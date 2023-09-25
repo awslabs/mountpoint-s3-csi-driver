@@ -1,0 +1,106 @@
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: s3-csi-node
+  labels:
+    app.kubernetes.io/name: aws-s3-csi-driver
+spec:
+  selector:
+    matchLabels:
+      app: s3-csi-node
+      app.kubernetes.io/name: aws-s3-csi-driver
+  template:
+    metadata:
+      labels:
+        app: s3-csi-node
+        app.kubernetes.io/name: aws-s3-csi-driver
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      serviceAccountName: s3-csi-driver-sa
+      priorityClassName: system-node-critical
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+      containers:
+        - name: s3-plugin
+          securityContext:
+            privileged: true
+          image: csi-driver
+          imagePullPolicy: IfNotPresent
+          args:
+            - --endpoint=$(CSI_ENDPOINT)
+            - --logtostderr
+            - --v=5
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:/csi/csi.sock
+          volumeMounts:
+            - name: kubelet-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: "Bidirectional"
+            - name: plugin-dir
+              mountPath: /csi
+            - name: aws-credentials
+              mountPath: /root/.aws
+          ports:
+            - containerPort: 9810
+              name: healthz
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 2
+        - name: node-driver-registrar
+          image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.7.0-eks-1-23-13
+          imagePullPolicy: IfNotPresent
+          args:
+            - --csi-address=$(ADDRESS)
+            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: liveness-probe
+          image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.9.0-eks-1-23-13
+          imagePullPolicy: IfNotPresent
+          args:
+            - --csi-address=/csi/csi.sock
+            - --health-port=9810
+          volumeMounts:
+            - mountPath: /csi
+              name: plugin-dir
+      volumes:
+        - name: kubelet-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+            type: Directory
+        - name: plugin-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/s3.csi.aws.com/
+            type: DirectoryOrCreate
+        - name: aws-credentials
+          secret:
+            secretName: aws-credentials
