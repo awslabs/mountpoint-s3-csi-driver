@@ -7,11 +7,14 @@ spec:
     storage: 1200Gi # ignored, required
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  mountOptions:
+    - allow-delete
+    - region eu-west-1
+    - uid 1001
+    - allow-other
   csi:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver # bucket name, required
-    volumeAttributes:
-      mountpointArgs: --allow-delete --region eu-west-1 --uid 1001 --allow-other
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
