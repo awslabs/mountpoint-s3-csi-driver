@@ -62,9 +62,26 @@ Usage of long-term credentials for production accounts/workloads is discouraged 
 ```
 kubectl apply -k deploy/kubernetes/overlays/stable
 ```
-#### Development
+#### FOR DEVELOPERS ONLY [REMOVE BEFORE RELEASING]
+Deploy using a registry in ECR (if you don't have one create a registry with default settings and name it `s3-csi-driver`)
+
+Change the registry destination:
+  - in the `Makefile` where it sets `REGISTRY?=<your_registry_endpoint>`
+  - and the `/overlays/dev/kustomization.yaml` where the `newName` is set for the `image`
+
+Update the iam role in the node-serviceaccount.yaml
+
+Take the arn (should look something like `arn:aws:iam::<isengard_acct_number>:role/AmazonS3CSIDriverFullAccess`) of the iam role that was created above using the `eksctl create iamserviceaccount` command and set it in the `node-serviceaccount.yaml` file at the end for `eks.amazonaws.com/role-arn`.
+
+Build your image
+```
+touch deploy/kubernetes/overlays/dev/credentials
+make build_image TAG=latest PLATFORM=linux/amd64
+make login_registry
+make push_image TAG=latest
+```
 - this will use `:latest` tag which is pulled on every container recreation
-- this will provide aws credentials specified in `deploy/kubernetes/overlays/dev/credentials` (file should exists, even if empty) to the driver
+- this will provide aws credentials specified in `deploy/kubernetes/overlays/dev/credentials` (file should exists, even if empty, created in first step of building the image) to the driver
 ```
 kubectl apply -k deploy/kubernetes/overlays/dev
 ```
@@ -84,4 +101,35 @@ $ kubectl logs -f s3-csi-node-94mdh -n kube-system
 <...>
 I0922 12:11:20.465762       1 driver.go:51] Driver version: 0.1.0, Git commit: b36c8a52b999a48ca8b88f985ed862d54585f0dd, build date: 2023-09-22T11:58:15Z
 <...>
+```
+
+To deploy the static provisioning example run:
+```
+kubectl apply -f examples/kubernetes/static_provisioning/static_provisioning.yaml
+```
+
+To access the fs in the pod, run
+```
+kubectl exec --stdin --tty fc-app --container app -- /bin/bash
+```
+
+##### Cleanup
+Delete the pod
+```
+kubectl delete -f examples/kubernetes/static_provisioning/static_provisioning.yaml
+```
+
+Note: If you use `kubectl delete -k deploy/kubernetes/overlays/dev` to delete the driver itself, it will also delete the service account. You can change the `node-serviceaccount.yaml` file to this to prevent having to re-connect it when deploying the driver next
+```
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: s3-csi-driver-sa
+  labels:
+    app.kubernetes.io/name: aws-s3-csi-driver
+    app.kubernetes.io/managed-by: eksctl
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::151381207180:role/AmazonS3CSIDriverFullAccess # CHANGE THIS ARN
 ```
