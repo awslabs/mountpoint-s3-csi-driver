@@ -11,7 +11,7 @@ spec:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver # bucket name, required
     volumeAttributes:
-      mountpointArgs: --allow-delete --region eu-west-1 --uid 1001 --allow-other
+      mountpointArgs: --allow-delete,--region eu-west-1,--uid 1001,--allow-other
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -31,10 +31,6 @@ kind: Pod
 metadata:
   name: fc-app
 spec:
-  securityContext:
-    runAsUser: 1001
-    runAsGroup: 2002
-    fsGroup: 3003
   containers:
     - name: app
       image: centos
