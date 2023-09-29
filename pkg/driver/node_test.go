@@ -1,6 +1,8 @@
 package driver
 
 import (
+	"errors"
+	"io/fs"
 	"testing"
 
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
@@ -116,6 +118,123 @@ func TestNodePublishVolume(t *testing.T) {
 				if err == nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.testFunc)
+	}
+}
+
+func TestNodeUnpublishVolume(t *testing.T) {
+	var (
+		volumeId   = "test-bucket-name"
+		targetPath = "/target/path"
+	)
+	testCases := []struct {
+		name     string
+		testFunc func(t *testing.T)
+	}{
+		{
+			name: "success: happy path",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodeUnpublishVolumeRequest{
+					VolumeId:   volumeId,
+					TargetPath: targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(nil)
+				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: corrupted volume",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodeUnpublishVolumeRequest{
+					VolumeId:   volumeId,
+					TargetPath: targetPath,
+				}
+
+				expectedErr := errors.New("")
+				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, expectedErr)
+				nodeTestEnv.mockMounter.EXPECT().IsCorruptedMnt(expectedErr).Return(true)
+				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(nil)
+				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: not mounted",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodeUnpublishVolumeRequest{
+					VolumeId:   volumeId,
+					TargetPath: targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, nil)
+				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "failure: unmount failure is error",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodeUnpublishVolumeRequest{
+					VolumeId:   volumeId,
+					TargetPath: targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(errors.New(""))
+				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				if err == nil {
+					t.Fatalf("NodePublishVolume must fail")
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: inexistent dir",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodeUnpublishVolumeRequest{
+					VolumeId:   volumeId,
+					TargetPath: targetPath,
+				}
+
+				expectedError := fs.ErrNotExist
+				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, expectedError)
+				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
 				nodeTestEnv.mockCtl.Finish()
 			},
 		},

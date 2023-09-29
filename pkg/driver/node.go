@@ -96,7 +96,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	//Checking if the target directory is already mounted with a volume.
-	mounted, err := d.isMounted(source, target)
+	mounted, err := d.isMounted(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not check if %q is mounted: %v", target, err)
 	}
@@ -143,15 +143,23 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	// Check if the target is mounted before unmounting
-	notMnt, _ := d.mounter.IsLikelyNotMountPoint(target)
-	if notMnt {
+	mounted, err := d.mounter.IsMountPoint(target)
+	if err != nil && os.IsNotExist(err) {
+		klog.V(5).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
+		return &csi.NodeUnpublishVolumeResponse{}, nil
+	} else if err != nil && d.mounter.IsCorruptedMnt(err) {
+		klog.V(5).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
+		mounted = true
+	} else if err != nil {
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+	}
+	if !mounted {
 		klog.V(5).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", target)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
 	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err := d.mounter.Unmount(target)
+	err = d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
@@ -191,37 +199,23 @@ func (d *Driver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (
 	}, nil
 }
 
-// isMounted checks if target is mounted. It does NOT return an error if target
-// doesn't exist.
-func (d *Driver) isMounted(source string, target string) (bool, error) {
-	/*
-		Checking if it's a mount point using IsLikelyNotMountPoint. There are three different return values,
-		1. true, err when the directory does not exist or corrupted.
-		2. false, nil when the path is already mounted with a device.
-		3. true, nil when the path is not mounted with any device.
-	*/
-	klog.V(4).Infoln(target)
+// isMounted checks if target is a valid mountpoint
+// inexistent target directory is NOT an error
+// method will try to unmount the directory if it was detected to be corrupted
+func (d *Driver) isMounted(target string) (bool, error) {
 	notMnt, err := d.mounter.IsLikelyNotMountPoint(target)
 	if err != nil && !os.IsNotExist(err) {
-		//Checking if the path exists and error is related to Corrupted Mount, in that case, the system could unmount and mount.
 		_, pathErr := d.mounter.PathExists(target)
 		if pathErr != nil && d.mounter.IsCorruptedMnt(pathErr) {
 			klog.V(4).Infof("NodePublishVolume: Target path %q is a corrupted mount. Trying to unmount.", target)
 			if mntErr := d.mounter.Unmount(target); mntErr != nil {
 				return false, status.Errorf(codes.Internal, "Unable to unmount the target %q : %v", target, mntErr)
 			}
-			//After successful unmount, the device is ready to be mounted.
 			return false, nil
 		}
 		return false, status.Errorf(codes.Internal, "Could not check if %q is a mount point: %v, %v", target, err, pathErr)
 	}
 
-	// Do not return os.IsNotExist error. Other errors were handled above.  The
-	// Existence of the target should be checked by the caller explicitly and
-	// independently because sometimes prior to mount it is expected not to exist
-	// (in Windows, the target must NOT exist before a symlink is created at it)
-	// and in others it is an error (in Linux, the target mount directory must
-	// exist before mount is called on it)
 	if err != nil && os.IsNotExist(err) {
 		klog.V(5).Infof("[Debug] NodePublishVolume: Target path %q does not exist", target)
 		return false, nil
