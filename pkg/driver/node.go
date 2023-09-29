@@ -19,10 +19,12 @@ package driver
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -66,12 +68,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not supported")
 	}
 
-	context := req.GetVolumeContext()
-	mountpointArgsRaw := context[mountpointArgsAttribute]
 	mountpointArgs := []string{}
-	if len(mountpointArgsRaw) > 0 {
-		mountpointArgs = append(mountpointArgs, mountpointArgsRaw)
-	}
 
 	if req.GetReadonly() {
 		mountpointArgs = append(mountpointArgs, "--read-only")
@@ -80,6 +77,22 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	klog.V(5).Infof("NodePublishVolume: creating dir %s", target)
 	if err := d.mounter.MakeDir(target); err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not create dir %q: %v", target, err)
+	}
+
+	// get the mount(point) options (yaml list)
+	if capMount := req.GetVolumeCapability().GetMount(); capMount != nil {
+		mountFlags := capMount.GetMountFlags()
+		for i := range mountFlags {
+			// trim left and right spaces
+			// trim spaces in between from multiple spaces to just one i.e. uid   1001 would turn into uid 1001
+			// if there is a space between, replace it with an = sign
+			mountFlags[i] = strings.Replace(strings.Join(strings.Fields(strings.Trim(mountFlags[i], " ")), " "), " ", "=", -1)
+			// prepend -- if it's not already there
+			if !strings.HasPrefix(mountFlags[i], "--") {
+				mountFlags[i] = "--" + mountFlags[i]
+			}
+		}
+		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
 	//Checking if the target directory is already mounted with a volume.
@@ -97,6 +110,25 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+/**
+ * Compile mounting options into a singular set
+ */
+func compileMountOptions(currentOptions []string, newOptions []string) []string {
+	allMountOptions := sets.NewString()
+
+	for _, currentMountOptions := range currentOptions {
+		if len(currentMountOptions) > 0 {
+			allMountOptions.Insert(currentMountOptions)
+		}
+	}
+
+	for _, mountOption := range newOptions {
+		allMountOptions.Insert(mountOption)
+	}
+
+	return allMountOptions.List()
 }
 
 func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
