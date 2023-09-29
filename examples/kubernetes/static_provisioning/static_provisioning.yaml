@@ -34,10 +34,6 @@ kind: Pod
 metadata:
   name: fc-app
 spec:
-  securityContext:
-    runAsUser: 1001
-    runAsGroup: 2002
-    fsGroup: 3003
   containers:
     - name: app
       image: centos
