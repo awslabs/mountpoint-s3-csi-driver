@@ -71,6 +71,35 @@ func TestNodePublishVolume(t *testing.T) {
 			},
 		},
 		{
+			name: "success: reader only volume access type",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+						},
+					},
+					TargetPath: targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--read-only"}))
+				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
 			name: "success: mount with mount options and read only",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
