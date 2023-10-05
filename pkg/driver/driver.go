@@ -36,6 +36,9 @@ var (
 		{
 			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 		},
+		{
+			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		},
 	}
 )
 

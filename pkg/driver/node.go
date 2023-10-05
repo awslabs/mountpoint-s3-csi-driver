@@ -70,7 +70,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 
 	mountpointArgs := []string{}
 
-	if req.GetReadonly() {
+	if req.GetReadonly() || volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
 		mountpointArgs = append(mountpointArgs, "--read-only")
 	}
 
@@ -80,7 +80,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	// get the mount(point) options (yaml list)
-	if capMount := req.GetVolumeCapability().GetMount(); capMount != nil {
+	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
 		for i := range mountFlags {
 			// trim left and right spaces
