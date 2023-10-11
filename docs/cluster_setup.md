@@ -58,6 +58,7 @@ For development purposes [long-term access keys](https://docs.aws.amazon.com/IAM
 Usage of long-term credentials for production accounts/workloads is discouraged in favour of temporary credentials obtained through X.509 authentication scheme, read more [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_non-aws.html).
 
 ## Deploy the Driver
+### Kustomize
 #### Stable
 ```
 kubectl apply -k deploy/kubernetes/overlays/stable
@@ -89,6 +90,16 @@ To redeploy driver with an updated image:
 ```
 kubectl rollout restart daemonset s3-csi-node -n kube-system
 ```
+
+### Helm
+[IN DEVELOPMENT MODE] Change the image reference that you're deploying the driver image to to your personal private ECR repo in the values.yaml file.
+Install the aws-s3-csi-driver
+```
+helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --values ./charts/aws-s3-csi-driver/values.yaml
+```
+
+### Verifying installation
+
 Verify new version was deployed:
 ```
 $ kubectl get pods -A
@@ -113,7 +124,8 @@ To access the fs in the pod, run
 kubectl exec --stdin --tty fc-app --container app -- /bin/bash
 ```
 
-##### Cleanup
+## Cleanup
+### Kustomize
 Delete the pod
 ```
 kubectl delete -f examples/kubernetes/static_provisioning/static_provisioning.yaml
@@ -133,3 +145,10 @@ metadata:
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::151381207180:role/AmazonS3CSIDriverFullAccess # CHANGE THIS ARN
 ```
+
+### Helm
+Uninstall the driver
+```
+helm uninstall aws-s3-csi-driver --namespace kube-system
+```
+Note: This will not delete the service account.

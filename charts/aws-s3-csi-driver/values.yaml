@@ -1,0 +1,55 @@
+# Default values for ..
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  # NOTE: Change this to personal ECR private repo until public one is created
+  repository: <enter-registry-here>
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+node:
+  resources: {}
+  kubeletPath: /var/lib/kubelet
+  logLevel: 5
+  containerSecurityContext:
+    privileged: true
+  serviceAccount:
+    # Specifies whether a service account should be created
+    create: false
+    name: s3-csi-driver-sa
+
+sidecars:
+  nodeDriverRegistrar:
+    image: 
+      repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
+      tag: v2.7.0-eks-1-23-13
+      pullPolicy: IfNotPresent
+    env:
+      - name: KUBE_NODE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: spec.nodeName
+    volumeMounts:
+      - name: plugin-dir
+        mountPath: /csi
+      - name: registration-dir
+        mountPath: /registration
+  livenessProbe:
+    image: 
+      repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
+      tag: v2.9.0-eks-1-23-13
+      pullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /csi
+        name: plugin-dir
+
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []

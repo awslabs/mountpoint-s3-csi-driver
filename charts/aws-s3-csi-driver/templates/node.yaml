@@ -1,0 +1,130 @@
+# Source: aws-s3-csi-driver/templates/node.yaml
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: s3-csi-node
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-s3-csi-driver
+    app.kubernetes.io/instance: aws-s3-csi-driver
+    helm.sh/chart: aws-s3-csi-driver-0.1.0
+    app.kubernetes.io/component: csi-driver
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    matchLabels:
+      app: s3-csi-node
+      app.kubernetes.io/name: aws-s3-csi-driver
+      app.kubernetes.io/instance: aws-s3-csi-driver
+  template:
+    metadata:
+      labels:
+        app: s3-csi-node
+        app.kubernetes.io/name: aws-s3-csi-driver
+        app.kubernetes.io/instance: aws-s3-csi-driver
+        helm.sh/chart: aws-s3-csi-driver-0.1.0
+        app.kubernetes.io/component: csi-driver
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      serviceAccountName: {{ .Values.node.serviceAccount.name }}
+      priorityClassName: system-node-critical
+      tolerations:
+        {{- if .Values.node.tolerateAllTaints }}
+        - operator: Exists
+        {{- else }}
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        {{- end }}
+        {{- with .Values.node.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: s3-plugin
+          image: {{ printf "%s:%s" .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --endpoint=$(CSI_ENDPOINT)
+            - --logtostderr
+            - --v=5
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:/csi/csi.sock
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: kubelet-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: "Bidirectional"
+            - name: plugin-dir
+              mountPath: /csi
+          ports:
+            - name: healthz
+              containerPort: 9808
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 2
+            failureThreshold: 5
+          securityContext:
+            privileged: true
+        - name: node-driver-registrar
+          image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --csi-address=$(ADDRESS)
+            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          livenessProbe:
+            exec:
+              command:
+                - /csi-node-driver-registrar
+                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+                - --mode=kubelet-registration-probe
+            initialDelaySeconds: 30
+            timeoutSeconds: 15
+            periodSeconds: 90
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: liveness-probe
+          image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --csi-address=/csi/csi.sock
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+      volumes:
+        - name: kubelet-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+        - name: plugin-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/s3.csi.aws.com/
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+            type: Directory
