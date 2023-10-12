@@ -3,28 +3,19 @@ kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: s3-csi-node
-  namespace: kube-system
+  namespace: {{ .Release.Namespace }}
   labels:
-    app.kubernetes.io/name: aws-s3-csi-driver
-    app.kubernetes.io/instance: aws-s3-csi-driver
-    helm.sh/chart: aws-s3-csi-driver-0.1.0
-    app.kubernetes.io/component: csi-driver
-    app.kubernetes.io/managed-by: Helm
+    {{- include "aws-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
       app: s3-csi-node
-      app.kubernetes.io/name: aws-s3-csi-driver
-      app.kubernetes.io/instance: aws-s3-csi-driver
+      {{- include "aws-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         app: s3-csi-node
-        app.kubernetes.io/name: aws-s3-csi-driver
-        app.kubernetes.io/instance: aws-s3-csi-driver
-        helm.sh/chart: aws-s3-csi-driver-0.1.0
-        app.kubernetes.io/component: csi-driver
-        app.kubernetes.io/managed-by: Helm
+        {{- include "aws-s3-csi-driver.labels" . | nindent 8 }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
@@ -128,3 +119,6 @@ spec:
           hostPath:
             path: /var/lib/kubelet/plugins_registry/
             type: Directory
+        {{- with .Values.node.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
