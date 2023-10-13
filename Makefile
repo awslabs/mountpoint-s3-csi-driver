@@ -56,6 +56,14 @@ test:
 	go test -v -race ./pkg/...
 	go test -v ./tests/sanity/...
 
+.PHONY: fmt
+fmt:
+	go fmt ./...
+
+.PHONY: check_style
+check_style:
+	test -z "$$(gofmt -d . | tee /dev/stderr)"
+
 .PHONY: clean
 clean:
 	rm -rf bin/ && docker system prune
