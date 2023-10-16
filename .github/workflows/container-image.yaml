@@ -31,12 +31,12 @@ jobs:
           aws-region: ${{ env.REGION }}
       # - name: Login to Amazon ECR Public
       #   id: login-ecr-public
-      #   uses: aws-actions/amazon-ecr-login@v1
+      #   uses: aws-actions/amazon-ecr-login@v2
       #   with:
       #     registry-type: public
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Build, tag, and push docker image to Amazon ECR Public Repository
         env:
           REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
