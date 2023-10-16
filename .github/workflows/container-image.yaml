@@ -40,7 +40,7 @@ jobs:
           =: ${{ steps.login-ecr-public.outputs.registry }}
         run: |
           BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
-          if [ "$BRANCH_OR_TAG" = "master" ]; then
+          if [ "$BRANCH_OR_TAG" = "main" ]; then
             GIT_TAG=$GITHUB_SHA
           else
             GIT_TAG=$BRANCH_OR_TAG
