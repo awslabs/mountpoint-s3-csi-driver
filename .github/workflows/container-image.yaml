@@ -39,7 +39,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
       - name: Build, tag, and push docker image to Amazon ECR Public Repository
         env:
-          =: ${{ steps.login-ecr-public.outputs.registry }}
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
         run: |
           BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
           if [ "$BRANCH_OR_TAG" = "main" ]; then
