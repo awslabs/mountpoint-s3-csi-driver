@@ -5,6 +5,7 @@ on:
     # Sequence of patterns matched against refs/tags
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+
 env:
   REGION : "us-east-1"
 jobs:
@@ -14,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
