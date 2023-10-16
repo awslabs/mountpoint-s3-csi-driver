@@ -13,7 +13,7 @@
 #limitations under the License.
 
 # Download and verify the mountpoint's RPM in this container
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
 
 # We need the full version of GnuPG
 RUN dnf install -y --allowerasing wget gnupg2
@@ -36,7 +36,7 @@ WORKDIR /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver
 ADD . .
 RUN make bin
 
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS linux-amazon
+FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 AS linux-amazon
 
 RUN yum install util-linux -y
 
