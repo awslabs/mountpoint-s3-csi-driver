@@ -7,7 +7,7 @@ on:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
 
 env:
-  REGION : "us-east-1"
+  AWS_REGION : "us-east-1"
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -28,7 +28,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: arn:aws:iam::211164257204:role/S3CSIDriverPrivateImagePublisherRole # TODO: replace with a role with access to the public registry
-          aws-region: ${{ env.REGION }}
+          aws-region: ${{ env.AWS_REGION }}
       # - name: Login to Amazon ECR Public
       #   id: login-ecr-public
       #   uses: aws-actions/amazon-ecr-login@v2
