@@ -49,5 +49,6 @@ jobs:
           fi
           export PLATFORM=linux/amd64
           export TAG=$GIT_TAG
+          export REGISTRY=$REGISTRY
           make build_image
           make push_image
