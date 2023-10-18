@@ -7,9 +7,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
+    environment: PR Unit Tests
     steps:
     - uses: actions/checkout@v4
 
