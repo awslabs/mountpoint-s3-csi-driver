@@ -54,7 +54,8 @@ bin:
 .PHONY: test
 test:
 	go test -v -race ./pkg/...
-	go test -v ./tests/sanity/...
+	# skipping controller test cases because we don't implement controller for static provisioning, this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
+	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
 
 .PHONY: fmt
 fmt:
