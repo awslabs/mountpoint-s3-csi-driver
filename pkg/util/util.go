@@ -51,3 +51,7 @@ func ParseEndpoint(endpoint string) (string, string, error) {
 
 	return scheme, addr, nil
 }
+
+func IsSBE(region string) bool {
+	return region == "snow"
+}

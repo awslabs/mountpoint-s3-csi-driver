@@ -26,7 +26,7 @@ GOPATH=$(shell go env GOPATH)
 GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
-REGISTRY?=151381207180.dkr.ecr.eu-west-1.amazonaws.com
+REGISTRY?=081342720926.dkr.ecr.eu-west-1.amazonaws.com
 IMAGE?=$(REGISTRY)/s3-csi-driver
 TAG?=$(GIT_COMMIT)
 

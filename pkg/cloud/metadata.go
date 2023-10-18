@@ -19,22 +19,8 @@ package cloud
 import (
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"k8s.io/klog/v2"
 )
-
-type EC2Metadata interface {
-	Available() bool
-	GetInstanceIdentityDocument() (ec2metadata.EC2InstanceIdentityDocument, error)
-}
-
-// MetadataService represents AWS metadata service.
-type MetadataService interface {
-	GetInstanceID() string
-	GetRegion() string
-	GetAvailabilityZone() string
-}
 
 type metadata struct {
 	instanceID       string
@@ -59,39 +45,26 @@ func (m *metadata) GetAvailabilityZone() string {
 	return m.availabilityZone
 }
 
-// NewMetadataService returns a new MetadataServiceImplementation.
-func NewMetadata() (MetadataService, error) {
-	sess := session.Must(session.NewSession(&aws.Config{}))
-	svc := ec2metadata.New(sess)
-	return NewMetadataService(svc)
-}
-
-// NewMetadataService returns a new MetadataServiceImplementation.
-func NewMetadataService(svc EC2Metadata) (MetadataService, error) {
+func NewMetadataService(ec2MetadataClient EC2MetadataClient, k8sAPIClient KubernetesAPIClient, region string) (MetadataService, error) {
+	klog.InfoS("retrieving instance data from ec2 metadata")
+	svc, err := ec2MetadataClient()
 	if !svc.Available() {
-		return nil, fmt.Errorf("EC2 instance metadata is not available")
+		klog.InfoS("ec2 metadata is not available")
+	} else if err != nil {
+		klog.InfoS("error creating ec2 metadata client", "err", err)
+	} else {
+		klog.InfoS("ec2 metadata is available")
+		return EC2MetadataInstanceInfo(svc, region)
 	}
 
-	doc, err := svc.GetInstanceIdentityDocument()
+	klog.InfoS("retrieving instance data from kubernetes api")
+	clientset, err := k8sAPIClient()
 	if err != nil {
-		return nil, fmt.Errorf("could not get EC2 instance identity metadata")
+		klog.InfoS("error creating kubernetes api client", "err", err)
+	} else {
+		klog.InfoS("kubernetes api is available")
+		return KubernetesAPIInstanceInfo(clientset)
 	}
 
-	if len(doc.InstanceID) == 0 {
-		return nil, fmt.Errorf("could not get valid EC2 instance ID")
-	}
-
-	if len(doc.Region) == 0 {
-		return nil, fmt.Errorf("could not get valid EC2 region")
-	}
-
-	if len(doc.AvailabilityZone) == 0 {
-		return nil, fmt.Errorf("could not get valid EC2 availavility zone")
-	}
-
-	return &metadata{
-		instanceID:       doc.InstanceID,
-		region:           doc.Region,
-		availabilityZone: doc.AvailabilityZone,
-	}, nil
+	return nil, fmt.Errorf("error getting instance data from ec2 metadata or kubernetes api")
 }

@@ -1,10 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: kube-system
 resources:
   - ../../base
 images:
 - name: csi-driver
-  newName: 151381207180.dkr.ecr.eu-west-1.amazonaws.com/s3-csi-driver
+  newName: 081342720926.dkr.ecr.eu-west-1.amazonaws.com/s3-csi-driver
   newTag: latest
 secretGenerator:
 - name: aws-credentials

@@ -19,6 +19,7 @@ package driver
 import (
 	"context"
 	"net"
+	"os"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
@@ -50,10 +51,16 @@ type Driver struct {
 	mounter Mounter
 }
 
+var (
+	// NewMetadataFunc is a variable for the cloud.NewMetadata function that can
+	// be overwritten in unit tests.
+	NewMetadataFunc = cloud.NewMetadataService
+)
+
 func NewDriver(endpoint string) *Driver {
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v", driverVersion, gitCommit, buildDate)
-
-	metadata, err := cloud.NewMetadata()
+	region := os.Getenv("AWS_REGION")
+	metadata, err := NewMetadataFunc(cloud.DefaultEC2MetadataClient, cloud.DefaultKubernetesAPIClient, region)
 	if err != nil {
 		klog.Fatalln(err)
 	}

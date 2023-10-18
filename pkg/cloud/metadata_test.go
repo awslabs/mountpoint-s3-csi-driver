@@ -23,25 +23,30 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud/mocks"
 	"github.com/golang/mock/gomock"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 var (
 	stdInstanceID       = "instance-1"
-	stdRegion           = "instance-1"
+	stdRegion           = "region-1"
 	stdAvailabilityZone = "az-1"
 )
 
 func TestNewMetadataService(t *testing.T) {
 	testCases := []struct {
 		name             string
-		isAvailable      bool
+		isEC2Available   bool
 		isPartial        bool
 		identityDocument ec2metadata.EC2InstanceIdentityDocument
+		node             v1.Node
 		err              error
 	}{
 		{
-			name:        "success: normal",
-			isAvailable: true,
+			name:           "success: normal",
+			isEC2Available: true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
 				Region:           stdRegion,
@@ -50,8 +55,29 @@ func TestNewMetadataService(t *testing.T) {
 			err: nil,
 		},
 		{
-			name:        "fail: metadata not available",
-			isAvailable: false,
+			name:           "success: ec2 metadata not available, used k8s api",
+			isEC2Available: false,
+			node: v1.Node{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Node",
+					APIVersion: "v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": stdRegion,
+						"topology.kubernetes.io/zone":   stdAvailabilityZone,
+					},
+				},
+				Spec: v1.NodeSpec{
+					ProviderID: "aws:///" + stdAvailabilityZone + "/" + stdInstanceID,
+				},
+				Status: v1.NodeStatus{},
+			},
+			err: nil,
+		},
+		{
+			name:           "fail: metadata not available",
+			isEC2Available: false,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
 				Region:           stdRegion,
@@ -60,8 +86,8 @@ func TestNewMetadataService(t *testing.T) {
 			err: nil,
 		},
 		{
-			name:        "fail: GetInstanceIdentityDocument returned error",
-			isAvailable: true,
+			name:           "fail: GetInstanceIdentityDocument returned error",
+			isEC2Available: true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
 				Region:           stdRegion,
@@ -70,9 +96,9 @@ func TestNewMetadataService(t *testing.T) {
 			err: fmt.Errorf(""),
 		},
 		{
-			name:        "fail: GetInstanceIdentityDocument returned empty instance",
-			isAvailable: true,
-			isPartial:   true,
+			name:           "fail: GetInstanceIdentityDocument returned empty instance",
+			isEC2Available: true,
+			isPartial:      true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       "",
 				Region:           stdRegion,
@@ -81,9 +107,9 @@ func TestNewMetadataService(t *testing.T) {
 			err: nil,
 		},
 		{
-			name:        "fail: GetInstanceIdentityDocument returned empty region",
-			isAvailable: true,
-			isPartial:   true,
+			name:           "fail: GetInstanceIdentityDocument returned empty region",
+			isEC2Available: true,
+			isPartial:      true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
 				Region:           "",
@@ -92,9 +118,9 @@ func TestNewMetadataService(t *testing.T) {
 			err: nil,
 		},
 		{
-			name:        "fail: GetInstanceIdentityDocument returned empty az",
-			isAvailable: true,
-			isPartial:   true,
+			name:           "fail: GetInstanceIdentityDocument returned empty az",
+			isEC2Available: true,
+			isPartial:      true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
 				Region:           stdRegion,
@@ -106,16 +132,28 @@ func TestNewMetadataService(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			clientset := fake.NewSimpleClientset(&tc.node)
+			clientsetInitialized := false
+
 			mockCtrl := gomock.NewController(t)
 			mockEC2Metadata := mocks.NewMockEC2Metadata(mockCtrl)
 
-			mockEC2Metadata.EXPECT().Available().Return(tc.isAvailable)
-			if tc.isAvailable {
+			ec2MetadataClient := func() (EC2Metadata, error) { return mockEC2Metadata, nil }
+			k8sAPIClient := func() (kubernetes.Interface, error) { clientsetInitialized = true; return clientset, nil }
+
+			mockEC2Metadata.EXPECT().Available().Return(tc.isEC2Available)
+			if tc.isEC2Available {
 				mockEC2Metadata.EXPECT().GetInstanceIdentityDocument().Return(tc.identityDocument, tc.err)
+				if clientsetInitialized == true {
+					t.Errorf("kubernetes client was unexpectedly initialized when metadata is available!")
+					if len(clientset.Actions()) > 0 {
+						t.Errorf("kubernetes client was unexpectedly called! %v", clientset.Actions())
+					}
+				}
 			}
 
-			m, err := NewMetadataService(mockEC2Metadata)
-			if tc.isAvailable && tc.err == nil && !tc.isPartial {
+			m, err := NewMetadataService(ec2MetadataClient, k8sAPIClient, stdRegion)
+			if tc.isEC2Available && tc.err == nil && !tc.isPartial {
 				if err != nil {
 					t.Fatalf("NewMetadataService() failed: expected no error, got %v", err)
 				}

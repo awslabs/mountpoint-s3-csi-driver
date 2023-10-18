@@ -4,7 +4,7 @@
 
 image:
   # NOTE: Change this to personal ECR private repo until public one is created
-  repository: <enter-registry-here>
+  repository: 081342720926.dkr.ecr.eu-west-1.amazonaws.com/s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
@@ -21,7 +21,7 @@ node:
     privileged: true
   serviceAccount:
     # Specifies whether a service account should be created
-    create: false
+    create: true
     name: s3-csi-driver-sa
 
 sidecars:
