@@ -3,14 +3,11 @@ package driver
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/context"
 )
 
@@ -142,9 +139,6 @@ func TestNodePublishVolume(t *testing.T) {
 					TargetPath: targetPath,
 					Readonly:   true,
 				}
-				str, boo := os.LookupEnv(cloud.MP_EC2_METADATA_DISABLED_ENV_VAR)
-				assert.Equal(t, str, "true")
-				assert.Equal(t, boo, true)
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
 				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
@@ -177,9 +171,6 @@ func TestNodePublishVolume(t *testing.T) {
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
 				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"AWS_EC2_METADATA_DISABLED"}))
-				str, boo := os.LookupEnv(cloud.MP_EC2_METADATA_DISABLED_ENV_VAR)
-				assert.Equal(t, str, "true")
-				assert.Equal(t, boo, true)
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)

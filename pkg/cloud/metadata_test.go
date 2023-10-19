@@ -169,7 +169,7 @@ func TestNewMetadataService(t *testing.T) {
 			if !tc.isEC2Available {
 				os.Setenv("CSI_NODE_NAME", nodeName)
 			}
-			m, err := NewMetadataService(ec2MetadataClient, k8sAPIClient, stdRegion)
+			m, err := NewMetadataService(ec2MetadataClient, k8sAPIClient, "")
 			if err == nil && !tc.isPartial {
 				if tc.err != nil {
 					t.Fatalf("NewMetadataService() failed: expected no error, got %v", err)
