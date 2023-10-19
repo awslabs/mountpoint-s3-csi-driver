@@ -8,11 +8,13 @@ spec:
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
   mountOptions:
-    - region us-west-2
-    - debug
+    - allow-delete
+    - region eu-west-1
+    - uid 1001
+    - allow-other
   csi:
     driver: s3.csi.aws.com # required
-    volumeHandle: s3-csi-driver-dlakh-testing-csi-driver # bucket name, required
+    volumeHandle: s3-csi-driver # bucket name, required
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

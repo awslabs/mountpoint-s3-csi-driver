@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -69,6 +70,10 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	mountpointArgs := []string{}
+
+	if !d.isEC2MetadataAvailable {
+		mountpointArgs = append(mountpointArgs, cloud.MP_EC2_METADATA_DISABLED_ENV_VAR)
+	}
 
 	if req.GetReadonly() || volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
 		mountpointArgs = append(mountpointArgs, "--read-only")

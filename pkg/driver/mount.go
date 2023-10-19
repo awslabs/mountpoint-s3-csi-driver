@@ -19,7 +19,10 @@ package driver
 import (
 	"os"
 	"os/exec"
+	"slices"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
@@ -67,9 +70,17 @@ func (m *NodeMounter) PathExists(path string) (bool, error) {
 }
 
 func (m *NodeMounter) Mount(source string, target string, _ string, options []string) error {
+	ec2_metadata_disabled := false
+	if slices.Contains(options, cloud.MP_EC2_METADATA_DISABLED_ENV_VAR) {
+		ec2_metadata_disabled = true
+		options = util.RemoveElFromStringList(options, cloud.MP_EC2_METADATA_DISABLED_ENV_VAR)
+	}
 	mp_args := []string{source, target}
 	mp_args = append(mp_args, options...)
 	cmd := exec.Command("mount-s3", mp_args...)
+	if ec2_metadata_disabled {
+		cmd.Env = append((os.Environ()), cloud.MP_EC2_METADATA_DISABLED_ENV_VAR+"=true")
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		klog.V(5).Infof("mount-s3 output: %s, failed with: %v", string(output), err)

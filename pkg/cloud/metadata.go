@@ -23,10 +23,13 @@ import (
 )
 
 type metadata struct {
-	instanceID       string
-	region           string
-	availabilityZone string
+	instanceID           string
+	region               string
+	availabilityZone     string
+	isEC2MetadataEnabled bool
 }
+
+const MP_EC2_METADATA_DISABLED_ENV_VAR = "AWS_EC2_METADATA_DISABLED"
 
 var _ MetadataService = &metadata{}
 
@@ -45,26 +48,31 @@ func (m *metadata) GetAvailabilityZone() string {
 	return m.availabilityZone
 }
 
+// IsEC2MetadataAvailable returns a boolean whether ec2 metadata is available or not.
+func (m *metadata) IsEC2MetadataAvailable() bool {
+	return m.isEC2MetadataEnabled
+}
+
 func NewMetadataService(ec2MetadataClient EC2MetadataClient, k8sAPIClient KubernetesAPIClient, region string) (MetadataService, error) {
-	klog.InfoS("retrieving instance data from ec2 metadata")
+	klog.InfoS("Retrieving instance data from ec2 metadata")
 	svc, err := ec2MetadataClient()
 	if !svc.Available() {
-		klog.InfoS("ec2 metadata is not available")
+		klog.InfoS("EC2 metadata is not available")
 	} else if err != nil {
-		klog.InfoS("error creating ec2 metadata client", "err", err)
+		klog.InfoS("Error creating ec2 metadata client", "err", err)
 	} else {
-		klog.InfoS("ec2 metadata is available")
+		klog.InfoS("EC2 metadata is available")
 		return EC2MetadataInstanceInfo(svc, region)
 	}
 
-	klog.InfoS("retrieving instance data from kubernetes api")
+	klog.InfoS("Retrieving instance data from kubernetes API")
 	clientset, err := k8sAPIClient()
 	if err != nil {
-		klog.InfoS("error creating kubernetes api client", "err", err)
+		klog.InfoS("Error creating kubernetes API client", "err", err)
 	} else {
-		klog.InfoS("kubernetes api is available")
+		klog.InfoS("Kubernetes API is available")
 		return KubernetesAPIInstanceInfo(clientset)
 	}
 
-	return nil, fmt.Errorf("error getting instance data from ec2 metadata or kubernetes api")
+	return nil, fmt.Errorf("Error getting instance data from EC2 metadata or kubernetes API")
 }

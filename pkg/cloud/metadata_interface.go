@@ -16,4 +16,5 @@ type MetadataService interface {
 	GetInstanceID() string
 	GetRegion() string
 	GetAvailabilityZone() string
+	IsEC2MetadataAvailable() bool
 }

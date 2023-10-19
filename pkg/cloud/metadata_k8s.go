@@ -33,44 +33,43 @@ func KubernetesAPIInstanceInfo(clientset kubernetes.Interface) (*metadata, error
 	if nodeName == "" {
 		return nil, fmt.Errorf("CSI_NODE_NAME env var not set")
 	}
-
 	// get node with k8s API
 	node, err := clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("error getting Node %v: %w", nodeName, err)
+		return nil, fmt.Errorf("Error getting Node %v: %w", nodeName, err)
 	}
 
 	providerID := node.Spec.ProviderID
 	if providerID == "" {
-		return nil, fmt.Errorf("node providerID empty, cannot parse")
+		return nil, fmt.Errorf("Node providerID empty, cannot parse")
 	}
-
 	awsInstanceIDRegex := "s\\.i-[a-z0-9]+|i-[a-z0-9]+$"
 
 	re := regexp.MustCompile(awsInstanceIDRegex)
 	instanceID := re.FindString(providerID)
 	if instanceID == "" {
-		return nil, fmt.Errorf("did not find aws instance ID in node providerID string")
+		return nil, fmt.Errorf("Did not find AWS instance ID in node providerID string")
 	}
 
 	var region string
 	if val, ok := node.GetLabels()[corev1.LabelTopologyRegion]; ok {
 		region = val
 	} else {
-		return nil, fmt.Errorf("could not retrieve region from topology label")
+		return nil, fmt.Errorf("Could not retrieve region from topology label")
 	}
 
 	var availabilityZone string
 	if val, ok := node.GetLabels()[corev1.LabelTopologyZone]; ok {
 		availabilityZone = val
 	} else {
-		return nil, fmt.Errorf("could not retrieve AZ from topology label")
+		return nil, fmt.Errorf("Could not retrieve AZ from topology label")
 	}
 
 	instanceInfo := metadata{
-		instanceID:       instanceID,
-		region:           region,
-		availabilityZone: availabilityZone,
+		instanceID:           instanceID,
+		region:               region,
+		availabilityZone:     availabilityZone,
+		isEC2MetadataEnabled: false,
 	}
 
 	return &instanceInfo, nil

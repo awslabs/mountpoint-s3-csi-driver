@@ -47,8 +47,9 @@ type Driver struct {
 	endpoint string
 	srv      *grpc.Server
 
-	nodeID  string
-	mounter Mounter
+	isEC2MetadataAvailable bool
+	nodeID                 string
+	mounter                Mounter
 }
 
 var (
@@ -66,9 +67,10 @@ func NewDriver(endpoint string) *Driver {
 	}
 
 	return &Driver{
-		endpoint: endpoint,
-		nodeID:   metadata.GetInstanceID(),
-		mounter:  newNodeMounter(),
+		endpoint:               endpoint,
+		nodeID:                 metadata.GetInstanceID(),
+		mounter:                newNodeMounter(),
+		isEC2MetadataAvailable: metadata.IsEC2MetadataAvailable(),
 	}
 }
 

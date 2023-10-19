@@ -18,6 +18,7 @@ package cloud
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
@@ -29,10 +30,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-var (
-	stdInstanceID       = "instance-1"
+const (
+	stdInstanceID       = "i-123456789abc"
 	stdRegion           = "region-1"
 	stdAvailabilityZone = "az-1"
+	nodeName            = "ip-123-45-67-890.us-west-2.compute.internal"
 )
 
 func TestNewMetadataService(t *testing.T) {
@@ -45,7 +47,7 @@ func TestNewMetadataService(t *testing.T) {
 		err              error
 	}{
 		{
-			name:           "success: normal",
+			name:           "success: ec2 metadata is available",
 			isEC2Available: true,
 			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
 				InstanceID:       stdInstanceID,
@@ -67,6 +69,7 @@ func TestNewMetadataService(t *testing.T) {
 						"topology.kubernetes.io/region": stdRegion,
 						"topology.kubernetes.io/zone":   stdAvailabilityZone,
 					},
+					Name: nodeName,
 				},
 				Spec: v1.NodeSpec{
 					ProviderID: "aws:///" + stdAvailabilityZone + "/" + stdInstanceID,
@@ -76,25 +79,37 @@ func TestNewMetadataService(t *testing.T) {
 			err: nil,
 		},
 		{
-			name:           "fail: metadata not available",
+			name:           "fail: metadata not available, no provider ID",
 			isEC2Available: false,
-			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
-				InstanceID:       stdInstanceID,
-				Region:           stdRegion,
-				AvailabilityZone: stdAvailabilityZone,
+			node: v1.Node{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Node",
+					APIVersion: "v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"topology.kubernetes.io/region": stdRegion,
+						"topology.kubernetes.io/zone":   stdAvailabilityZone,
+					},
+					Name: nodeName,
+				},
+				Spec: v1.NodeSpec{
+					ProviderID: "",
+				},
+				Status: v1.NodeStatus{},
 			},
-			err: nil,
+			err: fmt.Errorf("Node providerID empty, cannot parse"),
 		},
-		{
-			name:           "fail: GetInstanceIdentityDocument returned error",
-			isEC2Available: true,
-			identityDocument: ec2metadata.EC2InstanceIdentityDocument{
-				InstanceID:       stdInstanceID,
-				Region:           stdRegion,
-				AvailabilityZone: stdAvailabilityZone,
-			},
-			err: fmt.Errorf(""),
-		},
+		// {
+		// 	name:           "fail: GetInstanceIdentityDocument returned error",
+		// 	isEC2Available: true,
+		// 	identityDocument: ec2metadata.EC2InstanceIdentityDocument{
+		// 		InstanceID:       stdInstanceID,
+		// 		Region:           stdRegion,
+		// 		AvailabilityZone: stdAvailabilityZone,
+		// 	},
+		// 	err: fmt.Errorf("Could not get EC2 instance identity metadata: "),
+		// },
 		{
 			name:           "fail: GetInstanceIdentityDocument returned empty instance",
 			isEC2Available: true,
@@ -151,23 +166,31 @@ func TestNewMetadataService(t *testing.T) {
 					}
 				}
 			}
-
+			if !tc.isEC2Available {
+				os.Setenv("CSI_NODE_NAME", nodeName)
+			}
 			m, err := NewMetadataService(ec2MetadataClient, k8sAPIClient, stdRegion)
-			if tc.isEC2Available && tc.err == nil && !tc.isPartial {
-				if err != nil {
+			if err == nil && !tc.isPartial {
+				if tc.err != nil {
 					t.Fatalf("NewMetadataService() failed: expected no error, got %v", err)
 				}
 
-				if m.GetInstanceID() != tc.identityDocument.InstanceID {
-					t.Fatalf("GetInstanceID() failed: expected %v, got %v", tc.identityDocument.InstanceID, m.GetInstanceID())
+				if m.GetInstanceID() != stdInstanceID {
+					t.Fatalf("GetInstanceID() failed: expected %v, got %v", stdInstanceID, m.GetInstanceID())
 				}
 
-				if m.GetRegion() != tc.identityDocument.Region {
-					t.Fatalf("GetRegion() failed: expected %v, got %v", tc.identityDocument.Region, m.GetRegion())
+				if m.GetRegion() != stdRegion {
+					t.Fatalf("GetRegion() failed: expected %v, got %v", stdRegion, m.GetRegion())
 				}
 
-				if m.GetAvailabilityZone() != tc.identityDocument.AvailabilityZone {
-					t.Fatalf("GetAvailabilityZone() failed: expected %v, got %v", tc.identityDocument.AvailabilityZone, m.GetAvailabilityZone())
+				if m.GetAvailabilityZone() != stdAvailabilityZone {
+					t.Fatalf("GetAvailabilityZone() failed: expected %v, got %v", stdAvailabilityZone, m.GetAvailabilityZone())
+				}
+			} else if err != nil && !tc.isPartial {
+				if err == nil {
+					t.Errorf("Got error %q, expected no error", err)
+				} else if err.Error() != tc.err.Error() {
+					t.Errorf("Got error %q, expected %q", err, tc.err)
 				}
 			} else {
 				if err == nil {

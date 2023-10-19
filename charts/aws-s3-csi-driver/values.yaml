@@ -4,7 +4,7 @@
 
 image:
   # NOTE: Change this to personal ECR private repo until public one is created
-  repository: 081342720926.dkr.ecr.eu-west-1.amazonaws.com/s3-csi-driver
+  repository: <enter-registry-here>
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
