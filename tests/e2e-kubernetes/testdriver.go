@@ -32,7 +32,6 @@ type s3Volume struct {
 var _ framework.TestDriver = &s3Driver{}
 var _ framework.PreprovisionedVolumeTestDriver = &s3Driver{}
 var _ framework.PreprovisionedPVTestDriver = &s3Driver{}
-var _ framework.InlineVolumeTestDriver = &s3Driver{}
 
 func initS3Driver() *s3Driver {
 	return &s3Driver{
@@ -58,7 +57,7 @@ func (d *s3Driver) GetDriverInfo() *framework.DriverInfo {
 }
 
 func (d *s3Driver) SkipUnsupportedTest(pattern framework.TestPattern) {
-	if pattern.VolType != framework.InlineVolume {
+	if pattern.VolType != framework.PreprovisionedPV {
 		e2eskipper.Skipf("S3 Driver only supports static provisioning -- skipping")
 	}
 }
@@ -74,7 +73,7 @@ func (d *s3Driver) PrepareTest(ctx context.Context, f *f.Framework) *framework.P
 }
 
 func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestConfig, volumeType framework.TestVolType) framework.TestVolume {
-	if volumeType != framework.InlineVolume {
+	if volumeType != framework.PreprovisionedPV {
 		f.Failf("Unsupported volType: %v is specified", volumeType)
 	}
 	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("e2e-kubernetes-%s-", PullRequest))
