@@ -26,6 +26,16 @@ spec:
         - operator: Exists
           effect: NoExecute
           tolerationSeconds: 300
+      initContainers:
+        - name: install-mountpoint
+          securityContext:
+            privileged: true
+          image: csi-driver
+          command:
+            - "/install-mp.sh"
+          volumeMounts:
+            - name: host-usr
+              mountPath: /host/usr
       containers:
         - name: s3-plugin
           securityContext:
@@ -46,6 +56,10 @@ spec:
               mountPath: /csi
             - name: aws-credentials
               mountPath: /root/.aws
+            - name: host-dbus
+              mountPath: /var/run/dbus
+            - name: host-dev
+              mountPath: /hostdev
           ports:
             - containerPort: 9810
               name: healthz
@@ -88,6 +102,15 @@ spec:
             - mountPath: /csi
               name: plugin-dir
       volumes:
+        - name: host-usr
+          hostPath:
+            path: /usr
+        - name: host-dev
+          hostPath:
+            path: /dev
+        - name: host-dbus
+          hostPath:
+            path: /var/run/dbus
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet
