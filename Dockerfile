@@ -32,21 +32,23 @@ RUN gpg --verify mount-s3.rpm.asc
 
 # Build driver
 FROM --platform=$BUILDPLATFORM golang:1.21.1-bullseye as builder
+
 WORKDIR /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver
-ADD . .
-RUN make bin
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+make bin
 
 FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 AS linux-amazon
 
 RUN yum install util-linux -y
 
-# Install MP
+# MP Installer
 COPY --from=mp_builder /mount-s3.rpm /mount-s3.rpm
+COPY ./cmd/install-mp.sh /
 
 RUN dnf upgrade -y && \
     dnf install -y ./mount-s3.rpm && \
-    dnf clean all && \
-    rm mount-s3.rpm
+    dnf clean all
 
 RUN echo "user_allow_other" >> /etc/fuse.conf
 

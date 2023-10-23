@@ -43,11 +43,11 @@ var (
 )
 
 type Driver struct {
-	endpoint string
-	srv      *grpc.Server
+	Endpoint string
+	Srv      *grpc.Server
 
-	nodeID  string
-	mounter Mounter
+	NodeID  string
+	Mounter Mounter
 }
 
 func NewDriver(endpoint string) *Driver {
@@ -58,15 +58,20 @@ func NewDriver(endpoint string) *Driver {
 		klog.Fatalln(err)
 	}
 
+	mounter, err := newS3Mounter()
+	if err != nil {
+		klog.Fatalln(err)
+	}
+
 	return &Driver{
-		endpoint: endpoint,
-		nodeID:   metadata.GetInstanceID(),
-		mounter:  newNodeMounter(),
+		Endpoint: endpoint,
+		NodeID:   metadata.GetInstanceID(),
+		Mounter:  mounter,
 	}
 }
 
 func (d *Driver) Run() error {
-	scheme, addr, err := util.ParseEndpoint(d.endpoint)
+	scheme, addr, err := util.ParseEndpoint(d.Endpoint)
 	if err != nil {
 		return err
 	}
@@ -86,17 +91,17 @@ func (d *Driver) Run() error {
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(logErr),
 	}
-	d.srv = grpc.NewServer(opts...)
+	d.Srv = grpc.NewServer(opts...)
 
-	csi.RegisterIdentityServer(d.srv, d)
-	csi.RegisterControllerServer(d.srv, d)
-	csi.RegisterNodeServer(d.srv, d)
+	csi.RegisterIdentityServer(d.Srv, d)
+	csi.RegisterControllerServer(d.Srv, d)
+	csi.RegisterNodeServer(d.Srv, d)
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
-	return d.srv.Serve(listener)
+	return d.Srv.Serve(listener)
 }
 
 func (d *Driver) Stop() {
 	klog.Infof("Stopping server")
-	d.srv.Stop()
+	d.Srv.Stop()
 }

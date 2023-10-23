@@ -1,3 +1,4 @@
+//go:generate mockgen -source=mount.go -destination=./mocks/mock_mount.go -package=mock_driver
 /*
 Copyright 2022 The Kubernetes Authors
 
@@ -17,9 +18,10 @@ limitations under the License.
 package driver
 
 import (
+	"context"
 	"os"
-	"os/exec"
 
+	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
@@ -32,17 +34,27 @@ type Mounter interface {
 	MakeDir(pathname string) error
 }
 
-type NodeMounter struct {
+type S3Mounter struct {
 	mount.Interface
+	ctx         context.Context
+	runner      SystemdRunner
+	connFactory func(context.Context) (SystemdConnection, error)
 }
 
-func newNodeMounter() Mounter {
-	return &NodeMounter{
-		Interface: mount.New(""),
+func newS3Mounter() (Mounter, error) {
+	ctx := context.Background()
+	connFactory := func(ctx context.Context) (SystemdConnection, error) {
+		return systemd.NewSystemConnectionContext(ctx)
 	}
+	return &S3Mounter{
+		Interface:   mount.New(""),
+		ctx:         ctx,
+		runner:      NewSystemdRunner(),
+		connFactory: connFactory,
+	}, nil
 }
 
-func (m *NodeMounter) MakeDir(pathname string) error {
+func (m *S3Mounter) MakeDir(pathname string) error {
 	err := os.MkdirAll(pathname, os.FileMode(0755))
 	if err != nil {
 		if !os.IsExist(err) {
@@ -53,11 +65,11 @@ func (m *NodeMounter) MakeDir(pathname string) error {
 }
 
 // IsCorruptedMnt return true if err is about corrupted mount point
-func (m *NodeMounter) IsCorruptedMnt(err error) bool {
+func (m *S3Mounter) IsCorruptedMnt(err error) bool {
 	return mount.IsCorruptedMnt(err)
 }
 
-func (m *NodeMounter) PathExists(path string) (bool, error) {
+func (m *S3Mounter) PathExists(path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil
 	} else if err != nil {
@@ -66,13 +78,12 @@ func (m *NodeMounter) PathExists(path string) (bool, error) {
 	return true, nil
 }
 
-func (m *NodeMounter) Mount(source string, target string, _ string, options []string) error {
-	mp_args := []string{source, target}
-	mp_args = append(mp_args, options...)
-	cmd := exec.Command("mount-s3", mp_args...)
-	output, err := cmd.CombinedOutput()
+func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
+	output, err := m.runner.Run(m.ctx, "/usr/bin/mount-s3", append([]string{source, target}, options...))
+	if output != "" {
+		klog.V(5).Infof("mount-s3 output: %s", output)
+	}
 	if err != nil {
-		klog.V(5).Infof("mount-s3 output: %s, failed with: %v", string(output), err)
 		return err
 	}
 	return nil
