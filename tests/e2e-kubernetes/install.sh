@@ -14,7 +14,7 @@ function setup_kubeconfig() {
 }
 
 function check_pods() {
-    kubectl get pods -A
+    kubectl get pods -A --kubeconfig=${KUBECONFIG}
 }
 
 kubectl_install

@@ -36,19 +36,18 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
           aws-region: ${{ env.AWS_REGION }}
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Build, tag, and push docker image to Amazon ECR Public Repository
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
-          GIT_TAG=$GITHUB_SHA
-          export PLATFORM=linux/amd64
-          export TAG=$GIT_TAG
-          make build_image
-          make push_image
+      # - name: Login to Amazon ECR
+      #   id: login-ecr
+      #   uses: aws-actions/amazon-ecr-login@v2
+      # - name: Build, tag, and push docker image to Amazon ECR Public Repository
+      #   env:
+      #     REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      #   run: |
+      #     BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
+      #     export PLATFORM=linux/amd64
+      #     export TAG=$GITHUB_SHA
+      #     make build_image
+      #     make push_image
       - name: Install the driver
         run: |
           export EKS_REGION=us-east-1
