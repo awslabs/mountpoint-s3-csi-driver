@@ -67,7 +67,9 @@ test:
 e2e:
 	pushd tests/e2e-kubernetes; \
 	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --pull-request=${E2E_PR}; \
-	popd
+	EXIT_CODE=$$?; \
+	popd; \
+	exit $$EXIT_CODE
 
 .PHONY: fmt
 fmt:

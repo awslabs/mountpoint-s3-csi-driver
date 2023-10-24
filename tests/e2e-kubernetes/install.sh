@@ -13,10 +13,15 @@ function setup_kubeconfig() {
     aws eks update-kubeconfig --region ${EKS_REGION} --name ${EKS_CLUSTER_NAME} --kubeconfig=${KUBECONFIG}
 }
 
-function check_pods() {
-    kubectl get pods -A --kubeconfig=${KUBECONFIG}
+function ensure_driver_not_installed() {
+    echo "not installed"
+}
+
+function install_driver() {
+    kubectl get pods -A
 }
 
 kubectl_install
 setup_kubeconfig
-check_pods
+ensure_driver_not_installed
+install_driver

@@ -1,6 +1,6 @@
 module github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes
 
-go 1.21.1
+go 1.21
 
 require (
 	github.com/onsi/ginkgo/v2 v2.9.4
