@@ -36,9 +36,9 @@ function ensure_driver_not_installed() {
 }
 
 function install_driver() {
-    helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --wait --timeout=300s --values \
+    helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --values \
         ./charts/aws-s3-csi-driver/values.yaml \
-        --set image.repository=${REGISTRY} \
+        --set image.repository=${REGISTRY}/s3-csi-driver \
         --set image.tag=${TAG}
     kubectl rollout status daemonset s3-csi-node -n kube-system --timeout=60s
     kubectl get pods -A
