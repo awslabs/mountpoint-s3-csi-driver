@@ -35,7 +35,7 @@ PLATFORM?=linux/amd64,linux/arm64
 
 # region is expected to be the same where cluster is created
 E2E_REGION?=us-east-1
-E2E_PR?=local
+E2E_COMMIT_ID?=local
 E2E_KUBECONFIG?=""
 
 .EXPORT_ALL_VARIABLES:
@@ -66,7 +66,7 @@ test:
 .PHONY: e2e
 e2e:
 	pushd tests/e2e-kubernetes; \
-	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --pull-request=${E2E_PR}; \
+	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
 	EXIT_CODE=$$?; \
 	popd; \
 	exit $$EXIT_CODE

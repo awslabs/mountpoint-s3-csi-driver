@@ -18,7 +18,7 @@ func init() {
 	f.RegisterCommonFlags(flag.CommandLine)  // configures --kubectl flag
 	f.AfterReadingAllFlags(&f.TestContext)
 
-	flag.StringVar(&PullRequest, "pull-request", "local", "the associated pull request number if present")
+	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.Parse()
 }
