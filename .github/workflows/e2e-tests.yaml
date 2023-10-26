@@ -19,7 +19,7 @@ env:
 jobs:
   build:
     # this is to prevent the job to run at forked projects
-    if: github.repository == 'awslabs/aws-s3-csi-driver'
+    if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     runs-on: ubuntu-latest
     environment: PR Integration Tests
     permissions:
