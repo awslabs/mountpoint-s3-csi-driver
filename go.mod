@@ -3,7 +3,6 @@ module github.com/awslabs/aws-s3-csi-driver
 go 1.21
 
 require (
-	github.com/aws/aws-sdk-go v1.45.13
 	github.com/container-storage-interface/spec v1.8.0
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/godbus/dbus/v5 v5.1.0
@@ -27,7 +26,6 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/uuid v1.3.1
-	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/moby/sys/mountinfo v0.6.2 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	golang.org/x/net v0.14.0
