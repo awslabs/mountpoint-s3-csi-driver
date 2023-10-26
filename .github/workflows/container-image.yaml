@@ -48,7 +48,6 @@ jobs:
           else
             GIT_TAG=$BRANCH_OR_TAG
           fi
-          echo $REGISTRY
           export PLATFORM=linux/amd64
           export TAG=$GIT_TAG
           make build_image

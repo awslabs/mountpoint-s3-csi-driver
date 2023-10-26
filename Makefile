@@ -11,6 +11,7 @@
 #WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #See the License for the specific language governing permissions and
 #limitations under the License.
+SHELL = /bin/bash
 
 VERSION=0.1.0
 
@@ -26,11 +27,16 @@ GOPATH=$(shell go env GOPATH)
 GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
-REGISTRY?=151381207180.dkr.ecr.eu-west-1.amazonaws.com
+REGISTRY?=""
 IMAGE?=$(REGISTRY)/s3-csi-driver
 TAG?=$(GIT_COMMIT)
 
 PLATFORM?=linux/amd64,linux/arm64
+
+# region is expected to be the same where cluster is created
+E2E_REGION?=us-east-1
+E2E_COMMIT_ID?=local
+E2E_KUBECONFIG?=""
 
 .EXPORT_ALL_VARIABLES:
 
@@ -56,6 +62,14 @@ test:
 	go test -v -race ./pkg/...
 	# skipping controller test cases because we don't implement controller for static provisioning, this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
+
+.PHONY: e2e
+e2e:
+	pushd tests/e2e-kubernetes; \
+	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
+	EXIT_CODE=$$?; \
+	popd; \
+	exit $$EXIT_CODE
 
 .PHONY: fmt
 fmt:

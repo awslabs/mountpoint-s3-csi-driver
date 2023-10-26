@@ -1,0 +1,57 @@
+package e2e
+
+import (
+	"flag"
+	"testing"
+
+	ginkgo "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	f "k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/storage/framework"
+	"k8s.io/kubernetes/test/e2e/storage/testsuites"
+	"k8s.io/kubernetes/test/e2e/storage/utils"
+)
+
+func init() {
+	testing.Init()
+	f.RegisterClusterFlags(flag.CommandLine) // configures --kubeconfig flag
+	f.RegisterCommonFlags(flag.CommandLine)  // configures --kubectl flag
+	f.AfterReadingAllFlags(&f.TestContext)
+
+	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
+	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
+	flag.Parse()
+}
+
+func TestE2E(t *testing.T) {
+	gomega.RegisterFailHandler(ginkgo.Fail)
+	ginkgo.RunSpecs(t, "S3 CSI E2E Suite")
+}
+
+var CSITestSuites = []func() framework.TestSuite{
+	// testsuites.InitCapacityTestSuite,
+	testsuites.InitVolumesTestSuite, // success: writes 53 bytes to index.html file, reads and verifies content from another pod
+	// testsuites.InitVolumeIOTestSuite,   // tries to open a file for writing multiple times, which is unsupported by MP
+	// testsuites.InitVolumeModeTestSuite, // fail: tries to mount in block mode, success: check unused volume is not mounted
+	// testsuites.InitSubPathTestSuite,
+	// testsuites.InitProvisioningTestSuite,
+	// testsuites.InitMultiVolumeTestSuite,
+	// testsuites.InitVolumeExpandTestSuite,
+	// testsuites.InitDisruptiveTestSuite,
+	// testsuites.InitVolumeLimitsTestSuite,
+	// testsuites.InitTopologyTestSuite,
+	// testsuites.InitVolumeStressTestSuite,
+	// testsuites.InitFsGroupChangePolicyTestSuite,
+	// testsuites.InitSnapshottableTestSuite,
+	// testsuites.InitSnapshottableStressTestSuite,
+	// testsuites.InitVolumePerformanceTestSuite,
+	// testsuites.InitReadWriteOncePodTestSuite,
+}
+
+// This executes testSuites for csi volumes.
+var _ = utils.SIGDescribe("CSI Volumes", func() {
+	curDriver := initS3Driver()
+	ginkgo.Context(framework.GetDriverNameWithFeatureTags(curDriver), func() {
+		framework.DefineTestSuites(curDriver, CSITestSuites)
+	})
+})
