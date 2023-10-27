@@ -32,7 +32,7 @@ RUN gpg --verify mount-s3.rpm.asc
 
 # Build driver
 FROM --platform=$BUILDPLATFORM golang:1.21.1-bullseye as builder
-WORKDIR /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver
+WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 ADD . .
 RUN make bin
 
@@ -51,6 +51,6 @@ RUN dnf upgrade -y && \
 RUN echo "user_allow_other" >> /etc/fuse.conf
 
 # Install driver
-COPY --from=builder /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-mountpoint-s3-csi-driver /bin/aws-mountpoint-s3-csi-driver
 
-ENTRYPOINT ["/bin/aws-s3-csi-driver"]
+ENTRYPOINT ["/bin/aws-mountpoint-s3-csi-driver"]

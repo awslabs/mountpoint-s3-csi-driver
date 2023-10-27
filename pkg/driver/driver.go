@@ -20,8 +20,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cloud"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"

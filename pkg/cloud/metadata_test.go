@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud/mocks"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cloud/mocks"
 	"github.com/golang/mock/gomock"
 )
 

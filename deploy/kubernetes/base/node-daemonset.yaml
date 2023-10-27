@@ -4,17 +4,17 @@ apiVersion: apps/v1
 metadata:
   name: s3-csi-node
   labels:
-    app.kubernetes.io/name: aws-s3-csi-driver
+    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
 spec:
   selector:
     matchLabels:
       app: s3-csi-node
-      app.kubernetes.io/name: aws-s3-csi-driver
+      app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
   template:
     metadata:
       labels:
         app: s3-csi-node
-        app.kubernetes.io/name: aws-s3-csi-driver
+        app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
     spec:
       nodeSelector:
         kubernetes.io/os: linux

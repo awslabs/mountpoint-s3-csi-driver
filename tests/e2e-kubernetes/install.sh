@@ -27,8 +27,8 @@ function setup_kubeconfig() {
 }
 
 function ensure_driver_not_installed() {
-    if [[ $(helm list -A | grep aws-s3-csi-driver) == *deployed* ]]; then
-        helm uninstall aws-s3-csi-driver --namespace kube-system
+    if [[ $(helm list -A | grep aws-mountpoint-s3-csi-driver) == *deployed* ]]; then
+        helm uninstall aws-mountpoint-s3-csi-driver --namespace kube-system
         sleep 10 # nice to have: a better way to wait for driver removed
     fi
     kubectl get pods -A
@@ -36,8 +36,8 @@ function ensure_driver_not_installed() {
 }
 
 function install_driver() {
-    helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --values \
-        ./charts/aws-s3-csi-driver/values.yaml \
+    helm upgrade --install aws-mountpoint-s3-csi-driver --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
+        ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
         --set image.repository=${REGISTRY}/s3-csi-driver \
         --set image.tag=${TAG} \
         --set image.pullPolicy=Always

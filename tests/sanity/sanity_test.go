@@ -27,8 +27,8 @@ import (
 
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (

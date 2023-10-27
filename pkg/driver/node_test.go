@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"testing"
 
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
+	mock_driver "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"golang.org/x/net/context"

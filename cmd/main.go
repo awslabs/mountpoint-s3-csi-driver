@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver"
 	"k8s.io/klog/v2"
 )
 

@@ -15,7 +15,7 @@ SHELL = /bin/bash
 
 VERSION=0.1.0
 
-PKG=github.com/awslabs/aws-s3-csi-driver
+PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -28,7 +28,7 @@ GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
 REGISTRY?=""
-IMAGE?=$(REGISTRY)/s3-csi-driver
+IMAGE?=$(REGISTRY)/mountpoint-s3-csi-driver
 TAG?=$(GIT_COMMIT)
 
 PLATFORM?=linux/amd64,linux/arm64
@@ -55,7 +55,7 @@ login_registry:
 .PHONY: bin
 bin:
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/
+	CGO_ENABLED=0 GOOS=linux go build -ldflags ${LDFLAGS} -o bin/aws-mountpoint-s3-csi-driver ./cmd/
 
 .PHONY: test
 test:

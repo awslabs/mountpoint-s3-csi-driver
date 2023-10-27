@@ -2,7 +2,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "aws-s3-csi-driver.name" -}}
+{{- define "aws-mountpoint-s3-csi-driver.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -11,7 +11,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "aws-s3-csi-driver.fullname" -}}
+{{- define "aws-mountpoint-s3-csi-driver.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -27,17 +27,17 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "aws-s3-csi-driver.chart" -}}
+{{- define "aws-mountpoint-s3-csi-driver.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Common labels
 */}}
-{{- define "aws-s3-csi-driver.labels" -}}
-{{ include "aws-s3-csi-driver.selectorLabels" . }}
+{{- define "aws-mountpoint-s3-csi-driver.labels" -}}
+{{ include "aws-mountpoint-s3-csi-driver.selectorLabels" . }}
 {{- if ne .Release.Name "kustomize" }}
-helm.sh/chart: {{ include "aws-s3-csi-driver.chart" . }}
+helm.sh/chart: {{ include "aws-mountpoint-s3-csi-driver.chart" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -52,8 +52,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Common selector labels
 */}}
-{{- define "aws-s3-csi-driver.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "aws-s3-csi-driver.name" . }}
+{{- define "aws-mountpoint-s3-csi-driver.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "aws-mountpoint-s3-csi-driver.name" . }}
 {{- if ne .Release.Name "kustomize" }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
@@ -62,7 +62,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 Convert the `--extra-tags` command line arg from a map.
 */}}
-{{- define "aws-s3-csi-driver.extra-volume-tags" -}}
+{{- define "aws-mountpoint-s3-csi-driver.extra-volume-tags" -}}
 {{- $result := dict "pairs" (list) -}}
 {{- range $key, $value := .Values.controller.extraVolumeTags -}}
 {{- $noop := printf "%s=%v" $key $value | append $result.pairs | set $result "pairs" -}}
