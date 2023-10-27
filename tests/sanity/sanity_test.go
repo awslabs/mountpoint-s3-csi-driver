@@ -14,11 +14,16 @@ limitations under the License.
 package sanity
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 
@@ -40,11 +45,32 @@ func TestSanity(t *testing.T) {
 	RunSpecs(t, "Sanity Tests Suite")
 }
 
+// Waits for driver's grpc server to become up.
+// Testing framework connects to UDS in a hacky way (which was required before grpc implemented support for UDS),
+// which leads to a "Connection timed out" error if `grpc.Dial` was called before UDS created / server started listening:
+// https://github.com/kubernetes-csi/csi-test/blob/master/utils/grpcutil.go#L37
+func waitDriverIsUp(endpoint string) {
+	By("connecting to CSI driver")
+	dialOptions := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+	conn, err := grpc.Dial(endpoint, dialOptions...)
+	Expect(err).NotTo(HaveOccurred())
+	defer conn.Close()
+	client := csi.NewIdentityClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	resp, err := client.Probe(ctx, &csi.ProbeRequest{}, grpc.WaitForReady(true))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(resp.Ready.GetValue()).To(BeTrue())
+}
+
 var _ = BeforeSuite(func() {
 	s3Driver = driver.NewFakeDriver(endpoint)
 	go func() {
 		Expect(s3Driver.Run()).NotTo(HaveOccurred())
 	}()
+	waitDriverIsUp(endpoint)
 })
 
 var _ = AfterSuite(func() {
