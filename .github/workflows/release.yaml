@@ -50,5 +50,6 @@ jobs:
         run: |
           export IMAGE_TO_PROMOTE=${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }}
           export RELEASE_IMAGE=${{ steps.login-ecr-prod.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}
+          docker pull ${IMAGE_TO_PROMOTE}
           docker tag ${IMAGE_TO_PROMOTE} ${RELEASE_IMAGE}
           docker push ${RELEASE_IMAGE}

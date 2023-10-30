@@ -51,7 +51,7 @@ push_image:
 
 .PHONY: login_registry
 login_registry:
-	aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${REGISTRY}
+	aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${REGISTRY}
 
 .PHONY: bin
 bin:
