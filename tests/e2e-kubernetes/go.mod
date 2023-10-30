@@ -1,4 +1,4 @@
-module github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes
+module github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes
 
 go 1.21
 

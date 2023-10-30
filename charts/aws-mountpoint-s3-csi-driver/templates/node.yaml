@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: s3-csi-node
-      {{- include "aws-s3-csi-driver.selectorLabels" . | nindent 6 }}
+      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:

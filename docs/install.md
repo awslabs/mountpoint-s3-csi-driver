@@ -64,7 +64,7 @@ helm upgrade --install aws-mountpoint-s3-csi-driver \
     aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
 ```
 
-Review the [configuration values](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/charts/aws-s3-csi-driver/values.yaml) for the Helm chart.
+Review the [configuration values](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/charts/aws-mountpoint-s3-csi-driver/values.yaml) for the Helm chart.
 
 #### Once the driver has been deployed, verify the pods are running:
 ```sh
