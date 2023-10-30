@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+
+# This workflow copies image from testing private repository to:
+# 1) public repository
+# 2) private ARS source repository (TODO)
+env:
+  AWS_REGION : "us-east-1"
+  COMMIT_ID: ${{ github.sha }}
+  GIT_TAG: ${{ github.ref_name }}
+  IMAGE_NAME: "s3-csi-driver"
+jobs:
+  build:
+    # this is to prevent the job to run at forked projects
+    if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Configure AWS Credentials from Test acccount
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR test
+        id: login-ecr-test
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Configure AWS Credentials from Prod account
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          role-to-assume: arn:aws:iam::211164257204:role/S3CSIDriverPrivateImagePublisherRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR prod
+        id: login-ecr-prod
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Promote image
+        run: |
+          export IMAGE_TO_PROMOTE=${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }}
+          export RELEASE_IMAGE=${{ steps.login-ecr-prod.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}
+          docker tag ${IMAGE_TO_PROMOTE} ${RELEASE_IMAGE}
+          docker push ${RELEASE_IMAGE}

@@ -28,7 +28,8 @@ GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
 REGISTRY?=""
-IMAGE?=$(REGISTRY)/s3-csi-driver
+IMAGE_NAME?=""
+IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
 
 PLATFORM?=linux/amd64,linux/arm64

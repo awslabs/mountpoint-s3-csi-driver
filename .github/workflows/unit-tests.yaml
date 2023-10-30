@@ -1,4 +1,4 @@
-name: Go
+name: Unit tests
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: PR Unit Tests
     steps:
     - uses: actions/checkout@v4
 
