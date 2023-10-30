@@ -1,11 +1,11 @@
-# Source: aws-s3-csi-driver/templates/node.yaml
+# Source: aws-mountpoint-s3-csi-driver/templates/node.yaml
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: s3-csi-node
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aws-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         app: s3-csi-node
-        {{- include "aws-s3-csi-driver.labels" . | nindent 8 }}
+        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux

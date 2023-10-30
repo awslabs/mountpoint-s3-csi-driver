@@ -28,7 +28,7 @@ GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
 REGISTRY?=""
-IMAGE?=$(REGISTRY)/mountpoint-s3-csi-driver
+IMAGE?=$(REGISTRY)/s3-csi-driver
 TAG?=$(GIT_COMMIT)
 
 PLATFORM?=linux/amd64,linux/arm64
