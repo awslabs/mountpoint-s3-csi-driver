@@ -51,3 +51,4 @@ helm_install
 setup_kubeconfig
 ensure_driver_not_installed
 install_driver
+ensure_driver_not_installed
