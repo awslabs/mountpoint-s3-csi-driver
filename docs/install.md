@@ -87,4 +87,4 @@ helm uninstall aws-mountpoint-s3-csi-driver --namespace kube-system
 kubectl delete -k "github.com/awslabs/aws-mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-<YOUR-CSI-DRIVER-VERION-NUMBER>"
 ```
 
-> Warning: Warning: executing this command will delete a service account s3-csi-driver-sa from your cluster , which may cause problems when installing the driver again on a EKS cluster (re-created account won't include eks.amazonaws.com/role-arn annotation). Please refer to [eksctl documentation](https://eksctl.io/usage/iamserviceaccounts/) for details of how to re-create SA in this case.
+> Warning: executing this command will delete a service account s3-csi-driver-sa from your cluster , which may cause problems when installing the driver again on a EKS cluster (re-created account won't include eks.amazonaws.com/role-arn annotation). Please refer to [eksctl documentation](https://eksctl.io/usage/iamserviceaccounts/) for details of how to re-create SA in this case.
