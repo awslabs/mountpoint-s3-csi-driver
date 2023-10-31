@@ -28,7 +28,8 @@ GOOS=$(shell go env GOOS)
 GOBIN=$(shell pwd)/bin
 
 REGISTRY?=""
-IMAGE?=$(REGISTRY)/s3-csi-driver
+IMAGE_NAME?=""
+IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
 
 PLATFORM?=linux/amd64,linux/arm64
@@ -50,7 +51,7 @@ push_image:
 
 .PHONY: login_registry
 login_registry:
-	aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${REGISTRY}
+	aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${REGISTRY}
 
 .PHONY: bin
 bin:

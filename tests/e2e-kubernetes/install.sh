@@ -38,7 +38,7 @@ function ensure_driver_not_installed() {
 function install_driver() {
     helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --values \
         ./charts/aws-s3-csi-driver/values.yaml \
-        --set image.repository=${REGISTRY}/s3-csi-driver \
+        --set image.repository=${REGISTRY}/${IMAGE_NAME} \
         --set image.tag=${TAG} \
         --set image.pullPolicy=Always
     kubectl rollout status daemonset s3-csi-node -n kube-system --timeout=60s
