@@ -1,5 +1,5 @@
 # Static Provisioning Example
-This example shows how to make a static provisioned EFS persistent volume (PV) mounted inside container.
+This example shows how to make a static provisioned Mountpoint for S3 persistent volume (PV) mounted inside container.
 
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
