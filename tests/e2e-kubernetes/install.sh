@@ -26,7 +26,7 @@ NODE_COUNT=${NODE_COUNT:-3}
 INSTANCE_TYPE=${INSTANCE_TYPE:-c5.large}
 AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
-KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
+KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_STATE_FILE=s3://vlaad-kops-state-store
 
 # kops: must include patch version (e.g. 1.19.1)
@@ -95,6 +95,6 @@ function install_driver() {
 #   "$K8S_VERSION_KOPS" \
 #   "$CLUSTER_FILE" \
 #   "$KUBECONFIG" \
-#   "$KOPS_PATCH_NODE_FILE" \
+#   "$KOPS_PATCH_FILE" \
 #   "$KOPS_STATE_FILE"
 install_driver

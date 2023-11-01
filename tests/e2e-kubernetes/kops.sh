@@ -29,7 +29,7 @@ function kops_create_cluster() {
   K8S_VERSION=${7}
   CLUSTER_FILE=${8}
   KUBECONFIG=${9}
-  KOPS_PATCH_NODE_FILE=${10}
+  KOPS_PATCH_FILE=${10}
   KOPS_STATE_FILE=${11}
 
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
