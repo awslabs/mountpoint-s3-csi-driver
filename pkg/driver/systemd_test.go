@@ -126,12 +126,11 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Do(func(_ context.Context, name string, _ string, _ []systemd.Property, ch chan<- string) {
 			startUnitResp = ch
 			serviceName = name
+			go func() {
+				startUnitResp <- "done"
+				updates <- map[string]*systemd.UnitStatus{serviceName: {ActiveState: "active"}}
+			}()
 		}).Return(0, nil)
-
-	go func() {
-		startUnitResp <- "done"
-		updates <- map[string]*systemd.UnitStatus{serviceName: {ActiveState: "active"}}
-	}()
 
 	runner := driver.SystemdRunner{
 		Connector: mockConnector,
