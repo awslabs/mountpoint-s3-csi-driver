@@ -86,6 +86,7 @@ jobs:
         if: always()
         run: |
           export ACTION=delete_cluster
+          CLUSTER_TYPE=kops
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
         if: ${{ startsWith(github.ref_name, 'release') }}
