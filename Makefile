@@ -64,14 +64,6 @@ test:
 	# skipping controller test cases because we don't implement controller for static provisioning, this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
 
-.PHONY: e2e
-e2e:
-	pushd tests/e2e-kubernetes; \
-	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
-	EXIT_CODE=$$?; \
-	popd; \
-	exit $$EXIT_CODE
-
 .PHONY: fmt
 fmt:
 	go fmt ./...

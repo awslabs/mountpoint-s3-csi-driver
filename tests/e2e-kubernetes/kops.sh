@@ -30,29 +30,28 @@ function kops_create_cluster() {
   CLUSTER_FILE=${8}
   KUBECONFIG=${9}
   KOPS_PATCH_FILE=${10}
-  KOPS_STATE_FILE=${11}
+  KOPS_PATCH_NODE_FILE=${11}
+  KOPS_STATE_FILE=${12}
 
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
-    kops_delete_cluster "${BIN}" \
-      "${CLUSTER_NAME}" \
-      "${KOPS_STATE_FILE}"
-    # fail if cluster already exists
+    echo "cluster already existed which means a failed cleanup or a concurrently running workflow; please, ensure that there are no leaked aws resources before retrying"
     exit 1
   fi
-  # ${BIN} create cluster --state "${KOPS_STATE_FILE}" \
-  #   --zones "${ZONES}" \
-  #   --node-count="${NODE_COUNT}" \
-  #   --node-size="${INSTANCE_TYPE}" \
-  #   --image="${AMI_ID}" \
-  #   --kubernetes-version="${K8S_VERSION}" \
-  #   --dry-run \
-  #   -o yaml \
-  #   "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
 
-  # todo: patch node iam policies
+  ${BIN} create cluster --state "${KOPS_STATE_FILE}" \
+    --zones "${ZONES}" \
+    --node-count="${NODE_COUNT}" \
+    --node-size="${INSTANCE_TYPE}" \
+    --image="${AMI_ID}" \
+    --kubernetes-version="${K8S_VERSION}" \
+    --dry-run \
+    -o yaml \
+    "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
 
-  # ${BIN} create --state "${KOPS_STATE_FILE}" -f "${CLUSTER_FILE}"
+  kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_FILE" "Cluster" ""
+  kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_NODE_FILE" "InstanceGroup" "Node"
 
+  ${BIN} create --state "${KOPS_STATE_FILE}" -f "${CLUSTER_FILE}"
   ${BIN} update cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --yes
   ${BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
   ${BIN} validate cluster --state "${KOPS_STATE_FILE}" --wait 10m --kubeconfig "${KUBECONFIG}"
@@ -78,4 +77,65 @@ function kops_delete_cluster() {
   KOPS_STATE_FILE=${3}
   echo "Deleting cluster ${CLUSTER_NAME}"
   ${BIN} delete cluster --name "${CLUSTER_NAME}" --state "${KOPS_STATE_FILE}" --yes
+}
+
+# TODO switch this to python, work exclusively with yaml, use kops toolbox
+# template/kops set?, all this hacking with jq stinks!
+function kops_patch_cluster_file() {
+  CLUSTER_FILE=${1}    # input must be yaml
+  KOPS_PATCH_FILE=${2} # input must be yaml
+  KIND=${3}            # must be either Cluster or InstanceGroup
+  ROLE=${4}            # must be either Master or Node
+
+  echo "Patching cluster $CLUSTER_NAME with $KOPS_PATCH_FILE"
+
+  # Temporary intermediate files for patching, don't mutate CLUSTER_FILE until
+  # the end
+  CLUSTER_FILE_JSON=$CLUSTER_FILE.json
+  CLUSTER_FILE_0=$CLUSTER_FILE.0
+  CLUSTER_FILE_1=$CLUSTER_FILE.1
+
+  # HACK convert the multiple yaml documents to an array of json objects
+  yaml_to_json "$CLUSTER_FILE" "$CLUSTER_FILE_JSON"
+
+  # Find the json objects to patch
+  FILTER=".[] | select(.kind==\"$KIND\")"
+  if [ -n "$ROLE" ]; then
+    FILTER="$FILTER | select(.spec.role==\"$ROLE\")"
+  fi
+  jq "$FILTER" "$CLUSTER_FILE_JSON" > "$CLUSTER_FILE_0"
+
+  # Patch only the json objects
+  kubectl patch -f "$CLUSTER_FILE_0" --local --type merge --patch "$(cat "$KOPS_PATCH_FILE")" -o json > "$CLUSTER_FILE_1"
+  mv "$CLUSTER_FILE_1" "$CLUSTER_FILE_0"
+
+  # Delete the original json objects, add the patched
+  # TODO Cluster must always be first?
+  jq "del($FILTER)" "$CLUSTER_FILE_JSON" | jq ". + \$patched | sort" --slurpfile patched "$CLUSTER_FILE_0" > "$CLUSTER_FILE_1"
+  mv "$CLUSTER_FILE_1" "$CLUSTER_FILE_0"
+
+  # HACK convert the array of json objects to multiple yaml documents
+  json_to_yaml "$CLUSTER_FILE_0" "$CLUSTER_FILE_1"
+  mv "$CLUSTER_FILE_1" "$CLUSTER_FILE_0"
+
+  # Done patching, overwrite original yaml CLUSTER_FILE
+  mv "$CLUSTER_FILE_0" "$CLUSTER_FILE" # output is yaml
+
+  # Clean up
+  rm "$CLUSTER_FILE_JSON"
+}
+
+function yaml_to_json() {
+  IN=${1}
+  OUT=${2}
+  kubectl patch -f "$IN" --local -p "{}" --type merge -o json | jq '.' -s > "$OUT"
+}
+
+function json_to_yaml() {
+  IN=${1}
+  OUT=${2}
+  for ((i = 0; i < $(jq length "$IN"); i++)); do
+    echo "---" >> "$OUT"
+    jq ".[$i]" "$IN" | kubectl patch -f - --local -p "{}" --type merge -o yaml >> "$OUT"
+  done
 }

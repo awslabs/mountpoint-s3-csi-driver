@@ -18,7 +18,6 @@ on:
 concurrency: e2e-cluster
 env:
   AWS_REGION : "us-east-1"
-  KUBECONFIG: "/tmp/kubeconfig"
   COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
   TMP_IMAGE_NAME: "s3-csi-driver-tmp"
   PROMOTED_IMAGE_NAME: "s3-csi-driver"
@@ -60,18 +59,33 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           make build_image
           make push_image
-      - name: Install the driver
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
+      - name: Install tools
         run: |
-          export EKS_REGION=${{ env.AWS_REGION }}
-          export EKS_CLUSTER_NAME=s3-csi-cluster
-          export KUBECONFIG=${{ env.KUBECONFIG }}
+          export ACTION=install_tools
+          tests/e2e-kubernetes/run.sh
+      - name: Create cluster
+        run: |
+          export ACTION=create_cluster
+          tests/e2e-kubernetes/run.sh
+      - name: Install the driver
+        run: |
+          export ACTION=install_driver
+          export CLUSTER_TYPE=kops
+          export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
-          tests/e2e-kubernetes/install.sh
+          tests/e2e-kubernetes/run.sh
       - name: Run E2E Tests
-        run: make e2e E2E_KUBECONFIG=${{ env.KUBECONFIG }} E2E_COMMIT_ID=${{ env.COMMIT_ID }}
+        run: |
+          cd tests/e2e-kubernetes
+          export ACTION=run_tests
+          export CLUSTER_TYPE=kops
+          export TAG=${{ env.COMMIT_ID }}
+          ./run.sh
+      - name: Delete cluster
+        if: always()
+        run: |
+          export ACTION=delete_cluster
+          tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
         if: ${{ startsWith(github.ref_name, 'release') }}
         env:
