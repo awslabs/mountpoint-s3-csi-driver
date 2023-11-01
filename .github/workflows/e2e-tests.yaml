@@ -72,7 +72,8 @@ jobs:
           export ACTION=install_driver
           export CLUSTER_TYPE=kops
           export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
-          export TAG=${{ env.COMMIT_ID }}
+          # export TAG=${{ env.COMMIT_ID }}
+          export TAG=bab31fd6a09bf568ffe7f2c6a82444ab9c4fbfe5
           tests/e2e-kubernetes/run.sh
       - name: Run E2E Tests
         run: |

@@ -18,14 +18,15 @@ function helm_uninstall_driver() {
   HELM_BIN=${1}
   KUBECTL_BIN=${2}
   RELEASE_NAME=${3}
+  KUBECONFIG=${4}
   if [[ $($HELM_BIN list -A | grep $RELEASE_NAME) == *deployed* ]]; then
-    $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system
-    $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s
+    $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+    $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   else
     echo "driver does not seem to be installed"
   fi
-  $KUBECTL_BIN get pods -A
-  $KUBECTL_BIN get CSIDriver
+  $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN get CSIDriver --kubeconfig $KUBECONFIG
 }
 
 function helm_install_driver() {
@@ -34,17 +35,20 @@ function helm_install_driver() {
   RELEASE_NAME=${3}
   REPOSITORY=${4}
   TAG=${5}
+  KUBECONFIG=${6}
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
-    "$RELEASE_NAME"
+    "$RELEASE_NAME" \
+    "$KUBECONFIG"
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-s3-csi-driver --values \
     ./charts/aws-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
-    --set node.serviceAccount.create=true
-  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s
-  $KUBECTL_BIN get pods -A
-  echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}")"
+    --set node.serviceAccount.create=true \
+    --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
+  echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
 }

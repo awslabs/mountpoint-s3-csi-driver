@@ -36,7 +36,7 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
-KOPS_STATE_FILE=s3://vlaad-kops-state-store
+KOPS_STATE_FILE=${KOPS_STATE_FILE:-s3://mountpoint-s3-csi-driver-kops-state-store}
 
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
@@ -108,14 +108,16 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "$KUBECTL_BIN" \
     "$HELM_RELEASE_NAME" \
     "${REGISTRY}/${IMAGE_NAME}" \
-    "${TAG}"
+    "${TAG}" \
+    "${KUBECONFIG}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG};
 elif [[ "${ACTION}" == "uninstall_driver" ]]; then
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
-    "$HELM_RELEASE_NAME"
+    "$HELM_RELEASE_NAME" \
+    "${KUBECONFIG}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 else
