@@ -18,7 +18,6 @@ source "${BASE_DIR}"/helm.sh
 TEST_DIR=${BASE_DIR}/csi-test-artifacts
 BIN_DIR=${TEST_DIR}/bin
 KUBECTL_INSTALL_PATH=/usr/local/bin
-CLUSTER_NAME=s3-csi-cluster.k8s.local
 
 HELM_BIN=${BIN_DIR}/helm
 KOPS_BIN=${BIN_DIR}/kops
@@ -26,7 +25,12 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
-KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.kubeconfig"}
+CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-cluster.${CLUSTER_TYPE}.k8s.local"}
+# temporary crutch to make eksctl working with pre-created cluster
+if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+  CLUSTER_NAME=s3-csi-cluster
+fi
+KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
 KOPS_VERSION=1.28.0
 ZONES=${AWS_AVAILABILITY_ZONES:-us-east-1a,us-east-1b,us-east-1c,us-east-1d}

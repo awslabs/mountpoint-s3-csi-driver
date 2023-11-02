@@ -10,6 +10,7 @@ IAMFullAccess
 AmazonVPCFullAccess
 AmazonSQSFullAccess
 AmazonEventBridgeFullAccess
+AmazonSSMReadOnlyAccess
 ```
 
 ## Setting up the environment

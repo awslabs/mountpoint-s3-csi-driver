@@ -25,6 +25,9 @@ jobs:
   build:
     # this is to prevent the job to run at forked projects
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
+    strategy:
+      matrix:
+        cluster-type: ["kops", "eksctl"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -66,11 +69,12 @@ jobs:
       - name: Create cluster
         run: |
           export ACTION=create_cluster
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Install the driver
         run: |
           export ACTION=install_driver
-          export CLUSTER_TYPE=kops
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
           tests/e2e-kubernetes/run.sh
@@ -78,14 +82,20 @@ jobs:
         run: |
           cd tests/e2e-kubernetes
           export ACTION=run_tests
-          export CLUSTER_TYPE=kops
+          export CLUSTER_TYPE==${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           ./run.sh
+      - name: Uinstall the driver
+        if: always()
+        run: |
+          export ACTION=uninstall_driver
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          tests/e2e-kubernetes/run.sh
       - name: Delete cluster
         if: always()
         run: |
           export ACTION=delete_cluster
-          CLUSTER_TYPE=kops
+          export CLUSTER_TYPE==${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
         if: ${{ startsWith(github.ref_name, 'release') }}

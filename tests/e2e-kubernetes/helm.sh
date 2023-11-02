@@ -19,7 +19,7 @@ function helm_uninstall_driver() {
   KUBECTL_BIN=${2}
   RELEASE_NAME=${3}
   KUBECONFIG=${4}
-  if [[ $($HELM_BIN list -A | grep $RELEASE_NAME) == *deployed* ]]; then
+  if [[ $($HELM_BIN list -A --kubeconfig $KUBECONFIG | grep $RELEASE_NAME) == *deployed* ]]; then
     $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
     $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   else
@@ -41,12 +41,17 @@ function helm_install_driver() {
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG"
+  # temporary crutch to make eksctl working with pre-created cluster
+  SA_CREATE=true
+  if [[ "${KUBECONFIG}" == *"s3-csi-cluster.kubeconfig"* ]]; then
+    SA_CREATE=false
+  fi
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-s3-csi-driver --values \
     ./charts/aws-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
-    --set node.serviceAccount.create=true \
+    --set node.serviceAccount.create=$SA_CREATE \
     --kubeconfig $KUBECONFIG
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
