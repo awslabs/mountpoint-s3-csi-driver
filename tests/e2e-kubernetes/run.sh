@@ -46,6 +46,7 @@ K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION:-1.28.2}}
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
+export PATH="$PATH:${BIN_DIR}"
 
 function kubectl_install() {
   curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"

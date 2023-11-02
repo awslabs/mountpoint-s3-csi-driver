@@ -68,6 +68,14 @@ test:
 fmt:
 	go fmt ./...
 
+.PHONY: e2e
+e2e:
+	pushd tests/e2e-kubernetes; \
+	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
+	EXIT_CODE=$$?; \
+	popd; \
+	exit $$EXIT_CODE
+
 .PHONY: check_style
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
