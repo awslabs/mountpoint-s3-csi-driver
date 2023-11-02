@@ -3,7 +3,7 @@
 set -euox pipefail
 
 ACTION=${ACTION:-}
-REGION=${AWS_REGION:-us-east-1}
+REGION=${AWS_REGION}
 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
@@ -25,7 +25,7 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
-CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-cluster.${CLUSTER_TYPE}.k8s.local"}
+CLUSTER_NAME="s3-csi-cluster.${CLUSTER_TYPE}.k8s.local"
 # temporary crutch to make eksctl working with pre-created cluster
 if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
   CLUSTER_NAME=s3-csi-cluster

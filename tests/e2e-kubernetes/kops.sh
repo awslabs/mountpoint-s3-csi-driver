@@ -34,8 +34,7 @@ function kops_create_cluster() {
   KOPS_STATE_FILE=${12}
 
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
-    echo "cluster already existed which means a failed cleanup or a concurrently running workflow; please, ensure that there are no leaked aws resources before retrying"
-    exit 1
+    kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE"
   fi
 
   ${BIN} create cluster --state "${KOPS_STATE_FILE}" \

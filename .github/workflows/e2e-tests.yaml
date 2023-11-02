@@ -69,11 +69,13 @@ jobs:
       - name: Create cluster
         run: |
           export ACTION=create_cluster
+          export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Install the driver
         run: |
           export ACTION=install_driver
+          export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
@@ -82,6 +84,7 @@ jobs:
         run: |
           cd tests/e2e-kubernetes
           export ACTION=run_tests
+          export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE==${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           ./run.sh
@@ -89,12 +92,14 @@ jobs:
         if: always()
         run: |
           export ACTION=uninstall_driver
+          export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Delete cluster
         if: always()
         run: |
           export ACTION=delete_cluster
+          export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE==${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
