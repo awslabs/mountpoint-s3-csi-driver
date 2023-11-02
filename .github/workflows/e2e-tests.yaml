@@ -85,7 +85,7 @@ jobs:
           cd tests/e2e-kubernetes
           export ACTION=run_tests
           export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE==${{ matrix.cluster-type }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           ./run.sh
       - name: Uinstall the driver
@@ -100,7 +100,7 @@ jobs:
         run: |
           export ACTION=delete_cluster
           export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE==${{ matrix.cluster-type }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
         if: ${{ startsWith(github.ref_name, 'release') }}
