@@ -96,7 +96,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	//Checking if the target directory is already mounted with a volume.
-	mounted, err := d.Mounter.IsMountPoint(target)
+	mounted, err := d.isMounted(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not check if %q is mounted: %v", target, err)
 	}
@@ -125,6 +125,11 @@ func compileMountOptions(currentOptions []string, newOptions []string) []string 
 	}
 
 	for _, mountOption := range newOptions {
+		// disallow options that don't make sense in CSI
+		switch mountOption {
+		case "--foreground", "-f", "--help", "-h", "--version", "-v":
+			continue
+		}
 		allMountOptions.Insert(mountOption)
 	}
 
