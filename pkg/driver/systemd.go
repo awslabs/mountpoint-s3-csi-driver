@@ -85,8 +85,12 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (st
 		systemd.PropExecStart(append([]string{cmd}, args...), true),
 	}
 
-	// Unit names must be unique in systemd, so include a uuid
-	serviceName := filepath.Base(cmd) + "." + uuid.New().String() + ".service"
+	// Unit names must be unique in systemd, so include a uuid and include the mountpoint version
+	mpVersion := os.Getenv("MOUNTPOINT_VERSION")
+	if mpVersion == "" {
+		mpVersion = "UNKNOWN"
+	}
+	serviceName := filepath.Base(cmd) + "-" + mpVersion + "-" + uuid.New().String() + ".service"
 
 	// Subscribe to status updates
 	isChanged := func(l *systemd.UnitStatus, r *systemd.UnitStatus) bool {

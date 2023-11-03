@@ -1,11 +1,73 @@
 #!/bin/sh
 
-NSENTER_HOST="nsenter --target 1 --mount --uts --ipc --net"
+set -euox pipefail
 
-cp /mount-s3-wrap /host/usr/bin/mount-s3-wrap
+NSENTER_HOST="nsenter --target 1 --mount --net"
+RPM_FILE=mount-s3.rpm
+DEB_FILE=mount-s3.deb
 
-echo 'Installing mountpoint'
-cp /mount-s3.rpm /host/usr/mount-s3.rpm
-$NSENTER_HOST yum install -y /usr/mount-s3.rpm
-$NSENTER_HOST rm -f /usr/mount-s3.rpm
-$NSENTER_HOST mkdir -p /var/run/mountpoint-s3
+get_os_info() {
+    local key=$1
+    local value=$($NSENTER_HOST cat /etc/os-release | grep "^$key=" | cut -d= -f2-)
+    # Remove potential quotes around the value
+    echo ${value//\"/}
+}
+
+# Determine the package manager based on the ID_LIKE or ID from os-release
+determine_package_manager() {
+    local id_like=$(get_os_info ID_LIKE)
+    local id=$(get_os_info ID)
+
+    if [[ "$id_like" == *"debian"* || "$id" == "debian" || "$id" == "ubuntu" ]]; then
+        echo "apt"
+    elif [[ "$id_like" == *"fedora"* || "$id_like" == *"rhel"* || "$id" == "fedora" || "$id" == "centos" ]]; then
+        echo "yum"
+    else
+        echo "unknown"
+    fi
+}
+
+cleanup_rpm() {
+    $NSENTER_HOST rm -f "/usr/${RPM_FILE}"
+}
+
+cleanup_deb() {
+    $NSENTER_HOST rm -f "/usr/${DEB_FILE}"
+}
+
+install_mountpoint_rpm() {
+    echo "Using yum to install S3 Mountpoint..."
+    local rpm_package_name=$(rpm -qp --queryformat '%{NAME}\n' "/${RPM_FILE}")
+    local installed_mp_version=$($NSENTER_HOST rpm -q --queryformat '%{VERSION}-%{RELEASE}\n' "${rpm_package_name}" || true)
+    local package_mp_version=$(rpm -qp --queryformat '%{VERSION}-%{RELEASE}\n' "/${RPM_FILE}")
+    echo "Installed S3 Mountpoint version: ${installed_mp_version}"
+    echo "Package S3 Mountpoint version: ${package_mp_version}"
+
+    if [[ "${installed_mp_version}" != "${package_mp_version}" ]]; then
+        cp "/${RPM_FILE}" "/host/usr/${RPM_FILE}"
+        trap cleanup_rpm EXIT SIGINT SIGTERM
+        # If install fails try downgrade
+        $NSENTER_HOST yum install -y "/usr/${RPM_FILE}" || $NSENTER_HOST yum downgrade -y "/usr/${RPM_FILE}"
+    else
+        echo "S3 Mountpoint already up to date"
+    fi
+}
+
+install_mountpoint_deb() {
+    echo "Using apt to install S3 Mountpoint..."
+    $NSENTER_HOST apt-get update
+    cp /mount-s3.deb /host/usr/mount-s3.deb
+    trap cleanup_deb EXIT SIGINT SIGTERM
+    $NSENTER_HOST apt-get install -y --allow-downgrades /usr/mount-s3.deb
+}
+
+package_manager=$(determine_package_manager)
+
+if [ "$package_manager" == "apt" ]; then
+    install_mountpoint_deb
+elif [ "$package_manager" == "yum" ]; then
+    install_mountpoint_rpm
+else
+    echo "Package manager not supported or not detected."
+    exit 1
+fi

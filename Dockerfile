@@ -12,15 +12,20 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-# Download and verify the mountpoint's RPM in this container
+ARG MOUNTPOINT_VERSION=1.1.0
+
+# Download and verify the mountpoint's RPM and DEB in this container
 FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
+ARG MOUNTPOINT_VERSION
 
 # We need the full version of GnuPG
 RUN dnf install -y --allowerasing wget gnupg2
 
 RUN MP_ARCH=`uname -p | sed s/aarch64/arm64/` && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/latest/$MP_ARCH/mount-s3.rpm" && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/latest/$MP_ARCH/mount-s3.rpm.asc" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm.asc" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb.asc" && \
     wget -q https://s3.amazonaws.com/mountpoint-s3-release/public_keys/KEYS
 
 # Import the key and validate it has the fingerprint we expect
@@ -28,31 +33,36 @@ RUN gpg --import KEYS && \
     (gpg --fingerprint mountpoint-s3@amazon.com | grep "673F E406 1506 BB46 9A0E  F857 BE39 7A52 B086 DA5A")
 
 # Verify the downloaded binary
-RUN gpg --verify mount-s3.rpm.asc
+RUN MP_ARCH=`uname -p | sed s/aarch64/arm64/` && \
+    gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm.asc && \
+    gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb.asc && \
+    mv mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm /mount-s3.rpm && \
+    mv mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb /mount-s3.deb
 
 # Build driver
 FROM --platform=$BUILDPLATFORM golang:1.21.1-bullseye as builder
 
-WORKDIR /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver
+WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
 make bin
 
 FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 AS linux-amazon
+ARG MOUNTPOINT_VERSION
+ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 
 RUN yum install util-linux -y
 
 # MP Installer
 COPY --from=mp_builder /mount-s3.rpm /mount-s3.rpm
-COPY ./cmd/install-mp.sh /
+COPY --from=mp_builder /mount-s3.deb /mount-s3.deb
+COPY ./cmd/install-mp.sh /install-mp.sh
 
 RUN dnf upgrade -y && \
     dnf install -y ./mount-s3.rpm && \
     dnf clean all
 
-RUN echo "user_allow_other" >> /etc/fuse.conf
-
 # Install driver
-COPY --from=builder /go/src/github.com/kubernetes-sigs/aws-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
 
 ENTRYPOINT ["/bin/aws-s3-csi-driver"]
