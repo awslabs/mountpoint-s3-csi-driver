@@ -20,6 +20,7 @@ import (
 )
 
 // Interface to wrap the external go-systemd dbus connection
+// https://pkg.go.dev/github.com/coreos/go-systemd/dbus
 type SystemdConnection interface {
 	Close()
 	SubscribeUnitsCustom(interval time.Duration, buffer int,
@@ -30,6 +31,7 @@ type SystemdConnection interface {
 	ResetFailedUnitContext(ctx context.Context, name string) error
 }
 
+// Factory interface for connections, needed for mocking
 type SystemdConnector interface {
 	Connect(ctx context.Context) (SystemdConnection, error)
 }
@@ -49,6 +51,7 @@ type SystemdRunner struct {
 	Pts       Pts
 }
 
+// SystemdRunner that talks to the real system dbus
 func NewSystemdRunner() SystemdRunner {
 	return SystemdRunner{
 		Connector: NewOsSystemd(),
@@ -56,6 +59,7 @@ func NewSystemdRunner() SystemdRunner {
 	}
 }
 
+// Run a given command in a transient systemd service. Will wait for the service to become active
 func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (string, error) {
 	systemdConn, err := sr.Connector.Connect(ctx)
 	if err != nil {
@@ -105,21 +109,23 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (st
 	}
 
 	// Wait for systemd dbus response
-	resp := <-respChan
-	switch resp {
-	case "done":
-		// Success, don't return
-	case "cancelled", "timeout", "failed", "dependency", "skipped":
-		systemdConn.ResetFailedUnitContext(ctx, serviceName)
-		return "", fmt.Errorf("Failed to create systemd service %s, resp: %s", serviceName, resp)
-	default:
-		systemdConn.ResetFailedUnitContext(ctx, serviceName)
-		return "", fmt.Errorf("Unknown status starting systemd service %s, resp: %s", serviceName, resp)
+	select {
+	case resp := <-respChan:
+		switch resp {
+		case "done":
+			// Success, continue
+		case "cancelled", "timeout", "failed", "dependency", "skipped":
+			systemdConn.ResetFailedUnitContext(ctx, serviceName)
+			return readOutput(), fmt.Errorf("Failed to create systemd service %s, resp: %s", serviceName, resp)
+		default:
+			systemdConn.ResetFailedUnitContext(ctx, serviceName)
+			return readOutput(), fmt.Errorf("Unknown status starting systemd service %s, resp: %s", serviceName, resp)
+		}
+	case <-ctx.Done():
+		return readOutput(), fmt.Errorf("Context cancelled starting systemd service %s", serviceName)
 	}
 
 	starting := true
-	// Wait 1 second for the status to reach active. The status can briefly go inactive before becoming active
-	startTimeout := time.After(time.Second)
 	for starting {
 		select {
 		case update := <-updates:
@@ -127,33 +133,33 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (st
 				klog.V(5).Infof("Systemd service update [%s]: %v", k, v)
 				if k == serviceName {
 					if v == nil {
-						mountOutput := readOutput()
-						return mountOutput, fmt.Errorf("%s failed to launch, mount-s3 output: %s",
-							serviceName, mountOutput)
+						return readOutput(), fmt.Errorf("%s failed to launch", serviceName)
 					} else if v.ActiveState == "active" {
 						starting = false
 					}
 				}
 			}
-		case <-startTimeout:
-			return "", fmt.Errorf("%s failed to launch, mount-s3 output: %s",
-				serviceName, readOutput())
+		case <-ctx.Done():
+			return readOutput(), fmt.Errorf("Timed out launching %s service",
+				serviceName)
 		case err = <-errChan:
-			return "", fmt.Errorf("Failed to start systemd service %s err: %w, mount-s3 output: %s",
-				serviceName, err, readOutput())
+			return readOutput(), fmt.Errorf("Failed to start systemd service %s err: %w",
+				serviceName, err)
 		}
 	}
 
 	return readOutput(), nil
 }
 
-// Interface for creating new private terminal session. See pts(4)
+// Interface for creating new private terminal session. See man pts(4)
 type Pts interface {
 	NewPts() (io.ReadCloser, int, error)
 }
 
+// Real os implementation of the Pts interface
 type OsPts struct{}
 
+// Create a new pseduo terminal slave (pts). Returns a ReaderCloser for the master device and a pts number
 func (p *OsPts) NewPts() (io.ReadCloser, int, error) {
 	ptsMaster, err := os.Open("/hostdev/ptmx")
 	if err != nil {

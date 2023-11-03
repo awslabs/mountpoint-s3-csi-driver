@@ -18,6 +18,7 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
+      hostPID: true
       serviceAccountName: s3-csi-driver-sa
       priorityClassName: system-node-critical
       tolerations:

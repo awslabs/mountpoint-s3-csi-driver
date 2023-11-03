@@ -103,6 +103,39 @@ func TestSystemdStartUnitFailure(t *testing.T) {
 	}
 }
 
+func TestSystemdRunCanceledContext(t *testing.T) {
+	mockCtl := gomock.NewController(t)
+	mockConnector := mock_driver.NewMockSystemdConnector(mockCtl)
+	mockConnection := mock_driver.NewMockSystemdConnection(mockCtl)
+	mockPts := mock_driver.NewMockPts(mockCtl)
+	mockConnection.EXPECT().Close()
+	mockConnector.EXPECT().Connect(gomock.Any()).Return(mockConnection, nil)
+	testOutput := "testoutputdata"
+	mockPts.EXPECT().NewPts().Return(io.NopCloser(strings.NewReader(testOutput)), 0, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // immediately cancel context
+
+	updates := make(chan map[string]*systemd.UnitStatus)
+	errChan := make(chan error)
+	mockConnection.EXPECT().SubscribeUnitsCustom(
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errChan)
+
+	mockConnection.EXPECT().StartTransientUnitContext(
+		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Any(), gomock.Any()).Return(0, nil)
+
+	runner := driver.SystemdRunner{
+		Connector: mockConnector,
+		Pts:       mockPts,
+	}
+	out, err := runner.Run(ctx, "", nil)
+	if err == nil {
+		t.Fatalf("Expected error on connection failure")
+	}
+	if out != testOutput {
+		t.Fatalf("Unexpected output, expected: %s got: %s", testOutput, out)
+	}
+}
+
 func TestSystemdRunSuccess(t *testing.T) {
 	mockCtl := gomock.NewController(t)
 	mockConnector := mock_driver.NewMockSystemdConnector(mockCtl)
@@ -115,9 +148,9 @@ func TestSystemdRunSuccess(t *testing.T) {
 	ctx := context.Background()
 
 	updates := make(chan map[string]*systemd.UnitStatus)
-	errors := make(chan error)
+	errChan := make(chan error)
 	mockConnection.EXPECT().SubscribeUnitsCustom(
-		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errors)
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errChan)
 
 	var startUnitResp chan<- string
 	var serviceName string
