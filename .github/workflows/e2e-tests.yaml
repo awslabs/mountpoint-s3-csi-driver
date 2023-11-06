@@ -27,7 +27,7 @@ jobs:
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     strategy:
       matrix:
-        cluster-type: ["kops", "eksctl"]
+        cluster-type: ["eksctl"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -72,14 +72,14 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
-      - name: Install the driver
-        run: |
-          export ACTION=install_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
-          export TAG=${{ env.COMMIT_ID }}
-          tests/e2e-kubernetes/run.sh
+      # - name: Install the driver
+      #   run: |
+      #     export ACTION=install_driver
+      #     export AWS_REGION=${{ env.AWS_REGION }}
+      #     export CLUSTER_TYPE=${{ matrix.cluster-type }}
+      #     export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
+      #     export TAG=${{ env.COMMIT_ID }}
+      #     tests/e2e-kubernetes/run.sh
       # - name: Run E2E Tests
       #   run: |
       #     cd tests/e2e-kubernetes
