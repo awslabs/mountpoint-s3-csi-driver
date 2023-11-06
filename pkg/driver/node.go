@@ -88,7 +88,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			// if there is a space between, replace it with an = sign
 			mountFlags[i] = strings.Replace(strings.Join(strings.Fields(strings.Trim(mountFlags[i], " ")), " "), " ", "=", -1)
 			// prepend -- if it's not already there
-			if !strings.HasPrefix(mountFlags[i], "--") {
+			if !strings.HasPrefix(mountFlags[i], "-") {
 				mountFlags[i] = "--" + mountFlags[i]
 			}
 		}

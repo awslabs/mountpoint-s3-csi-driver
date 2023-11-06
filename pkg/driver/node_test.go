@@ -124,7 +124,7 @@ func TestNodePublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -156,8 +156,10 @@ func TestNodePublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--test=123", "--foo"}))
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"),
+					gomock.Eq([]string{"--read-only", "--test=123"})).Return(nil)
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
