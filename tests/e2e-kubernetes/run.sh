@@ -26,14 +26,13 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
 CLUSTER_NAME="s3-csi-cluster.${CLUSTER_TYPE}.k8s.local"
-# temporary crutch to make eksctl working with pre-created cluster
 if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
-  CLUSTER_NAME=s3-csi-cluster
+  CLUSTER_NAME="s3-csi-cluster"
 fi
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
 KOPS_VERSION=1.28.0
-ZONES=${AWS_AVAILABILITY_ZONES:-us-east-1a,us-east-1b,us-east-1c,us-east-1d}
+ZONES=${AWS_AVAILABILITY_ZONES:-us-east-1a,us-east-1b}
 NODE_COUNT=${NODE_COUNT:-3}
 INSTANCE_TYPE=${INSTANCE_TYPE:-c5.large}
 AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
@@ -43,6 +42,9 @@ KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
 KOPS_STATE_FILE=${KOPS_STATE_FILE:-s3://mountpoint-s3-csi-driver-kops-state-store}
 
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
+
+EKSCTL_VERSION=${EKSCTL_VERSION:-0.161.0}
+EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.yaml}
 
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
@@ -67,6 +69,10 @@ function install_tools() {
   kops_install \
     "${BIN_DIR}" \
     "${KOPS_VERSION}"
+
+  eksctl_install \
+    "${BIN_DIR}" \
+    "${EKSCTL_VERSION}"
 }
 
 function create_cluster() {
@@ -88,7 +94,12 @@ function create_cluster() {
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
       "$REGION" \
-      "$KUBECONFIG"
+      "$KUBECONFIG" \
+      "$CLUSTER_FILE" \
+      "$EKSCTL_BIN" \
+      "$KUBECTL_BIN" \
+      "$EKSCTL_PATCH_FILE" \
+      "$ZONES"
   fi
 }
 
@@ -99,7 +110,10 @@ function delete_cluster() {
       "${CLUSTER_NAME}" \
       "${KOPS_STATE_FILE}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
-    eksctl_delete_cluster
+    eksctl_delete_cluster \
+      "$EKSCTL_BIN" \
+      "$CLUSTER_NAME" \
+      "$REGION"
   fi
 }
 

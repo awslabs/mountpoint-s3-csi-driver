@@ -41,17 +41,12 @@ function helm_install_driver() {
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG"
-  # temporary crutch to make eksctl working with pre-created cluster
-  SA_CREATE=true
-  if [[ "${KUBECONFIG}" == *"s3-csi-cluster.kubeconfig"* ]]; then
-    SA_CREATE=false
-  fi
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-s3-csi-driver --values \
     ./charts/aws-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
-    --set node.serviceAccount.create=${SA_CREATE} \
+    --set node.serviceAccount.create=true \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG

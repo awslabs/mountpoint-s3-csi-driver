@@ -95,6 +95,14 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
+      - name: Promote image for release branch
+        if: ${{ startsWith(github.ref_name, 'release') && matrix.cluster-type == 'eksctl' }}
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
+          docker tag ${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }} ${NEW_IMAGE_NAME}
+          docker push ${NEW_IMAGE_NAME}
       - name: Delete cluster
         if: always()
         run: |
@@ -102,11 +110,3 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
-      - name: Promote image for release branch
-        if: ${{ startsWith(github.ref_name, 'release') }}
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          docker tag ${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }} ${NEW_IMAGE_NAME}
-          docker push ${NEW_IMAGE_NAME}

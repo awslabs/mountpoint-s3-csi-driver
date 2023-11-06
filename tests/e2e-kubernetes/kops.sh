@@ -44,6 +44,7 @@ function kops_create_cluster() {
     --image="${AMI_ID}" \
     --kubernetes-version="${K8S_VERSION}" \
     --dry-run \
+    --cloud aws \
     -o yaml \
     "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
 
