@@ -11,6 +11,37 @@ AmazonVPCFullAccess
 AmazonSQSFullAccess
 AmazonEventBridgeFullAccess
 AmazonSSMReadOnlyAccess
+AWSCloudFormationFullAccess
+EksAllAccess (non-managed see below, and https://eksctl.io/usage/minimum-iam-policies/)
+```
+
+### EksAllAccess
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "eks:*",
+            "Resource": "*"
+        },
+        {
+             "Action": [
+               "kms:CreateGrant",
+               "kms:DescribeKey"
+             ],
+             "Resource": "*",
+             "Effect": "Allow"
+        },
+        {
+             "Action": [
+               "logs:PutRetentionPolicy"
+             ],
+             "Resource": "*",
+             "Effect": "Allow"
+        }
+    ]
+}
 ```
 
 ## Setting up the environment
