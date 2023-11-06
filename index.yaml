@@ -1,0 +1,23 @@
+apiVersion: v1
+entries:
+  aws-s3-csi-driver:
+  - apiVersion: v2
+    created: "2023-11-06T18:07:47.713055437Z"
+    description: A Helm chart for AWS S3 CSI Driver
+    digest: 5822a6c9902ca7f1ecfb19b8b7919c42b36e60f54eaa1382f61daf57fd100b74
+    home: https://github.com/awslabs/aws-s3-csi-driver
+    keywords:
+    - aws
+    - s3
+    - csi
+    kubeVersion: '>=1.17.0-0'
+    maintainers:
+    - name: AWS S3
+      url: https://github.com/awslabs/aws-s3-csi-driver
+    name: aws-s3-csi-driver
+    sources:
+    - https://github.com/awslabs/aws-s3-csi-driver
+    urls:
+    - aws-s3-csi-driver-0.1.0.tgz
+    version: 0.1.0
+generated: "2023-11-06T18:07:47.711213843Z"
