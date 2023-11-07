@@ -45,6 +45,7 @@ HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
 EKSCTL_VERSION=${EKSCTL_VERSION:-0.161.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.yaml}
+CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
@@ -99,7 +100,8 @@ function create_cluster() {
       "$EKSCTL_BIN" \
       "$KUBECTL_BIN" \
       "$EKSCTL_PATCH_FILE" \
-      "$ZONES"
+      "$ZONES" \
+      "$CI_ROLE_ARN"
   fi
 }
 

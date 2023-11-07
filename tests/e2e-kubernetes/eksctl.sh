@@ -13,29 +13,36 @@ function eksctl_install() {
 }
 
 function eksctl_create_cluster() {
-    CLUSTER_NAME=${1}
-    REGION=${2}
-    KUBECONFIG=${3}
-    CLUSTER_FILE=${4}
-    BIN=${5}
-    KUBECTL_BIN=${6}
-    EKSCTL_PATCH_FILE=${7}
-    ZONES=${8}
+  CLUSTER_NAME=${1}
+  REGION=${2}
+  KUBECONFIG=${3}
+  CLUSTER_FILE=${4}
+  BIN=${5}
+  KUBECTL_BIN=${6}
+  EKSCTL_PATCH_FILE=${7}
+  ZONES=${8}
+  CI_ROLE_ARN=${9}
 
-    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
+  eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
 
-    # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
-    ${BIN} create cluster \
-      --name $CLUSTER_NAME \
-      --region $REGION \
-      --with-oidc \
-      --zones $ZONES \
-      --dry-run > $CLUSTER_FILE
+  # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
+  ${BIN} create cluster \
+    --name $CLUSTER_NAME \
+    --region $REGION \
+    --with-oidc \
+    --zones $ZONES \
+    --dry-run > $CLUSTER_FILE
 
-    CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
-    ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_FILE)" -o yaml > $CLUSTER_FILE_TMP
-    mv $CLUSTER_FILE_TMP $CLUSTER_FILE
-    ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
+  CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
+  ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_FILE)" -o yaml > $CLUSTER_FILE_TMP
+  mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+  ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
+
+  if [ -n "$CI_ROLE_ARN" ]; then
+    ${BIN} create iamidentitymapping --cluster ${CLUSTER_NAME} --region=${REGION} \
+      --arn ${CI_ROLE_ARN} --username admin --group system:masters \
+      --no-duplicate-arns
+  fi
 }
 
 function eksctl_delete_cluster() {
