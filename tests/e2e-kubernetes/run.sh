@@ -117,10 +117,20 @@ function delete_cluster() {
   fi
 }
 
+function update_kubeconfig() {
+  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
+    ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
+  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+    aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
+  fi
+}
+
 if [[ "${ACTION}" == "install_tools" ]]; then
   install_tools
 elif [[ "${ACTION}" == "create_cluster" ]]; then
   create_cluster
+elif [[ "${ACTION}" == "update_kubeconfig" ]]; then
+  update_kubeconfig
 elif [[ "${ACTION}" == "install_driver" ]]; then
   helm_install_driver \
     "$HELM_BIN" \
@@ -140,6 +150,6 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|run_tests|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|uninstall_driver|delete_cluster"
   exit 1
 fi

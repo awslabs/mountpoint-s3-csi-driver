@@ -67,8 +67,15 @@ jobs:
           export ACTION=install_tools
           tests/e2e-kubernetes/run.sh
       - name: Create cluster
+        if: matrix.cluster-type == 'kops'
         run: |
           export ACTION=create_cluster
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          tests/e2e-kubernetes/run.sh
+      - name: Update kubeconfig
+        run: |
+          export ACTION=update_kubeconfig
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
@@ -96,7 +103,7 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Delete cluster
-        if: always()
+        if: always() && matrix.cluster-type == 'kops'
         run: |
           export ACTION=delete_cluster
           export AWS_REGION=${{ env.AWS_REGION }}

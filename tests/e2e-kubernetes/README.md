@@ -52,6 +52,8 @@ ACTION=install_tools tests/e2e-kubernetes/run.sh
 
 ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
 
+ACTION=update_kubeconfig AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
+
 ACTION=install_driver AWS_REGION=us-east-1 CLUSTER_TYPE=kops IMAGE_NAME=s3-csi-driver TAG=v0.1.0 tests/e2e-kubernetes/run.sh
 
 ACTION=uninstall_driver AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh

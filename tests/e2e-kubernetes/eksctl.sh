@@ -36,7 +36,6 @@ function eksctl_create_cluster() {
     ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_FILE)" -o yaml > $CLUSTER_FILE_TMP
     mv $CLUSTER_FILE_TMP $CLUSTER_FILE
     ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
-    aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME} --kubeconfig=${KUBECONFIG}
 }
 
 function eksctl_delete_cluster() {
