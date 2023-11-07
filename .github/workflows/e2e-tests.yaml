@@ -103,7 +103,7 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
-        if: ${{ startsWith(github.ref_name, 'release') }}
+        if: ${{ startsWith(github.ref_name, 'release') && matrix.cluster-type == 'eksctl' }}
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
