@@ -19,6 +19,7 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
+      hostPID: true
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
       tolerations:
@@ -34,6 +35,17 @@ spec:
         {{- with .Values.node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      initContainers:
+        - name: install-mountpoint
+          securityContext:
+            privileged: true
+          image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/install-mp.sh"
+          volumeMounts:
+            - name: host-usr
+              mountPath: /host/usr
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
@@ -55,6 +67,10 @@ spec:
               mountPropagation: "Bidirectional"
             - name: plugin-dir
               mountPath: /csi
+            - name: host-dbus
+              mountPath: /var/run/dbus
+            - name: host-dev
+              mountPath: /hostdev
           ports:
             - name: healthz
               containerPort: 9808
@@ -107,6 +123,15 @@ spec:
             - name: plugin-dir
               mountPath: /csi
       volumes:
+        - name: host-usr
+          hostPath:
+            path: /usr
+        - name: host-dev
+          hostPath:
+            path: /dev
+        - name: host-dbus
+          hostPath:
+            path: /var/run/dbus
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet

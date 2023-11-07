@@ -1,10 +1,11 @@
-package driver
+package driver_test
 
 import (
 	"errors"
 	"io/fs"
 	"testing"
 
+	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
@@ -14,17 +15,17 @@ import (
 type nodeServerTestEnv struct {
 	mockCtl     *gomock.Controller
 	mockMounter *mock_driver.MockMounter
-	driver      *Driver
+	driver      *driver.Driver
 }
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	driver := &Driver{
-		endpoint: "unix://tmp/csi.sock",
-		nodeID:   "test-nodeID",
-		mounter:  mockMounter,
+	driver := &driver.Driver{
+		Endpoint: "unix://tmp/csi.sock",
+		NodeID:   "test-nodeID",
+		Mounter:  mockMounter,
 	}
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
@@ -62,7 +63,7 @@ func TestNodePublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Any())
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -91,7 +92,7 @@ func TestNodePublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--read-only"}))
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -125,6 +126,40 @@ func TestNodePublishVolume(t *testing.T) {
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
 				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
+				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: foreground option is removed",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags: []string{"--foreground", "-f", "--test 123"},
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					TargetPath: targetPath,
+					Readonly:   true,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
+				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(volumeId), gomock.Eq(targetPath), gomock.Eq("unused"),
+					gomock.Eq([]string{"--read-only", "--test=123"})).Return(nil)
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)

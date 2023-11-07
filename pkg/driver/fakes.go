@@ -21,7 +21,7 @@ import (
 )
 
 func NewFakeMounter() Mounter {
-	return &NodeMounter{
+	return &S3Mounter{
 		Interface: &mount.FakeMounter{
 			MountPoints: []mount.MountPoint{},
 		},
@@ -31,8 +31,8 @@ func NewFakeMounter() Mounter {
 // NewFakeDriver creates a new mock driver used for testing
 func NewFakeDriver(endpoint string) *Driver {
 	return &Driver{
-		endpoint: endpoint,
-		nodeID:   "fake_id",
-		mounter:  NewFakeMounter(),
+		Endpoint: endpoint,
+		NodeID:   "fake_id",
+		Mounter:  NewFakeMounter(),
 	}
 }
