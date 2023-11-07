@@ -27,7 +27,7 @@ jobs:
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     strategy:
       matrix:
-        cluster-type: ["kops", "eksctl"]
+        cluster-type: ["kops", "kops-arm"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -40,10 +40,12 @@ jobs:
         with:
           go-version-file: 'go.mod'
       - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
+        with:
+          version: latest
+          driver-opts: 'image=moby/buildkit:v0.10.5'
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -58,16 +60,15 @@ jobs:
           IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
         run: |
           BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
-          export PLATFORM=linux/amd64
+          export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
-          make build_image
-          make push_image
+          make -j `nproc` all-push
       - name: Install tools
         run: |
           export ACTION=install_tools
           tests/e2e-kubernetes/run.sh
       - name: Create cluster
-        if: matrix.cluster-type == 'kops'
+        if: matrix.cluster-type == 'kops' || matrix.cluster-type == 'kops-arm'
         run: |
           export ACTION=create_cluster
           export AWS_REGION=${{ env.AWS_REGION }}
