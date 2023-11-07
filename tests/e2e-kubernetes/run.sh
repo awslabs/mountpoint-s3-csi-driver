@@ -35,12 +35,14 @@ KOPS_VERSION=1.28.0
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
 INSTANCE_TYPE=${INSTANCE_TYPE:-c5.large}
+INSTANCE_TYPE_ARM=${INSTANCE_TYPE_ARM:-m7g.medium}
 AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
+AMI_ID_ARM=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
 KOPS_STATE_FILE=${KOPS_STATE_FILE:-s3://mountpoint-s3-csi-driver-kops-state-store}
-
+KOPS_STATE_FILE_ARM=${KOPS_STATE_FILE_ARM:-s3://mountpoint-s3-csi-driver-kops-arm-state-store}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
 EKSCTL_VERSION=${EKSCTL_VERSION:-0.161.0}
@@ -91,6 +93,20 @@ function create_cluster() {
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
       "$KOPS_STATE_FILE"
+  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+    kops_create_cluster \
+      "$CLUSTER_NAME" \
+      "$KOPS_BIN" \
+      "$ZONES" \
+      "$NODE_COUNT" \
+      "$INSTANCE_TYPE_ARM" \
+      "$AMI_ID_ARM" \
+      "$K8S_VERSION_KOPS" \
+      "$CLUSTER_FILE" \
+      "$KUBECONFIG" \
+      "$KOPS_PATCH_FILE" \
+      "$KOPS_PATCH_NODE_FILE" \
+      "$KOPS_STATE_FILE_ARM"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
@@ -111,6 +127,11 @@ function delete_cluster() {
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
       "${KOPS_STATE_FILE}"
+  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+    kops_delete_cluster \
+      "${KOPS_BIN}" \
+      "${CLUSTER_NAME}" \
+      "${KOPS_STATE_FILE_ARM}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
@@ -122,6 +143,8 @@ function delete_cluster() {
 function update_kubeconfig() {
   if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
     ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
+  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+    ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE_ARM}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
   fi
