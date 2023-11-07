@@ -27,7 +27,7 @@ jobs:
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     strategy:
       matrix:
-        cluster-type: ["kops", "eksctl"]
+        cluster-type: ["kops", "kops-arm"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write

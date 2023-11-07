@@ -36,6 +36,7 @@ KOPS_VERSION=1.28.0
 ZONES=${AWS_AVAILABILITY_ZONES:-us-east-1a,us-east-1b,us-east-1c,us-east-1d}
 NODE_COUNT=${NODE_COUNT:-3}
 INSTANCE_TYPE=${INSTANCE_TYPE:-c5.large}
+INSTANCE_TYPE_ARM=${INSTANCE_TYPE:-m7g.medium}
 AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
@@ -89,11 +90,25 @@ function create_cluster() {
       "$CLUSTER_NAME" \
       "$REGION" \
       "$KUBECONFIG"
+  elif [[ "${CLUSTER_TYPE}" == "kops-arm"]]; then
+    kops_create_cluster \
+      "$CLUSTER_NAME" \
+      "$KOPS_BIN" \
+      "$ZONES" \
+      "$NODE_COUNT" \
+      "$INSTANCE_TYPE_ARM" \
+      "$AMI_ID" \
+      "$K8S_VERSION_KOPS" \
+      "$CLUSTER_FILE" \
+      "$KUBECONFIG" \
+      "$KOPS_PATCH_FILE" \
+      "$KOPS_PATCH_NODE_FILE" \
+      "$KOPS_STATE_FILE"
   fi
 }
 
 function delete_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" ] || [ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
     kops_delete_cluster \
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
