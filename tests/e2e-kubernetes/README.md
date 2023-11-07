@@ -11,15 +11,50 @@ AmazonVPCFullAccess
 AmazonSQSFullAccess
 AmazonEventBridgeFullAccess
 AmazonSSMReadOnlyAccess
+AWSCloudFormationFullAccess
+EksAllAccess (non-managed see below, and https://eksctl.io/usage/minimum-iam-policies/)
+```
+
+### EksAllAccess
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "eks:*",
+            "Resource": "*"
+        },
+        {
+             "Action": [
+               "kms:CreateGrant",
+               "kms:DescribeKey"
+             ],
+             "Resource": "*",
+             "Effect": "Allow"
+        },
+        {
+             "Action": [
+               "logs:PutRetentionPolicy"
+             ],
+             "Resource": "*",
+             "Effect": "Allow"
+        }
+    ]
+}
 ```
 
 ## Setting up the environment
+> To recreate EKS cluster used in CI (run locally using CI's AWS account): `ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=eksctl CI_ROLE_ARN=arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole tests/e2e-kubernetes/run.sh`
+
 All of the following commands are expected to be executed from repo root:
 
 ```bash
 ACTION=install_tools tests/e2e-kubernetes/run.sh
 
 ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
+
+ACTION=update_kubeconfig AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
 
 ACTION=install_driver AWS_REGION=us-east-1 CLUSTER_TYPE=kops IMAGE_NAME=s3-csi-driver TAG=v0.1.0 tests/e2e-kubernetes/run.sh
 
