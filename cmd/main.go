@@ -25,10 +25,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var unknownVersion = "UNKNOWN"
+
 func main() {
 	var (
-		endpoint = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
-		version  = flag.Bool("version", false, "Print the version and exit")
+		endpoint  = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
+		version   = flag.Bool("version", false, "Print the version and exit")
+		mpVersion = flag.String("mp-version", os.Getenv("MOUNTPOINT_VERSION"), "mp version to report in service name")
 	)
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -42,7 +45,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	drv := driver.NewDriver(*endpoint)
+	if mpVersion == nil {
+		mpVersion = &unknownVersion
+	}
+
+	drv := driver.NewDriver(*endpoint, *mpVersion)
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)
 	}

@@ -14,7 +14,6 @@ import (
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	dbus "github.com/godbus/dbus/v5"
-	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 )
@@ -60,7 +59,7 @@ func NewSystemdRunner() SystemdRunner {
 }
 
 // Run a given command in a transient systemd service. Will wait for the service to become active
-func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (string, error) {
+func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, args []string) (string, error) {
 	systemdConn, err := sr.Connector.Connect(ctx)
 	if err != nil {
 		// TODO fallback to launching in container if systemd doesn't exist on host
@@ -85,8 +84,8 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, args []string) (st
 		systemd.PropExecStart(append([]string{cmd}, args...), true),
 	}
 
-	// Unit names must be unique in systemd, so include a uuid
-	serviceName := filepath.Base(cmd) + "." + uuid.New().String() + ".service"
+	// Unit names must be unique in systemd, so include a tag
+	serviceName := filepath.Base(cmd) + "-" + serviceTag + ".service"
 
 	// Subscribe to status updates
 	isChanged := func(l *systemd.UnitStatus, r *systemd.UnitStatus) bool {

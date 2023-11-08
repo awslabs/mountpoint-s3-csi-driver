@@ -22,6 +22,7 @@ import (
 	"os"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
+	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
@@ -39,9 +40,10 @@ type S3Mounter struct {
 	ctx         context.Context
 	runner      SystemdRunner
 	connFactory func(context.Context) (SystemdConnection, error)
+	mpVersion   string
 }
 
-func newS3Mounter() (Mounter, error) {
+func newS3Mounter(mpVersion string) (Mounter, error) {
 	ctx := context.Background()
 	connFactory := func(ctx context.Context) (SystemdConnection, error) {
 		return systemd.NewSystemConnectionContext(ctx)
@@ -51,6 +53,7 @@ func newS3Mounter() (Mounter, error) {
 		ctx:         ctx,
 		runner:      NewSystemdRunner(),
 		connFactory: connFactory,
+		mpVersion:   mpVersion,
 	}, nil
 }
 
@@ -79,7 +82,8 @@ func (m *S3Mounter) PathExists(path string) (bool, error) {
 }
 
 func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
-	output, err := m.runner.Run(m.ctx, "/usr/bin/mount-s3", append([]string{source, target}, options...))
+	output, err := m.runner.Run(m.ctx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
+		append([]string{source, target}, options...))
 	if output != "" {
 		klog.V(5).Infof("mount-s3 output: %s", output)
 	}
