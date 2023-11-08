@@ -40,7 +40,7 @@ func TestSystemdRunFailedConnection(t *testing.T) {
 	runner := &driver.SystemdRunner{
 		Connector: mockConnector,
 	}
-	out, err := runner.Run(ctx, "", nil)
+	out, err := runner.Run(ctx, "", "", nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -63,7 +63,7 @@ func TestSystemdRunNewPtsFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", nil)
+	out, err := runner.Run(ctx, "", "", nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -94,7 +94,7 @@ func TestSystemdStartUnitFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", nil)
+	out, err := runner.Run(ctx, "", "", nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -127,7 +127,7 @@ func TestSystemdRunCanceledContext(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", nil)
+	out, err := runner.Run(ctx, "", "", nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -169,7 +169,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", nil)
+	out, err := runner.Run(ctx, "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

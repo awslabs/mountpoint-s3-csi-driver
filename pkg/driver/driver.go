@@ -50,7 +50,7 @@ type Driver struct {
 	Mounter Mounter
 }
 
-func NewDriver(endpoint string) *Driver {
+func NewDriver(endpoint string, mpVersion string) *Driver {
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v", driverVersion, gitCommit, buildDate)
 
 	metadata, err := cloud.NewMetadata()
@@ -58,7 +58,7 @@ func NewDriver(endpoint string) *Driver {
 		klog.Fatalln(err)
 	}
 
-	mounter, err := newS3Mounter()
+	mounter, err := newS3Mounter(mpVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
