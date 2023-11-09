@@ -116,7 +116,7 @@ login_registry:
 .PHONY: bin
 bin:
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/
+	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/
 
 .PHONY: test
 test:
