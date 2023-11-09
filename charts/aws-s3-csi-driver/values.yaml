@@ -53,3 +53,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 imagePullSecrets: []
+
+awsAccessSecret:
+  name: aws-secret
+  keyId: key_id
+  accessKey: access_key
