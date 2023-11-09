@@ -35,8 +35,8 @@ spec:
           command:
             - "/install-mp.sh"
           volumeMounts:
-            - name: host-usr
-              mountPath: /host/usr
+            - name: plugin-dir
+              mountPath: /csi
       containers:
         - name: s3-plugin
           securityContext:
@@ -103,15 +103,14 @@ spec:
             - mountPath: /csi
               name: plugin-dir
       volumes:
-        - name: host-usr
-          hostPath:
-            path: /usr
         - name: host-dev
           hostPath:
-            path: /dev
+            path: /dev/
+            type: Directory
         - name: host-dbus
           hostPath:
-            path: /var/run/dbus
+            path: /var/run/dbus/
+            type: Directory
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet

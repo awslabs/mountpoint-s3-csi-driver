@@ -19,6 +19,8 @@ package driver
 import (
 	"context"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
@@ -71,6 +73,8 @@ func NewDriver(endpoint string, mpVersion string) *Driver {
 }
 
 func (d *Driver) Run() error {
+	printRunningMountpoints()
+
 	scheme, addr, err := util.ParseEndpoint(d.Endpoint)
 	if err != nil {
 		return err
@@ -104,4 +108,25 @@ func (d *Driver) Run() error {
 func (d *Driver) Stop() {
 	klog.Infof("Stopping server")
 	d.Srv.Stop()
+}
+
+func printRunningMountpoints() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	systemdConn, err := ConnectOsSystemd(ctx)
+	if err != nil {
+		klog.Infof("Could not connect to systemd: %v", err)
+		return
+	}
+	statuses, err := systemdConn.ListUnitsContext(ctx)
+	if err != nil {
+		klog.Infof("Could not get systemd status: %v", err)
+		return
+	}
+
+	for _, status := range statuses {
+		if strings.Contains(status.Name, "mount-s3") {
+			klog.Infof("Existing mount-s3 systemd service: %v", status)
+		}
+	}
 }

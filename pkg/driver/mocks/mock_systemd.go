@@ -8,7 +8,6 @@ import (
 	context "context"
 	io "io"
 	reflect "reflect"
-	time "time"
 
 	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	dbus "github.com/coreos/go-systemd/v22/dbus"
@@ -50,6 +49,21 @@ func (mr *MockSystemdConnectionMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockSystemdConnection)(nil).Close))
 }
 
+// ListUnitsContext mocks base method.
+func (m *MockSystemdConnection) ListUnitsContext(ctx context.Context) ([]dbus.UnitStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUnitsContext", ctx)
+	ret0, _ := ret[0].([]dbus.UnitStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUnitsContext indicates an expected call of ListUnitsContext.
+func (mr *MockSystemdConnectionMockRecorder) ListUnitsContext(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUnitsContext", reflect.TypeOf((*MockSystemdConnection)(nil).ListUnitsContext), ctx)
+}
+
 // ResetFailedUnitContext mocks base method.
 func (m *MockSystemdConnection) ResetFailedUnitContext(ctx context.Context, name string) error {
 	m.ctrl.T.Helper()
@@ -77,21 +91,6 @@ func (m *MockSystemdConnection) StartTransientUnitContext(ctx context.Context, n
 func (mr *MockSystemdConnectionMockRecorder) StartTransientUnitContext(ctx, name, mode, properties, ch interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartTransientUnitContext", reflect.TypeOf((*MockSystemdConnection)(nil).StartTransientUnitContext), ctx, name, mode, properties, ch)
-}
-
-// SubscribeUnitsCustom mocks base method.
-func (m *MockSystemdConnection) SubscribeUnitsCustom(interval time.Duration, buffer int, isChanged func(*dbus.UnitStatus, *dbus.UnitStatus) bool, filterUnit func(string) bool) (<-chan map[string]*dbus.UnitStatus, <-chan error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SubscribeUnitsCustom", interval, buffer, isChanged, filterUnit)
-	ret0, _ := ret[0].(<-chan map[string]*dbus.UnitStatus)
-	ret1, _ := ret[1].(<-chan error)
-	return ret0, ret1
-}
-
-// SubscribeUnitsCustom indicates an expected call of SubscribeUnitsCustom.
-func (mr *MockSystemdConnectionMockRecorder) SubscribeUnitsCustom(interval, buffer, isChanged, filterUnit interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubscribeUnitsCustom", reflect.TypeOf((*MockSystemdConnection)(nil).SubscribeUnitsCustom), interval, buffer, isChanged, filterUnit)
 }
 
 // MockSystemdConnector is a mock of SystemdConnector interface.

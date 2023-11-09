@@ -3,6 +3,8 @@
 set -euox pipefail
 
 NSENTER_HOST="nsenter --target 1 --mount --net"
+CSI_DIR="/csi/"
+HOST_CSI_DIR="/var/lib/kubelet/plugins/s3.csi.aws.com/"
 RPM_FILE=mount-s3.rpm
 DEB_FILE=mount-s3.deb
 
@@ -28,11 +30,11 @@ determine_package_manager() {
 }
 
 cleanup_rpm() {
-    $NSENTER_HOST rm -f "/usr/${RPM_FILE}"
+    rm -f "${CSI_DIR}${RPM_FILE}"
 }
 
 cleanup_deb() {
-    $NSENTER_HOST rm -f "/usr/${DEB_FILE}"
+    rm -f "${CSI_DIR}${DEB_FILE}"
 }
 
 install_mountpoint_rpm() {
@@ -44,10 +46,11 @@ install_mountpoint_rpm() {
     echo "Package S3 Mountpoint version: ${package_mp_version}"
 
     if [[ "${installed_mp_version}" != "${package_mp_version}" ]]; then
-        cp "/${RPM_FILE}" "/host/usr/${RPM_FILE}"
+        cp "/${RPM_FILE}" "${CSI_DIR}${RPM_FILE}"
         trap cleanup_rpm EXIT SIGINT SIGTERM
         # If install fails try downgrade
-        $NSENTER_HOST yum install -y "/usr/${RPM_FILE}" || $NSENTER_HOST yum downgrade -y "/usr/${RPM_FILE}"
+        $NSENTER_HOST yum install -y "${HOST_CSI_DIR}${RPM_FILE}" || \
+            $NSENTER_HOST yum downgrade -y "${HOST_CSI_DIR}${RPM_FILE}"
     else
         echo "S3 Mountpoint already up to date"
     fi
@@ -56,9 +59,9 @@ install_mountpoint_rpm() {
 install_mountpoint_deb() {
     echo "Using apt to install S3 Mountpoint..."
     $NSENTER_HOST apt-get update
-    cp /mount-s3.deb /host/usr/mount-s3.deb
+    cp "/${DEB_FILE}" "${CSI_DIR}${DEB_FILE}"
     trap cleanup_deb EXIT SIGINT SIGTERM
-    $NSENTER_HOST apt-get install -y --allow-downgrades /usr/mount-s3.deb
+    $NSENTER_HOST apt-get install -y --allow-downgrades "${HOST_CSI_DIR}${DEB_FILE}"
 }
 
 package_manager=$(determine_package_manager)

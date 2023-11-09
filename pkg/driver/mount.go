@@ -19,7 +19,9 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/google/uuid"
@@ -82,13 +84,15 @@ func (m *S3Mounter) PathExists(path string) (bool, error) {
 }
 
 func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
-	output, err := m.runner.Run(m.ctx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
+	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+	defer cancel()
+	output, err := m.runner.Run(timeoutCtx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
 		append([]string{source, target}, options...))
+	if err != nil {
+		return fmt.Errorf("Mount failed: %w mount-s3 output: %s", err, output)
+	}
 	if output != "" {
 		klog.V(5).Infof("mount-s3 output: %s", output)
-	}
-	if err != nil {
-		return err
 	}
 	return nil
 }
