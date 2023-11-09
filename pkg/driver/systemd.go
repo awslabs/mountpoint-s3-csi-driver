@@ -141,7 +141,7 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 		case <-pollTimer:
 			// keep polling
 		case <-ctx.Done():
-			return readOutput(), fmt.Errorf("Context canclled launching service %s",
+			return readOutput(), fmt.Errorf("Context cancelled launching service %s",
 				serviceName)
 		}
 	}
