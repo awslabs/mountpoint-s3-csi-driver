@@ -19,6 +19,7 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -87,11 +88,11 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 	defer cancel()
 	output, err := m.runner.Run(timeoutCtx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
 		append([]string{source, target}, options...))
+	if err != nil {
+		return fmt.Errorf("Mount failed: %w mount-s3 output: %s", err, output)
+	}
 	if output != "" {
 		klog.V(5).Infof("mount-s3 output: %s", output)
-	}
-	if err != nil {
-		return err
 	}
 	return nil
 }

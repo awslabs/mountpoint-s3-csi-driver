@@ -123,15 +123,14 @@ spec:
             - name: plugin-dir
               mountPath: /csi
       volumes:
-        - name: host-usr
-          hostPath:
-            path: /usr
         - name: host-dev
           hostPath:
-            path: /dev
+            path: /dev/
+            type: Directory
         - name: host-dbus
           hostPath:
-            path: /var/run/dbus
+            path: /var/run/dbus/
+            type: Directory
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet

@@ -41,6 +41,11 @@ func NewOsSystemd() SystemdConnector {
 	return &osSystemdConnector{}
 }
 
+func ConnectOsSystemd(ctx context.Context) (SystemdConnection, error) {
+	sd := NewOsSystemd()
+	return sd.Connect(ctx)
+}
+
 type SystemdRunner struct {
 	Connector SystemdConnector
 	Pts       Pts
@@ -58,7 +63,6 @@ func NewSystemdRunner() SystemdRunner {
 func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, args []string) (string, error) {
 	systemdConn, err := sr.Connector.Connect(ctx)
 	if err != nil {
-		// TODO fallback to launching in container if systemd doesn't exist on host
 		return "", fmt.Errorf("Failed to connect to systemd: %w", err)
 	}
 	defer systemdConn.Close()
@@ -70,10 +74,10 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 	}
 	defer ptsMaster.Close()
 
-	// Use a tty to capture stdout/stderr. Older versions of systemd do not support options like named pipes
 	props := []systemd.Property{
 		systemd.PropDescription("Mountpoint for S3 CSI driver FUSE daemon"),
 		systemd.PropType("forking"),
+		// Use a tty to capture stdout/stderr. Older versions of systemd do not support options like named pipes
 		{Name: "StandardOutput", Value: dbus.MakeVariant("tty")},
 		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
 		{Name: "TTYPath", Value: dbus.MakeVariant(fmt.Sprintf("/dev/pts/%d", ptsN))},
