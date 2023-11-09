@@ -46,7 +46,7 @@ install_mountpoint_rpm() {
     echo "Package S3 Mountpoint version: ${package_mp_version}"
 
     if [[ "${installed_mp_version}" != "${package_mp_version}" ]]; then
-        cp "/${RPM_FILE}" "/csi/${RPM_FILE}"
+        cp "/${RPM_FILE}" "${CSI_DIR}${RPM_FILE}"
         trap cleanup_rpm EXIT SIGINT SIGTERM
         # If install fails try downgrade
         $NSENTER_HOST yum install -y "${HOST_CSI_DIR}${RPM_FILE}" || \

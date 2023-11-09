@@ -44,8 +44,8 @@ spec:
           command:
             - "/install-mp.sh"
           volumeMounts:
-            - name: host-usr
-              mountPath: /host/usr
+            - name: plugin-dir
+              mountPath: /csi
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
