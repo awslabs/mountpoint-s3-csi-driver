@@ -69,10 +69,6 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	f := framework.NewFrameworkWithCustomTimeouts("multivolume", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
-	init := func(ctx context.Context) {
-		l = local{}
-		l.config = driver.PrepareTest(ctx, f)
-	}
 	cleanup := func(ctx context.Context) {
 		var errs []error
 		for _, resource := range l.resources {
@@ -80,6 +76,11 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		}
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup resource")
 	}
+	ginkgo.BeforeEach(func(ctx context.Context) {
+		l = local{}
+		l.config = driver.PrepareTest(ctx, f)
+		ginkgo.DeferCleanup(cleanup)
+	})
 	toWrite := 1024 // 1KB
 	testTwoPodsSameVolume := func(ctx context.Context, pvc *v1.PersistentVolumeClaim, requiresSameNode bool) {
 		var pods []*v1.Pod
@@ -145,9 +146,6 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	//   \      /
 	//   [volume1]
 	ginkgo.It("should concurrently access the single volume from pods on the same node", func(ctx context.Context) {
-		init(ctx)
-		ginkgo.DeferCleanup(cleanup)
-
 		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
 		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
 		l.resources = append(l.resources, resource)
@@ -160,9 +158,6 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	//         \      /
 	//         [volume1]
 	ginkgo.It("should concurrently access the single volume from pods on different node", func(ctx context.Context) {
-		init(ctx)
-		ginkgo.DeferCleanup(cleanup)
-
 		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
 		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
 		l.resources = append(l.resources, resource)
@@ -172,14 +167,11 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	// This tests below configuration:
 	//          [pod1]                            same node       [pod2]
 	//      [   node1   ]                           ==>        [   node1   ]
-	//          /    \						                      /    \
+	//          /    \      <- same volume mode                   /    \
 	//   [volume1]  [volume2]                              [volume1]  [volume2]
 	//		/				\								/				\
 	// 	[bucket1]		[bucket2]						[bucket1]		[bucket2]
 	ginkgo.It("should access to two volumes with the same volume mode and retain data across pod recreation on the same node", func(ctx context.Context) {
-		init(ctx)
-		ginkgo.DeferCleanup(cleanup)
-
 		var pvcs []*v1.PersistentVolumeClaim
 		numVols := 2
 
@@ -200,9 +192,9 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {
 	binData := make([]byte, len)
-	rand.Seed(seed)
+	randLocal := rand.New(rand.NewSource(seed))
 
-	_, err := rand.Read(binData)
+	_, err := randLocal.Read(binData)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
