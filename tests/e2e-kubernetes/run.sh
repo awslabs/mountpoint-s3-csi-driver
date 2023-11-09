@@ -25,7 +25,8 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
-CLUSTER_NAME="s3-csi-cluster.${CLUSTER_TYPE}.k8s.local"
+# CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}.k8s.local"
+CLUSTER_NAME="s3-csi-cluster-kops-24945.k8s.local"
 if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
   CLUSTER_NAME="s3-csi-cluster"
 fi
