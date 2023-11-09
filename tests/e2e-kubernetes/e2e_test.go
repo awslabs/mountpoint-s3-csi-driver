@@ -4,6 +4,7 @@ import (
 	"flag"
 	"testing"
 
+	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	f "k8s.io/kubernetes/test/e2e/framework"
@@ -46,6 +47,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitSnapshottableStressTestSuite,
 	// testsuites.InitVolumePerformanceTestSuite,
 	// testsuites.InitReadWriteOncePodTestSuite,
+	custom_testsuites.InitS3CSIMultiVolumeTestSuite,
 }
 
 // This executes testSuites for csi volumes.
