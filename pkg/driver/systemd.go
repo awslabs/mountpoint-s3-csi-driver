@@ -8,23 +8,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 	"unsafe"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	dbus "github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
-	"k8s.io/klog/v2"
 )
 
 // Interface to wrap the external go-systemd dbus connection
 // https://pkg.go.dev/github.com/coreos/go-systemd/dbus
 type SystemdConnection interface {
 	Close()
-	SubscribeUnitsCustom(interval time.Duration, buffer int,
-		isChanged func(*systemd.UnitStatus, *systemd.UnitStatus) bool,
-		filterUnit func(string) bool) (<-chan map[string]*systemd.UnitStatus, <-chan error)
+	ListUnitsContext(ctx context.Context) ([]systemd.UnitStatus, error)
 	StartTransientUnitContext(ctx context.Context, name string, mode string,
 		properties []systemd.Property, ch chan<- string) (int, error)
 	ResetFailedUnitContext(ctx context.Context, name string) error
@@ -87,13 +83,6 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 	// Unit names must be unique in systemd, so include a tag
 	serviceName := filepath.Base(cmd) + "-" + serviceTag + ".service"
 
-	// Subscribe to status updates
-	isChanged := func(l *systemd.UnitStatus, r *systemd.UnitStatus) bool {
-		return l.ActiveState != r.ActiveState
-	}
-	filter := func(name string) bool { return !strings.Contains(name, serviceName) }
-	updates, errChan := systemdConn.SubscribeUnitsCustom(50*time.Millisecond, 10, isChanged, filter)
-
 	respChan := make(chan string, 1)
 	defer close(respChan)
 	_, err = systemdConn.StartTransientUnitContext(ctx, serviceName, "fail", props, respChan)
@@ -124,30 +113,34 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 		return readOutput(), fmt.Errorf("Context cancelled starting systemd service %s", serviceName)
 	}
 
-	starting := true
-	for starting {
-		select {
-		case update := <-updates:
-			for k, v := range update {
-				klog.V(5).Infof("Systemd service update [%s]: %v", k, v)
-				if k == serviceName {
-					if v == nil {
-						return readOutput(), fmt.Errorf("%s failed to launch", serviceName)
-					} else if v.ActiveState == "active" {
-						starting = false
-					}
+	// Poll the service status in systemd until error or cancellation
+	for {
+		pollTimer := time.After(50 * time.Millisecond)
+		statuses, err := systemdConn.ListUnitsContext(ctx)
+		if err != nil {
+			return readOutput(), fmt.Errorf("Failed to read systemd status: %w", err)
+		}
+
+		unitFound := false
+		for _, status := range statuses {
+			if status.Name == serviceName {
+				if status.ActiveState == "active" {
+					return readOutput(), nil
 				}
+				unitFound = true
 			}
+		}
+		if !unitFound {
+			return readOutput(), fmt.Errorf("Failed to launch systemd service %s", serviceName)
+		}
+		select {
+		case <-pollTimer:
+			// keep polling
 		case <-ctx.Done():
-			return readOutput(), fmt.Errorf("Timed out launching %s service",
+			return readOutput(), fmt.Errorf("Context canclled launching service %s",
 				serviceName)
-		case err = <-errChan:
-			return readOutput(), fmt.Errorf("Failed to start systemd service %s err: %w",
-				serviceName, err)
 		}
 	}
-
-	return readOutput(), nil
 }
 
 // Interface for creating new private terminal session. See man pts(4)

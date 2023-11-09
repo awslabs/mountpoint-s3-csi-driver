@@ -13,6 +13,12 @@ import (
 	"github.com/golang/mock/gomock"
 )
 
+const (
+	testExe         = "/usr/bin/testmount"
+	testTag         = "1.0.0-abcd"
+	testServiceName = "testmount-1.0.0-abcd.service"
+)
+
 type systemRunnerTestEnv struct {
 	ctx           context.Context
 	mockCtl       *gomock.Controller
@@ -82,11 +88,6 @@ func TestSystemdStartUnitFailure(t *testing.T) {
 	mockPts.EXPECT().NewPts().Return(io.NopCloser(strings.NewReader("")), 0, nil)
 	ctx := context.Background()
 
-	updates := make(chan map[string]*systemd.UnitStatus)
-	errorsChan := make(chan error)
-	mockConnection.EXPECT().SubscribeUnitsCustom(
-		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errorsChan)
-
 	mockConnection.EXPECT().StartTransientUnitContext(
 		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Any(), gomock.Any()).Return(0, errors.New(""))
 
@@ -115,11 +116,6 @@ func TestSystemdRunCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // immediately cancel context
 
-	updates := make(chan map[string]*systemd.UnitStatus)
-	errChan := make(chan error)
-	mockConnection.EXPECT().SubscribeUnitsCustom(
-		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errChan)
-
 	mockConnection.EXPECT().StartTransientUnitContext(
 		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Any(), gomock.Any()).Return(0, nil)
 
@@ -147,29 +143,25 @@ func TestSystemdRunSuccess(t *testing.T) {
 	mockPts.EXPECT().NewPts().Return(io.NopCloser(strings.NewReader(testOutput)), 0, nil)
 	ctx := context.Background()
 
-	updates := make(chan map[string]*systemd.UnitStatus)
-	errChan := make(chan error)
-	mockConnection.EXPECT().SubscribeUnitsCustom(
-		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(updates, errChan)
-
-	var startUnitResp chan<- string
-	var serviceName string
 	mockConnection.EXPECT().StartTransientUnitContext(
 		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Any(), gomock.Any()).
 		Do(func(_ context.Context, name string, _ string, _ []systemd.Property, ch chan<- string) {
-			startUnitResp = ch
-			serviceName = name
-			go func() {
-				startUnitResp <- "done"
-				updates <- map[string]*systemd.UnitStatus{serviceName: {ActiveState: "active"}}
-			}()
+			go func() { ch <- "done" }()
 		}).Return(0, nil)
+
+	status := []systemd.UnitStatus{
+		{
+			Name:        testServiceName,
+			ActiveState: "active",
+		},
+	}
+	mockConnection.EXPECT().ListUnitsContext(gomock.Any()).Return(status, nil)
 
 	runner := driver.SystemdRunner{
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil)
+	out, err := runner.Run(ctx, testExe, testTag, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
