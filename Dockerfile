@@ -66,10 +66,6 @@ COPY --from=mp_builder /mount-s3.rpm /mount-s3.rpm
 COPY --from=mp_builder /mount-s3.deb /mount-s3.deb
 COPY ./cmd/install-mp.sh /install-mp.sh
 
-# RUN dnf upgrade -y && \
-#     dnf install -y ./mount-s3.rpm && \
-#     dnf clean all
-
 # Install driver
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
 
