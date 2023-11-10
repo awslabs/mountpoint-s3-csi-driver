@@ -22,8 +22,6 @@ ARG TARGETPLATFORM
 # We need the full version of GnuPG
 RUN dnf install -y --allowerasing wget gnupg2
 
-RUN echo ${BUILDPLATFORM}
-RUN echo ${TARGETARCH}
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm" && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm.asc" && \
@@ -45,9 +43,6 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
 # Build driver
 FROM --platform=$BUILDPLATFORM golang:1.21.1-bullseye as builder
 ARG TARGETARCH
-ARG TARGETPLATFORM
-RUN uname -a
-RUN echo $TARGETPLATFORM
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
@@ -55,11 +50,7 @@ TARGETARCH=${TARGETARCH} make bin
 
 FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al2 AS linux-amazon
 ARG MOUNTPOINT_VERSION
-ARG TARGETARCH
-ARG TARGETPLATFORM
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
-
-# RUN yum install util-linux -y
 
 # MP Installer
 COPY --from=mp_builder /mount-s3.rpm /mount-s3.rpm
