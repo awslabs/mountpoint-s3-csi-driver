@@ -25,10 +25,12 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
-# CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}.k8s.local"
-CLUSTER_NAME="s3-csi-cluster.kops-arm.k8s.local"
-if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+ARCH=${ARCH:-x86}
+CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${ARCH}.k8s.local"
+if [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "x86" ]]; then
   CLUSTER_NAME="s3-csi-cluster"
+elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
+  CLUSTER_NAME="s3-csi-cluster-arm"
 fi
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
@@ -80,7 +82,7 @@ function install_tools() {
 }
 
 function create_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
     kops_create_cluster \
       "$CLUSTER_NAME" \
       "$KOPS_BIN" \
@@ -94,7 +96,7 @@ function create_cluster() {
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
       "$KOPS_STATE_FILE"
-  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
     kops_create_cluster \
       "$CLUSTER_NAME" \
       "$KOPS_BIN" \
@@ -108,7 +110,7 @@ function create_cluster() {
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
       "$KOPS_STATE_FILE_ARM"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+  elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "x86" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
       "$REGION" \
@@ -118,17 +120,30 @@ function create_cluster() {
       "$KUBECTL_BIN" \
       "$EKSCTL_PATCH_FILE" \
       "$ZONES" \
-      "$CI_ROLE_ARN"
+      "$CI_ROLE_ARN" \
+      "$INSTANCE_TYPE"
+  elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
+    eksctl_create_cluster \
+      "$CLUSTER_NAME" \
+      "$REGION" \
+      "$KUBECONFIG" \
+      "$CLUSTER_FILE" \
+      "$EKSCTL_BIN" \
+      "$KUBECTL_BIN" \
+      "$EKSCTL_PATCH_FILE" \
+      "$ZONES" \
+      "$CI_ROLE_ARN" \
+      "$INSTANCE_TYPE_ARM"
   fi
 }
 
 function delete_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
     kops_delete_cluster \
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
       "${KOPS_STATE_FILE}"
-  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
     kops_delete_cluster \
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
@@ -142,9 +157,9 @@ function delete_cluster() {
 }
 
 function update_kubeconfig() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
     ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
-  elif [[ "${CLUSTER_TYPE}" == "kops-arm" ]]; then
+  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
     ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE_ARM}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
