@@ -54,7 +54,7 @@ function kops_create_cluster() {
   ${BIN} create --state "${KOPS_STATE_FILE}" -f "${CLUSTER_FILE}"
   ${BIN} update cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --yes
   ${BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
-  ${BIN} validate cluster --state "${KOPS_STATE_FILE}" --wait 10m --kubeconfig "${KUBECONFIG}"
+  ${BIN} validate cluster --state "${KOPS_STATE_FILE}" --wait 15m --kubeconfig "${KUBECONFIG}"
 }
 
 function kops_cluster_exists() {
