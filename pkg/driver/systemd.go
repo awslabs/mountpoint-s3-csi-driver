@@ -12,9 +12,12 @@ import (
 	"unsafe"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
-	unit "github.com/coreos/go-systemd/v22/unit"
 	dbus "github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
+)
+
+const (
+	defaultPtmxPath = "/dev/ptmx"
 )
 
 // Interface to wrap the external go-systemd dbus connection
@@ -61,7 +64,9 @@ func NewSystemdRunner() SystemdRunner {
 }
 
 // Run a given command in a transient systemd service. Will wait for the service to become active
-func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, env []string, args []string) (string, error) {
+func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, serviceType string,
+	env []string, args []string) (string, error) {
+
 	systemdConn, err := sr.Connector.Connect(ctx)
 	if err != nil {
 		return "", fmt.Errorf("Failed to connect to systemd: %w", err)
@@ -77,7 +82,7 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 
 	props := []systemd.Property{
 		systemd.PropDescription("Mountpoint for S3 CSI driver"),
-		systemd.PropType("forking"),
+		systemd.PropType(serviceType),
 		// Use a tty to capture stdout/stderr. Older versions of systemd do not support options like named pipes
 		{Name: "StandardOutput", Value: dbus.MakeVariant("tty")},
 		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
@@ -89,7 +94,7 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 	}
 
 	// Unit names must be unique in systemd, so include a tag
-	serviceName := unit.UnitNamePathEscape(filepath.Base(cmd) + "-" + serviceTag + ".service")
+	serviceName := filepath.Base(cmd) + "-" + serviceTag + ".service"
 
 	respChan := make(chan string, 1)
 	defer close(respChan)
@@ -119,6 +124,11 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 		}
 	case <-ctx.Done():
 		return readOutput(), fmt.Errorf("Context cancelled starting systemd service %s", serviceName)
+	}
+
+	// If service type is oneshot, the script will not go active so exit here and do not wait
+	if serviceType == "oneshot" {
+		return readOutput(), nil
 	}
 
 	// Poll the service status in systemd until error or cancellation
@@ -162,7 +172,11 @@ type OsPts struct{}
 
 // Create a new pseduo terminal slave (pts). Returns a ReaderCloser for the master device and a pts number
 func (p *OsPts) NewPts() (io.ReadCloser, int, error) {
-	ptsMaster, err := os.Open("/hostdev/ptmx")
+	ptmxPath := os.Getenv("PTMX_PATH")
+	if ptmxPath == "" {
+		ptmxPath = defaultPtmxPath
+	}
+	ptsMaster, err := os.Open(ptmxPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("Failed to open tty: %w", err)
 	}

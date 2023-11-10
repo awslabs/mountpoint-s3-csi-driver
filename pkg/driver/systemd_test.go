@@ -49,7 +49,7 @@ func TestSystemdRunFailedConnection(t *testing.T) {
 	runner := &driver.SystemdRunner{
 		Connector: mockConnector,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -72,7 +72,7 @@ func TestSystemdRunNewPtsFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -98,7 +98,7 @@ func TestSystemdStartUnitFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -126,7 +126,7 @@ func TestSystemdRunCanceledContext(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -158,8 +158,8 @@ func TestSystemdRunSuccess(t *testing.T) {
 		systemd.PropExecStart(append([]string{testExe}, args...), true),
 		{Name: "Environment", Value: dbus.MakeVariant(env)},
 	}
-	mockConnection.EXPECT().StartTransientUnitContext(
-		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Eq(expectedProps), gomock.Any()).
+	mockConnection.EXPECT().StartTransientUnitContext(gomock.Eq(ctx), gomock.Any(),
+		gomock.Eq("fail"), gomock.Eq(expectedProps), gomock.Any()).
 		Do(func(_ context.Context, name string, _ string, _ []systemd.Property, ch chan<- string) {
 			go func() { ch <- "done" }()
 		}).Return(0, nil)
@@ -176,7 +176,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, testExe, testTag, env, args)
+	out, err := runner.Run(ctx, testExe, testTag, "", env, args)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
