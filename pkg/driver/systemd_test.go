@@ -3,6 +3,7 @@ package driver_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	systemd "github.com/coreos/go-systemd/v22/dbus"
+	dbus "github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 )
 
@@ -140,11 +142,23 @@ func TestSystemdRunSuccess(t *testing.T) {
 	mockConnection.EXPECT().Close()
 	mockConnector.EXPECT().Connect(gomock.Any()).Return(mockConnection, nil)
 	testOutput := "testoutputdata"
-	mockPts.EXPECT().NewPts().Return(io.NopCloser(strings.NewReader(testOutput)), 0, nil)
+	ptsN := 5
+	mockPts.EXPECT().NewPts().Return(io.NopCloser(strings.NewReader(testOutput)), 5, nil)
+	env := []string{"TEST=TEST"}
+	args := []string{"--test-arg1", "--test-arg2"}
 	ctx := context.Background()
 
+	expectedProps := []systemd.Property{
+		systemd.PropDescription("Mountpoint for S3 CSI driver FUSE daemon"),
+		systemd.PropType("forking"),
+		{Name: "StandardOutput", Value: dbus.MakeVariant("tty")},
+		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
+		{Name: "TTYPath", Value: dbus.MakeVariant(fmt.Sprintf("/dev/pts/%d", ptsN))},
+		systemd.PropExecStart(append([]string{testExe}, args...), true),
+		{Name: "Environment", Value: dbus.MakeVariant(env)},
+	}
 	mockConnection.EXPECT().StartTransientUnitContext(
-		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Any(), gomock.Any()).
+		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Eq(expectedProps), gomock.Any()).
 		Do(func(_ context.Context, name string, _ string, _ []systemd.Property, ch chan<- string) {
 			go func() { ch <- "done" }()
 		}).Return(0, nil)
@@ -161,7 +175,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, testExe, testTag, nil, nil)
+	out, err := runner.Run(ctx, testExe, testTag, env, args)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
