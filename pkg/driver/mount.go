@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
@@ -30,9 +31,12 @@ import (
 )
 
 const (
-	keyIdEnv     = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv = "AWS_SECRET_ACCESS_KEY"
-	pluginDir    = "/var/lib/kubelet/plugins/s3.csi.aws.com"
+	keyIdEnv        = "AWS_ACCESS_KEY_ID"
+	accessKeyEnv    = "AWS_SECRET_ACCESS_KEY"
+	pluginDir       = "/var/lib/kubelet/plugins/s3.csi.aws.com"
+	mountS3Path     = pluginDir + "/mountpoint-s3/bin/mount-s3"
+	userAgentPrefix = "--user-agent-prefix"
+	csiDriverPrefix = "s3-csi-driver/"
 )
 
 // Mounter is an interface for mount operations
@@ -100,8 +104,8 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 		env = append(env, accessKeyEnv+"="+accessKey)
 	}
 
-	output, err := m.runner.Run(timeoutCtx, pluginDir+"/mountpoint-s3/bin/mount-s3",
-		m.mpVersion+"-"+uuid.New().String(), env, append([]string{source, target}, options...))
+	output, err := m.runner.Run(timeoutCtx, mountS3Path, m.mpVersion+"-"+uuid.New().String(),
+		env, append([]string{source, target}, addUserAgentToOptions(options)...))
 	if err != nil {
 		return fmt.Errorf("Mount failed: %w mount-s3 output: %s", err, output)
 	}
@@ -109,4 +113,17 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 		klog.V(5).Infof("mount-s3 output: %s", output)
 	}
 	return nil
+}
+
+// method to add the user agent prefix to the Mountpoint headers
+// https://github.com/awslabs/mountpoint-s3/pull/548
+func addUserAgentToOptions(options []string) []string {
+	// first remove it from the options in case it's in there
+	for i := len(options) - 1; i >= 0; i-- {
+		if strings.Contains(options[i], userAgentPrefix) {
+			options = append(options[:i], options[i+1:]...)
+		}
+	}
+	// add the hard coded S3 CSI driver user agent string
+	return append(options, userAgentPrefix+" "+csiDriverPrefix+GetVersion().DriverVersion)
 }
