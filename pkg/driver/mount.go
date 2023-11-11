@@ -37,8 +37,6 @@ const (
 	mountS3Path     = pluginDir + "/mountpoint-s3/bin/mount-s3"
 	userAgentPrefix = "--user-agent-prefix"
 	csiDriverPrefix = "s3-csi-driver/"
-	keyIdEnv        = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv    = "AWS_SECRET_ACCESS_KEY"
 )
 
 // Mounter is an interface for mount operations
