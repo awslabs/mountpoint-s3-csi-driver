@@ -29,6 +29,11 @@ import (
 	"k8s.io/mount-utils"
 )
 
+const (
+	keyIdEnv     = "AWS_ACCESS_KEY_ID"
+	accessKeyEnv = "AWS_SECRET_ACCESS_KEY"
+)
+
 // Mounter is an interface for mount operations
 type Mounter interface {
 	mount.Interface
@@ -86,8 +91,15 @@ func (m *S3Mounter) PathExists(path string) (bool, error) {
 func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
 	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
+	keyId := os.Getenv(keyIdEnv)
+	accessKey := os.Getenv(accessKeyEnv)
+	env := []string{}
+	if keyId != "" && accessKey != "" {
+		env = append(env, keyIdEnv+"="+keyId)
+		env = append(env, accessKeyEnv+"="+accessKey)
+	}
 	output, err := m.runner.Run(timeoutCtx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
-		append([]string{source, target}, options...))
+		env, append([]string{source, target}, options...))
 	if err != nil {
 		return fmt.Errorf("Mount failed: %w mount-s3 output: %s", err, output)
 	}

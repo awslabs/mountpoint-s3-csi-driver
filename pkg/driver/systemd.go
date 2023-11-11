@@ -60,7 +60,7 @@ func NewSystemdRunner() SystemdRunner {
 }
 
 // Run a given command in a transient systemd service. Will wait for the service to become active
-func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, args []string) (string, error) {
+func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string, env []string, args []string) (string, error) {
 	systemdConn, err := sr.Connector.Connect(ctx)
 	if err != nil {
 		return "", fmt.Errorf("Failed to connect to systemd: %w", err)
@@ -82,6 +82,9 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
 		{Name: "TTYPath", Value: dbus.MakeVariant(fmt.Sprintf("/dev/pts/%d", ptsN))},
 		systemd.PropExecStart(append([]string{cmd}, args...), true),
+	}
+	if len(env) > 0 {
+		props = append(props, systemd.Property{Name: "Environment", Value: dbus.MakeVariant(env)})
 	}
 
 	// Unit names must be unique in systemd, so include a tag
