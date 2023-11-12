@@ -32,7 +32,7 @@ import (
 const (
 	keyIdEnv     = "AWS_ACCESS_KEY_ID"
 	accessKeyEnv = "AWS_SECRET_ACCESS_KEY"
-	pluginDir      = "/var/lib/kubelet/plugins/s3.csi.aws.com"
+	pluginDir    = "/var/lib/kubelet/plugins/s3.csi.aws.com"
 )
 
 // Mounter is an interface for mount operations
