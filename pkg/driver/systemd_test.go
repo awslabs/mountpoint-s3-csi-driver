@@ -11,14 +11,15 @@ import (
 	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	systemd "github.com/coreos/go-systemd/v22/dbus"
+	"github.com/coreos/go-systemd/v22/unit"
 	dbus "github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 )
 
-const (
+var (
 	testExe         = "/usr/bin/testmount"
 	testTag         = "1.0.0-abcd"
-	testServiceName = "testmount-1.0.0-abcd.service"
+	testServiceName = unit.UnitNamePathEscape("testmount-1.0.0-abcd.service")
 )
 
 type systemRunnerTestEnv struct {
@@ -149,7 +150,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 	ctx := context.Background()
 
 	expectedProps := []systemd.Property{
-		systemd.PropDescription("Mountpoint for S3 CSI driver FUSE daemon"),
+		systemd.PropDescription("Mountpoint for S3 CSI driver"),
 		systemd.PropType("forking"),
 		{Name: "StandardOutput", Value: dbus.MakeVariant("tty")},
 		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
