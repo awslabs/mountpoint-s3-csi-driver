@@ -27,11 +27,16 @@ import (
 
 var unknownVersion = "UNKNOWN"
 
+const (
+	NodeIDEnvVar = "CSI_NODE_NAME"
+)
+
 func main() {
 	var (
 		endpoint  = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
 		version   = flag.Bool("version", false, "Print the version and exit")
 		mpVersion = flag.String("mp-version", os.Getenv("MOUNTPOINT_VERSION"), "mp version to report in service name")
+		nodeID    = flag.String("node-id", os.Getenv(NodeIDEnvVar), "node-id to report in NodeGetInfo RPC")
 	)
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -48,8 +53,10 @@ func main() {
 	if mpVersion == nil {
 		mpVersion = &unknownVersion
 	}
-
-	drv := driver.NewDriver(*endpoint, *mpVersion)
+	if *nodeID == "" {
+		klog.Fatalln("node-id is required")
+	}
+	drv := driver.NewDriver(*endpoint, *mpVersion, *nodeID)
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)
 	}

@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cloud"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -52,13 +51,8 @@ type Driver struct {
 	Mounter Mounter
 }
 
-func NewDriver(endpoint string, mpVersion string) *Driver {
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v", driverVersion, gitCommit, buildDate)
-
-	metadata, err := cloud.NewMetadata()
-	if err != nil {
-		klog.Fatalln(err)
-	}
+func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v", driverVersion, gitCommit, buildDate, nodeID)
 
 	mounter, err := newS3Mounter(mpVersion)
 	if err != nil {
@@ -67,7 +61,7 @@ func NewDriver(endpoint string, mpVersion string) *Driver {
 
 	return &Driver{
 		Endpoint: endpoint,
-		NodeID:   metadata.GetInstanceID(),
+		NodeID:   nodeID,
 		Mounter:  mounter,
 	}
 }
