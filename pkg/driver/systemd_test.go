@@ -150,7 +150,11 @@ func TestSystemdRunSuccess(t *testing.T) {
 	ctx := context.Background()
 
 	expectedProps := []systemd.Property{
+<<<<<<< HEAD
 		systemd.PropDescription("Mountpoint for S3 CSI driver"),
+=======
+		systemd.PropDescription("Mountpoint for S3 CSI driver FUSE daemon"),
+>>>>>>> 238943e (rebasing)
 		systemd.PropType("forking"),
 		{Name: "StandardOutput", Value: dbus.MakeVariant("tty")},
 		{Name: "StandardError", Value: dbus.MakeVariant("tty")},
