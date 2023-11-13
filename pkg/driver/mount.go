@@ -32,6 +32,7 @@ import (
 const (
 	keyIdEnv     = "AWS_ACCESS_KEY_ID"
 	accessKeyEnv = "AWS_SECRET_ACCESS_KEY"
+	pluginDir    = "/var/lib/kubelet/plugins/s3.csi.aws.com"
 )
 
 // Mounter is an interface for mount operations
@@ -98,8 +99,9 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 		env = append(env, keyIdEnv+"="+keyId)
 		env = append(env, accessKeyEnv+"="+accessKey)
 	}
-	output, err := m.runner.Run(timeoutCtx, "/usr/bin/mount-s3", m.mpVersion+"-"+uuid.New().String(),
-		env, append([]string{source, target}, options...))
+
+	output, err := m.runner.Run(timeoutCtx, pluginDir+"/mountpoint-s3/bin/mount-s3",
+		m.mpVersion+"-"+uuid.New().String(), env, append([]string{source, target}, options...))
 	if err != nil {
 		return fmt.Errorf("Mount failed: %w mount-s3 output: %s", err, output)
 	}

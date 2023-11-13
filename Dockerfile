@@ -14,47 +14,53 @@
 
 ARG MOUNTPOINT_VERSION=1.1.0
 
-# Download and verify the mountpoint's RPM and DEB in this container
-FROM --platform=$BUILDPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
+# Download the mountpoint tarball and produce an installable directory
+# Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
+# is being packaged up in the container and a newer version linking to a too new glibc
+# can cause portability issues
+FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as mp_builder
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
 # We need the full version of GnuPG
-RUN dnf install -y --allowerasing wget gnupg2
+RUN yum install -y gzip wget gnupg2 tar fuse-libs binutils patchelf
 
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm" && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm.asc" && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb" && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb.asc" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz" && \
+    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz.asc" && \
     wget -q https://s3.amazonaws.com/mountpoint-s3-release/public_keys/KEYS
 
 # Import the key and validate it has the fingerprint we expect
 RUN gpg --import KEYS && \
     (gpg --fingerprint mountpoint-s3@amazon.com | grep "673F E406 1506 BB46 9A0E  F857 BE39 7A52 B086 DA5A")
 
-# Verify the downloaded binary
+# Verify the downloaded tarball, extract it, and fixup the binary
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
-    gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm.asc && \
-    gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb.asc && \
-    mv mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.rpm /mount-s3.rpm && \
-    mv mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.deb /mount-s3.deb
+    gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz.asc && \
+    mkdir -p /mountpoint-s3 && \
+    tar -xvzf mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz -C /mountpoint-s3 && \
+    # strip debugging information to reduce binary size
+    strip --strip-debug /mountpoint-s3/bin/mount-s3 && \
+    # set rpath for dynamic library loading
+    patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
-# Build driver
-FROM --platform=$BUILDPLATFORM golang:1.21.1-bullseye as builder
+# Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.21-bullseye as builder
 ARG TARGETARCH
+
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
 TARGETARCH=${TARGETARCH} make bin
 
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al2 AS linux-amazon
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 
 # MP Installer
-COPY --from=mp_builder /mount-s3.rpm /mount-s3.rpm
-COPY --from=mp_builder /mount-s3.deb /mount-s3.deb
+COPY --from=mp_builder /mountpoint-s3 /mountpoint-s3
+COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
+COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
 COPY ./cmd/install-mp.sh /install-mp.sh
 
 # Install driver

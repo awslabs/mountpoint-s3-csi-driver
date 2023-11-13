@@ -18,7 +18,6 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-      hostPID: true
       serviceAccountName: s3-csi-driver-sa
       priorityClassName: system-node-critical
       tolerations:
@@ -29,9 +28,8 @@ spec:
           tolerationSeconds: 300
       initContainers:
         - name: install-mountpoint
-          securityContext:
-            privileged: true
           image: csi-driver
+          imagePullPolicy: IfNotPresent
           command:
             - "/install-mp.sh"
           volumeMounts:
@@ -42,6 +40,7 @@ spec:
           securityContext:
             privileged: true
           image: csi-driver
+          imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
             - --logtostderr
@@ -71,10 +70,8 @@ spec:
               mountPropagation: "Bidirectional"
             - name: plugin-dir
               mountPath: /csi
-            - name: aws-credentials
-              mountPath: /root/.aws
-            - name: host-dbus
-              mountPath: /var/run/dbus
+            - name: systemd-bus
+              mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /hostdev
           ports:
@@ -123,13 +120,13 @@ spec:
           hostPath:
             path: /dev/
             type: Directory
-        - name: host-dbus
+        - name: systemd-bus
           hostPath:
-            path: /var/run/dbus/
-            type: Directory
+            path: /run/systemd/private
+            type: Socket
         - name: kubelet-dir
           hostPath:
-            path: /var/lib/kubelet
+            path: /var/lib/kubelet/
             type: Directory
         - name: registration-dir
           hostPath:
@@ -139,6 +136,3 @@ spec:
           hostPath:
             path: /var/lib/kubelet/plugins/s3.csi.aws.com/
             type: DirectoryOrCreate
-        - name: aws-credentials
-          secret:
-            secretName: aws-credentials
