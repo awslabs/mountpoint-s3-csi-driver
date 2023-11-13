@@ -37,8 +37,6 @@ spec:
         {{- end }}
       initContainers:
         - name: install-mountpoint
-          securityContext:
-            privileged: true
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           imagePullPolicy: IfNotPresent
           command:
@@ -57,10 +55,6 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:/csi/csi.sock
-            - name: CSI_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -81,8 +75,10 @@ spec:
               mountPropagation: "Bidirectional"
             - name: plugin-dir
               mountPath: /csi
-            - name: host-dbus
-              mountPath: /var/run/dbus
+            - name: aws-credentials
+              mountPath: /root/.aws
+            - name: systemd-bus
+              mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /hostdev
           ports:
@@ -141,10 +137,10 @@ spec:
           hostPath:
             path: /dev/
             type: Directory
-        - name: host-dbus
+        - name: systemd-bus
           hostPath:
-            path: /var/run/dbus/
-            type: Directory
+            path: /run/systemd/private
+            type: Socket
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet

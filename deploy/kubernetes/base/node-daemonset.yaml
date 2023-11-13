@@ -29,6 +29,7 @@ spec:
       initContainers:
         - name: install-mountpoint
           image: csi-driver
+          imagePullPolicy: IfNotPresent
           command:
             - "/install-mp.sh"
           volumeMounts:
@@ -39,6 +40,7 @@ spec:
           securityContext:
             privileged: true
           image: csi-driver
+          imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
             - --logtostderr
