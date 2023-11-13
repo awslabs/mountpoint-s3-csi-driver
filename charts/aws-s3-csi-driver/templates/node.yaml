@@ -75,8 +75,6 @@ spec:
               mountPropagation: "Bidirectional"
             - name: plugin-dir
               mountPath: /csi
-            - name: aws-credentials
-              mountPath: /root/.aws
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
@@ -153,9 +151,6 @@ spec:
           hostPath:
             path: /var/lib/kubelet/plugins_registry/
             type: Directory
-        - name: aws-credentials
-          secret:
-            secretName: aws-credentials
         {{- with .Values.node.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
