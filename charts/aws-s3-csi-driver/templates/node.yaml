@@ -153,6 +153,9 @@ spec:
           hostPath:
             path: /var/lib/kubelet/plugins_registry/
             type: Directory
+        - name: aws-credentials
+          secret:
+            secretName: aws-credentials
         {{- with .Values.node.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
