@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -104,5 +105,23 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 2000 1000'", volPath))
 		ginkgo.By("Checking pod identity")
 		e2evolume.VerifyExecInPodSucceed(f, pod, "id | grep 'uid=1000 gid=2000 groups=2000'")
+	})
+	ginkgo.It("should not be able to access volume as a non-root user", func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{})
+		l.resources = append(l.resources, resource)
+		ginkgo.By("Creating pod with a volume")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		pod.Spec.SecurityContext.RunAsGroup = pointer.Int64(2000)
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+		volPath := "/mnt/volume1"
+		ginkgo.By("Checking file group owner")
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls %s", volPath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"))
 	})
 }
