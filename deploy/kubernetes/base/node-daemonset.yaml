@@ -28,12 +28,6 @@ spec:
           tolerationSeconds: 300
       initContainers:
         - name: install-mountpoint
-          securityContext:
-            seLinuxOptions:
-              user: system_u
-              type: super_t
-              role: system_r
-              level: s0
           image: csi-driver
           imagePullPolicy: IfNotPresent
           command:
@@ -41,10 +35,6 @@ spec:
           env:
             - name: MOUNTPOINT_INSTALL_DIR
               value: /target
-            - name: SE_LINUX_EXECUTABLE_LABEL
-              value: system_u:object_r:os_t:s0
-            - name: SE_LINUX_WRITABLE_LABEL
-              value: system_u:object_r:any_t:s0
           volumeMounts:
             - name: mp-install
               mountPath: /target
@@ -52,11 +42,6 @@ spec:
         - name: s3-plugin
           securityContext:
             privileged: false
-            seLinuxOptions:
-              user: system_u
-              type: super_t
-              role: system_r
-              level: s0
           image: csi-driver
           imagePullPolicy: IfNotPresent
           args:
@@ -70,7 +55,7 @@ spec:
               value: /host/dev/ptmx
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
-              value: /dev/mountpoint-s3-csi/mount-s3
+              value: /opt/mountpoint-s3-csi/bin/mount-s3
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -146,7 +131,7 @@ spec:
             type: Directory
         - name: mp-install
           hostPath:
-            path: /dev/mountpoint-s3-csi
+            path: /opt/mountpoint-s3-csi/bin
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:

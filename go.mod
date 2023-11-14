@@ -11,7 +11,6 @@ require (
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.27.6
 	github.com/stretchr/testify v1.8.2
-	github.com/opencontainers/selinux v1.11.0
 	google.golang.org/grpc v1.59.0
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/mount-utils v0.28.2

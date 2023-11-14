@@ -19,7 +19,6 @@ package driver
 import (
 	"context"
 	"net"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -53,14 +52,8 @@ type Driver struct {
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v", driverVersion, gitCommit, buildDate, nodeID)
-	// check Mountpoint version
-	cmd := exec.Command(MountS3Path(), "--version")
-	osMpVersion, err := cmd.CombinedOutput()
-	if err != nil {
-		klog.Fatal(err)
-	}
-	klog.Infof("Mountpoint version: %s", osMpVersion)
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v",
+		driverVersion, gitCommit, buildDate, nodeID, mpVersion)
 
 	mounter, err := NewS3Mounter(mpVersion)
 	if err != nil {

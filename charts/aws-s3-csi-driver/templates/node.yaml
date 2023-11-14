@@ -66,7 +66,7 @@ spec:
               value: /host/dev/ptmx
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
-              value: /dev/mountpoint-s3-csi/mount-s3
+              value: /opt/mountpoint-s3-csi/bin/mount-s3
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -108,12 +108,6 @@ spec:
             timeoutSeconds: 3
             periodSeconds: 2
             failureThreshold: 5
-          securityContext:
-            seLinuxOptions:
-              user: system_u
-              type: super_t
-              role: system_r
-              level: s0
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
           imagePullPolicy: IfNotPresent
@@ -158,7 +152,7 @@ spec:
             type: Directory
         - name: mp-install
           hostPath:
-            path: /dev/mountpoint-s3-csi
+            path: /opt/mountpoint-s3-csi/bin/
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:

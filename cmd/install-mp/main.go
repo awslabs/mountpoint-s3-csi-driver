@@ -6,23 +6,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-
-	"github.com/opencontainers/selinux/go-selinux"
 )
 
 const (
 	binDirKey     = "MOUNTPOINT_BIN_DIR"
 	installDirKey = "MOUNTPOINT_INSTALL_DIR"
-	// SELinux labels to set on the installed binaries. The installer will set the writable
-	// label on the old binaries, move the new versions on top of them, then set the executable
-	// label on the new binaries.
-	seLinuxWritableKey   = "SE_LINUX_WRITABLE_LABEL"
-	seLinuxExecutableKey = "SE_LINUX_EXECUTABLE_LABEL"
 )
 
-// Copies files from a directory to a new directory and sets SELinux labels on them, basically:
-// $ cp $SOURCE_DIR/* $DESTDIR/ && chcon -R $SE_LINUX_LABEL $MOUNTPOINT_INSTALL_DIR/*
-// Written as a go program to avoid bash, cp, and selinux dependencies in the container.
+// Copies files from a directory to a new directory
+// $ cp $SOURCE_DIR/* $DESTDIR/
+// Written as a go program to avoid bash and cp dependencies in the container.
 // Does not handle nested directories or anything beyond the simple install.
 func main() {
 	binDir := os.Getenv(binDirKey)
@@ -31,18 +24,13 @@ func main() {
 		log.Fatalf("Missing environment variable, %s and %s required", binDirKey, installDirKey)
 	}
 
-	seLinuxWritableLabel := os.Getenv(seLinuxWritableKey)
-	seLinuxExecutableLabel := os.Getenv(seLinuxExecutableKey)
-
-	err := installFiles(binDir, installDir, seLinuxWritableLabel, seLinuxExecutableLabel)
+	err := installFiles(binDir, installDir)
 	if err != nil {
 		log.Fatalf("Failed install binDir %s installDir %s: %v", binDir, installDir, err)
 	}
 }
 
-func installFiles(
-	binDir string, installDir string, seLinuxWritableLabel string,
-	seLinuxExecutableLabel string) error {
+func installFiles(binDir string, installDir string) error {
 
 	sd, err := os.Open(binDir)
 	if err != nil {
@@ -55,7 +43,6 @@ func installFiles(
 		return fmt.Errorf("Failed to read source directory: %w", err)
 	}
 
-	seLinuxEnabled := seLinuxWritableLabel != "" && seLinuxExecutableLabel != ""
 	for _, name := range entries {
 		log.Printf("Copying file %s\n", name)
 		destFile := filepath.Join(installDir, name)
@@ -65,22 +52,6 @@ func installFiles(
 		err = copyFile(destFileTmp, filepath.Join(binDir, name))
 		if err != nil {
 			return fmt.Errorf("Failed to copy file %s: %w", name, err)
-		}
-
-		if seLinuxEnabled {
-			err = selinux.SetFileLabel(destFile, seLinuxWritableLabel)
-			if err != nil {
-				log.Printf("Ignoring error resetting SELinux label on %s: %v", name, err)
-			}
-			n := name // Copy so we don't capture the loop var
-			defer func() {
-				// Set these in a defer to ensure the binaries remain executable
-				log.Printf("Setting label %s -- %s", seLinuxExecutableLabel, n)
-				err = selinux.SetFileLabel(destFile, seLinuxExecutableLabel)
-				if err != nil {
-					log.Printf("Failed to set SELinux label on %s: %v", n, err)
-				}
-			}()
 		}
 
 		err = os.Rename(destFileTmp, destFile)
