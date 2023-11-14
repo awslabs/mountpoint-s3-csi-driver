@@ -166,6 +166,13 @@ function update_kubeconfig() {
   fi
 }
 
+function e2e_cleanup() {
+  for ns in $($KUBECTL_BIN get namespaces -o custom-columns=":metadata.name" --kubeconfig "${KUBECONFIG}" | grep -E "^aws-s3-csi-e2e-.*|^volume-.*"); do
+    $KUBECTL_BIN delete all --all -n $ns --timeout=2m --kubeconfig "${KUBECONFIG}"
+    $KUBECTL_BIN delete namespace $ns --timeout=2m --kubeconfig "${KUBECONFIG}"
+  done
+}
+
 if [[ "${ACTION}" == "install_tools" ]]; then
   install_tools
 elif [[ "${ACTION}" == "create_cluster" ]]; then
@@ -190,7 +197,9 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
     "${KUBECONFIG}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
+elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
+  e2e_cleanup
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
 fi

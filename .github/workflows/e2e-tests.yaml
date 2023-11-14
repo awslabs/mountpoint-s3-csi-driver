@@ -27,7 +27,7 @@ jobs:
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     strategy:
       matrix:
-        cluster-type: ["kops"]
+        cluster-type: ["kops", "eksctl"]
         arch: ["x86", "arm"]
     runs-on: ubuntu-latest
     permissions:
@@ -89,6 +89,14 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/run.sh
+      - name: Pre e2e cleanup
+        if: matrix.cluster-type == 'eksctl'
+        run: |
+          export ACTION=e2e_cleanup
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/run.sh
       - name: Run E2E Tests
         run: |
           cd tests/e2e-kubernetes
@@ -98,6 +106,14 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
           ./run.sh
+      - name: Post e2e cleanup
+        if: always() && matrix.cluster-type == 'eksctl'
+        run: |
+          export ACTION=e2e_cleanup
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/run.sh
       - name: Uninstall the driver
         if: always()
         run: |

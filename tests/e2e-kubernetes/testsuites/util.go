@@ -19,6 +19,8 @@ import (
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 )
 
+const NamespacePrefix = "aws-s3-csi-e2e-"
+
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {
 	binData := make([]byte, len)
