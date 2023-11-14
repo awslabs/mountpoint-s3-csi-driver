@@ -11,7 +11,6 @@ import (
 	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	systemd "github.com/coreos/go-systemd/v22/dbus"
-	"github.com/coreos/go-systemd/v22/unit"
 	dbus "github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 )
@@ -19,7 +18,7 @@ import (
 var (
 	testExe         = "/usr/bin/testmount"
 	testTag         = "1.0.0-abcd"
-	testServiceName = unit.UnitNamePathEscape("testmount-1.0.0-abcd.service")
+	testServiceName = "testmount-1.0.0-abcd.service"
 )
 
 type systemRunnerTestEnv struct {
@@ -176,7 +175,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, testExe, testTag, "", env, args)
+	out, err := runner.Run(ctx, testExe, testTag, "forking", env, args)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
