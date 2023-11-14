@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	sourceDirKey  = "MOUNTPOINT_BIN_DIR"
+	binDirKey  = "MOUNTPOINT_BIN_DIR"
 	installDirKey = "MOUNTPOINT_INSTALL_DIR"
 	// SELinux labels to set on the installed binaries. The installer will set the writable
 	// label on the old binaries, move the new versions on top of them, then set the executable
@@ -25,26 +25,26 @@ const (
 // Written as a go program to avoid bash, cp, and selinux dependencies in the container.
 // Does not handle nested directories or anything beyond the simple install.
 func main() {
-	sourceDir := os.Getenv(sourceDirKey)
+	binDir := os.Getenv(binDirKey)
 	installDir := os.Getenv(installDirKey)
-	if sourceDir == "" || installDir == "" {
-		log.Fatalf("Missing environment variable, %s and %s required", sourceDirKey, installDirKey)
+	if binDir == "" || installDir == "" {
+		log.Fatalf("Missing environment variable, %s and %s required", binDirKey, installDirKey)
 	}
 
 	seLinuxWritableLabel := os.Getenv(seLinuxWritableKey)
 	seLinuxExecutableLabel := os.Getenv(seLinuxExecutableKey)
 
-	err := installFiles(sourceDir, installDir, seLinuxWritableLabel, seLinuxExecutableLabel)
+	err := installFiles(binDir, installDir, seLinuxWritableLabel, seLinuxExecutableLabel)
 	if err != nil {
-		log.Fatalf("Failed install sourceDir %s installDir %s: %v", sourceDir, installDir, err)
+		log.Fatalf("Failed install binDir %s installDir %s: %v", binDir, installDir, err)
 	}
 }
 
 func installFiles(
-	sourceDir string, installDir string, seLinuxWritableLabel string,
+	binDir string, installDir string, seLinuxWritableLabel string,
 	seLinuxExecutableLabel string) error {
 
-	sd, err := os.Open(sourceDir)
+	sd, err := os.Open(binDir)
 	if err != nil {
 		return fmt.Errorf("Failed to open source directory: %w", err)
 	}
@@ -62,7 +62,7 @@ func installFiles(
 		destFileTmp := destFile + ".tmp"
 
 		// First copy to a temporary location then rename to handle replacing running binaries
-		err = copyFile(destFileTmp, filepath.Join(sourceDir, name))
+		err = copyFile(destFileTmp, filepath.Join(binDir, name))
 		if err != nil {
 			return fmt.Errorf("Failed to copy file %s: %w", name, err)
 		}
