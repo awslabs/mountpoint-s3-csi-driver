@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	binDirKey  = "MOUNTPOINT_BIN_DIR"
+	binDirKey     = "MOUNTPOINT_BIN_DIR"
 	installDirKey = "MOUNTPOINT_INSTALL_DIR"
 	// SELinux labels to set on the installed binaries. The installer will set the writable
 	// label on the old binaries, move the new versions on top of them, then set the executable
