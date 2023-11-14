@@ -1,21 +1,21 @@
-# Source: aws-s3-csi-driver/templates/node.yaml
+# Source: aws-mountpoint-s3-csi-driver/templates/node.yaml
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: s3-csi-node
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aws-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
       app: s3-csi-node
-      {{- include "aws-s3-csi-driver.selectorLabels" . | nindent 6 }}
+      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         app: s3-csi-node
-        {{- include "aws-s3-csi-driver.labels" . | nindent 8 }}
+        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
@@ -106,7 +106,7 @@ spec:
             failureThreshold: 5
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -135,7 +135,7 @@ spec:
               mountPath: /registration
         - name: liveness-probe
           image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
           args:
             - --csi-address=/csi/csi.sock
           volumeMounts:

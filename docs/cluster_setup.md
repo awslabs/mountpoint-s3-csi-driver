@@ -93,9 +93,9 @@ kubectl rollout restart daemonset s3-csi-node -n kube-system
 
 ### Helm
 [IN DEVELOPMENT MODE] Change the image reference that you're deploying the driver image to to your personal private ECR repo in the values.yaml file.
-Install the aws-s3-csi-driver
+Install the aws-mountpoint-s3-csi-driver
 ```
-helm upgrade --install aws-s3-csi-driver --namespace kube-system ./charts/aws-s3-csi-driver --values ./charts/aws-s3-csi-driver/values.yaml
+helm upgrade --install aws-mountpoint-s3-csi-driver --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values ./charts/aws-mountpoint-s3-csi-driver/values.yaml
 ```
 
 ### Verifying installation
@@ -140,7 +140,7 @@ kind: ServiceAccount
 metadata:
   name: s3-csi-driver-sa
   labels:
-    app.kubernetes.io/name: aws-s3-csi-driver
+    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
     app.kubernetes.io/managed-by: eksctl
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::151381207180:role/AmazonS3CSIDriverFullAccess # CHANGE THIS ARN
@@ -149,6 +149,6 @@ metadata:
 ### Helm
 Uninstall the driver
 ```
-helm uninstall aws-s3-csi-driver --namespace kube-system
+helm uninstall aws-mountpoint-s3-csi-driver --namespace kube-system
 ```
 Note: This will not delete the service account.
