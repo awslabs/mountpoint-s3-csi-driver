@@ -44,10 +44,6 @@ spec:
           env:
             - name: MOUNTPOINT_INSTALL_DIR
               value: /target
-            - name: SE_LINUX_EXECUTABLE_LABEL
-              value: system_u:object_r:os_t:s0
-            - name: SE_LINUX_WRITABLE_LABEL
-              value: system_u:object_r:any_t:s0
           volumeMounts:
             - name: mp-install
               mountPath: /target
