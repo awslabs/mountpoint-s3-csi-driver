@@ -15,12 +15,12 @@ func TestUserAgentPrefix(t *testing.T) {
 		{
 			name:     "success: add user agent prefix to mount call",
 			input:    []string{"--read-only"},
-			expected: []string{"--read-only", userAgentPrefix + " " + csiDriverPrefix + GetVersion().DriverVersion},
+			expected: []string{"--read-only", userAgentPrefix + "=" + csiDriverPrefix + GetVersion().DriverVersion},
 		},
 		{
 			name:     "success: replacing customer user agent prefix",
 			input:    []string{"--read-only", "--user-agent-prefix testing"},
-			expected: []string{"--read-only", userAgentPrefix + " " + csiDriverPrefix + GetVersion().DriverVersion},
+			expected: []string{"--read-only", userAgentPrefix + "=" + csiDriverPrefix + GetVersion().DriverVersion},
 		},
 	}
 	for _, tc := range testCases {
