@@ -125,5 +125,5 @@ func addUserAgentToOptions(options []string) []string {
 		}
 	}
 	// add the hard coded S3 CSI driver user agent string
-	return append(options, userAgentPrefix+" "+csiDriverPrefix+GetVersion().DriverVersion)
+	return append(options, userAgentPrefix+"="+csiDriverPrefix+GetVersion().DriverVersion)
 }
