@@ -60,7 +60,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.Infof("Mountpoint version: %v", osMpVersion)
+	klog.Infof("Mountpoint version: %s", osMpVersion)
 
 	if err != nil {
 		klog.Fatal(err)
