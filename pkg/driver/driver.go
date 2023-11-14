@@ -62,10 +62,6 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 	}
 	klog.Infof("Mountpoint version: %s", osMpVersion)
 
-	if err != nil {
-		klog.Fatal(err)
-	}
-
 	mounter, err := newS3Mounter(mpVersion)
 	if err != nil {
 		klog.Fatalln(err)
