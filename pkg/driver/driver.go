@@ -55,7 +55,7 @@ type Driver struct {
 func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v", driverVersion, gitCommit, buildDate, nodeID)
 	// check Mountpoint version
-	cmd := exec.Command(mountS3Path, "--version")
+	cmd := exec.Command(MountS3Path(), "--version")
 	osMpVersion, err := cmd.CombinedOutput()
 	if err != nil {
 		klog.Fatal(err)

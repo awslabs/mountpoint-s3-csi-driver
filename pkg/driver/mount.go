@@ -59,14 +59,18 @@ type S3Mounter struct {
 	mountS3Path string
 }
 
+func MountS3Path() string {
+	mountS3Path := os.Getenv(MountS3PathEnv)
+	if mountS3Path == "" {
+		mountS3Path = defaultMountS3Path
+	}
+	return mountS3Path
+}
+
 func NewS3Mounter(mpVersion string) (*S3Mounter, error) {
 	ctx := context.Background()
 	connFactory := func(ctx context.Context) (SystemdConnection, error) {
 		return systemd.NewSystemConnectionContext(ctx)
-	}
-	mountS3Path := os.Getenv(MountS3PathEnv)
-	if mountS3Path == "" {
-		mountS3Path = defaultMountS3Path
 	}
 	return &S3Mounter{
 		Interface:   mount.New(""),
@@ -74,7 +78,7 @@ func NewS3Mounter(mpVersion string) (*S3Mounter, error) {
 		runner:      NewSystemdRunner(),
 		connFactory: connFactory,
 		mpVersion:   mpVersion,
-		mountS3Path: mountS3Path,
+		mountS3Path: MountS3Path(),
 	}, nil
 }
 
