@@ -5,15 +5,19 @@ on:
     # Sequence of patterns matched against refs/tags
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+      - "test*" # Only for testing, remove afterwards
 
 # This workflow copies image from testing private repository to:
 # 1) public repository
-# 2) private ARS source repository (TODO)
+# 2) private ARS source repository
+# 3) public repository (TODO)
 env:
-  AWS_REGION : "us-east-1"
+  AWS_SRC_REGION : "us-east-1" # this is where our testing repo exists
+  AWS_DEST_REGION : "us-west-2" # this is where our prod repos exist
   COMMIT_ID: ${{ github.sha }}
   GIT_TAG: ${{ github.ref_name }}
   IMAGE_NAME: "s3-csi-driver"
+  ARS_REGISTRY: "211164257204.dkr.ecr.us-west-2.amazonaws.com/eks/aws-s3-csi-driver"
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -28,13 +32,15 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v1
+      - name: Set up crane
+        uses: imjasonh/setup-crane@v0.1
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
       - name: Configure AWS Credentials from Test acccount
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ env.AWS_SRC_REGION }}
       - name: Login to Amazon ECR test
         id: login-ecr-test
         uses: aws-actions/amazon-ecr-login@v2
@@ -42,14 +48,10 @@ jobs:
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: arn:aws:iam::211164257204:role/S3CSIDriverPrivateImagePublisherRole
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ env.AWS_DEST_REGION }}
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
         uses: aws-actions/amazon-ecr-login@v2
       - name: Promote image
         run: |
-          export IMAGE_TO_PROMOTE=${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          export RELEASE_IMAGE=${{ steps.login-ecr-prod.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}
-          docker pull ${IMAGE_TO_PROMOTE}
-          docker tag ${IMAGE_TO_PROMOTE} ${RELEASE_IMAGE}
-          docker push ${RELEASE_IMAGE}
+          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.ARS_REGISTRY }}:${{ env.GIT_TAG }}
