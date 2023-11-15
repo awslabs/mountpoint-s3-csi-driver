@@ -107,7 +107,7 @@ jobs:
           export ARCH=${{ matrix.arch }}
           ./run.sh
       - name: Post e2e cleanup
-        if: always() && matrix.cluster-type == 'eksctl'
+        if: always()
         run: |
           export ACTION=e2e_cleanup
           export AWS_REGION=${{ env.AWS_REGION }}

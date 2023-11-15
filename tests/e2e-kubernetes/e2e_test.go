@@ -21,6 +21,7 @@ func init() {
 
 	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
+	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.Parse()
 }
 

@@ -19,6 +19,7 @@ import (
 var (
 	CommitId     string
 	BucketRegion string // assumed to be the same as k8s cluster's region
+	BucketPrefix string
 )
 
 type s3Driver struct {
@@ -76,7 +77,7 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 	if volumeType != framework.PreprovisionedPV {
 		f.Failf("Unsupported volType: %v is specified", volumeType)
 	}
-	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("e2e-kubernetes-%s-", CommitId))
+	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-e2e-kubernetes-%s-", BucketPrefix, CommitId))
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}

@@ -19,7 +19,7 @@ function helm_uninstall_driver() {
   KUBECTL_BIN=${2}
   RELEASE_NAME=${3}
   KUBECONFIG=${4}
-  if [[ $($HELM_BIN list -A --kubeconfig $KUBECONFIG | grep $RELEASE_NAME) == *deployed* ]]; then
+  if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
     $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
     $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   else
@@ -51,4 +51,18 @@ function helm_install_driver() {
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
+}
+
+function driver_installed() {
+  HELM_BIN=${1}
+  RELEASE_NAME=${2}
+  KUBECONFIG=${3}
+  set +e
+  if [[ $($HELM_BIN list -A --kubeconfig $KUBECONFIG | grep $RELEASE_NAME) == *deployed* ]]; then
+    set -e
+    return 0
+  else
+    set -e
+    return 1
+  fi
 }
