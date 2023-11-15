@@ -170,7 +170,7 @@ type Pts interface {
 // Real os implementation of the Pts interface
 type OsPts struct{}
 
-// Create a new pseduo terminal slave (pts). Returns a ReaderCloser for the master device and a pts number
+// Create a new pseduo terminal (pts). Returns a ReaderCloser for the master device and a pts number
 func (p *OsPts) NewPts() (io.ReadCloser, int, error) {
 	ptmxPath := os.Getenv("PTMX_PATH")
 	if ptmxPath == "" {
