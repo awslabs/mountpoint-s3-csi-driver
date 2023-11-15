@@ -1,0 +1,16 @@
+apiVersion: v2
+name: aws-mountpoint-s3-csi-driver
+description: A Helm chart for installing the Mountpoint for Amazon S3 CSI Driver. This is a CSI driver that uses Mountpoint for S3 to mount S3 buckets as a file system.
+version: 0.1.0
+kubeVersion: ">=1.23.0-0"
+home: https://github.com/awslabs/mountpoint-s3-csi-driver
+sources:
+  - https://github.com/awslabs/mountpoint-s3-csi-driver
+keywords:
+  - aws
+  - mountpoint
+  - s3
+  - csi
+maintainers:
+  - name: AWS S3
+    url: https://github.com/awslabs/mountpoint-s3-csi-driver

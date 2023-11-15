@@ -41,8 +41,8 @@ function helm_install_driver() {
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG"
-  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-s3-csi-driver --values \
-    ./charts/aws-s3-csi-driver/values.yaml \
+  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
+    ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \

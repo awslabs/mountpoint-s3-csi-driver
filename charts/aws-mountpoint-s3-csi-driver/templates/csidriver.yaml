@@ -3,6 +3,6 @@ kind: CSIDriver
 metadata:
   name: s3.csi.aws.com
   labels:
-    {{- include "aws-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   attachRequired: false
