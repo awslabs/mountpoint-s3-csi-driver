@@ -5,7 +5,6 @@ on:
     # Sequence of patterns matched against refs/tags
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
-      - "test*" # Only for testing, remove afterwards
 
 # This workflow copies image from testing private repository to:
 # 1) public repository
