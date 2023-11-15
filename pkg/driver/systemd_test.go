@@ -11,7 +11,6 @@ import (
 	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
 	systemd "github.com/coreos/go-systemd/v22/dbus"
-	"github.com/coreos/go-systemd/v22/unit"
 	dbus "github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 )
@@ -19,7 +18,7 @@ import (
 var (
 	testExe         = "/usr/bin/testmount"
 	testTag         = "1.0.0-abcd"
-	testServiceName = unit.UnitNamePathEscape("testmount-1.0.0-abcd.service")
+	testServiceName = "testmount-1.0.0-abcd.service"
 )
 
 type systemRunnerTestEnv struct {
@@ -49,7 +48,7 @@ func TestSystemdRunFailedConnection(t *testing.T) {
 	runner := &driver.SystemdRunner{
 		Connector: mockConnector,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -72,7 +71,7 @@ func TestSystemdRunNewPtsFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -98,7 +97,7 @@ func TestSystemdStartUnitFailure(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -126,7 +125,7 @@ func TestSystemdRunCanceledContext(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, "", "", nil, nil)
+	out, err := runner.Run(ctx, "", "", "", nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error on connection failure")
 	}
@@ -158,8 +157,8 @@ func TestSystemdRunSuccess(t *testing.T) {
 		systemd.PropExecStart(append([]string{testExe}, args...), true),
 		{Name: "Environment", Value: dbus.MakeVariant(env)},
 	}
-	mockConnection.EXPECT().StartTransientUnitContext(
-		gomock.Eq(ctx), gomock.Any(), gomock.Eq("fail"), gomock.Eq(expectedProps), gomock.Any()).
+	mockConnection.EXPECT().StartTransientUnitContext(gomock.Eq(ctx), gomock.Any(),
+		gomock.Eq("fail"), gomock.Eq(expectedProps), gomock.Any()).
 		Do(func(_ context.Context, name string, _ string, _ []systemd.Property, ch chan<- string) {
 			go func() { ch <- "done" }()
 		}).Return(0, nil)
@@ -176,7 +175,7 @@ func TestSystemdRunSuccess(t *testing.T) {
 		Connector: mockConnector,
 		Pts:       mockPts,
 	}
-	out, err := runner.Run(ctx, testExe, testTag, env, args)
+	out, err := runner.Run(ctx, testExe, testTag, "forking", env, args)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

@@ -31,14 +31,17 @@ spec:
           image: csi-driver
           imagePullPolicy: IfNotPresent
           command:
-            - "/install-mp.sh"
+            - "/bin/install-mp"
+          env:
+            - name: MOUNTPOINT_INSTALL_DIR
+              value: /target
           volumeMounts:
-            - name: plugin-dir
-              mountPath: /csi
+            - name: mp-install
+              mountPath: /target
       containers:
         - name: s3-plugin
           securityContext:
-            privileged: true
+            privileged: false
           image: csi-driver
           imagePullPolicy: IfNotPresent
           args:
@@ -48,6 +51,11 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:/csi/csi.sock
+            - name: PTMX_PATH
+              value: /host/dev/ptmx
+            # mount-s3 runs in systemd context, so this is relative to the host
+            - name: MOUNT_S3_PATH
+              value: /opt/mountpoint-s3-csi/bin/mount-s3
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -67,13 +75,14 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
-              mountPropagation: "Bidirectional"
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
-              mountPath: /hostdev
+              mountPath: /host/dev
+            - name: proc-mounts
+              mountPath: /host/proc/mounts
           ports:
             - containerPort: 9810
               name: healthz
@@ -120,6 +129,14 @@ spec:
           hostPath:
             path: /dev/
             type: Directory
+        - name: mp-install
+          hostPath:
+            path: /opt/mountpoint-s3-csi/bin
+            type: DirectoryOrCreate
+        - name: proc-mounts
+          hostPath:
+            path: /proc/mounts
+            type: File
         - name: systemd-bus
           hostPath:
             path: /run/systemd/private

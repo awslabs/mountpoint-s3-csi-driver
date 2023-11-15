@@ -56,14 +56,15 @@ TARGETARCH=${TARGETARCH} make bin
 FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
+ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
 
 # MP Installer
 COPY --from=mp_builder /mountpoint-s3 /mountpoint-s3
 COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
 COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
-COPY ./cmd/install-mp.sh /install-mp.sh
 
 # Install driver
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
 
 ENTRYPOINT ["/bin/aws-s3-csi-driver"]
