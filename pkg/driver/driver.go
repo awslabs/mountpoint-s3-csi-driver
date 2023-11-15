@@ -18,7 +18,11 @@ package driver
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"io/fs"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -29,7 +33,9 @@ import (
 )
 
 const (
-	driverName = "s3.csi.aws.com"
+	driverName          = "s3.csi.aws.com"
+	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
+	roleArnEnv          = "AWS_ROLE_ARN"
 )
 
 var (
@@ -69,6 +75,14 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 
 func (d *Driver) Run() error {
 	printRunningMountpoints()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tokenFile := os.Getenv(webIdentityTokenEnv)
+	if tokenFile != "" {
+		klog.Errorf("Found AWS_WEB_IDENTITY_TOKEN_FILE, syncing token")
+		go tokenFileTender(ctx, tokenFile, "/csi/token")
+	}
 
 	scheme, addr, err := util.ParseEndpoint(d.Endpoint)
 	if err != nil {
@@ -124,4 +138,51 @@ func printRunningMountpoints() {
 			klog.Infof("Existing mount-s3 systemd service: %v", status)
 		}
 	}
+}
+
+func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {
+	for {
+		timer := time.After(10 * time.Second)
+		err := ReplaceFile(destPath, sourcePath, 0600)
+		if err != nil {
+			klog.Errorf("Failed to sync AWS web token file: %v", err)
+		}
+		select {
+		case <-timer:
+			continue
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// replaceFile safely replaces a file with a new file by copying to a temporary location first
+// then renaming.
+func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
+	tmpDest := destPath + ".tmp"
+
+	sourceFile, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.OpenFile(tmpDest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	buf := make([]byte, 64*1024)
+	_, err = io.CopyBuffer(destFile, sourceFile, buf)
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(tmpDest, destPath)
+	if err != nil {
+		return fmt.Errorf("Failed to rename file %s: %w", destPath, err)
+	}
+
+	return nil
 }

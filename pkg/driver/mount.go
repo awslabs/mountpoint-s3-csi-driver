@@ -35,11 +35,15 @@ import (
 const (
 	keyIdEnv           = "AWS_ACCESS_KEY_ID"
 	accessKeyEnv       = "AWS_SECRET_ACCESS_KEY"
+	regionEnv          = "AWS_REGION"
+	defaultRegionEnv   = "AWS_DEFAULT_REGION"
+	stsEndpointsEnv    = "AWS_STS_REGIONAL_ENDPOINTS"
 	MountS3PathEnv     = "MOUNT_S3_PATH"
 	defaultMountS3Path = "/usr/bin/mount-s3"
 	procMounts         = "/host/proc/mounts"
 	userAgentPrefix    = "--user-agent-prefix"
 	csiDriverPrefix    = "s3-csi-driver/"
+	hostTokenPath      = "/var/lib/kubelet/plugins/s3.csi.aws.com/token"
 )
 
 // Mounter is an interface for mount operations
@@ -130,7 +134,7 @@ func (m *S3Mounter) PathExists(path string) (bool, error) {
 func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
 	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
-	env := accessKeysEnv()
+	env := passthroughEnv()
 
 	output, err := m.runner.Run(timeoutCtx, m.mountS3Path,
 		m.mpVersion+"-"+uuid.New().String(), "forking", env,
@@ -172,7 +176,7 @@ func (m *S3Mounter) Unmount(target string) error {
 	return nil
 }
 
-func accessKeysEnv() []string {
+func passthroughEnv() []string {
 	env := []string{}
 
 	keyId := os.Getenv(keyIdEnv)
@@ -181,6 +185,25 @@ func accessKeysEnv() []string {
 		env = append(env, keyIdEnv+"="+keyId)
 		env = append(env, accessKeyEnv+"="+accessKey)
 	}
+	webIdentityFile := os.Getenv(webIdentityTokenEnv)
+	awsRoleArn := os.Getenv(roleArnEnv)
+	if webIdentityFile != "" {
+		env = append(env, webIdentityTokenEnv+"="+hostTokenPath)
+		env = append(env, roleArnEnv+"="+awsRoleArn)
+	}
+	region := os.Getenv(regionEnv)
+	if region != "" {
+		env = append(env, regionEnv+"="+region)
+	}
+	defaultRegion := os.Getenv(defaultRegionEnv)
+	if defaultRegion != "" {
+		env = append(env, defaultRegionEnv+"="+defaultRegion)
+	}
+	stsEndpoints := os.Getenv(stsEndpointsEnv)
+	if stsEndpoints != "" {
+		env = append(env, stsEndpointsEnv+"="+stsEndpoints)
+	}
+
 	return env
 }
 

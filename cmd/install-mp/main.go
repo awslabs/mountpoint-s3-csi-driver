@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 )
 
 const (
@@ -46,41 +47,13 @@ func installFiles(binDir string, installDir string) error {
 	for _, name := range entries {
 		log.Printf("Copying file %s\n", name)
 		destFile := filepath.Join(installDir, name)
-		destFileTmp := destFile + ".tmp"
 
 		// First copy to a temporary location then rename to handle replacing running binaries
-		err = copyFile(destFileTmp, filepath.Join(binDir, name))
+		err = driver.ReplaceFile(destFile, filepath.Join(binDir, name), 0755)
 		if err != nil {
 			return fmt.Errorf("Failed to copy file %s: %w", name, err)
 		}
 
-		err = os.Rename(destFileTmp, destFile)
-		if err != nil {
-			return fmt.Errorf("Failed to rename file %s: %w", name, err)
-		}
 	}
-	return nil
-}
-
-func copyFile(destPath string, sourcePath string) error {
-	sourceFile, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	buf := make([]byte, 64*1024)
-
-	_, err = io.CopyBuffer(destFile, sourceFile, buf)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
