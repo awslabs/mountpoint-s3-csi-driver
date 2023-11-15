@@ -8,8 +8,9 @@ spec:
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
   mountOptions:
-    - allow-delete
-    - region eu-west-1
+    - uid=1000
+    - gid=2000
+    - allow-other
   csi:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver # bucket name, required
@@ -32,6 +33,9 @@ kind: Pod
 metadata:
   name: s3-app
 spec:
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 2000
   containers:
     - name: app
       image: centos

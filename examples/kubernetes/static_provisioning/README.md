@@ -1,6 +1,10 @@
 # Static Provisioning Example
 This example shows how to make a static provisioned Mountpoint for S3 persistent volume (PV) mounted inside container.
 
+## Examples in this folder
+- `static_provisioning.yaml` - spawning a pod which creates a file with name as the current date/time
+- `non_root.yaml` - same as above, but the pod is spawned as non-root (uid `1000`, gid `2000`)
+
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
 > Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html).
@@ -16,7 +20,7 @@ kubectl apply -f examples/kubernetes/static_provisioning/static_provisioning.yam
 
 ## Check the pod is running
 ```
-kubectl get pod fc-app
+kubectl get pod s3-app
 ```
 
 ## [Optional] Check fc-app created a file in s3

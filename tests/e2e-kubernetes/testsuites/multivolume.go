@@ -18,10 +18,7 @@ package custom_testsuites
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"math/rand"
 	"path/filepath"
 	"time"
 
@@ -30,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 )
@@ -120,7 +116,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		checkReadFromPath(f, pods[0], pod2WritesTo, toWrite, seed)
 	}
 
-	testConcurrentAccessToSingleVolume := func(ctx context.Context, pvcs []*v1.PersistentVolumeClaim, seed int64, doWrite bool) {
+	testOnePodTwoVolumes := func(ctx context.Context, pvcs []*v1.PersistentVolumeClaim, seed int64, doWrite bool) {
 		node := l.config.ClientNodeSelection
 		ginkgo.By(fmt.Sprintf("Creating pod with a volume on %+v", node))
 		pod, err := e2epod.CreatePod(ctx, f.ClientSet, f.Namespace.Name, nil, pvcs, admissionapi.LevelBaseline, "")
@@ -183,35 +179,8 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		}
 		seed := time.Now().UTC().UnixNano()
 		ginkgo.By("Checking read/write works with empty buckets")
-		testConcurrentAccessToSingleVolume(ctx, pvcs, seed, true /* doWrite */)
+		testOnePodTwoVolumes(ctx, pvcs, seed, true /* doWrite */)
 		ginkgo.By("Checking read works from non-empty buckets after pod recreation")
-		testConcurrentAccessToSingleVolume(ctx, pvcs, seed, false /* doWrite */)
+		testOnePodTwoVolumes(ctx, pvcs, seed, false /* doWrite */)
 	})
-}
-
-// genBinDataFromSeed generate binData with random seed
-func genBinDataFromSeed(len int, seed int64) []byte {
-	binData := make([]byte, len)
-	randLocal := rand.New(rand.NewSource(seed))
-
-	_, err := randLocal.Read(binData)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
-
-	return binData
-}
-
-func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
-	data := genBinDataFromSeed(toWrite, seed)
-	encoded := base64.StdEncoding.EncodeToString(data)
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite))
-	ginkgo.By(fmt.Sprintf("written data with sha: %x", sha256.Sum256(data)))
-}
-
-func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
-	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum", path, toWrite))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
 }
