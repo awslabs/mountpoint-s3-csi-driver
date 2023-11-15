@@ -19,7 +19,6 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-      hostPID: true
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
       tolerations:

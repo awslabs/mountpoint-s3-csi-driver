@@ -39,8 +39,6 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     gpg --verify mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz.asc && \
     mkdir -p /mountpoint-s3 && \
     tar -xvzf mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz -C /mountpoint-s3 && \
-    # strip debugging information to reduce binary size
-    strip --strip-debug /mountpoint-s3/bin/mount-s3 && \
     # set rpath for dynamic library loading
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
