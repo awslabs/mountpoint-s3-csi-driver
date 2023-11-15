@@ -44,6 +44,8 @@ jobs:
         uses: docker/setup-buildx-action@v2
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
+      - name: Set up crane
+        uses: imjasonh/setup-crane@v0.1
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -115,10 +117,10 @@ jobs:
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/run.sh
       - name: Promote image for release branch
-        if: ${{ startsWith(github.ref_name, 'release') && matrix.cluster-type == 'eksctl' }}
+        if: ${{ startsWith(github.ref_name, 'release') && matrix.cluster-type == 'kops' && matrix.arch == 'x86' }}
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
+          export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
           export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          docker tag ${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }} ${NEW_IMAGE_NAME}
-          docker push ${NEW_IMAGE_NAME}
+          crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
