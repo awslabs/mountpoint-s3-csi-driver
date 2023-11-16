@@ -1,4 +1,4 @@
-# Mountpoint for Amazon S3 CSI Driver [WIP]
+# Mountpoint for Amazon S3 CSI Driver
 
 ## Overview
 The [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) Container Storage Interface (CSI) Driver implements [CSI](https://github.com/container-storage-interface/spec/blob/master/spec.md) specification for container orchestrators (CO) to manage lifecycle of S3 filesystems. [S3](https://aws.amazon.com/s3/) iteslf is a cloud storage service and this CSI driver specifically uses Mountpoint to mount S3 as a filesystem.
@@ -7,10 +7,10 @@ The [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) Contain
 * **Static Provisioning** - Associate an externally-created S3 bucket with a [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
 * **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted. For Mountpoint for S3 specific options, take a look at the Mountpoint docs for [configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and [semantics](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md).
 
-## Container Images [WIP]
+## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v0.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v0.1.0                       |
+| v1.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.0.0                       |
 
 
 ## Releases
