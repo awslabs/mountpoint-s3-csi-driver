@@ -54,3 +54,18 @@ jobs:
       - name: Promote image
         run: |
           crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.ARS_REGISTRY }}:${{ env.GIT_TAG }}
+      - name: Create Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ${{ github.ref }}
+          body: |
+            Mountpoint for AWS S3 CSI Driver
+
+            ## CHANGELOG
+            See [CHANGELOG](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/CHANGELOG.md) for full list of changes
+          draft: true
+          prerelease: false

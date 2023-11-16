@@ -3,25 +3,20 @@
 # Declare variables to be passed into your templates.
 
 image:
-  # NOTE: Change this to personal ECR private repo until public one is created
   repository: <enter-registry-here>
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
 
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-
 node:
   resources: {}
   kubeletPath: /var/lib/kubelet
-  logLevel: 5
+  logLevel: 2
   containerSecurityContext:
     privileged: true
   serviceAccount:
     # Specifies whether a service account should be created
-    create: false
+    create: true
     name: s3-csi-driver-sa
 
 sidecars:
