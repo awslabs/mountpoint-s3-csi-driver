@@ -62,7 +62,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		l local
 	)
 
-	f := framework.NewFrameworkWithCustomTimeouts("multivolume", storageframework.GetDriverTimeouts(driver))
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"multivolume", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	cleanup := func(ctx context.Context) {
