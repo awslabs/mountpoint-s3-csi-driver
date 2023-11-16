@@ -167,12 +167,14 @@ function update_kubeconfig() {
 }
 
 function e2e_cleanup() {
+  set -e
   if driver_installed ${HELM_BIN} ${HELM_RELEASE_NAME} ${KUBECONFIG}; then
     for ns in $($KUBECTL_BIN get namespaces -o custom-columns=":metadata.name" --kubeconfig "${KUBECONFIG}" | grep -E "^aws-s3-csi-e2e-.*|^volume-.*"); do
       $KUBECTL_BIN delete all --all -n $ns --timeout=2m --kubeconfig "${KUBECONFIG}"
       $KUBECTL_BIN delete namespace $ns --timeout=2m --kubeconfig "${KUBECONFIG}"
     done
   fi
+  set +e
 
   for bucket in $(aws s3 ls --region ${REGION} | awk '{ print $3 }' | grep "^${CLUSTER_NAME}-e2e-kubernetes-.*"); do
     aws s3 rb "s3://${bucket}" --force --region ${REGION}
@@ -204,7 +206,7 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
-  e2e_cleanup
+  e2e_cleanup || true
 else
   echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
