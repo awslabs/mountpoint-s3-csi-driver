@@ -60,6 +60,7 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeId:         volumeId,
 					VolumeCapability: stdVolCap,
 					TargetPath:       targetPath,
+					VolumeContext:    map[string]string{"bucketName": volumeId},
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
@@ -88,7 +89,8 @@ func TestNodePublishVolume(t *testing.T) {
 							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
 						},
 					},
-					TargetPath: targetPath,
+					TargetPath:    targetPath,
+					VolumeContext: map[string]string{"bucketName": volumeId},
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
@@ -119,8 +121,9 @@ func TestNodePublishVolume(t *testing.T) {
 							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 						},
 					},
-					TargetPath: targetPath,
-					Readonly:   true,
+					TargetPath:    targetPath,
+					VolumeContext: map[string]string{"bucketName": volumeId},
+					Readonly:      true,
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
@@ -151,8 +154,9 @@ func TestNodePublishVolume(t *testing.T) {
 							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 						},
 					},
-					TargetPath: targetPath,
-					Readonly:   true,
+					VolumeContext: map[string]string{"bucketName": volumeId},
+					TargetPath:    targetPath,
+					Readonly:      true,
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
@@ -176,6 +180,7 @@ func TestNodePublishVolume(t *testing.T) {
 				req := &csi.NodePublishVolumeRequest{
 					VolumeCapability: stdVolCap,
 					TargetPath:       targetPath,
+					VolumeContext:    map[string]string{"bucketName": volumeId},
 				}
 
 				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
