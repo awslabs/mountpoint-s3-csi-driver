@@ -52,7 +52,10 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	source := volumeID
+	bucket, ok := req.GetVolumeContext()["bucketName"]
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
+	}
 
 	target := req.GetTargetPath()
 	if len(target) == 0 {
@@ -101,10 +104,10 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Errorf(codes.Internal, "Could not check if %q is mounted: %v", target, err)
 	}
 	if !mounted {
-		klog.V(5).Infof("NodePublishVolume: mounting %s at %s with options %v", source, target, mountpointArgs)
-		if err := d.Mounter.Mount(source, target, fstype, mountpointArgs); err != nil {
+		klog.V(5).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+		if err := d.Mounter.Mount(bucket, target, fstype, mountpointArgs); err != nil {
 			os.Remove(target)
-			return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", source, target, err)
+			return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 		}
 		klog.V(5).Infof("NodePublishVolume: %s was mounted", target)
 	}
