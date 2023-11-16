@@ -8,7 +8,7 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
 > Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html).
-- Bucket name (required): `PersistentVolume -> csi -> volumeHandle`
+- Bucket name (required): `PersistentVolume -> csi -> volumeAttributes -> bucketName`
 - Bucket region (if bucket and cluster are in different regions): `PersistentVolume -> csi -> mountOptions`
 - [Mountpoint configurations](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) can be added in the `mountOptions` of the Persistent Volume spec.
 

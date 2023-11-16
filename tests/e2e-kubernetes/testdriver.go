@@ -91,8 +91,9 @@ func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testV
 	volume, _ := testVolume.(*s3Volume)
 	return &v1.PersistentVolumeSource{
 		CSI: &v1.CSIPersistentVolumeSource{
-			Driver:       d.driverInfo.Name,
-			VolumeHandle: volume.bucketName,
+			Driver:           d.driverInfo.Name,
+			VolumeHandle:     volume.bucketName,
+			VolumeAttributes: map[string]string{"bucketName": volume.bucketName},
 		},
 	}, nil
 }
