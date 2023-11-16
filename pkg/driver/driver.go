@@ -80,7 +80,7 @@ func (d *Driver) Run() error {
 	defer cancel()
 	tokenFile := os.Getenv(webIdentityTokenEnv)
 	if tokenFile != "" {
-		klog.Errorf("Found AWS_WEB_IDENTITY_TOKEN_FILE, syncing token")
+		klog.Infof("Found AWS_WEB_IDENTITY_TOKEN_FILE, syncing token")
 		go tokenFileTender(ctx, tokenFile, "/csi/token")
 	}
 
@@ -145,7 +145,7 @@ func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {
 		timer := time.After(10 * time.Second)
 		err := ReplaceFile(destPath, sourcePath, 0600)
 		if err != nil {
-			klog.Errorf("Failed to sync AWS web token file: %v", err)
+			klog.Infof("Failed to sync AWS web token file: %v", err)
 		}
 		select {
 		case <-timer:
