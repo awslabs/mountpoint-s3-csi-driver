@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	fstype = "unused"
+	fstype     = "unused"
+	bucketName = "bucketName"
 )
 
 var (
@@ -52,7 +53,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	bucket, ok := req.GetVolumeContext()["bucketName"]
+	bucket, ok := req.GetVolumeContext()[bucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
