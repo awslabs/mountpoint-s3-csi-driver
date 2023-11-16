@@ -78,7 +78,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		mountpointArgs = append(mountpointArgs, "--read-only")
 	}
 
-	klog.V(5).Infof("NodePublishVolume: creating dir %s", target)
+	klog.V(4).Infof("NodePublishVolume: creating dir %s", target)
 	if err := d.Mounter.MakeDir(target); err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not create dir %q: %v", target, err)
 	}
@@ -105,12 +105,12 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Errorf(codes.Internal, "Could not check if %q is mounted: %v", target, err)
 	}
 	if !mounted {
-		klog.V(5).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+		klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
 		if err := d.Mounter.Mount(bucket, target, fstype, mountpointArgs); err != nil {
 			os.Remove(target)
 			return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 		}
-		klog.V(5).Infof("NodePublishVolume: %s was mounted", target)
+		klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
@@ -154,20 +154,20 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 
 	mounted, err := d.Mounter.IsMountPoint(target)
 	if err != nil && os.IsNotExist(err) {
-		klog.V(5).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	} else if err != nil && d.Mounter.IsCorruptedMnt(err) {
-		klog.V(5).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
 		mounted = true
 	} else if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
 	if !mounted {
-		klog.V(5).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", target)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
-	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
+	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
 	err = d.Mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)

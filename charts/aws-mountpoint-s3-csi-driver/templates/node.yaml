@@ -53,7 +53,7 @@ spec:
           args:
             - --endpoint=$(CSI_ENDPOINT)
             - --logtostderr
-            - --v=5
+            - --v={{ .Values.node.logLevel }}
           env:
             - name: CSI_ENDPOINT
               value: unix:/csi/csi.sock

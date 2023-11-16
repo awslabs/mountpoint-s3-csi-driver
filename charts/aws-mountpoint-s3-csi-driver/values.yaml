@@ -6,12 +6,12 @@ image:
   repository: <enter-registry-here>
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "1.0.0"
+  tag: "v1.0.0"
 
 node:
   resources: {}
   kubeletPath: /var/lib/kubelet
-  logLevel: 2
+  logLevel: 4
   containerSecurityContext:
     privileged: true
   serviceAccount:
