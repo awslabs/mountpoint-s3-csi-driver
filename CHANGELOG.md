@@ -1,6 +1,8 @@
-# v0.1.0alpha
-[Documentation](https://github.com/awslabs/aws-s3-csi-driver/blob/v0.0.1alpha/README.md)
+# v1.0.0
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.0.0/README.md)
 
 ### Notable changes
-* Add suppport for Static Provisioning with all-in-one pod implementation ([#2](https://github.com/awslabs/aws-s3-csi-driver/pull/2), [#4](https://github.com/awslabs/aws-s3-csi-driver/pull/4))
+* Initial release to support using [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) to mount S3 buckets as a persistent volume in your kubernetes cluster
+    * Mountpoint Version: 1.1.1
+* Add support for Static Provisioning ([#2](https://github.com/awslabs/aws-s3-csi-driver/pull/2), [#4](https://github.com/awslabs/aws-s3-csi-driver/pull/4))
 * Add helm install  ([#8](https://github.com/awslabs/aws-s3-csi-driver/pull/8))
