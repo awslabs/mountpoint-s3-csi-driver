@@ -14,6 +14,7 @@ import (
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	dbus "github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -95,6 +96,7 @@ func (sr *SystemdRunner) Run(ctx context.Context, cmd string, serviceTag string,
 
 	// Unit names must be unique in systemd, so include a tag
 	serviceName := filepath.Base(cmd) + "-" + serviceTag + ".service"
+	klog.V(4).Infof("Creating service to run cmd %s with args %v: %s", cmd, args, serviceName)
 
 	respChan := make(chan string, 1)
 	defer close(respChan)
