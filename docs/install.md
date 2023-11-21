@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-* Kubernetes Version >= 1.20 
+* Kubernetes Version >= 1.23
 
 * If you are using a self managed cluster, ensure the flag `--allow-privileged=true` for `kube-apiserver`.
 
@@ -37,7 +37,7 @@ aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
 ```
 
 ### Set up driver permissions
-The driver requires IAM permissions to talk to Amazon S3 to manage the volume on user's behalf. AWS maintains a managed policy, available at ARN `arn:aws:iam::aws:policy/AmazonS3FullAccess`. 
+The driver requires IAM permissions to talk to Amazon S3 to manage the volume on user's behalf. AWS maintains a managed policy, available at ARN `arn:aws:iam::aws:policy/AmazonS3FullAccess`.
 
 For more information, review ["Creating the Amazon Mountpoint for S3 CSI driver IAM role for service accounts" from the EKS User Guide.](TODO: add AWS docs link)
 
@@ -53,7 +53,7 @@ kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/
 #### Helm
 - Add the `aws-mountpoint-s3-csi-driver` Helm repository.
 ```sh
-helm repo add aws-mountpoint-s3-csi-driver ???
+helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver
 helm repo update
 ```
 
