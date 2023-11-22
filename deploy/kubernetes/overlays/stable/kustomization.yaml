@@ -4,6 +4,5 @@ resources:
   - ../../base
 images:
 - name: csi-driver
-  newName: 151381207180.dkr.ecr.eu-west-1.amazonaws.com/s3-csi-driver
-  newTag: v0.1.0
-  
+  newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
+  newTag: v1.0.0
