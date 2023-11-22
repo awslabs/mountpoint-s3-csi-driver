@@ -39,10 +39,10 @@ aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
 ### Set up driver permissions
 The driver requires IAM permissions to talk to Amazon S3 to manage the volume on user's behalf. AWS maintains a managed policy, available at ARN `arn:aws:iam::aws:policy/AmazonS3FullAccess`.
 
-For more information, review ["Creating the Amazon Mountpoint for S3 CSI driver IAM role for service accounts" from the EKS User Guide.](TODO: add AWS docs link)
+For more information, review ["Creating an IAM role"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-role) from the EKS User Guide.
 
 ### Deploy driver
-You may deploy the Mountpoint for S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on].
+You may deploy the Mountpoint for S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
 
 #### Kustomize
 ```sh

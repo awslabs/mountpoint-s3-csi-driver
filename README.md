@@ -5,7 +5,7 @@ The [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) Contain
 
 ## Features
 * **Static Provisioning** - Associate an externally-created S3 bucket with a [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
-* **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted. For Mountpoint for S3 specific options, take a look at the Mountpoint docs for [configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and [semantics](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md).
+* **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted. For Mountpoint for S3 specific options, take a look at the [Mountpoint docs for configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and [semantics](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md).
 
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
@@ -46,6 +46,6 @@ The following table provides the support status for various distros with regards
 ## Documentation
 
 * [Driver Installation](docs/install.md)
-* [Kubernetes Static Provisionin Example](/examples/kubernetes/static_provisioning)
+* [Kubernetes Static Provisioning Example](/examples/kubernetes/static_provisioning)
 * [Driver Uninstallation](docs/install.md#uninstalling-the-driver)
 * [Development and Contributing](CONTRIBUTING.md)
