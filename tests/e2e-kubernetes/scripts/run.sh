@@ -134,10 +134,8 @@ function delete_cluster() {
 }
 
 function update_kubeconfig() {
-  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
     ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
-  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
-    ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE_ARM}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
   fi
