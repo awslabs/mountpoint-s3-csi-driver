@@ -32,9 +32,15 @@ function kops_create_cluster() {
   KOPS_PATCH_FILE=${10}
   KOPS_PATCH_NODE_FILE=${11}
   KOPS_STATE_FILE=${12}
+  SSH_KEY=${13}
 
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
     kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE"
+  fi
+
+  ARGS=()
+  if [ -n "$SSH_KEY" ]; then
+    ARGS+=('--ssh-public-key' $SSH_KEY)
   fi
 
   ${BIN} create cluster --state "${KOPS_STATE_FILE}" \
@@ -46,6 +52,7 @@ function kops_create_cluster() {
     --dry-run \
     --cloud aws \
     -o yaml \
+    ${ARGS[@]+"${ARGS[@]}"} \
     "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
 
   kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_FILE" "Cluster" ""
