@@ -15,7 +15,7 @@ source "${BASE_DIR}"/kops.sh
 source "${BASE_DIR}"/eksctl.sh
 source "${BASE_DIR}"/helm.sh
 
-TEST_DIR=${BASE_DIR}/csi-test-artifacts
+TEST_DIR=${BASE_DIR}/../csi-test-artifacts
 BIN_DIR=${TEST_DIR}/bin
 KUBECTL_INSTALL_PATH=/usr/local/bin
 
@@ -26,7 +26,7 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
 ARCH=${ARCH:-x86}
-CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${ARCH}.k8s.local"
+CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-cluster-${CLUSTER_TYPE}-${ARCH}.k8s.local"}
 if [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "x86" ]]; then
   CLUSTER_NAME="s3-csi-cluster"
 elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
@@ -37,15 +37,22 @@ KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 KOPS_VERSION=1.28.0
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
-INSTANCE_TYPE=${INSTANCE_TYPE:-c5.large}
-INSTANCE_TYPE_ARM=${INSTANCE_TYPE_ARM:-m7g.medium}
-AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-AMI_ID_ARM=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
+if [[ "${ARCH}" == "x86" ]]; then
+  INSTANCE_TYPE_DEFAULT=c5.large
+  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
+  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-state-store
+else
+  INSTANCE_TYPE_DEFAULT=m7g.medium
+  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
+  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-arm-state-store
+fi
+INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
+AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
-KOPS_STATE_FILE=${KOPS_STATE_FILE:-s3://mountpoint-s3-csi-driver-kops-state-store}
-KOPS_STATE_FILE_ARM=${KOPS_STATE_FILE_ARM:-s3://mountpoint-s3-csi-driver-kops-arm-state-store}
+KOPS_STATE_FILE=${KOPS_STATE_FILE:-$KOPS_STATE_FILE_DEFAULT}
+SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
 EKSCTL_VERSION=${EKSCTL_VERSION:-0.161.0}
@@ -82,7 +89,7 @@ function install_tools() {
 }
 
 function create_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
     kops_create_cluster \
       "$CLUSTER_NAME" \
       "$KOPS_BIN" \
@@ -95,22 +102,9 @@ function create_cluster() {
       "$KUBECONFIG" \
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
-      "$KOPS_STATE_FILE"
-  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
-    kops_create_cluster \
-      "$CLUSTER_NAME" \
-      "$KOPS_BIN" \
-      "$ZONES" \
-      "$NODE_COUNT" \
-      "$INSTANCE_TYPE_ARM" \
-      "$AMI_ID_ARM" \
-      "$K8S_VERSION_KOPS" \
-      "$CLUSTER_FILE" \
-      "$KUBECONFIG" \
-      "$KOPS_PATCH_FILE" \
-      "$KOPS_PATCH_NODE_FILE" \
-      "$KOPS_STATE_FILE_ARM"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "x86" ]]; then
+      "$KOPS_STATE_FILE" \
+      "$SSH_KEY"
+  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
       "$REGION" \
@@ -122,32 +116,15 @@ function create_cluster() {
       "$ZONES" \
       "$CI_ROLE_ARN" \
       "$INSTANCE_TYPE"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
-    eksctl_create_cluster \
-      "$CLUSTER_NAME" \
-      "$REGION" \
-      "$KUBECONFIG" \
-      "$CLUSTER_FILE" \
-      "$EKSCTL_BIN" \
-      "$KUBECTL_BIN" \
-      "$EKSCTL_PATCH_FILE" \
-      "$ZONES" \
-      "$CI_ROLE_ARN" \
-      "$INSTANCE_TYPE_ARM"
   fi
 }
 
 function delete_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
     kops_delete_cluster \
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
       "${KOPS_STATE_FILE}"
-  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
-    kops_delete_cluster \
-      "${KOPS_BIN}" \
-      "${CLUSTER_NAME}" \
-      "${KOPS_STATE_FILE_ARM}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
@@ -157,10 +134,8 @@ function delete_cluster() {
 }
 
 function update_kubeconfig() {
-  if [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "x86" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
     ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
-  elif [[ "${CLUSTER_TYPE}" == "kops" && "${ARCH}" == "arm" ]]; then
-    ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE_ARM}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
   fi
@@ -196,7 +171,15 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${TAG}" \
     "${KUBECONFIG}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
+  set +e
+  pushd tests/e2e-kubernetes
   KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME}
+  EXIT_CODE=$?
+  # print some cluster info in the end
+  kubectl version --kubeconfig ${KUBECONFIG}
+  kubectl get nodes -o wide --kubeconfig ${KUBECONFIG}
+  popd
+  exit $EXIT_CODE
 elif [[ "${ACTION}" == "uninstall_driver" ]]; then
   helm_uninstall_driver \
     "$HELM_BIN" \

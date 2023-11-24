@@ -1,7 +1,33 @@
 
 # Usage
+> To recreate EKS cluster used in CI (run locally using CI's AWS account): `ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=eksctl CI_ROLE_ARN=arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole tests/e2e-kubernetes/scripts/run.sh`
+
+All of the following commands are expected to be executed from repo root:
+
+```bash
+export KOPS_STATE_FILE="s3://vlaad-kops-state-store" # set KOPS_STATE_FILE to your bucket when running locally
+export AWS_REGION=us-east-1
+export TAG=20cb9d919704522d93ac40914b760dbd0487bcf3 # CSI Driver image tag to install
+export IMAGE_NAME="s3-csi-driver" # repository is infered from current AWS account and region
+export SSH_KEY=/home/vlaad/.ssh/k8s.private.pub # optional
+
+ACTION=install_tools tests/e2e-kubernetes/scripts/run.sh
+ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh
+ACTION=update_kubeconfig tests/e2e-kubernetes/scripts/run.sh
+ACTION=install_driver  tests/e2e-kubernetes/scripts/run.sh
+
+# option 1: kubeconfig infered from CLUSTER_TYPE and ARCH
+ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
+# option 2: kubeconfig set explicitly
+export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.kops.1.28.0.k8s.local.kubeconfig
+ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
+
+ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh
+ACTION=delete_cluster tests/e2e-kubernetes/scripts/run.sh
+```
+
 ## Prerequisites
-AWS credentials in ENVs with the following policies attached:
+To run command above its expected that you have AWS credentials in ENVs with the following policies attached:
 ```
 AmazonEC2FullAccess
 AmazonRoute53FullAccess
@@ -43,45 +69,3 @@ EksAllAccess (non-managed see below, and https://eksctl.io/usage/minimum-iam-pol
     ]
 }
 ```
-
-## Setting up the environment
-> To recreate EKS cluster used in CI (run locally using CI's AWS account): `ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=eksctl CI_ROLE_ARN=arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole tests/e2e-kubernetes/run.sh`
-
-All of the following commands are expected to be executed from repo root:
-
-```bash
-ACTION=install_tools tests/e2e-kubernetes/run.sh
-
-ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
-
-ACTION=update_kubeconfig AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh # set KOPS_STATE_FILE to your bucket when running locally
-
-ACTION=install_driver AWS_REGION=us-east-1 CLUSTER_TYPE=kops IMAGE_NAME=s3-csi-driver TAG=v0.1.0 tests/e2e-kubernetes/run.sh
-
-ACTION=uninstall_driver AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh
-
-ACTION=delete_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=kops tests/e2e-kubernetes/run.sh
-```
-
-## Running tests
-### On cluster created by run.sh
-`run_tests` command is expected to be executed from tests/e2e-kubernetes directory:
-```bash
-pushd tests/e2e-kubernetes
-ACTION=run_tests AWS_REGION=us-east-1 CLUSTER_TYPE=kops TAG=v0.1.0 ./run.sh
-popd
-```
-
-### On existing cluster
-From repository root:
-```
-make e2e E2E_KUBECONFIG=~/.kube/config E2E_REGION=eu-west-1
-```
-> E2E_REGION specifies where to create bucket for test (should be the same as where cluster is located)
-
-#### Prerequisites
-- existing k8s cluster (e.g. EKS)
-- `kubectl` in $PATH
-- `kubeconfig` setting up access to k8s cluster
-- driver deployed in the cluster
-- aws credentials with access to s3 (create/delete buckets, read/write/list objects)
