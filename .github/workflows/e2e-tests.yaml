@@ -3,8 +3,22 @@ name: E2E Tests
 on:
   push:
     branches: [ "main", "release-**" ]
+    paths:
+      - 'tests'
+      - 'pkg'
+      - 'cmd'
+      - 'charts'
+      - '.github/workflows'
+      - 'Dockerfile'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'tests'
+      - 'pkg'
+      - 'cmd'
+      - 'charts'
+      - '.github/workflows'
+      - 'Dockerfile'
 
 # This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
 # already deployed to it, which provides the driver with access to s3.
