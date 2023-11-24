@@ -34,10 +34,41 @@ eksctl create cluster \
 aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
 ```
 
-### Set up driver permissions
-The driver requires IAM permissions to talk to Amazon S3 to manage the volume on user's behalf. AWS maintains a managed policy, available at ARN `arn:aws:iam::aws:policy/AmazonS3FullAccess`.
+### Configure access to S3
 
-For more information, review ["Creating an IAM role"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-role) from the EKS User Guide.
+The driver requires IAM permissions to talk to Amazon S3 to manage the volume on user's behalf. We recommend using [Mountpoint's IAM permission policy](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#iam-permissions). Alternatively, you can use the AWS managed policy AmazonS3FullAccess, available at ARN `arn:aws:iam::aws:policy/AmazonS3FullAccess`, but this managed policy. For more details on creating a policy and an IAM role, review ["Creating an IAM policy"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-policy) and ["Creating an IAM role"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-role) from the EKS User Guide.
+
+The policy ARN will be referred to as `$ROLE_ARN` in the setup instructions and the name of the role will be `$ROLE_NAME`.
+
+#### From Amazon EKS
+
+EKS allows to use kubernetes service accounts to authenticate requests to S3, read more [here](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html). To set this up follow the steps:
+
+##### Create a Kubernetes service account for the driver and attach the policy to the service account:
+> Notice that the same service account name `s3-csi-driver-sa` must be specified when creating a drivers pod (already in pod spec `deploy/kubernetes/base/node-daemonset.yaml`)
+
+```
+eksctl create iamserviceaccount \
+    --name s3-csi-driver-sa \
+    --namespace kube-system \
+    --cluster $CLUSTER_NAME \
+    --attach-policy-arn $ROLE_ARN \
+    --approve \
+    --role-name $ROLE_NAME \
+    --region $REGION
+```
+##### [Optional] validate account was succesfully created
+```
+kubectl describe sa s3-csi-driver-sa --namespace kube-system
+```
+
+For more validation steps read more [here](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html).
+
+#### From on-premises k8s cluster
+
+For development purposes [long-term access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html) may be used. Those may be delivered  as a k8s secret through kustomize: put your access keys in `deploy/kubernetes/overlays/dev/credentials` file and use `kubectl apply -k deploy/kubernetes/overlays/dev` to deploy the driver.
+
+Usage of long-term credentials for production accounts/workloads is discouraged in favour of temporary credentials obtained through X.509 authentication scheme, read more [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_non-aws.html).
 
 ### Deploy driver
 You may deploy the Mountpoint for S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
