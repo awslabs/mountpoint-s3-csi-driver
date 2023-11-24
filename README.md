@@ -30,7 +30,7 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0. Driver supports **x86-64** and **arm-64** architectures.
 
 ## Distros Support Matrix
 
