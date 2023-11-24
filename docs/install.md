@@ -7,7 +7,7 @@
 ## Installation
 
 ### Cluster setup (optional)
-If you don't have an existing cluster, you can follow these steps to setup an EKS cluster.
+If you don't have an existing cluster, you can follow these steps to setup an EKS cluster. Clusters using the driver must use a supported OS (see [README](/README.md#distros-support-matrix)) on either x86_64 or ARM64.
 
 #### Set cluster-name and a region:
 ```
@@ -40,7 +40,13 @@ The driver requires IAM permissions to talk to Amazon S3 to manage the volume on
 
 The policy ARN will be referred to as `$ROLE_ARN` in the setup instructions and the name of the role will be `$ROLE_NAME`.
 
-#### From Amazon EKS
+There are several methods to grant these IAM permissions to the driver:
+
+- Using IAM [instance profile](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html) - attach the policy to the instance profile IAM role and turn on access to [instance metadata](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html) for the instance(s) on which the driver Deployment will run
+- EKS only: Using [IAM roles for ServiceAccounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+- Using secret object - create an IAM user, attach the policy to it, then create a generic secret in the `kube-system` namespace with the user's credentials.
+
+#### Service Account configuration for EKS Clusters
 
 EKS allows to use kubernetes service accounts to authenticate requests to S3, read more [here](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html). To set this up follow the steps:
 
@@ -64,11 +70,16 @@ kubectl describe sa s3-csi-driver-sa --namespace kube-system
 
 For more validation steps read more [here](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html).
 
-#### From on-premises k8s cluster
+#### Secret Object setup
 
-For development purposes [long-term access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html) may be used. Those may be delivered  as a k8s secret through kustomize: put your access keys in `deploy/kubernetes/overlays/dev/credentials` file and use `kubectl apply -k deploy/kubernetes/overlays/dev` to deploy the driver.
+The CSI driver will read k8s secrets at `aws-secret.key_id` and `aws-secret.access_key` to pass keys to the driver. These keys are only read on startup, so must be in place before the driver starts. The following snippet can be used to create these secrets in the cluster:
 
-Usage of long-term credentials for production accounts/workloads is discouraged in favour of temporary credentials obtained through X.509 authentication scheme, read more [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_non-aws.html).
+```
+kubectl create secret generic aws-secret \
+    --namespace kube-system \
+    --from-literal "key_id=${AWS_ACCESS_KEY_ID}" \
+    --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
+```
 
 ### Deploy driver
 You may deploy the Mountpoint for S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
