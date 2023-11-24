@@ -4,8 +4,6 @@
 
 * Kubernetes Version >= 1.23
 
-* If you are using a self managed cluster, ensure the flag `--allow-privileged=true` for `kube-apiserver`.
-
 ## Installation
 
 ### Cluster setup (optional)
