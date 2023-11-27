@@ -4,20 +4,20 @@ on:
   push:
     branches: [ "main", "release-**" ]
     paths:
-      - 'tests'
-      - 'pkg'
-      - 'cmd'
-      - 'charts'
-      - '.github/workflows'
+      - 'tests/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - 'charts/**'
+      - '.github/workflows/**'
       - 'Dockerfile'
   pull_request:
     branches: [ "main" ]
     paths:
-      - 'tests'
-      - 'pkg'
-      - 'cmd'
-      - 'charts'
-      - '.github/workflows'
+      - 'tests/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - 'charts/**'
+      - '.github/workflows/**'
       - 'Dockerfile'
 
 # This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
@@ -132,6 +132,16 @@ jobs:
       - name: Run E2E Tests
         run: |
           export ACTION=run_tests
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export TAG=${{ env.COMMIT_ID }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Run Performance Tests
+        # todo, add: (startsWith(github.ref_name, 'main')
+        if: ${{ matrix.cluster-type == 'kops' && matrix.arch == 'x86' }}
+        run: |
+          export ACTION=run_perf
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
