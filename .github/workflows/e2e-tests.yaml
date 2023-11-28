@@ -25,10 +25,6 @@ jobs:
   build:
     # this is to prevent the job to run at forked projects
     if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
-    strategy:
-      matrix:
-        cluster-type: ["kops", "eksctl"]
-        arch: ["x86", "arm"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -44,8 +40,6 @@ jobs:
         uses: docker/setup-buildx-action@v2
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
-      - name: Set up crane
-        uses: imjasonh/setup-crane@v0.1
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -63,6 +57,28 @@ jobs:
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
           make -j `nproc` all-push
+  test:
+    needs: build
+    strategy:
+      matrix:
+        cluster-type: ["kops", "eksctl"]
+        arch: ["x86", "arm"]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+          aws-region: ${{ env.AWS_REGION }}
       - name: Install tools
         run: |
           export ACTION=install_tools
@@ -131,11 +147,28 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Promote image for release branch
-        if: ${{ startsWith(github.ref_name, 'release') && matrix.cluster-type == 'kops' && matrix.arch == 'x86' }}
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
+  promote:
+    if: startsWith(github.ref_name, 'release')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+    - name: Set up crane
+      uses: imjasonh/setup-crane@v0.1
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@master
+      with:
+        role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+        aws-region: ${{ env.AWS_REGION }}
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    - name: Promote image for release branch
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
+        export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
+        crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
