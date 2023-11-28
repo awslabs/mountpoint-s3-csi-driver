@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-ARG MOUNTPOINT_VERSION=1.1.1
+ARG MOUNTPOINT_VERSION=1.3.0
 
 # Download the mountpoint tarball and produce an installable directory
 # Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
