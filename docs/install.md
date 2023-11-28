@@ -89,7 +89,7 @@ You may deploy the Mountpoint for Amzon S3 CSI driver via Kustomize, Helm, or as
 
 #### Kustomize
 ```sh
-kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-0.1.0"
+kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/"
 ```
 > [!WARNING]
 > Using the main branch to deploy the driver is not supported. The main branch may contain upcoming features incompatible with the currently released stable version of the driver.
@@ -128,7 +128,7 @@ helm uninstall aws-mountpoint-s3-csi-driver --namespace kube-system
 #### Kustomize
 
 ```
-kubectl delete -k "github.com/awslabs/aws-mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-<YOUR-CSI-DRIVER-VERION-NUMBER>"
+kubectl delete -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=<YOUR-CSI-DRIVER-VERION-NUMBER>"
 ```
 
 > [!WARNING]
