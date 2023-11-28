@@ -35,6 +35,10 @@ env:
   COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
   TMP_IMAGE_NAME: "s3-csi-driver-tmp"
   PROMOTED_IMAGE_NAME: "s3-csi-driver"
+  BENCHMARK_RESULTS_BUCKET: "s3://mountpoint-s3-csi-driver-benchmark"
+  BENCHMARK_RESULTS_REGION: "us-east-1"
+  BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -136,6 +140,34 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/scripts/run.sh
+      - name: Run Performance Tests
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          export ACTION=run_perf
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export TAG=${{ env.COMMIT_ID }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Download previous benchmark results
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          aws s3 cp --region ${{ env.BENCHMARK_RESULTS_REGION }} ${{ env.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
+      - name: Update benchmark result file
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customBiggerIsBetter'
+          output-file-path: tests/e2e-kubernetes/csi-test-artifacts/output.json
+          alert-threshold: "200%"
+          fail-on-alert: true
+          external-data-json-path: ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json
+          max-items-in-chart: 20
+      - name: Store benchmark result
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          echo "window.BENCHMARK_DATA = $(cat ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json)" > ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/data.js
+          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
       - name: Post e2e cleanup
         if: always()
         run: |
