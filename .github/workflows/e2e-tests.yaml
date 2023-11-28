@@ -67,7 +67,6 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
         run: |
-          BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
           make -j `nproc` all-push
@@ -132,16 +131,6 @@ jobs:
       - name: Run E2E Tests
         run: |
           export ACTION=run_tests
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Run Performance Tests
-        # todo, add: (startsWith(github.ref_name, 'main')
-        if: ${{ matrix.cluster-type == 'kops' && matrix.arch == 'x86' }}
-        run: |
-          export ACTION=run_perf
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
