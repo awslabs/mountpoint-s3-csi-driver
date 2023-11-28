@@ -86,7 +86,7 @@ You may deploy the Mountpoint for S3 CSI driver via Kustomize, Helm, or as an [A
 
 #### Kustomize
 ```sh
-kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-0.1.0"
+kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/"
 ```
 *Note: Using the main branch to deploy the driver is not supported as the main branch may contain upcoming features incompatible with the currently released stable version of the driver.*
 
@@ -124,7 +124,7 @@ helm uninstall aws-mountpoint-s3-csi-driver --namespace kube-system
 #### Kustomize
 
 ```
-kubectl delete -k "github.com/awslabs/aws-mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-<YOUR-CSI-DRIVER-VERION-NUMBER>"
+kubectl delete -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=<YOUR-CSI-DRIVER-VERION-NUMBER>"
 ```
 
 > Warning: executing this command will delete a service account s3-csi-driver-sa from your cluster , which may cause problems when installing the driver again on a EKS cluster (re-created account won't include eks.amazonaws.com/role-arn annotation). Please refer to [eksctl documentation](https://eksctl.io/usage/iamserviceaccounts/) for details of how to re-create SA in this case.
