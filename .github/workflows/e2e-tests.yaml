@@ -152,6 +152,7 @@ jobs:
       - name: Download previous benchmark results
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
+          mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
           aws s3 cp --region ${{ env.BENCHMARK_RESULTS_REGION }} ${{ env.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
       - name: Update benchmark result file
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
@@ -166,7 +167,7 @@ jobs:
       - name: Store benchmark result
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
-          echo "window.BENCHMARK_DATA = $(cat ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json)" > ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/data.js
+          tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
           aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
       - name: Post e2e cleanup
         if: always()
