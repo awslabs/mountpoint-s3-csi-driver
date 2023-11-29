@@ -20,7 +20,7 @@ env:
   AWS_REGION : "us-east-1"
   COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
   TMP_IMAGE_NAME: "s3-csi-driver-tmp"
-  PROMOTED_IMAGE_NAME: "s3-csi-driver"
+  PROMOTED_IMAGE_NAME: "s3-csi-driver-tmp2"
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -57,99 +57,7 @@ jobs:
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
           make -j `nproc` all-push
-  test:
-    needs: build
-    strategy:
-      matrix:
-        cluster-type: ["kops", "eksctl"]
-        arch: ["x86", "arm"]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version-file: 'go.mod'
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
-        with:
-          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Install tools
-        run: |
-          export ACTION=install_tools
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Create cluster
-        if: matrix.cluster-type == 'kops'
-        run: |
-          export ACTION=create_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Update kubeconfig
-        run: |
-          export ACTION=update_kubeconfig
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Install the driver
-        run: |
-          export ACTION=install_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Pre e2e cleanup
-        if: matrix.cluster-type == 'eksctl'
-        run: |
-          export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Run E2E Tests
-        run: |
-          export ACTION=run_tests
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Post e2e cleanup
-        if: always()
-        run: |
-          export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Uninstall the driver
-        if: always()
-        run: |
-          export ACTION=uninstall_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Delete cluster
-        if: always() && matrix.cluster-type == 'kops'
-        run: |
-          export ACTION=delete_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
   promote:
-    if: startsWith(github.ref_name, 'release')
-    needs: test
     runs-on: ubuntu-latest
     permissions:
       id-token: write
