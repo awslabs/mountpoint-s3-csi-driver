@@ -7,9 +7,8 @@ on:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
 
 # This workflow copies image from testing private repository to:
-# 1) public repository
-# 2) private ARS source repository
-# 3) public repository (TODO)
+# 1) private ARS source repository
+# 2) public repository
 env:
   AWS_SRC_REGION : "us-east-1" # this is where our testing repo exists
   AWS_DEST_REGION : "us-west-2" # this is where our prod repos exist
@@ -17,6 +16,7 @@ env:
   GIT_TAG: ${{ github.ref_name }}
   IMAGE_NAME: "s3-csi-driver"
   ARS_REGISTRY: "211164257204.dkr.ecr.us-west-2.amazonaws.com/eks/aws-s3-csi-driver"
+  PUBLIC_REGISTRY: "public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver"
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -51,9 +51,15 @@ jobs:
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
         uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to Amazon ECR Public
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
       - name: Promote image
         run: |
           crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.ARS_REGISTRY }}:${{ env.GIT_TAG }}
+          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.PUBLIC_REGISTRY }}:${{ env.GIT_TAG }}
       - name: Create Release
         id: create-release
         uses: actions/create-release@v1
@@ -63,7 +69,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: ${{ github.ref }}
           body: |
-            Mountpoint for AWS S3 CSI Driver
+            Mountpoint for Amazon S3 CSI Driver
 
             ## CHANGELOG
             See [CHANGELOG](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/CHANGELOG.md) for full list of changes
