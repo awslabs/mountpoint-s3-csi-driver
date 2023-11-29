@@ -58,6 +58,7 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           make -j `nproc` all-push
   promote:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       id-token: write
