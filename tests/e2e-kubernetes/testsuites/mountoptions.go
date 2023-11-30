@@ -33,6 +33,10 @@ import (
 	"k8s.io/utils/pointer"
 )
 
+const (
+	S3ExpressTestIdentifier = "express"
+)
+
 type s3CSIMountOptionsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
 }
@@ -79,8 +83,9 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		l.config = driver.PrepareTest(ctx, f)
 		ginkgo.DeferCleanup(cleanup)
 	})
-	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
-		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"uid=1000", "gid=2000", "allow-other"})
+
+	validateWriteToVolume := func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"uid=1000", "gid=2000", "allow-other", "debug", "debug-crt"})
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
@@ -105,8 +110,16 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 2000 1000'", volPath))
 		ginkgo.By("Checking pod identity")
 		e2evolume.VerifyExecInPodSucceed(f, pod, "id | grep 'uid=1000 gid=2000 groups=2000'")
+	}
+	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
+		validateWriteToVolume(ctx)
 	})
-	ginkgo.It("should not be able to access volume as a non-root user", func(ctx context.Context) {
+	ginkgo.It("S3 express -- should access volume as a non-root user", func(ctx context.Context) {
+		l.config.Prefix = S3ExpressTestIdentifier
+		validateWriteToVolume(ctx)
+	})
+
+	accessVolAsNonRootUser := func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{})
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
@@ -123,5 +136,12 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls %s", volPath))
 		gomega.Expect(err).To(gomega.HaveOccurred())
 		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"))
+	}
+	ginkgo.It("should not be able to access volume as a non-root user", func(ctx context.Context) {
+		accessVolAsNonRootUser(ctx)
+	})
+	ginkgo.It("S3 express -- should not be able to access volume as a non-root user", func(ctx context.Context) {
+		l.config.Prefix = S3ExpressTestIdentifier
+		accessVolAsNonRootUser(ctx)
 	})
 }

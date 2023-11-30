@@ -74,6 +74,12 @@ function kubectl_install() {
   sudo install -o root -g root -m 0755 kubectl ${KUBECTL_INSTALL_PATH}/kubectl
 }
 
+function print_cluster_info() {
+  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
+}
+
 function install_tools() {
   kubectl_install
 
