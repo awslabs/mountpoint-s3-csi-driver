@@ -43,7 +43,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
@@ -77,7 +77,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Install tools
         run: |
@@ -160,7 +160,7 @@ jobs:
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@master
       with:
-        role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+        role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
         aws-region: ${{ env.AWS_REGION }}
     - name: Login to Amazon ECR
       id: login-ecr

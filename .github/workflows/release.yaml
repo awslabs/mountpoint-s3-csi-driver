@@ -15,7 +15,6 @@ env:
   COMMIT_ID: ${{ github.sha }}
   GIT_TAG: ${{ github.ref_name }}
   IMAGE_NAME: "s3-csi-driver"
-  ARS_REGISTRY: "211164257204.dkr.ecr.us-west-2.amazonaws.com/eks/aws-s3-csi-driver"
   PUBLIC_REGISTRY: "public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver"
 jobs:
   build:
@@ -38,7 +37,7 @@ jobs:
       - name: Configure AWS Credentials from Test acccount
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole
+          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
           aws-region: ${{ env.AWS_SRC_REGION }}
       - name: Login to Amazon ECR test
         id: login-ecr-test
@@ -46,7 +45,7 @@ jobs:
       - name: Configure AWS Credentials from Prod account
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: arn:aws:iam::211164257204:role/S3CSIDriverPrivateImagePublisherRole
+          role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
           aws-region: ${{ env.AWS_DEST_REGION }}
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
@@ -57,8 +56,10 @@ jobs:
         with:
           registry-type: public
       - name: Promote image
+        env:
+          ARS_REGISTRY: ${{ secrets.ARS_REGISTRY }}
         run: |
-          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.ARS_REGISTRY }}:${{ env.GIT_TAG }}
+          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${ARS_REGISTRY}:${{ env.GIT_TAG }}
           crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.PUBLIC_REGISTRY }}:${{ env.GIT_TAG }}
       - name: Create Release
         id: create-release
