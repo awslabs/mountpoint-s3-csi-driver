@@ -1,6 +1,6 @@
 
 # Usage
-> To recreate EKS cluster used in CI (run locally using CI's AWS account): `ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=eksctl CI_ROLE_ARN=arn:aws:iam::239424963615:role/S3CSIDriverE2ETestsRole tests/e2e-kubernetes/scripts/run.sh`
+> To recreate EKS cluster used in CI (run locally using CI's AWS account): `ACTION=create_cluster AWS_REGION=us-east-1 CLUSTER_TYPE=eksctl CI_ROLE_ARN=<TEST_IAM_ROLE> tests/e2e-kubernetes/scripts/run.sh`
 
 All of the following commands are expected to be executed from repo root:
 
