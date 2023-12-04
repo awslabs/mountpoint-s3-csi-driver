@@ -61,7 +61,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        cluster-type: ["kops", "eksctl"]
+        cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
     runs-on: ubuntu-latest
     permissions:

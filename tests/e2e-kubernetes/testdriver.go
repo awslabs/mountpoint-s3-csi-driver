@@ -3,17 +3,24 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/storage/names"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
+)
+
+const (
+	maxS3ExpressBucketNameLength = 63
 )
 
 var (
@@ -80,8 +87,44 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-e2e-kubernetes-%s-", BucketPrefix, CommitId))
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
+		// note: you need this if testing in non us-east-1 regions
+		// CreateBucketConfiguration: &types.CreateBucketConfiguration{
+		// 	LocationConstraint: types.BucketLocationConstraint(BucketRegion),
+		// },
 	}
-	_, err := newS3Client().CreateBucket(input)
+
+	if config.Prefix == custom_testsuites.S3ExpressTestIdentifier {
+		// assume us-east-1 since that's where our integration tests currently do their work
+		// https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-networking.html
+		regionAz := "use1-az4"
+		if BucketRegion == "us-west-2" {
+			regionAz = "usw2-az1"
+		}
+		// refer to s3 express bucket naming conventions
+		// https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-naming-rules.html
+		suffix := fmt.Sprintf("--%s--x-s3", regionAz)
+		// s3 express doesn't allow non-virtually routable names
+		bucketName = strings.Replace(bucketName, ".", "", -1)
+		if len(bucketName)+len(suffix) > maxS3ExpressBucketNameLength {
+			bucketName = strings.TrimRight(bucketName[:maxS3ExpressBucketNameLength-len(suffix)], "-")
+		}
+		bucketName = fmt.Sprintf("%s%s", bucketName, suffix)
+		input = &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+			CreateBucketConfiguration: &types.CreateBucketConfiguration{
+				Location: &types.LocationInfo{
+					Name: aws.String(regionAz),
+					Type: types.LocationTypeAvailabilityZone,
+				},
+				Bucket: &types.BucketInfo{
+					DataRedundancy: types.DataRedundancySingleAvailabilityZone,
+					Type:           types.BucketTypeDirectory,
+				},
+			},
+		}
+	}
+	f.Logf("Attempting to create bucket: %s", bucketName)
+	_, err := newS3Client().CreateBucket(context.TODO(), input)
 	f.ExpectNoError(err)
 	f.Logf("Created bucket: %s", bucketName)
 	return &s3Volume{bucketName: bucketName}
@@ -100,23 +143,36 @@ func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testV
 
 func (v *s3Volume) DeleteVolume(ctx context.Context) {
 	s3Client := newS3Client()
-	// delete all objects from a bucket
-	iter := s3manager.NewDeleteListIterator(s3Client, &s3.ListObjectsInput{
+	objects, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
 		Bucket: aws.String(v.bucketName),
 	})
-	err := s3manager.NewBatchDeleteWithClient(s3Client).Delete(aws.BackgroundContext(), iter)
 	f.ExpectNoError(err)
+	var objectIds []types.ObjectIdentifier
+	// get all object keys in the s3 bucket
+	for _, obj := range objects.Contents {
+		objectIds = append(objectIds, types.ObjectIdentifier{Key: obj.Key})
+	}
+	// delete all objects from the bucket
+	if len(objectIds) > 0 {
+		_, err = s3Client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(v.bucketName),
+			Delete: &types.Delete{Objects: objectIds},
+		})
+		f.ExpectNoError(err)
+	}
 	// finally delete the bucket
 	input := &s3.DeleteBucketInput{
 		Bucket: aws.String(v.bucketName),
 	}
-	_, err = s3Client.DeleteBucket(input)
+	_, err = s3Client.DeleteBucket(context.TODO(), input)
 	f.ExpectNoError(err)
 	f.Logf("Deleted bucket: %s", v.bucketName)
 }
 
-func newS3Client() *s3.S3 {
-	session, err := session.NewSession(&aws.Config{Region: aws.String(BucketRegion)})
+func newS3Client() *s3.Client {
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(BucketRegion),
+	)
 	f.ExpectNoError(err)
-	return s3.New(session)
+	return s3.NewFromConfig(cfg)
 }

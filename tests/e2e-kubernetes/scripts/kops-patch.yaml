@@ -5,7 +5,8 @@ spec:
         {
           "Effect": "Allow",
           "Action": [
-            "s3:*"
+            "s3:*",
+            "s3express:*"
           ],
           "Resource": "*"
         }
