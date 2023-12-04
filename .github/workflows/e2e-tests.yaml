@@ -3,8 +3,22 @@ name: E2E Tests
 on:
   push:
     branches: [ "main", "release-**" ]
+    paths:
+      - 'tests/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - 'charts/**'
+      - '.github/workflows/**'
+      - 'Dockerfile'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'tests/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - 'charts/**'
+      - '.github/workflows/**'
+      - 'Dockerfile'
 
 # This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
 # already deployed to it, which provides the driver with access to s3.
@@ -21,6 +35,10 @@ env:
   COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
   TMP_IMAGE_NAME: "s3-csi-driver-tmp"
   PROMOTED_IMAGE_NAME: "s3-csi-driver"
+  BENCHMARK_RESULTS_BUCKET: "s3://mountpoint-s3-csi-driver-benchmark"
+  BENCHMARK_RESULTS_REGION: "us-east-1"
+  BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -53,7 +71,6 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
         run: |
-          BRANCH_OR_TAG=$(echo $GITHUB_REF | cut -d'/' -f3)
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
           make -j `nproc` all-push
@@ -74,6 +91,9 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -123,6 +143,35 @@ jobs:
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/scripts/run.sh
+      - name: Run Performance Tests
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          export ACTION=run_perf
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export TAG=${{ env.COMMIT_ID }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Download previous benchmark results
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
+          aws s3 cp --region ${{ env.BENCHMARK_RESULTS_REGION }} ${{ env.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
+      - name: Update benchmark result file
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customBiggerIsBetter'
+          output-file-path: tests/e2e-kubernetes/csi-test-artifacts/output.json
+          alert-threshold: "200%"
+          fail-on-alert: true
+          external-data-json-path: ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json
+          max-items-in-chart: 20
+      - name: Store benchmark result
+        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        run: |
+          tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
+          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
       - name: Post e2e cleanup
         if: always()
         run: |

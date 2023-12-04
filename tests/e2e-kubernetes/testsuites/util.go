@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"os"
 
 	"github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
@@ -117,4 +118,11 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 		return pod, fmt.Errorf("pod Get API error: %w", err)
 	}
 	return pod, nil
+}
+
+func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
+	data, err := os.ReadFile(hostPath)
+	framework.ExpectNoError(err)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
 }

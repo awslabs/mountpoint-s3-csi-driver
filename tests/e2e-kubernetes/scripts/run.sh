@@ -162,6 +162,12 @@ function e2e_cleanup() {
   done
 }
 
+function print_cluster_info() {
+  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
+}
+
 if [[ "${ACTION}" == "install_tools" ]]; then
   install_tools
 elif [[ "${ACTION}" == "create_cluster" ]]; then
@@ -181,10 +187,16 @@ elif [[ "${ACTION}" == "run_tests" ]]; then
   pushd tests/e2e-kubernetes
   KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME}
   EXIT_CODE=$?
-  # print some cluster info in the end
-  kubectl version --kubeconfig ${KUBECONFIG}
-  kubectl get nodes -o wide --kubeconfig ${KUBECONFIG}
+  print_cluster_info
+  exit $EXIT_CODE
+elif [[ "${ACTION}" == "run_perf" ]]; then
+  set +e
+  pushd tests/e2e-kubernetes
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true
+  EXIT_CODE=$?
+  print_cluster_info
   popd
+  cat tests/e2e-kubernetes/csi-test-artifacts/output.json
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "uninstall_driver" ]]; then
   helm_uninstall_driver \
@@ -197,6 +209,6 @@ elif [[ "${ACTION}" == "delete_cluster" ]]; then
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
   e2e_cleanup || true
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|e2e_cleanup|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
 fi

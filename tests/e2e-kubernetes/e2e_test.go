@@ -22,6 +22,7 @@ func init() {
 	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
+	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.Parse()
 }
 
@@ -54,6 +55,9 @@ var CSITestSuites = []func() framework.TestSuite{
 
 // This executes testSuites for csi volumes.
 var _ = utils.SIGDescribe("CSI Volumes", func() {
+	if Performance {
+		CSITestSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
+	}
 	curDriver := initS3Driver()
 	ginkgo.Context(framework.GetDriverNameWithFeatureTags(curDriver), func() {
 		framework.DefineTestSuites(curDriver, CSITestSuites)
