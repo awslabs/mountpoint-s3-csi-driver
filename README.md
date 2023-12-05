@@ -22,7 +22,7 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
 | v1.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.0.0                       |
-
+</details>
 
 ## Releases
 The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.org/). The version will be bumped following the rules below:
