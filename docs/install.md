@@ -115,6 +115,9 @@ Review the [configuration values](https://github.com/awslabs/mountpoint-s3-csi-d
 kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-mountpoint-s3-csi-driver
 ```
 
+### Volume Configuration Example
+Follow the [README for examples](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning) on using the driver.
+
 ### Uninstalling the driver
 
 Uninstall the self-managed Mountpoint for Amazon S3 CSI Driver with either Helm or Kustomize, depending on your installation method. If you are using the driver as an EKS add-on, see the [EKS documentation](https://docs.aws.amazon.com/eks/latest/userguide/managing-add-ons.html).

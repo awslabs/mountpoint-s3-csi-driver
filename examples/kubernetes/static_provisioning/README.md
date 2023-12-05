@@ -4,10 +4,12 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 ## Examples in this folder
 - `static_provisioning.yaml` - spawning a pod which creates a file with name as the current date/time
 - `non_root.yaml` - same as above, but the pod is spawned as non-root (uid `1000`, gid `2000`)
+- `s3_express_specify_az.yaml` - same as above, but this uses a [S3 Express One Zone](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-one-zone.html) directory bucket and shows how to specify the availability zone (AZ) of the [pod assignment](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity) to co-locate the pod with the bucket for lower latency access
+  - Note: This example sets the node affinity to create the pod in an availability zone that matches that of one of the nodes. We have an [open issue](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/93) to support topology to be able to schedule this pods using nodes that match the labels.
 
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
-> Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html).
+> Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html) for a general purpose bucket or the [S3 Express One Zone documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-create.html) for a directory bucket.
 - Bucket name (required): `PersistentVolume -> csi -> volumeAttributes -> bucketName`
 - Bucket region (if bucket and cluster are in different regions): `PersistentVolume -> csi -> mountOptions`
 - [Mountpoint configurations](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) can be added in the `mountOptions` of the Persistent Volume spec.
