@@ -47,6 +47,11 @@ jobs:
         with:
           role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
           aws-region: ${{ env.AWS_DEST_REGION }}
+      - name: Configure AWS Credentials from Prod account (for public repo)
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
+          aws-region: us-east-1
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
         uses: aws-actions/amazon-ecr-login@v2
