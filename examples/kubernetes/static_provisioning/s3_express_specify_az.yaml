@@ -42,7 +42,7 @@ spec:
             - key: topology.kubernetes.io/zone
               operator: In
               values:
-              - us-west-2a # specify az where bucket lives
+              - us-west-2a # specify az where bucket lives, note: the code of the availability zone (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html) must be used here (the AZ ID won't work)
   containers:
     - name: app
       image: centos

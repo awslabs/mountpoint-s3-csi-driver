@@ -115,7 +115,7 @@ Review the [configuration values](https://github.com/awslabs/mountpoint-s3-csi-d
 kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-mountpoint-s3-csi-driver
 ```
 
-### Driver example
+### Volume Configuration Example
 Follow the [README for examples](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning) on using the driver.
 
 ### Uninstalling the driver
