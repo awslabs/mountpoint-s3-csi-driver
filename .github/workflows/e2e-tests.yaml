@@ -3,13 +3,6 @@ name: E2E Tests
 on:
   push:
     branches: [ "main", "release-**" ]
-    paths:
-      - 'tests/**'
-      - 'pkg/**'
-      - 'cmd/**'
-      - 'charts/**'
-      - '.github/workflows/**'
-      - 'Dockerfile'
   pull_request:
     branches: [ "main" ]
     paths:
