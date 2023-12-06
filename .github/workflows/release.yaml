@@ -47,14 +47,14 @@ jobs:
         with:
           role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
           aws-region: ${{ env.AWS_DEST_REGION }}
+      - name: Login to Amazon ECR prod
+        id: login-ecr-prod
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Configure AWS Credentials from Prod account (for public repo)
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
           aws-region: us-east-1
-      - name: Login to Amazon ECR prod
-        id: login-ecr-prod
-        uses: aws-actions/amazon-ecr-login@v2
       - name: Login to Amazon ECR Public
         id: login-ecr-public
         uses: aws-actions/amazon-ecr-login@v2
@@ -81,3 +81,22 @@ jobs:
             See [CHANGELOG](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/CHANGELOG.md) for full list of changes
           draft: true
           prerelease: false
+  helm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          config: .github/cr.yaml
+          mark_as_latest: false
