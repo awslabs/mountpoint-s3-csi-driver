@@ -15,6 +15,14 @@ spec:
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
       bucketName: s3-csi-driver--usw2-az1--x-s3
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+            - us-west-2a
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -34,15 +42,6 @@ kind: Pod
 metadata:
   name: s3-app
 spec:
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-            - key: topology.kubernetes.io/zone
-              operator: In
-              values:
-              - us-west-2a # specify az where bucket lives, note: the code of the availability zone (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html) must be used here (the AZ ID won't work)
   containers:
     - name: app
       image: centos
