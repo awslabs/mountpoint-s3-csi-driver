@@ -23,7 +23,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
@@ -74,8 +73,6 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 }
 
 func (d *Driver) Run() error {
-	printRunningMountpoints()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tokenFile := os.Getenv(webIdentityTokenEnv)
@@ -117,27 +114,6 @@ func (d *Driver) Run() error {
 func (d *Driver) Stop() {
 	klog.Infof("Stopping server")
 	d.Srv.Stop()
-}
-
-func printRunningMountpoints() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	systemdConn, err := ConnectOsSystemd(ctx)
-	if err != nil {
-		klog.Infof("Could not connect to systemd: %v", err)
-		return
-	}
-	statuses, err := systemdConn.ListUnitsContext(ctx)
-	if err != nil {
-		klog.Infof("Could not get systemd status: %v", err)
-		return
-	}
-
-	for _, status := range statuses {
-		if strings.Contains(status.Name, "mount-s3") {
-			klog.Infof("Existing mount-s3 systemd service: %v", status)
-		}
-	}
 }
 
 func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {

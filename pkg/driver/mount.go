@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	systemd "github.com/coreos/go-systemd/v22/dbus"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
@@ -57,8 +57,7 @@ type Mounter interface {
 type S3Mounter struct {
 	mount.Interface
 	ctx         context.Context
-	runner      SystemdRunner
-	connFactory func(context.Context) (SystemdConnection, error)
+	supervisor  *system.SystemdSupervisor
 	mpVersion   string
 	mountS3Path string
 }
@@ -73,14 +72,14 @@ func MountS3Path() string {
 
 func NewS3Mounter(mpVersion string) (*S3Mounter, error) {
 	ctx := context.Background()
-	connFactory := func(ctx context.Context) (SystemdConnection, error) {
-		return systemd.NewSystemConnectionContext(ctx)
+	supervisor, err := system.StartOsSystemdSupervisor()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
 	return &S3Mounter{
 		Interface:   mount.New(""),
 		ctx:         ctx,
-		runner:      NewSystemdRunner(),
-		connFactory: connFactory,
+		supervisor:  supervisor,
 		mpVersion:   mpVersion,
 		mountS3Path: MountS3Path(),
 	}, nil
@@ -136,9 +135,14 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 	defer cancel()
 	env := passthroughEnv()
 
-	output, err := m.runner.Run(timeoutCtx, m.mountS3Path,
-		m.mpVersion+"-"+uuid.New().String(), "forking", env,
-		append([]string{source, target}, addUserAgentToOptions(options)...))
+	output, err := m.supervisor.StartService(timeoutCtx, &system.ExecConfig{
+		Name:        "mount-s3-" + m.mpVersion + "-" + uuid.New().String() + ".service",
+		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
+		ExecPath:    m.mountS3Path,
+		Args:        append(addUserAgentToOptions(options), source, target),
+		Env:         env,
+	})
+
 	if err != nil {
 		return fmt.Errorf("Mount failed: %w output: %s", err, output)
 	}
@@ -165,8 +169,12 @@ func (m *S3Mounter) Unmount(target string) error {
 	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 
-	output, err := m.runner.Run(timeoutCtx, "/usr/bin/umount",
-		m.mpVersion+"-"+uuid.New().String(), "oneshot", []string{}, []string{target})
+	output, err := m.supervisor.RunOneshot(timeoutCtx, &system.ExecConfig{
+		Name:        "mount-s3-umount-" + uuid.New().String() + ".service",
+		Description: "Mountpoint for Amazon S3 CSI driver unmount",
+		ExecPath:    "/usr/bin/umount",
+		Args:        []string{target},
+	})
 	if err != nil {
 		return fmt.Errorf("Unmount failed: %w unmount output: %s", err, output)
 	}
