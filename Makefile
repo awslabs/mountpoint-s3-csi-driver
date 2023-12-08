@@ -119,9 +119,15 @@ bin:
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/aws-s3-csi-driver/
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/install-mp ./cmd/install-mp/
 
+.PHONY: install-go-test-coverage
+install-go-test-coverage:
+	go install github.com/vladopajic/go-test-coverage/v2@latest
+
 .PHONY: test
 test:
-	go test -v -race ./pkg/...
+	go test -v -race ./pkg/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./pkg/...
+	${GOBIN}/go-test-coverage --config=./.testcoverage.yml
+	go tool cover -html=cover.out -o=cover.html
 	# skipping controller test cases because we don't implement controller for static provisioning, this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
 

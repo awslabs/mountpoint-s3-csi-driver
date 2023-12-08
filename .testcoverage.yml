@@ -1,0 +1,18 @@
+# (mandatory)
+# Path to coverprofile file (output of `go test -coverprofile` command)
+profile: cover.out
+
+# (optional)
+# When specified reported file paths will not contain local prefix in the output
+local-prefix: "github.com/awslabs/mountpoint-s3-csi-driver"
+
+# Holds regexp rules which will exclude matched files or packages from coverage statistics
+exclude:
+  # Exclude files or packages matching their paths
+  paths:
+    - \.pb\.go$ # excludes all protobuf generated files
+    - \/mocks\/   # exclude mocks
+
+# NOTES:
+# - symbol `/` in all path regexps will be replaced by
+#   current OS file path separator to properly work on Windows
