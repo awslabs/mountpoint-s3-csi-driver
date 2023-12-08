@@ -171,7 +171,7 @@ func (m *S3Mounter) Unmount(target string) error {
 
 	output, err := m.supervisor.RunOneshot(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-umount-" + uuid.New().String() + ".service",
-		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
+		Description: "Mountpoint for Amazon S3 CSI driver unmount",
 		ExecPath:    "/usr/bin/umount",
 		Args:        []string{target},
 	})
