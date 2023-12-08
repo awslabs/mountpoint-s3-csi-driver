@@ -27,7 +27,7 @@ func NewOsPts() Pts {
 	return &OsPts{}
 }
 
-// Create a new pseduo terminal (pts). Returns a ReaderCloser for the master device and a pts number
+// Create a new pseudo terminal (pts). Returns a ReaderCloser for the master device and a pts number
 func (p *OsPts) NewPts() (io.ReadCloser, int, error) {
 	ptmxPath := os.Getenv(PtmxPathEnv)
 	if ptmxPath == "" {
