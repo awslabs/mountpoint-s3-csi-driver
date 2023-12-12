@@ -30,6 +30,7 @@ sidecars:
         valueFrom:
           fieldRef:
             fieldPath: spec.nodeName
+    resources: {}
     volumeMounts:
       - name: plugin-dir
         mountPath: /csi
@@ -40,9 +41,13 @@ sidecars:
       repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
       tag: v2.9.0-eks-1-23-13
       pullPolicy: IfNotPresent
+    resources: {}
     volumeMounts:
       - mountPath: /csi
         name: plugin-dir
+
+initContainer:
+  resources: {}
 
 nameOverride: ""
 fullnameOverride: ""
