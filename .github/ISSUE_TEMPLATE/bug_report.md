@@ -6,6 +6,7 @@ labels:
 ---
 
 /kind bug
+> **_NOTE:_**  If this is a filesystem related bug, please take a look at the [Mountpoint repo](https://github.com/awslabs/mountpoint-s3) to submit a [bug report](https://github.com/awslabs/mountpoint-s3/issues/new?assignees=&labels=bug&projects=&template=bug-report.yml)
 
 **What happened?**
 
