@@ -5,6 +5,7 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 - `static_provisioning.yaml` - spawning a pod which creates a file with name as the current date/time
 - `non_root.yaml` - same as above, but the pod is spawned as non-root (uid `1000`, gid `2000`)
 - `s3_express_specify_az.yaml` - same as above, but this uses a [S3 Express One Zone](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-one-zone.html) directory bucket and shows how to specify the availability zone (AZ) of the [persistent volume](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity) to co-locate the pods with the bucket for lower latency access
+- `multiple_buckets_one_pod.yaml` - same as above, with multiple buckets mounted in one pod. Note: when mounting multiple buckets in the same pod, the `volumeHandle` must be unique as specified in the [CSI documentation](https://kubernetes.io/docs/concepts/storage/volumes/#csi).
 
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
