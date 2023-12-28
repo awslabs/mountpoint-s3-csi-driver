@@ -72,6 +72,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: HOST_TOKEN_PATH
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/token
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
@@ -95,6 +97,12 @@ spec:
             initialDelaySeconds: 10
             timeoutSeconds: 3
             periodSeconds: 2
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 10m
+              memory: 40Mi
         - name: node-driver-registrar
           image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.7.0-eks-1-23-13
           imagePullPolicy: IfNotPresent
@@ -115,6 +123,12 @@ spec:
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 10m
+              memory: 40Mi
         - name: liveness-probe
           image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.9.0-eks-1-23-13
           imagePullPolicy: IfNotPresent
@@ -124,6 +138,12 @@ spec:
           volumeMounts:
             - mountPath: /csi
               name: plugin-dir
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 10m
+              memory: 40Mi
       volumes:
         - name: host-dev
           hostPath:

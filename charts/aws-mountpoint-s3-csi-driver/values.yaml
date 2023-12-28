@@ -11,6 +11,8 @@ image:
 node:
   resources: {}
   kubeletPath: /var/lib/kubelet
+  mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
+  hostTokenPath: s3.csi.aws.com/token # the end path will be `kubeletPath + "/plugins/" + hostTokenpath`
   logLevel: 4
   containerSecurityContext:
     privileged: true
@@ -18,7 +20,12 @@ node:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-sa
-
+  resources:
+    requests:
+      cpu: 10m
+      memory: 40Mi
+    limits:
+      memory: 256Mi
 sidecars:
   nodeDriverRegistrar:
     image: 
@@ -35,6 +42,7 @@ sidecars:
         mountPath: /csi
       - name: registration-dir
         mountPath: /registration
+    resources: {}
   livenessProbe:
     image: 
       repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
@@ -43,6 +51,7 @@ sidecars:
     volumeMounts:
       - mountPath: /csi
         name: plugin-dir
+    resources: {}
 
 nameOverride: ""
 fullnameOverride: ""

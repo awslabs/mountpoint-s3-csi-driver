@@ -61,11 +61,13 @@ spec:
               value: /host/dev/ptmx
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
-              value: /opt/mountpoint-s3-csi/bin/mount-s3
+              value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: HOST_TOKEN_PATH
+              value: {{ printf "%s/plugins/%s" .Values.node.kubeletPath (default "s3.csi.aws.com/token" .Values.node.hostTokenPath) }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -82,7 +84,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: kubelet-dir
-              mountPath: /var/lib/kubelet
+              mountPath: {{ .Values.node.kubeletPath }}
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
@@ -103,6 +105,10 @@ spec:
             timeoutSeconds: 3
             periodSeconds: 2
             failureThreshold: 5
+          {{- with .Values.node.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
@@ -113,7 +119,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
+              value: {{ .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -132,6 +138,10 @@ spec:
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
+          {{- with default .Values.node.resources .Values.sidecars.nodeDriverRegistrar.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         - name: liveness-probe
           image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
@@ -140,6 +150,10 @@ spec:
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
+          {{- with default .Values.node.resources .Values.sidecars.livenessProbe.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: host-dev
           hostPath:
@@ -147,7 +161,7 @@ spec:
             type: Directory
         - name: mp-install
           hostPath:
-            path: /opt/mountpoint-s3-csi/bin/
+            path: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:
@@ -159,15 +173,15 @@ spec:
             type: Socket
         - name: kubelet-dir
           hostPath:
-            path: /var/lib/kubelet
+            path: {{ .Values.node.kubeletPath }}
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/s3.csi.aws.com/
+            path: {{ .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
-            path: /var/lib/kubelet/plugins_registry/
+            path: {{ .Values.node.kubeletPath }}/plugins_registry/
             type: Directory
         {{- with .Values.node.volumes }}
         {{- toYaml . | nindent 8 }}

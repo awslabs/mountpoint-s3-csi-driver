@@ -39,11 +39,11 @@ const (
 	defaultRegionEnv   = "AWS_DEFAULT_REGION"
 	stsEndpointsEnv    = "AWS_STS_REGIONAL_ENDPOINTS"
 	MountS3PathEnv     = "MOUNT_S3_PATH"
+	hostTokenPath      = "HOST_TOKEN_PATH"
 	defaultMountS3Path = "/usr/bin/mount-s3"
 	procMounts         = "/host/proc/mounts"
 	userAgentPrefix    = "--user-agent-prefix"
 	csiDriverPrefix    = "s3-csi-driver/"
-	hostTokenPath      = "/var/lib/kubelet/plugins/s3.csi.aws.com/token"
 )
 
 // Mounter is an interface for mount operations
