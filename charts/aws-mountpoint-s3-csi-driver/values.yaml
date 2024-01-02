@@ -12,7 +12,6 @@ node:
   resources: {}
   kubeletPath: /var/lib/kubelet
   mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
-  hostTokenPath: s3.csi.aws.com/token # the end path will be `kubeletPath + "/plugins/" + hostTokenpath`
   logLevel: 4
   containerSecurityContext:
     privileged: true
