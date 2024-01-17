@@ -41,7 +41,7 @@ jobs:
           aws-region: ${{ env.AWS_SRC_REGION }}
       - name: Login to Amazon ECR test
         id: login-ecr-test
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v1
       - name: Configure AWS Credentials from Prod account
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -49,7 +49,7 @@ jobs:
           aws-region: ${{ env.AWS_DEST_REGION }}
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v1
       - name: Configure AWS Credentials from Prod account (for public repo)
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -57,7 +57,7 @@ jobs:
           aws-region: us-east-1
       - name: Login to Amazon ECR Public
         id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v1
         with:
           registry-type: public
       - name: Promote image
