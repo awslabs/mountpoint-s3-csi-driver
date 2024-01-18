@@ -128,14 +128,6 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Run E2E Tests
-        run: |
-          export ACTION=run_tests
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          tests/e2e-kubernetes/scripts/run.sh
       - name: Run Performance Tests
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
@@ -165,6 +157,14 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
           aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
+      - name: Run E2E Tests
+        run: |
+          export ACTION=run_tests
+          export AWS_REGION=${{ env.AWS_REGION }}
+          export CLUSTER_TYPE=${{ matrix.cluster-type }}
+          export TAG=${{ env.COMMIT_ID }}
+          export ARCH=${{ matrix.arch }}
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup
         if: always()
         run: |
