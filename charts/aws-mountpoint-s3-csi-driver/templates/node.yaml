@@ -34,12 +34,13 @@ spec:
         {{- with .Values.node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- if .Values.imagePullSecrets }}
-          imagePullSecrets: {{- toYaml .Values.imagePullSecrets | nindent 8 }}
-          {{- end }}
           imagePullPolicy: IfNotPresent
           command:
             - "/bin/install-mp"
@@ -52,9 +53,6 @@ spec:
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- if .Values.imagePullSecrets }}
-          imagePullSecrets: {{- toYaml .Values.imagePullSecrets | nindent 8 }}
-          {{- end }}
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
@@ -117,9 +115,6 @@ spec:
           {{- end }}
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
-          {{- if .Values.imagePullSecrets }}
-          imagePullSecrets: {{- toYaml .Values.imagePullSecrets | nindent 8 }}
-          {{- end }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
           args:
             - --csi-address=$(ADDRESS)
@@ -153,9 +148,6 @@ spec:
           {{- end }}
         - name: liveness-probe
           image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
-          {{- if .Values.imagePullSecrets }}
-          imagePullSecrets: {{- toYaml .Values.imagePullSecrets | nindent 8 }}
-          {{- end }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
           args:
             - --csi-address=/csi/csi.sock
