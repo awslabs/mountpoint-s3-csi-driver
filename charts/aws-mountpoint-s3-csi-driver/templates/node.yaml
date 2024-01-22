@@ -34,6 +34,12 @@ spec:
         {{- with .Values.node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+      {{- end }}
+      {{- end }}
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
