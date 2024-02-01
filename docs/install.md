@@ -5,6 +5,8 @@
 * Kubernetes Version >= 1.23
 
 ## Installation
+> [!NOTE]
+> To install the Mountpoint for S3 CSI Driver using EKS Add-on (recommended) follow [the guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) on EKS.
 
 ### Cluster setup (optional)
 If you don't have an existing cluster, you can follow these steps to setup an EKS cluster. Clusters using the driver must use a supported OS (see [README](/README.md#distros-support-matrix)) on either x86_64 or ARM64.
@@ -64,7 +66,8 @@ eksctl create iamserviceaccount \
     --attach-policy-arn $ROLE_ARN \
     --approve \
     --role-name $ROLE_NAME \
-    --region $REGION
+    --region $REGION \
+    --role-only
 ```
 ##### [Optional] Validate the account was succesfully created
 ```
