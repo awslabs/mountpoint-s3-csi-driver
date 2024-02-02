@@ -87,6 +87,9 @@ kubectl create secret generic aws-secret \
     --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
 ```
 
+#### Configure driver toleration settings
+Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add policies to `Value.node.tolerations` to configure customized toleration for nodes.
+
 ### Deploy driver
 You may deploy the Mountpoint for Amzon S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
 

@@ -25,6 +25,7 @@ node:
       memory: 40Mi
     limits:
       memory: 256Mi
+  tolerateAllTaints: false
 sidecars:
   nodeDriverRegistrar:
     image: 
