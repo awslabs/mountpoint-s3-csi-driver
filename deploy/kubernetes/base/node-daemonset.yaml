@@ -72,8 +72,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: HOST_TOKEN_PATH
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/token
+            - name: HOST_PLUGIN_DIR
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet

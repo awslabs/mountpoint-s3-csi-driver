@@ -25,7 +25,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
@@ -51,9 +50,9 @@ var (
 type Driver struct {
 	Endpoint string
 	Srv      *grpc.Server
+	NodeID   string
 
-	NodeID  string
-	Mounter Mounter
+	NodeServer *S3NodeServer
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
@@ -66,9 +65,9 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 	}
 
 	return &Driver{
-		Endpoint: endpoint,
-		NodeID:   nodeID,
-		Mounter:  mounter,
+		Endpoint:   endpoint,
+		NodeID:     nodeID,
+		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter},
 	}
 }
 
@@ -81,7 +80,7 @@ func (d *Driver) Run() error {
 		go tokenFileTender(ctx, tokenFile, "/csi/token")
 	}
 
-	scheme, addr, err := util.ParseEndpoint(d.Endpoint)
+	scheme, addr, err := ParseEndpoint(d.Endpoint)
 	if err != nil {
 		return err
 	}
@@ -105,7 +104,7 @@ func (d *Driver) Run() error {
 
 	csi.RegisterIdentityServer(d.Srv, d)
 	csi.RegisterControllerServer(d.Srv, d)
-	csi.RegisterNodeServer(d.Srv, d)
+	csi.RegisterNodeServer(d.Srv, d.NodeServer)
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
 	return d.Srv.Serve(listener)

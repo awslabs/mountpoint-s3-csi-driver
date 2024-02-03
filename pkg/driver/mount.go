@@ -39,27 +39,95 @@ const (
 	defaultRegionEnv   = "AWS_DEFAULT_REGION"
 	stsEndpointsEnv    = "AWS_STS_REGIONAL_ENDPOINTS"
 	MountS3PathEnv     = "MOUNT_S3_PATH"
-	hostTokenPathEnv   = "HOST_TOKEN_PATH"
+	hostPluginDirEnv   = "HOST_TOKEN_DIR"
 	defaultMountS3Path = "/usr/bin/mount-s3"
 	procMounts         = "/host/proc/mounts"
 	userAgentPrefix    = "--user-agent-prefix"
 	csiDriverPrefix    = "s3-csi-driver/"
 )
 
+type MountCredentials struct {
+	AccessKeyID     string
+	SecretAccessKey string
+	Region          string
+	DefaultRegion   string
+	WebTokenPath    string
+	StsEndpoints    string
+	AwsRoleArn      string
+}
+
+// Get environment variables to pass to mount-s3 for authentication.
+func (mc *MountCredentials) Env() []string {
+	env := []string{}
+
+	if mc.AccessKeyID != "" && mc.SecretAccessKey != "" {
+		env = append(env, keyIdEnv+"="+mc.AccessKeyID)
+		env = append(env, accessKeyEnv+"="+mc.SecretAccessKey)
+	}
+	if mc.WebTokenPath != "" {
+		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)
+		env = append(env, roleArnEnv+"="+mc.AwsRoleArn)
+	}
+	if mc.Region != "" {
+		env = append(env, regionEnv+"="+mc.Region)
+	}
+	if mc.DefaultRegion != "" {
+		env = append(env, defaultRegionEnv+"="+mc.DefaultRegion)
+	}
+	if mc.StsEndpoints != "" {
+		env = append(env, stsEndpointsEnv+"="+mc.StsEndpoints)
+	}
+
+	return env
+}
+
+type Fs interface {
+	Stat(name string) (os.FileInfo, error)
+	MkdirAll(path string, perm os.FileMode) error
+	Remove(name string) error
+}
+
+type OsFs struct{}
+
+func (OsFs) Stat(name string) (os.FileInfo, error) {
+	return os.Stat(name)
+}
+
+func (OsFs) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+func (OsFs) Remove(path string) error {
+	return os.Remove(path)
+}
+
 // Mounter is an interface for mount operations
 type Mounter interface {
-	mount.Interface
-	IsCorruptedMnt(err error) bool
-	PathExists(path string) (bool, error)
-	MakeDir(pathname string) error
+	Mount(bucketName string, target string, credentials *MountCredentials, options []string) error
+	Unmount(target string) error
+	IsMountPoint(target string) (bool, error)
+}
+
+type ServiceRunner interface {
+	StartService(ctx context.Context, config *system.ExecConfig) (string, error)
+	RunOneshot(ctx context.Context, config *system.ExecConfig) (string, error)
+}
+
+type MountLister interface {
+	ListMounts() ([]mount.MountPoint, error)
+}
+
+type ProcMountLister struct {
+	ProcMountPath string
 }
 
 type S3Mounter struct {
-	mount.Interface
-	ctx         context.Context
-	supervisor  *system.SystemdSupervisor
-	mpVersion   string
-	mountS3Path string
+	Ctx         context.Context
+	Runner      ServiceRunner
+	Fs          Fs
+	MountLister MountLister
+	MpVersion   string
+	MountS3Path string
 }
 
 func MountS3Path() string {
@@ -72,74 +140,110 @@ func MountS3Path() string {
 
 func NewS3Mounter(mpVersion string) (*S3Mounter, error) {
 	ctx := context.Background()
-	supervisor, err := system.StartOsSystemdSupervisor()
+	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
 	return &S3Mounter{
-		Interface:   mount.New(""),
-		ctx:         ctx,
-		supervisor:  supervisor,
-		mpVersion:   mpVersion,
-		mountS3Path: MountS3Path(),
+		Ctx:         ctx,
+		Runner:      runner,
+		Fs:          &OsFs{},
+		MountLister: &ProcMountLister{ProcMountPath: procMounts},
+		MpVersion:   mpVersion,
+		MountS3Path: MountS3Path(),
 	}, nil
 }
 
-func (m *S3Mounter) MakeDir(pathname string) error {
-	err := os.MkdirAll(pathname, os.FileMode(0755))
-	if err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-// IsCorruptedMnt return true if err is about corrupted mount point
-func (m *S3Mounter) IsCorruptedMnt(err error) bool {
-	return mount.IsCorruptedMnt(err)
-}
-
-func (m *S3Mounter) List() ([]mount.MountPoint, error) {
-	mounts, err := os.ReadFile(procMounts)
+func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
+	mounts, err := os.ReadFile(pml.ProcMountPath)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read %s: %w", procMounts, err)
 	}
 	return parseProcMounts(mounts)
 }
 
-func (m *S3Mounter) IsMountPoint(file string) (bool, error) {
-	mountPoints, err := m.List()
+func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
+	if _, err := m.Fs.Stat(target); os.IsNotExist(err) {
+		return false, err
+	}
+
+	mountPoints, err := m.MountLister.ListMounts()
 	if err != nil {
-		return false, fmt.Errorf("Failed to cat /proc/mounts: %w", err)
+		return false, fmt.Errorf("Failed to list mounts: %w", err)
 	}
 	for _, mp := range mountPoints {
-		if mp.Path == file {
+		if mp.Path == target {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (m *S3Mounter) PathExists(path string) (bool, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return false, nil
-	} else if err != nil {
-		return false, err
+// Mount the given bucket at the target path. Options will be passed through mostly unchanged,
+// with the exception of the user agent prefix which will be added to the Mountpoint headers.
+// This method will create the target path if it does not exist and if there is an existing corrupt
+// mount, it will attempt an unmount before attempting the mount.
+func (m *S3Mounter) Mount(bucketName string, target string,
+	credentials *MountCredentials, options []string) error {
+
+	if bucketName == "" {
+		return fmt.Errorf("bucket name is empty")
 	}
-	return true, nil
-}
-
-func (m *S3Mounter) Mount(source string, target string, _ string, options []string) error {
-	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+	if target == "" {
+		return fmt.Errorf("target is empty")
+	}
+	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
-	env := passthroughEnv()
 
-	output, err := m.supervisor.StartService(timeoutCtx, &system.ExecConfig{
-		Name:        "mount-s3-" + m.mpVersion + "-" + uuid.New().String() + ".service",
+	cleanupDir := false
+
+	// check if the target path exists
+	_, statErr := m.Fs.Stat(target)
+	if statErr != nil {
+		// does not exist, create the directory
+		if os.IsNotExist(statErr) {
+			if err := m.Fs.MkdirAll(target, 0755); err != nil {
+				return fmt.Errorf("Failed to create target directory: %w", err)
+			}
+			cleanupDir = true
+			defer func() {
+				if cleanupDir {
+					if err := m.Fs.Remove(target); err != nil {
+						klog.V(4).Infof("Mount: Failed to delete target dir: %s.", target)
+					}
+				}
+			}()
+		}
+		// Corrupted mount, try unmounting
+		if mount.IsCorruptedMnt(statErr) {
+			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
+			if mntErr := m.Unmount(target); mntErr != nil {
+				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, statErr, mntErr)
+			}
+		}
+	}
+
+	mounts, err := m.MountLister.ListMounts()
+	if err != nil {
+		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, statErr, err)
+	}
+	for _, m := range mounts {
+		if m.Path == target {
+			klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
+			return nil
+		}
+	}
+
+	env := []string{}
+	if credentials != nil {
+		env = credentials.Env()
+	}
+
+	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
+		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
-		ExecPath:    m.mountS3Path,
-		Args:        append(addUserAgentToOptions(options), source, target),
+		ExecPath:    m.MountS3Path,
+		Args:        append(addUserAgentToOptions(options), bucketName, target),
 		Env:         env,
 	})
 
@@ -149,6 +253,7 @@ func (m *S3Mounter) Mount(source string, target string, _ string, options []stri
 	if output != "" {
 		klog.V(5).Infof("mount-s3 output: %s", output)
 	}
+	cleanupDir = false
 	return nil
 }
 
@@ -166,10 +271,10 @@ func addUserAgentToOptions(options []string) []string {
 }
 
 func (m *S3Mounter) Unmount(target string) error {
-	timeoutCtx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
 
-	output, err := m.supervisor.RunOneshot(timeoutCtx, &system.ExecConfig{
+	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-umount-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver unmount",
 		ExecPath:    "/usr/bin/umount",
@@ -182,42 +287,6 @@ func (m *S3Mounter) Unmount(target string) error {
 		klog.V(5).Infof("umount output: %s", output)
 	}
 	return nil
-}
-
-func passthroughEnv() []string {
-	env := []string{}
-
-	keyId := os.Getenv(keyIdEnv)
-	accessKey := os.Getenv(accessKeyEnv)
-	if keyId != "" && accessKey != "" {
-		env = append(env, keyIdEnv+"="+keyId)
-		env = append(env, accessKeyEnv+"="+accessKey)
-	}
-	webIdentityFile := os.Getenv(webIdentityTokenEnv)
-	awsRoleArn := os.Getenv(roleArnEnv)
-	hostTokenPath := os.Getenv(hostTokenPathEnv)
-	if hostTokenPath == "" {
-		// set the default in case the env variable isn't found
-		hostTokenPath = "/var/lib/kubelet/plugins/s3.csi.aws.com/token"
-	}
-	if webIdentityFile != "" {
-		env = append(env, webIdentityTokenEnv+"="+hostTokenPath)
-		env = append(env, roleArnEnv+"="+awsRoleArn)
-	}
-	region := os.Getenv(regionEnv)
-	if region != "" {
-		env = append(env, regionEnv+"="+region)
-	}
-	defaultRegion := os.Getenv(defaultRegionEnv)
-	if defaultRegion != "" {
-		env = append(env, defaultRegionEnv+"="+defaultRegion)
-	}
-	stsEndpoints := os.Getenv(stsEndpointsEnv)
-	if stsEndpoints != "" {
-		env = append(env, stsEndpointsEnv+"="+stsEndpoints)
-	}
-
-	return env
 }
 
 func parseProcMounts(data []byte) ([]mount.MountPoint, error) {

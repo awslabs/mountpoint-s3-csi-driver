@@ -28,7 +28,6 @@ import (
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -66,7 +65,15 @@ func waitDriverIsUp(endpoint string) {
 }
 
 var _ = BeforeSuite(func() {
-	s3Driver = driver.NewFakeDriver(endpoint)
+	s3Driver = &driver.Driver{
+		Endpoint: endpoint,
+		NodeID:   "fake_id",
+		NodeServer: &driver.S3NodeServer{
+			NodeID:          "fake_id",
+			BaseCredentials: &driver.MountCredentials{},
+			Mounter:         &driver.FakeMounter{},
+		},
+	}
 	go func() {
 		Expect(s3Driver.Run()).NotTo(HaveOccurred())
 	}()
@@ -84,7 +91,7 @@ var _ = Describe("Amazon S3 CSI Driver", func() {
 		Address:        endpoint,
 		TargetPath:     mountPath,
 		StagingPath:    stagePath,
-		TestVolumeSize: 2000 * util.GiB,
+		TestVolumeSize: 2000 * driver.GiB,
 		IDGen:          &sanity.DefaultIDGenerator{},
 	}
 	sanity.GinkgoTest(config)

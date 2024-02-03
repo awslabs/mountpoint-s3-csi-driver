@@ -19,13 +19,16 @@ package driver
 import (
 	"context"
 	"os"
+	"path"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	"k8s.io/mount-utils"
 )
 
 const (
@@ -37,16 +40,28 @@ var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
 )
 
-func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+// S3NodeServer is the implementation of the csi.NodeServer interface
+type S3NodeServer struct {
+	NodeID          string
+	BaseCredentials *MountCredentials
+	Mounter         Mounter
+}
+
+type Token struct {
+	Token               string    `json:"token"`
+	ExpirationTimestamp time.Time `json:"expirationTimestamp"`
+}
+
+func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (d *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+func (ns *S3NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	klog.V(4).Infof("NodePublishVolume: called with args %+v", req)
+func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	klog.V(4).Infof("NodePublishVolume: req: %+v", req)
 
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
@@ -68,19 +83,13 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not provided")
 	}
 
-	if !d.isValidVolumeCapabilities([]*csi.VolumeCapability{volCap}) {
+	if !ns.isValidVolumeCapabilities([]*csi.VolumeCapability{volCap}) {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not supported")
 	}
 
 	mountpointArgs := []string{}
-
 	if req.GetReadonly() || volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
 		mountpointArgs = append(mountpointArgs, "--read-only")
-	}
-
-	klog.V(4).Infof("NodePublishVolume: creating dir %s", target)
-	if err := d.Mounter.MakeDir(target); err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not create dir %q: %v", target, err)
 	}
 
 	// get the mount(point) options (yaml list)
@@ -99,19 +108,27 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	//Checking if the target directory is already mounted with a volume.
-	mounted, err := d.isMounted(target)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not check if %q is mounted: %v", target, err)
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+	hostPluginDirEnv := os.Getenv(hostPluginDirEnv)
+	if hostPluginDirEnv == "" {
+		// set the default in case the env variable isn't found
+		hostPluginDirEnv = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
 	}
-	if !mounted {
-		klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
-		if err := d.Mounter.Mount(bucket, target, fstype, mountpointArgs); err != nil {
-			os.Remove(target)
-			return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
-		}
-		klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
+	hostTokenPath := path.Join(hostPluginDirEnv, "token")
+	credentials := &MountCredentials{
+		AccessKeyID:     os.Getenv(keyIdEnv),
+		SecretAccessKey: os.Getenv(accessKeyEnv),
+		Region:          os.Getenv(regionEnv),
+		DefaultRegion:   os.Getenv(defaultRegionEnv),
+		WebTokenPath:    hostTokenPath,
+		StsEndpoints:    os.Getenv(stsEndpointsEnv),
+		AwsRoleArn:      os.Getenv(roleArnEnv),
 	}
+	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
+		os.Remove(target)
+		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
+	}
+	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -140,7 +157,7 @@ func compileMountOptions(currentOptions []string, newOptions []string) []string 
 	return allMountOptions.List()
 }
 
-func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("NodeUnpublishVolume: called with args %+v", req)
 
 	volumeID := req.GetVolumeId()
@@ -152,11 +169,11 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	mounted, err := d.Mounter.IsMountPoint(target)
+	mounted, err := ns.Mounter.IsMountPoint(target)
 	if err != nil && os.IsNotExist(err) {
 		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
-	} else if err != nil && d.Mounter.IsCorruptedMnt(err) {
+	} else if err != nil && mount.IsCorruptedMnt(err) {
 		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
 		mounted = true
 	} else if err != nil {
@@ -168,7 +185,7 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	}
 
 	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = d.Mounter.Unmount(target)
+	err = ns.Mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
@@ -176,15 +193,15 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
-func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+func (ns *S3NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (d *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
+func (ns *S3NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
+func (ns *S3NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	klog.V(4).Infof("NodeGetCapabilities: called with args %+v", req)
 	var caps []*csi.NodeServiceCapability
 	for _, cap := range nodeCaps {
@@ -200,44 +217,15 @@ func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabi
 	return &csi.NodeGetCapabilitiesResponse{Capabilities: caps}, nil
 }
 
-func (d *Driver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+func (ns *S3NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	klog.V(4).Infof("NodeGetInfo: called with args %+v", req)
 
 	return &csi.NodeGetInfoResponse{
-		NodeId: d.NodeID,
+		NodeId: ns.NodeID,
 	}, nil
 }
 
-// isMounted checks if target is a valid mountpoint
-// inexistent target directory is NOT an error
-// method will try to unmount the directory if it was detected to be corrupted
-func (d *Driver) isMounted(target string) (bool, error) {
-	notMnt, err := d.Mounter.IsLikelyNotMountPoint(target)
-	if err != nil && !os.IsNotExist(err) {
-		_, pathErr := d.Mounter.PathExists(target)
-		if pathErr != nil && d.Mounter.IsCorruptedMnt(pathErr) {
-			klog.V(4).Infof("NodePublishVolume: Target path %q is a corrupted mount. Trying to unmount.", target)
-			if mntErr := d.Mounter.Unmount(target); mntErr != nil {
-				return false, status.Errorf(codes.Internal, "Unable to unmount the target %q : %v", target, mntErr)
-			}
-			return false, nil
-		}
-		return false, status.Errorf(codes.Internal, "Could not check if %q is a mount point: %v, %v", target, err, pathErr)
-	}
-
-	if err != nil && os.IsNotExist(err) {
-		klog.V(5).Infof("[Debug] NodePublishVolume: Target path %q does not exist", target)
-		return false, nil
-	}
-
-	if !notMnt {
-		klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
-	}
-
-	return !notMnt, nil
-}
-
-func (d *Driver) isValidVolumeCapabilities(volCaps []*csi.VolumeCapability) bool {
+func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapability) bool {
 	hasSupport := func(cap *csi.VolumeCapability) bool {
 		for _, c := range volumeCaps {
 			if c.GetMode() == cap.AccessMode.GetMode() {
