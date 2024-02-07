@@ -19,6 +19,7 @@ node:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-sa
+  nodeSelector: {}
   resources:
     requests:
       cpu: 10m
