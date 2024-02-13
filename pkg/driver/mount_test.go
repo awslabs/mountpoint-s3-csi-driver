@@ -177,6 +177,3 @@ func TestS3MounterMount(t *testing.T) {
 		})
 	}
 }
-
-func TestS3MounterIsMountPoint(t *testing.T) {
-}
