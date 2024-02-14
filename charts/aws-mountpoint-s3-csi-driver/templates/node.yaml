@@ -75,8 +75,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: HOST_TOKEN_PATH
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/token
+            - name: HOST_PLUGIN_DIR
+              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

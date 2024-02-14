@@ -15,22 +15,22 @@ import (
 type nodeServerTestEnv struct {
 	mockCtl     *gomock.Controller
 	mockMounter *mock_driver.MockMounter
-	driver      *driver.Driver
+	server      *driver.S3NodeServer
 }
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	driver := &driver.Driver{
-		Endpoint: "unix://tmp/csi.sock",
-		NodeID:   "test-nodeID",
-		Mounter:  mockMounter,
+	server := &driver.S3NodeServer{
+		NodeID:          "test-nodeID",
+		BaseCredentials: &driver.MountCredentials{},
+		Mounter:         mockMounter,
 	}
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,
-		driver:      driver,
+		server:      server,
 	}
 }
 
@@ -64,10 +64,8 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext:    map[string]string{"bucketName": bucketName},
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Any())
-				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Any())
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
@@ -94,10 +92,8 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext: map[string]string{"bucketName": bucketName},
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(false, nil)
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--read-only"}))
-				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq([]string{"--read-only"}))
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
@@ -127,10 +123,8 @@ func TestNodePublishVolume(t *testing.T) {
 					Readonly:      true,
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Eq("unused"), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
-				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
@@ -160,12 +154,10 @@ func TestNodePublishVolume(t *testing.T) {
 					Readonly:      true,
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().MakeDir(gomock.Eq(targetPath)).Return(nil)
-				nodeTestEnv.mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Mount(
-					gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Eq("unused"),
+					gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(),
 					gomock.Eq([]string{"--read-only", "--test=123"})).Return(nil)
-				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
@@ -184,7 +176,7 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext:    map[string]string{"bucketName": bucketName},
 				}
 
-				_, err := nodeTestEnv.driver.NodePublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err == nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
 				}
@@ -219,29 +211,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(nil)
-				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
-				if err != nil {
-					t.Fatalf("NodePublishVolume failed: %v", err)
-				}
-
-				nodeTestEnv.mockCtl.Finish()
-			},
-		},
-		{
-			name: "success: corrupted volume",
-			testFunc: func(t *testing.T) {
-				nodeTestEnv := initNodeServerTestEnv(t)
-				ctx := context.Background()
-				req := &csi.NodeUnpublishVolumeRequest{
-					VolumeId:   volumeId,
-					TargetPath: targetPath,
-				}
-
-				expectedErr := errors.New("")
-				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, expectedErr)
-				nodeTestEnv.mockMounter.EXPECT().IsCorruptedMnt(expectedErr).Return(true)
-				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(nil)
-				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume failed: %v", err)
 				}
@@ -260,7 +230,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, nil)
-				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume failed: %v", err)
 				}
@@ -280,7 +250,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(errors.New(""))
-				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err == nil {
 					t.Fatalf("NodePublishVolume must fail")
 				}
@@ -300,7 +270,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 
 				expectedError := fs.ErrNotExist
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(false, expectedError)
-				_, err := nodeTestEnv.driver.NodeUnpublishVolume(ctx, req)
+				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume failed: %v", err)
 				}
@@ -313,4 +283,22 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
 	}
+}
+
+func TestNodeGetCapabilities(t *testing.T) {
+	nodeTestEnv := initNodeServerTestEnv(t)
+	ctx := context.Background()
+	req := &csi.NodeGetCapabilitiesRequest{}
+
+	resp, err := nodeTestEnv.server.NodeGetCapabilities(ctx, req)
+	if err != nil {
+		t.Fatalf("NodeGetCapabilities failed: %v", err)
+	}
+
+	capabilities := resp.GetCapabilities()
+	if len(capabilities) != 0 {
+		t.Fatalf("NodeGetCapabilities failed: capabilities not empty")
+	}
+
+	nodeTestEnv.mockCtl.Finish()
 }

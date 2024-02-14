@@ -165,11 +165,9 @@ func TestSystemdConnection(t *testing.T) {
 							}
 						}()
 					})
-				_, err := conn.ListUnits(ctx)
-				if err == nil {
+				if _, err := conn.ListUnits(ctx); err == nil {
 					t.Fatalf("Expected error, got nil")
 				}
-
 			},
 		},
 	}
