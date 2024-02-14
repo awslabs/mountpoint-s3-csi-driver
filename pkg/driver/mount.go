@@ -39,7 +39,6 @@ const (
 	defaultRegionEnv   = "AWS_DEFAULT_REGION"
 	stsEndpointsEnv    = "AWS_STS_REGIONAL_ENDPOINTS"
 	MountS3PathEnv     = "MOUNT_S3_PATH"
-	hostPluginDirEnv   = "HOST_TOKEN_DIR"
 	defaultMountS3Path = "/usr/bin/mount-s3"
 	procMounts         = "/host/proc/mounts"
 	userAgentPrefix    = "--user-agent-prefix"
