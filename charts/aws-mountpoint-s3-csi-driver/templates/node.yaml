@@ -19,9 +19,9 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-      {{- if .Values.node.nodeSelector }}
-      {{- toYaml .Values.node.nodeSelector | nindent 8 }}
-      {{- end }}
+        {{- with .Values.controller.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
       tolerations:
