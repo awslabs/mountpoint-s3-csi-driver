@@ -19,7 +19,7 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-        {{- with .Values.controller.nodeSelector }}
+        {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
