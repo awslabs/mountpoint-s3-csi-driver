@@ -14,7 +14,7 @@ spec:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
-      bucketName: s3-csi-driver
+      bucketName: s3-csi-driver-test-jjk
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

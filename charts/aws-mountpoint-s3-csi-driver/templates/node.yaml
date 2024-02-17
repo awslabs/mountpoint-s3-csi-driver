@@ -46,6 +46,14 @@ spec:
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          {{- with .Values.node.seLinuxOptions }}
+          securityContext:
+            seLinuxOptions:
+              user: {{ .user }}
+              type: {{ .type }}
+              role: {{ .role }}
+              level: {{ .level }}
+          {{- end }}
           imagePullPolicy: IfNotPresent
           command:
             - "/bin/install-mp"
@@ -58,6 +66,14 @@ spec:
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          {{- with .Values.node.seLinuxOptions }}
+          securityContext:
+            seLinuxOptions:
+              user: {{ .user }}
+              type: {{ .type }}
+              role: {{ .role }}
+              level: {{ .level }}
+          {{- end }}
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
