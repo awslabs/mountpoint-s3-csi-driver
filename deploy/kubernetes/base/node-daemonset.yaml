@@ -28,6 +28,12 @@ spec:
           tolerationSeconds: 300
       initContainers:
         - name: install-mountpoint
+          securityContext:
+            seLinuxOptions:
+              user: system_u
+              type: super_t
+              role: system_r
+              level: s0
           image: csi-driver
           imagePullPolicy: IfNotPresent
           command:
@@ -42,6 +48,11 @@ spec:
         - name: s3-plugin
           securityContext:
             privileged: false
+            seLinuxOptions:
+              user: system_u
+              type: super_t
+              role: system_r
+              level: s0
           image: csi-driver
           imagePullPolicy: IfNotPresent
           args:
