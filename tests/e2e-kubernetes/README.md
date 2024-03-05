@@ -9,7 +9,7 @@ export KOPS_STATE_FILE="s3://vlaad-kops-state-store" # set KOPS_STATE_FILE to yo
 export AWS_REGION=us-east-1
 export TAG=20cb9d919704522d93ac40914b760dbd0487bcf3 # CSI Driver image tag to install
 export IMAGE_NAME="s3-csi-driver" # repository is infered from current AWS account and region
-export SSH_KEY=/home/vlaad/.ssh/k8s.private.pub # optional
+export SSH_KEY=/home/csiuser/.ssh/k8s.private.pub # optional
 
 ACTION=install_tools tests/e2e-kubernetes/scripts/run.sh
 ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh

@@ -73,6 +73,23 @@ jobs:
       matrix:
         cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
+        family: ["AmazonLinux2", "Bottlerocket"]
+        include:
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "AmazonLinux2"
+          - cluster-type: "eksctl"
+            arch: "arm"
+            family: "AmazonLinux2"
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "Bottlerocket"
+          - cluster-type: "kops"
+            arch: "x86"
+            family: "AmazonLinux2"
+          - cluster-type: "kops"
+            arch: "arm"
+            family: "AmazonLinux2"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -103,6 +120,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Update kubeconfig
         run: |
@@ -110,6 +128,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Install the driver
         run: |
@@ -119,6 +138,7 @@ jobs:
           export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Pre e2e cleanup
         if: matrix.cluster-type == 'eksctl'
@@ -127,6 +147,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
         run: |
@@ -135,6 +156,7 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Performance Tests
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
@@ -144,6 +166,7 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Download previous benchmark results
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
@@ -172,6 +195,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
         if: always()
@@ -180,6 +204,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete cluster
         if: always() && matrix.cluster-type == 'kops'
@@ -188,6 +213,7 @@ jobs:
           export AWS_REGION=${{ env.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
+          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
   promote:
     if: startsWith(github.ref_name, 'release')

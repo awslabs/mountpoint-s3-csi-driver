@@ -23,6 +23,7 @@ function eksctl_create_cluster() {
   ZONES=${8}
   CI_ROLE_ARN=${9}
   NODE_TYPE=${10}
+  AMI_FAMILY=${11}
 
   eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
 
@@ -31,6 +32,7 @@ function eksctl_create_cluster() {
     --name $CLUSTER_NAME \
     --region $REGION \
     --node-type $NODE_TYPE \
+    --node-ami-family $AMI_FAMILY \
     --with-oidc \
     --zones $ZONES \
     --dry-run > $CLUSTER_FILE
