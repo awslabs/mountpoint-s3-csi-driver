@@ -14,13 +14,14 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.3.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.3.1                       |
+| v1.4.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.4.0                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v1.3.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.3.1                       |
 | v1.3.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.3.0                       |
 | v1.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.2.0                       |
 | v1.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.1.0                       |
@@ -52,10 +53,11 @@ The following table provides the support status for various distros with regards
 
 | Distro                                  | Experimental | Stable | Deprecated | Removed |
 |-----------------------------------------|-------------:|-------:|-----------:|--------:|
-| Amazon Linux 2    |         - |   1.0.0 |          - |       - |
-| Amazon Linux 2023 |         - |   1.0.0 |          - |       - |
-| Ubuntu 20.04      |         - |   1.0.0 |          - |       - |
-| Ubuntu 22.04      |         - |   1.0.0 |          - |       - |
+| Amazon Linux 2       |         - |   1.0.0 |          - |       - |
+| Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
+| Ubuntu 20.04         |         - |   1.0.0 |          - |       - |
+| Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
+| Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
 
 ## Documentation
 
