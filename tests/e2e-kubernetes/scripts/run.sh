@@ -26,9 +26,14 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
 ARCH=${ARCH:-x86}
+AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-cluster-${CLUSTER_TYPE}-${ARCH}.k8s.local"}
 if [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "x86" ]]; then
-  CLUSTER_NAME="s3-csi-cluster"
+  if [[ "${AMI_FAMILY}" == "Bottlerocket" ]]; then
+    CLUSTER_NAME="s3-csi-cluster-bottlerocket"
+  else
+    CLUSTER_NAME="s3-csi-cluster"
+  fi
 elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
   CLUSTER_NAME="s3-csi-cluster-arm"
 fi
@@ -121,7 +126,8 @@ function create_cluster() {
       "$EKSCTL_PATCH_FILE" \
       "$ZONES" \
       "$CI_ROLE_ARN" \
-      "$INSTANCE_TYPE"
+      "$INSTANCE_TYPE" \
+      "$AMI_FAMILY"
   fi
 }
 
