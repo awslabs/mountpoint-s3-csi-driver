@@ -74,22 +74,12 @@ jobs:
         cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
-        include:
-          - cluster-type: "eksctl"
-            arch: "x86"
-            family: "AmazonLinux2"
-          - cluster-type: "eksctl"
-            arch: "arm"
-            family: "AmazonLinux2"
-          - cluster-type: "eksctl"
-            arch: "x86"
+        exclude:
+          - cluster-type: "kops"
             family: "Bottlerocket"
-          - cluster-type: "kops"
-            arch: "x86"
-            family: "AmazonLinux2"
-          - cluster-type: "kops"
+          - cluster-type: "eksctl"
             arch: "arm"
-            family: "AmazonLinux2"
+            family: "Bottlerocket"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
