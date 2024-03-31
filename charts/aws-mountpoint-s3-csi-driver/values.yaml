@@ -30,6 +30,15 @@ node:
     limits:
       memory: 256Mi
   tolerateAllTaints: false
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: eks.amazonaws.com/compute-type
+                operator: NotIn
+                values:
+                  - fargate
 sidecars:
   nodeDriverRegistrar:
     image: 
