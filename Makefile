@@ -13,7 +13,7 @@
 #limitations under the License.
 SHELL = /bin/bash
 
-VERSION=1.4.0
+VERSION=1.5.1
 
 PKG=github.com/awslabs/aws-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
