@@ -24,6 +24,9 @@ spec:
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
+      {{- with .Values.node.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
       tolerations:
         {{- if .Values.node.tolerateAllTaints }}
         - operator: Exists
