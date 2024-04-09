@@ -9,7 +9,6 @@ image:
   tag: "v1.5.1"
 
 node:
-  resources: {}
   kubeletPath: /var/lib/kubelet
   mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
   logLevel: 4

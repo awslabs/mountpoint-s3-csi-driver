@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	hostTokenDirEnv = "HOST_TOKEN_DIR"
-	fstype          = "unused"
-	bucketName      = "bucketName"
+	hostPluginDirEnv = "HOST_PLUGIN_DIR"
+	fstype           = "unused"
+	bucketName       = "bucketName"
 )
 
 var (
@@ -110,12 +110,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
-	hostTokenDir := os.Getenv(hostTokenDirEnv)
-	if hostTokenDir == "" {
+	hostPluginDir := os.Getenv(hostPluginDirEnv)
+	if hostPluginDir == "" {
 		// set the default in case the env variable isn't found
-		hostTokenDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
 	}
-	hostTokenPath := path.Join(hostTokenDir, "token")
+	hostTokenPath := path.Join(hostPluginDir, "token")
 	credentials := &MountCredentials{
 		AccessKeyID:     os.Getenv(keyIdEnv),
 		SecretAccessKey: os.Getenv(accessKeyEnv),
