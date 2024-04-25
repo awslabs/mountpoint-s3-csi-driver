@@ -10,11 +10,13 @@ spec:
   mountOptions:
     - allow-delete
     - region us-west-2
+    - sse aws:kms # Use customer managed KMS key for server side encryption
+    - sse-kms-key-id arn:aws:kms:us-west-2:012345678900:key/00000000-0000-0000-0000-000000000000 # set key id (optional)
   csi:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
-      bucketName: s3-csi-driver-test-jjk
+      bucketName: s3-csi-driver-test
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

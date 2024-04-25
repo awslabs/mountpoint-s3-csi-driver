@@ -238,6 +238,20 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 		env = credentials.Env()
 	}
 
+	// Max attempts is passed to the driver as a mount option, but is passed to mp via env variable
+	// so we need to remove it from the options and add it to the env.
+	maxAttemptsIdx := -1
+	for i, o := range options {
+		if strings.HasPrefix(o, "--aws-max-attempts") {
+			maxAttemptsIdx = i
+			break
+		}
+	}
+	if maxAttemptsIdx != -1 {
+		env = append(env, strings.Replace(options[maxAttemptsIdx], "--aws-max-attempts", "AWS_MAX_ATTEMPTS", 1))
+		options = append(options[:maxAttemptsIdx], options[maxAttemptsIdx+1:]...)
+	}
+
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
