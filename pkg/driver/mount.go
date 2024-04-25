@@ -33,16 +33,18 @@ import (
 )
 
 const (
-	keyIdEnv           = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv       = "AWS_SECRET_ACCESS_KEY"
-	regionEnv          = "AWS_REGION"
-	defaultRegionEnv   = "AWS_DEFAULT_REGION"
-	stsEndpointsEnv    = "AWS_STS_REGIONAL_ENDPOINTS"
-	MountS3PathEnv     = "MOUNT_S3_PATH"
-	defaultMountS3Path = "/usr/bin/mount-s3"
-	procMounts         = "/host/proc/mounts"
-	userAgentPrefix    = "--user-agent-prefix"
-	csiDriverPrefix    = "s3-csi-driver/"
+	keyIdEnv             = "AWS_ACCESS_KEY_ID"
+	accessKeyEnv         = "AWS_SECRET_ACCESS_KEY"
+	regionEnv            = "AWS_REGION"
+	defaultRegionEnv     = "AWS_DEFAULT_REGION"
+	stsEndpointsEnv      = "AWS_STS_REGIONAL_ENDPOINTS"
+	MountS3PathEnv       = "MOUNT_S3_PATH"
+	awsMaxAttemptsEnv    = "AWS_MAX_ATTEMPTS"
+	defaultMountS3Path   = "/usr/bin/mount-s3"
+	procMounts           = "/host/proc/mounts"
+	userAgentPrefix      = "--user-agent-prefix"
+	awsMaxAttemptsOption = "--aws-max-attempts"
+	csiDriverPrefix      = "s3-csi-driver/"
 )
 
 type MountCredentials struct {
@@ -242,13 +244,13 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	// so we need to remove it from the options and add it to the env.
 	maxAttemptsIdx := -1
 	for i, o := range options {
-		if strings.HasPrefix(o, "--aws-max-attempts") {
+		if strings.HasPrefix(o, awsMaxAttemptsOption) {
 			maxAttemptsIdx = i
 			break
 		}
 	}
 	if maxAttemptsIdx != -1 {
-		env = append(env, strings.Replace(options[maxAttemptsIdx], "--aws-max-attempts", "AWS_MAX_ATTEMPTS", 1))
+		env = append(env, strings.Replace(options[maxAttemptsIdx], awsMaxAttemptsOption, awsMaxAttemptsEnv, 1))
 		options = append(options[:maxAttemptsIdx], options[maxAttemptsIdx+1:]...)
 	}
 
