@@ -193,7 +193,7 @@ spec:
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:
-            path: /proc/mounts
+            path: {{ default "/proc/mounts" .Values.node.procMountPath }}
             type: File
         - name: systemd-bus
           hostPath:
