@@ -24,4 +24,4 @@ jobs:
       run: make bin
 
     - name: Test
-      run: make test
+      run: sudo make test
