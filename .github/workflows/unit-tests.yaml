@@ -24,4 +24,5 @@ jobs:
       run: make bin
 
     - name: Test
-      run: make test
+      # Run tests as root as we require it for systemd tests
+      run: sudo make test
