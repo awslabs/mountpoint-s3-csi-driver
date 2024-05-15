@@ -10,6 +10,7 @@ spec:
   mountOptions:
     - allow-delete
     - region us-west-2
+    - prefix some-s3-prefix/
   csi:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver-volume
