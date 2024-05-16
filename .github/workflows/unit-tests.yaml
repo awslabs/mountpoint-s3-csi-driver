@@ -3,8 +3,12 @@ name: Unit tests
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  pull_request_target:
+    branches: [ "main", "feature/*" ]
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -44,7 +48,7 @@ jobs:
         path: cover.html
 
     - name: Comment test coverage
-      if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ github.event_name == 'pull_request_target' }}
       uses: actions/github-script@v7
       env:
         TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
