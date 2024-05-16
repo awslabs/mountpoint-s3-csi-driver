@@ -20,8 +20,40 @@ jobs:
     - name: Check style
       run: make check_style
 
+    - name: Install Go Test Coverage
+      run: make install-go-test-coverage
+
     - name: Build
       run: make bin
 
     - name: Test
-      run: make test
+      # Run tests as root as we require it for systemd tests
+      run: sudo make test
+
+    - name: Check test coverage
+      uses: vladopajic/go-test-coverage@v2
+      id: go-test-coverage
+      with:
+        config: ./.testcoverage.yml
+
+    - name: Upload report
+      uses: actions/upload-artifact@v4
+      id: uploaded-report
+      with:
+        name: cover
+        path: cover.html
+
+    - name: Comment test coverage
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
+        ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: 'Total test coverage: ${{ env.TOTAL_COVERAGE }}%\n Download report: ${{ env.ARTIFACT_URL }}'
+          })
