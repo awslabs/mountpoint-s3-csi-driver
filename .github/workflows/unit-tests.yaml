@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
 
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -52,11 +54,6 @@ jobs:
       env:
         TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
         ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
-      with:
-        script: |
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: 'Total test coverage: ${{ env.TOTAL_COVERAGE }}%\n Download report: ${{ env.ARTIFACT_URL }}'
-          })
+      run: |
+        echo "### Total test coverage: ${{ env.TOTAL_COVERAGE }}%" >> $GITHUB_STEP_SUMMARY
+        echo "Download report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
