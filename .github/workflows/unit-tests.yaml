@@ -3,7 +3,7 @@ name: Unit tests
 on:
   push:
     branches: [ "main" ]
-  pull_request_target:
+  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
 
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -46,7 +44,7 @@ jobs:
         path: cover.html
 
     - name: Comment test coverage
-      if: ${{ github.event_name == 'pull_request_target' }}
+      if: ${{ github.event_name == 'pull_request' }}
       uses: actions/github-script@v7
       env:
         TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
