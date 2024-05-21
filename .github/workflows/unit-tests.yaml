@@ -45,7 +45,6 @@ jobs:
 
     - name: Comment test coverage
       if: ${{ github.event_name == 'pull_request' }}
-      uses: actions/github-script@v7
       env:
         TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
         ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
