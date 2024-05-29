@@ -31,6 +31,7 @@ const (
 	NodeIDEnvVar = "CSI_NODE_NAME"
 )
 
+// dummy change to trigger the CI
 func main() {
 	var (
 		endpoint  = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
