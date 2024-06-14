@@ -1,10 +1,10 @@
 # Logging
 
-There are two types of logging you can use for troubleshooting. The first is CSI Driver itself and the other is Mountpoint logs.
+There are two types of logging you can use for troubleshooting. The first set of logs are from the CSI Driver, and the other are from Mountpoint.
 
 ## CSI Driver logs
 
-By default, CSI Driver logs are written to pod’s `stderr` and those are captured by Kubernetes and may be retrieved with a corresponding API call:
+By default, CSI Driver logs are written to the driver pod’s `stderr` and those are captured by Kubernetes and may be retrieved with a corresponding API call:
 
     POD_NAME=s3-app
     NODE_NAME=$(kubectl get pod ${POD_NAME} -o=custom-columns=NODE:.spec.nodeName | awk 'FNR == 2 {print}')
@@ -19,9 +19,11 @@ Mountpoint logs are written in a node which your application pods are running. T
     kubectl get pods ${POD_NAME} -o jsonpath='{.metadata.uid}'
     kubectl get pods ${POD_NAME} -o=custom-columns=NODE:.spec.nodeName
 
-Note down the pod UID and node name. Then connect to the Kubernetes node with the name you got. If you are using EKS with EC2 instances as worker nodes you can find more details about how to connect to your nodes in [AWS documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-linux-instance.html).
+Note down the pod UID and node name.
 
-Once you are inside, use the UID from previous step to find corresponding Mountpoint logs.
+Next, connect to the Kubernetes node with the name discovered in the previous step. If you are using EKS with EC2 instances as worker nodes, you can find more details about how to connect to your nodes in the [AWS documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-linux-instance.html).
+
+Once you have a session on the node itself, use the UID noted earlier to find the corresponding Mountpoint logs.
 
     POD_UID=f1015626-32ed-46e6-9634-c739c3a31312
     PV_NAME=s3-pv
@@ -29,4 +31,4 @@ Once you are inside, use the UID from previous step to find corresponding Mountp
     UNIT=$(systemctl status $MOUNT_PID | grep --only-matching "mount-s3-.*\.service" | tail -1)
     journalctl --unit $UNIT
 
-See more details about Mountpoint logging in [Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/LOGGING.md).
+For more details about Mountpoint logging and the configuration options available, please refer to [Mountpoint's logging documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/LOGGING.md).
