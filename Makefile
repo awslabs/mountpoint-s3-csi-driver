@@ -13,7 +13,8 @@
 #limitations under the License.
 SHELL = /bin/bash
 
-VERSION=1.6.0
+# MP CSI Driver version
+VERSION=1.7.0
 
 PKG=github.com/awslabs/aws-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
