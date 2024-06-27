@@ -239,20 +239,7 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	if credentials != nil {
 		env = credentials.Env()
 	}
-
-	// Max attempts is passed to the driver as a mount option, but is passed to mp via env variable
-	// so we need to remove it from the options and add it to the env.
-	maxAttemptsIdx := -1
-	for i, o := range options {
-		if strings.HasPrefix(o, awsMaxAttemptsOption) {
-			maxAttemptsIdx = i
-			break
-		}
-	}
-	if maxAttemptsIdx != -1 {
-		env = append(env, strings.Replace(options[maxAttemptsIdx], awsMaxAttemptsOption, awsMaxAttemptsEnv, 1))
-		options = append(options[:maxAttemptsIdx], options[maxAttemptsIdx+1:]...)
-	}
+	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
@@ -270,6 +257,25 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	}
 	cleanupDir = false
 	return nil
+}
+
+// Moves a parameter optionName from the options list to MP's environment variable list. We need this as options are
+// passed to the driver in a single field, but MP sometimes only supports config from environment variables.
+// Returns an updated options and environment.
+func moveOptionToEnvironmentVariables(optionName string, envName string, options []string, env []string) ([]string, []string) {
+	optionIdx := -1
+	for i, o := range options {
+		if strings.HasPrefix(o, optionName) {
+			optionIdx = i
+			break
+		}
+	}
+	if optionIdx != -1 {
+		// We can do replace here as we've just verified it has the right prefix
+		env = append(env, strings.Replace(options[optionIdx], optionName, envName, 1))
+		options = append(options[:optionIdx], options[optionIdx+1:]...)
+	}
+	return options, env
 }
 
 // method to add the user agent prefix to the Mountpoint headers
