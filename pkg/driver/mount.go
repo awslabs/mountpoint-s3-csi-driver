@@ -259,10 +259,10 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	return nil
 }
 
+// Moves a parameter optionName from the options list to MP's environment variable list. We need this as options are
+// passed to the driver in a single field, but MP sometimes only supports config from environment variables.
+// Returns an updated options and environment.
 func moveOptionToEnvironmentVariables(optionName string, envName string, options []string, env []string) ([]string, []string) {
-	// Moves a parameter optionName from the options list to MP's environment variable list. We need this as options are
-	// passed to the driver in a single field, but MP sometimes only supports config from environment variables.
-	// Returns an updated options and environment.
 	optionIdx := -1
 	for i, o := range options {
 		if strings.HasPrefix(o, optionName) {
