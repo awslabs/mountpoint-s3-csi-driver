@@ -23,8 +23,8 @@ node:
     create: true
     name: s3-csi-driver-sa
     annotations:
-      ## Specify the SA's role ARN
-      # "eks.amazonaws.com/role-arn": ""
+      ## Specify the SA's role ARN. Otherwise the the driver will be "Forbidden" from accessing s3 buckets
+      "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
   resources:
     requests:
