@@ -157,7 +157,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
 		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
 		l.resources = append(l.resources, resource)
-		testTwoPodsSameVolume(ctx, resource.Pvc, true)
+		testTwoPodsSameVolume(ctx, resource.Pvc, false)
 	})
 
 	// This tests below configuration:
