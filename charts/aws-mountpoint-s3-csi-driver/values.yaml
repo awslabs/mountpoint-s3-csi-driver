@@ -22,6 +22,9 @@ node:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-sa
+    # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
+    # annotations:
+      # "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
   resources:
     requests:
