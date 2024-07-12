@@ -80,6 +80,7 @@ jobs:
       # and in order to get latest supported version by envtest we convert it to 1.28.
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
       ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
+      SELINUX_MODE: "${{ matrix.selinux-mode }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
