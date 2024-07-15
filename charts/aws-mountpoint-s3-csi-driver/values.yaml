@@ -3,6 +3,9 @@
 # Declare variables to be passed into your templates.
 
 image:
+  # Our regional ECR repositories are labelled `eks/aws-s3-csi-driver`.
+  # See https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html for the per-region registry list.
+  # Example: `602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/aws-s3-csi-driver` for us-east-1.
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
@@ -44,7 +47,7 @@ node:
                   - fargate
 sidecars:
   nodeDriverRegistrar:
-    image: 
+    image:
       repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
       tag: v2.10.0-eks-1-29-7
       pullPolicy: IfNotPresent
