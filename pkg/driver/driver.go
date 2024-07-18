@@ -27,6 +27,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
@@ -64,10 +66,20 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 		klog.Fatalln(err)
 	}
 
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		klog.Fatal(err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		klog.Fatal(err)
+	}
+
 	return &Driver{
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
-		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter},
+		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter, K8sClient: clientset.CoreV1()},
 	}
 }
 
