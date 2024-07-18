@@ -18,6 +18,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path"
 	"strings"
@@ -26,15 +27,17 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
 
 const (
-	hostPluginDirEnv = "HOST_PLUGIN_DIR"
-	fstype           = "unused"
-	bucketName       = "bucketName"
+	hostPluginDirEnv      = "HOST_PLUGIN_DIR"
+	podInfoOnMountEnabled = "POD_INFO_MOUNT_ENABLED"
+	bucketName            = "bucketName"
 )
 
 var (
@@ -46,6 +49,7 @@ type S3NodeServer struct {
 	NodeID          string
 	BaseCredentials *MountCredentials
 	Mounter         Mounter
+	K8sClient       k8sv1.CoreV1Interface
 }
 
 type Token struct {
@@ -110,22 +114,72 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+
 	hostPluginDir := os.Getenv(hostPluginDirEnv)
 	if hostPluginDir == "" {
 		// set the default in case the env variable isn't found
 		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
 	}
 	hostTokenPath := path.Join(hostPluginDir, "token")
+
+	awsRoleArn := os.Getenv(roleArnEnv)
+
+	usePodIdentity := os.Getenv(podInfoOnMountEnabled)
+	if usePodIdentity == "true" {
+		klog.V(4).Infof("NodePublishVolume: Using pod identity")
+		tokensJson := req.VolumeContext["csi.storage.k8s.io/serviceAccount.tokens"]
+		if tokensJson != "" {
+			var tokens map[string]*Token
+			if err := json.Unmarshal([]byte(tokensJson), &tokens); err != nil {
+				return nil, status.Error(codes.InvalidArgument, "Tokens bad format")
+			}
+			stsToken := tokens["sts.amazonaws.com"]
+			if stsToken != nil {
+				klog.V(4).Infof("NodePublishVolume: stsToken exp: %v", stsToken.ExpirationTimestamp)
+				hostTokenPath = path.Join(hostPluginDir, volumeID+".token")
+				// TODO cleanup these files on unmount and startup
+				os.WriteFile(path.Join("/csi/", volumeID+".token"), []byte(stsToken.Token), 0400)
+			}
+		}
+
+		podNamespace := req.VolumeContext["csi.storage.k8s.io/pod.namespace"]
+		podServiceAccount := req.VolumeContext["csi.storage.k8s.io/serviceAccount.name"]
+
+		// Get role arn from kubernetes api
+		response, err := ns.K8sClient.ServiceAccounts(podNamespace).
+			Get(ctx, podServiceAccount, metav1.GetOptions{})
+		if err != nil {
+			klog.Errorf(
+				"Unable to get the service account description: '%s', "+
+					"Pod namespace: '%s', "+
+					"Service account name: '%s'",
+				err,
+				podNamespace,
+				podServiceAccount)
+			return nil, err
+		}
+		awsRoleArn = response.Annotations["eks.amazonaws.com/role-arn"]
+
+		//if len(awsRoleArn) <= 0 {
+		//	klog.Errorf("Need IAM role for service account %s (namespace: %s)", podServiceAccount, podNamespace)
+		//	err = fmt.Errorf("an IAM role must be associated with service account %s (namespace: %s)", podServiceAccount, podNamespace)
+		//	return nil, err
+		//}
+	}
+	klog.V(4).Infof("JJK roleArn: %s", awsRoleArn)
+
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
 	credentials := &MountCredentials{
 		AccessKeyID:     os.Getenv(keyIdEnv),
 		SecretAccessKey: os.Getenv(accessKeyEnv),
 		SessionToken:    os.Getenv(sessionTokenEnv),
 		Region:          os.Getenv(regionEnv),
-		DefaultRegion:   os.Getenv(defaultRegionEnv),
+		DefaultRegion:   "eu-north-1",
 		WebTokenPath:    hostTokenPath,
 		StsEndpoints:    os.Getenv(stsEndpointsEnv),
-		AwsRoleArn:      os.Getenv(roleArnEnv),
+		AwsRoleArn:      awsRoleArn,
 	}
+
 	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)

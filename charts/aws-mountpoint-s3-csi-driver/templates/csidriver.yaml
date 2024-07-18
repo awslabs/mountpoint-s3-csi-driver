@@ -6,3 +6,10 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   attachRequired: false
+  {{- if .Values.node.podInfoOnMountCompat.enable }}
+  podInfoOnMount: true
+  {{- end }}
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+      expirationSeconds: 3600
+  requiresRepublish: true

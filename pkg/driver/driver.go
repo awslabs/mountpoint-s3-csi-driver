@@ -84,7 +84,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	return &Driver{
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
-		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter},
+		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter, K8sClient: clientset.CoreV1()},
 	}, nil
 }
 
