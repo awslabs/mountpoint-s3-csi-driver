@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"os"
 
-	"github.com/onsi/ginkgo/v2"
+	ginkgo "github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +40,14 @@ func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite 
 	encoded := base64.StdEncoding.EncodeToString(data)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite))
+	ginkgo.By(fmt.Sprintf("written data with sha: %x", sha256.Sum256(data)))
+}
+
+func checkWriteToPathFails(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+	data := genBinDataFromSeed(toWrite, seed)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
+	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
 	ginkgo.By(fmt.Sprintf("written data with sha: %x", sha256.Sum256(data)))
 }
 
@@ -118,6 +126,10 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 		return pod, fmt.Errorf("pod Get API error: %w", err)
 	}
 	return pod, nil
+}
+
+func getNamespace(client clientset.Interface, namespace string) (*v1.Namespace, error) {
+	return client.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
 }
 
 func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {

@@ -141,7 +141,8 @@ function delete_cluster() {
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
-      "$REGION"
+      "$REGION" \
+      "$KUBECTL_BIN"
   fi
 }
 
