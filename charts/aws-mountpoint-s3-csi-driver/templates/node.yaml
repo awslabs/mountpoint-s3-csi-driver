@@ -116,6 +116,9 @@ spec:
                   key: {{ .sessionToken }}
                   optional: true
             {{- end }}
+            # Enable features that require pod info on mount
+            - name: POD_INFO_MOUNT_ENABLED
+              value: "{{ .Values.node.podInfoOnMountCompat.enable }}"
           volumeMounts:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletPath }}
