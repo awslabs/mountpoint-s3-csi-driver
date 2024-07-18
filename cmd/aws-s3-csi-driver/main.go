@@ -22,6 +22,8 @@ import (
 	"os"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
@@ -56,8 +58,33 @@ func main() {
 	if *nodeID == "" {
 		klog.Fatalln("node-id is required")
 	}
-	drv := driver.NewDriver(*endpoint, *mpVersion, *nodeID)
+
+	kubernetesVersion, err := kubernetesVersion()
+	if err != nil {
+		klog.Errorf("failed to get kubernetes version: %v", err)
+	}
+
+	drv := driver.NewDriver(*endpoint, *mpVersion, *nodeID, kubernetesVersion)
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)
 	}
+}
+
+func kubernetesVersion() (string, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return "", fmt.Errorf("cannot create in-cluster config: %w", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return "", fmt.Errorf("cannot create kubernetes clientset: %w", err)
+	}
+
+	version, err := clientset.ServerVersion()
+	if err != nil {
+		return "", fmt.Errorf("cannot get kubernetes server version: %w", err)
+	}
+
+	return version.String(), nil
 }

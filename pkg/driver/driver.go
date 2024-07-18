@@ -55,11 +55,11 @@ type Driver struct {
 	NodeServer *S3NodeServer
 }
 
-func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v",
-		driverVersion, gitCommit, buildDate, nodeID, mpVersion)
+func NewDriver(endpoint string, mpVersion string, nodeID string, kubernetesVersion string) *Driver {
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
+		driverVersion, gitCommit, buildDate, nodeID, mpVersion, kubernetesVersion)
 
-	mounter, err := NewS3Mounter(mpVersion)
+	mounter, err := NewS3Mounter(mpVersion, kubernetesVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}

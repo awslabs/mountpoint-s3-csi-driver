@@ -44,7 +44,6 @@ const (
 	procMounts           = "/host/proc/mounts"
 	userAgentPrefix      = "--user-agent-prefix"
 	awsMaxAttemptsOption = "--aws-max-attempts"
-	csiDriverPrefix      = "s3-csi-driver/"
 )
 
 type MountCredentials struct {
@@ -123,12 +122,13 @@ type ProcMountLister struct {
 }
 
 type S3Mounter struct {
-	Ctx         context.Context
-	Runner      ServiceRunner
-	Fs          Fs
-	MountLister MountLister
-	MpVersion   string
-	MountS3Path string
+	Ctx               context.Context
+	Runner            ServiceRunner
+	Fs                Fs
+	MountLister       MountLister
+	MpVersion         string
+	MountS3Path       string
+	kubernetesVersion string
 }
 
 func MountS3Path() string {
@@ -139,19 +139,20 @@ func MountS3Path() string {
 	return mountS3Path
 }
 
-func NewS3Mounter(mpVersion string) (*S3Mounter, error) {
+func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error) {
 	ctx := context.Background()
 	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
 	return &S3Mounter{
-		Ctx:         ctx,
-		Runner:      runner,
-		Fs:          &OsFs{},
-		MountLister: &ProcMountLister{ProcMountPath: procMounts},
-		MpVersion:   mpVersion,
-		MountS3Path: MountS3Path(),
+		Ctx:               ctx,
+		Runner:            runner,
+		Fs:                &OsFs{},
+		MountLister:       &ProcMountLister{ProcMountPath: procMounts},
+		MpVersion:         mpVersion,
+		MountS3Path:       MountS3Path(),
+		kubernetesVersion: kubernetesVersion,
 	}, nil
 }
 
@@ -240,12 +241,13 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 		env = credentials.Env()
 	}
 	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
+	options = addUserAgentToOptions(options, UserAgent(m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
 		ExecPath:    m.MountS3Path,
-		Args:        append(addUserAgentToOptions(options), bucketName, target),
+		Args:        append(options, bucketName, target),
 		Env:         env,
 	})
 
@@ -280,7 +282,7 @@ func moveOptionToEnvironmentVariables(optionName string, envName string, options
 
 // method to add the user agent prefix to the Mountpoint headers
 // https://github.com/awslabs/mountpoint-s3/pull/548
-func addUserAgentToOptions(options []string) []string {
+func addUserAgentToOptions(options []string, userAgent string) []string {
 	// first remove it from the options in case it's in there
 	for i := len(options) - 1; i >= 0; i-- {
 		if strings.Contains(options[i], userAgentPrefix) {
@@ -288,7 +290,7 @@ func addUserAgentToOptions(options []string) []string {
 		}
 	}
 	// add the hard coded S3 CSI driver user agent string
-	return append(options, userAgentPrefix+"="+csiDriverPrefix+GetVersion().DriverVersion)
+	return append(options, userAgentPrefix+"="+userAgent)
 }
 
 func (m *S3Mounter) Unmount(target string) error {

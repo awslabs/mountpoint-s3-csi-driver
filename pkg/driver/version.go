@@ -20,6 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
+)
+
+const (
+	userAgentCsiDriverPrefix = "s3-csi-driver/"
+	userAgentK8sPrefix       = "k8s/"
 )
 
 var (
@@ -47,6 +53,7 @@ func GetVersion() VersionInfo {
 		Platform:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 	}
 }
+
 func GetVersionJSON() (string, error) {
 	info := GetVersion()
 	marshalled, err := json.MarshalIndent(&info, "", "  ")
@@ -54,4 +61,22 @@ func GetVersionJSON() (string, error) {
 		return "", err
 	}
 	return string(marshalled), nil
+}
+
+// UserAgent returns user-agent for the CSI driver.
+func UserAgent(kubernetesVersion string) string {
+	var b strings.Builder
+
+	// s3-csi-driver/v0.0.0
+	b.WriteString(userAgentCsiDriverPrefix)
+	b.WriteString(GetVersion().DriverVersion)
+
+	if kubernetesVersion != "" {
+		// k8s/v0.0.0
+		b.WriteRune(' ')
+		b.WriteString(userAgentK8sPrefix)
+		b.WriteString(kubernetesVersion)
+	}
+
+	return b.String()
 }
