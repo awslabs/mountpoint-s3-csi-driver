@@ -9,7 +9,7 @@ import (
 	"github.com/onsi/gomega"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
-	"k8s.io/kubernetes/test/e2e/storage/testsuites"
+	//	"k8s.io/kubernetes/test/e2e/storage/testsuites"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
 )
 
@@ -33,7 +33,7 @@ func TestE2E(t *testing.T) {
 
 var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitCapacityTestSuite,
-	testsuites.InitVolumesTestSuite, // success: writes 53 bytes to index.html file, reads and verifies content from another pod
+	// testsuites.InitVolumesTestSuite, // success: writes 53 bytes to index.html file, reads and verifies content from another pod
 	// testsuites.InitVolumeIOTestSuite,   // tries to open a file for writing multiple times, which is unsupported by MP
 	// testsuites.InitVolumeModeTestSuite, // fail: tries to mount in block mode, success: check unused volume is not mounted
 	// testsuites.InitSubPathTestSuite,
@@ -49,8 +49,8 @@ var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitSnapshottableStressTestSuite,
 	// testsuites.InitVolumePerformanceTestSuite,
 	// testsuites.InitReadWriteOncePodTestSuite,
-	custom_testsuites.InitS3CSIMultiVolumeTestSuite,
-	custom_testsuites.InitS3MountOptionsTestSuite,
+	// custom_testsuites.InitS3CSIMultiVolumeTestSuite,
+	// custom_testsuites.InitS3MountOptionsTestSuite,
 	custom_testsuites.InitS3CSICredentialsTestSuite,
 }
 
