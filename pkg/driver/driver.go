@@ -27,6 +27,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
@@ -55,11 +57,26 @@ type Driver struct {
 	NodeServer *S3NodeServer
 }
 
-func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v",
-		driverVersion, gitCommit, buildDate, nodeID, mpVersion)
+func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("cannot create in-cluster config: %w", err)
+	}
 
-	mounter, err := NewS3Mounter(mpVersion)
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create kubernetes clientset: %w", err)
+	}
+
+	kubernetesVersion, err := kubernetesVersion(clientset)
+	if err != nil {
+		klog.Errorf("failed to get kubernetes version: %v", err)
+	}
+
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
+		driverVersion, gitCommit, buildDate, nodeID, mpVersion, kubernetesVersion)
+
+	mounter, err := NewS3Mounter(mpVersion, kubernetesVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
@@ -68,7 +85,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) *Driver {
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
 		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter},
-	}
+	}, nil
 }
 
 func (d *Driver) Run() error {
@@ -160,4 +177,13 @@ func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
 	}
 
 	return nil
+}
+
+func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {
+	version, err := clientset.ServerVersion()
+	if err != nil {
+		return "", fmt.Errorf("cannot get kubernetes server version: %w", err)
+	}
+
+	return version.String(), nil
 }

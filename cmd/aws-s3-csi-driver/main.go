@@ -56,7 +56,12 @@ func main() {
 	if *nodeID == "" {
 		klog.Fatalln("node-id is required")
 	}
-	drv := driver.NewDriver(*endpoint, *mpVersion, *nodeID)
+
+	drv, err := driver.NewDriver(*endpoint, *mpVersion, *nodeID)
+	if err != nil {
+		klog.Fatalf("failed to create driver: %s", err)
+	}
+
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)
 	}
