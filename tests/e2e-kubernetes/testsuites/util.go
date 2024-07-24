@@ -180,14 +180,15 @@ func annotateServiceAccountWithRole(roleARN string) func(*v1.ServiceAccount) {
 
 func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) func(context.Context) {
 	originalRoleARN := sa.Annotations[roleARNAnnotation]
-	ginkgo.By(fmt.Sprintf("Overriding ServiceAccount %s's role from %s to %s", sa.Name, originalRoleARN, roleARN))
+	ginkgo.By(fmt.Sprintf("Overriding ServiceAccount %s's role to %s", sa.Name, roleARN))
 
-	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	annotateServiceAccountWithRole(roleARN)(sa)
-	_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+	sa, err := client.Update(ctx, sa, metav1.UpdateOptions{})
 	framework.ExpectNoError(err)
 
 	return func(ctx context.Context) {
+		ginkgo.By(fmt.Sprintf("Restoring ServiceAccount %s's role to %s", sa.Name, originalRoleARN))
 		annotateServiceAccountWithRole(originalRoleARN)(sa)
 		_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
 		framework.ExpectNoError(err)
