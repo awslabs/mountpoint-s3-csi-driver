@@ -360,6 +360,152 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		})
 
 	})
+
+	Context("Pod level", func() {
+		Context("should use correct credentials", func() {
+			It("full access role", func(ctx context.Context) {
+				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+				defer deleteSA(ctx)
+
+				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+				l.resources = append(l.resources, resource)
+
+				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+				framework.ExpectNoError(err)
+				defer func() {
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+				}()
+
+				writtenFile := expectWriteToSucceed(pod)
+				expectReadToSucceed(pod, writtenFile)
+			})
+
+			It("read-only role", func(ctx context.Context) {
+				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+				defer deleteSA(ctx)
+
+				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+				l.resources = append(l.resources, resource)
+
+				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+				framework.ExpectNoError(err)
+				defer func() {
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+				}()
+
+				expectWriteToFail(pod)
+				expectListToSucceed(pod)
+			})
+		})
+
+		It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
+			// TODO:
+			// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
+			// 2. Assert new token file is written to the Pod
+		})
+
+		It("should use up to date role associated with service account", func(ctx context.Context) {
+			// Create a SA with full access role
+			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+			defer deleteSA(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+
+			writtenFile := expectWriteToSucceed(pod)
+			expectReadToSucceed(pod, writtenFile)
+
+			// Associate SA with read-only access role
+			saClient := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+			annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess)(sa)
+			_, err = saClient.Update(ctx, sa, metav1.UpdateOptions{})
+			framework.ExpectNoError(err)
+
+			// Re-create the pod
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}()
+
+			// The pod should only have a read-only access now
+			expectReadToSucceed(pod, writtenFile)
+			expectListToSucceed(pod)
+			expectWriteToFail(pod)
+		})
+
+		It("should fail if service account does not have an associated role", func(ctx context.Context) {
+			// TODO: How this should fail?
+		})
+
+		It("should not use csi driver's service account tokens", func(ctx context.Context) {
+			driverSA := getCSIDriverServiceAccount(ctx, f)
+			restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, iamRoleS3FullAccess)
+			defer restoreDriverSA(ctx)
+
+			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3NoAccess))
+			defer deleteSA(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}()
+
+			expectListToFail(pod)
+			expectWriteToFail(pod)
+		})
+
+		It("should not use mix different pod's service account tokens", func(ctx context.Context) {
+			saFullAccess, deleteSAFullAccess := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+			defer deleteSAFullAccess(ctx)
+
+			saReadOnlyAccess, deleteSAReadOnlyAccess := createServiceAccount(ctx, f, "s3-csi-e2e-read-only-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+			defer deleteSAReadOnlyAccess(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saFullAccess.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess))
+			}()
+
+			podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saReadOnlyAccess.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess))
+			}()
+
+			writtenFile := expectWriteToSucceed(podFullAccess)
+			expectReadToSucceed(podFullAccess, writtenFile)
+
+			expectListToSucceed(podReadOnlyAccess)
+			expectWriteToFail(podReadOnlyAccess)
+		})
+
+		It("should not use pod's service account role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
+			// TODO:
+			// 1. Associate Pod's service account with S3 Full Access role
+			// 2. Associate driver's service account with S3 Read-only Access role
+			// 3. Assert write fails but read succeeds
+		})
+
+		It("should not use pod's service account role if 'authenticationSource' is not explicitly set to 'pod'", func(ctx context.Context) {
+			// TODO:
+			// 1. Associate Pod's service account with S3 Full Access role
+			// 2. Associate driver's service account with S3 Read-only Access role
+			// 3. Assert write fails but read succeeds
+		})
+	})
 }
 
 //-- IAM & STS utils
