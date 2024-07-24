@@ -25,7 +25,7 @@ function eksctl_create_cluster() {
   NODE_TYPE=${10}
   AMI_FAMILY=${11}
 
-  eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
+  eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "$KUBECTL_BIN"
 
   # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
   ${BIN} create cluster \
@@ -53,7 +53,9 @@ function eksctl_delete_cluster() {
   BIN=${1}
   CLUSTER_NAME=${2}
   REGION=${3}
+  KUBECTL_BIN=${4}
   if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
+    ${KUBECTL_BIN} delete pdb --all -A
     ${BIN} delete cluster "${CLUSTER_NAME}"
   fi
   STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
