@@ -66,6 +66,14 @@ func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
 }
 
+func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
+}
+
+func checkListingPathFails(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("ls %s", path), 1)
+}
+
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
 	f := config.Framework
 	r := storageframework.VolumeResource{

@@ -35,6 +35,7 @@ import (
 const (
 	iamRoleS3FullAccess     = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
 	iamRoleS3ReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+	iamRoleS3NoAccess       = "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess" // `AmazonEC2ReadOnlyAccess` gives no S3 access
 )
 
 type s3CSICredentialsTestSuite struct {
@@ -84,31 +85,45 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		l.config = driver.PrepareTest(ctx, f)
 		ginkgo.DeferCleanup(cleanup)
 	})
-	toWrite := 1024 // 1KB
+
+	const (
+		testVolumePath = "/mnt/volume1"
+		testFilePath   = testVolumePath + "/file.txt"
+		testWriteSize  = 1024 // 1KB
+	)
 
 	type writtenFile struct {
 		path string
 		seed int64
+		size int
 	}
 
 	expectWriteToSucceed := func(pod *v1.Pod) writtenFile {
 		seed := time.Now().UTC().UnixNano()
-		path := "/mnt/volume1/file.txt"
-		ginkgo.By(fmt.Sprintf("checking writing to %s", path))
-		checkWriteToPath(f, pod, path, toWrite, seed)
-		return writtenFile{path, seed}
+		ginkgo.By(fmt.Sprintf("checking writing to %s", testFilePath))
+		checkWriteToPath(f, pod, testFilePath, testWriteSize, seed)
+		return writtenFile{testFilePath, seed, testWriteSize}
 	}
 
 	expectReadToSucceed := func(pod *v1.Pod, file writtenFile) {
 		ginkgo.By(fmt.Sprintf("checking reading from %s", file.path))
-		checkReadFromPath(f, pod, file.path, toWrite, file.seed)
+		checkReadFromPath(f, pod, file.path, file.size, file.seed)
 	}
 
 	expectWriteToFail := func(pod *v1.Pod) {
 		seed := time.Now().UTC().UnixNano()
-		path := "/mnt/volume1/file.txt"
-		ginkgo.By(fmt.Sprintf("checking if writing to %s fails", path))
-		checkWriteToPathFails(f, pod, path, toWrite, seed)
+		ginkgo.By(fmt.Sprintf("checking if writing to %s fails", testFilePath))
+		checkWriteToPathFails(f, pod, testFilePath, testWriteSize, seed)
+	}
+
+	expectListToSucceed := func(pod *v1.Pod) {
+		ginkgo.By(fmt.Sprintf("checking listing %s", testVolumePath))
+		checkListingPath(f, pod, testVolumePath)
+	}
+
+	expectListToFail := func(pod *v1.Pod) {
+		ginkgo.By(fmt.Sprintf("checking if listing %s fails", testVolumePath))
+		checkListingPathFails(f, pod, testVolumePath)
 	}
 
 	ginkgo.Context("Driver level", func() {
@@ -148,6 +163,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				}()
 
 				expectWriteToFail(pod)
+				expectListToSucceed(pod)
 			})
 		})
 
@@ -187,6 +203,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 			// The pod should only have a read-only access now
 			expectReadToSucceed(pod, writtenFile)
+			expectListToSucceed(pod)
 			expectWriteToFail(pod)
 		})
 
@@ -199,7 +216,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, iamRoleS3FullAccess)
 			defer restoreDriverSA(ctx)
 
-			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3NoAccess))
 			defer deleteSA(ctx)
 
 			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
@@ -211,6 +228,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
 			}()
 
+			expectListToFail(pod)
 			expectWriteToFail(pod)
 		})
 
@@ -239,6 +257,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			writtenFile := expectWriteToSucceed(podFullAccess)
 			expectReadToSucceed(podFullAccess, writtenFile)
 
+			expectListToSucceed(podReadOnlyAccess)
 			expectWriteToFail(podReadOnlyAccess)
 		})
 
