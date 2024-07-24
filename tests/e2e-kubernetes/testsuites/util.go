@@ -9,6 +9,7 @@ import (
 	"os"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,9 +19,17 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
+	admissionapi "k8s.io/pod-security-admission/api"
 )
 
 const NamespacePrefix = "aws-s3-csi-e2e-"
+
+const (
+	csiDriverDaemonSetName      = "s3-csi-node"
+	csiDriverDaemonSetNamespace = "kube-system"
+)
+
+const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {
@@ -111,6 +120,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 }
 
 func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
+	ginkgo.By(fmt.Sprintf("Creating Pod %s in %s (SA: %s)", pod.Name, namespace, pod.Spec.ServiceAccountName))
 	pod, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %w", err)
@@ -128,13 +138,71 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 	return pod, nil
 }
 
+func createPodWithServiceAccount(ctx context.Context, client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, serviceAccountName string) (*v1.Pod, error) {
+	pod := e2epod.MakePod(namespace, nil, pvclaims, admissionapi.LevelBaseline, "")
+	pod.Spec.ServiceAccountName = serviceAccountName
+	return createPod(ctx, client, namespace, pod)
+}
+
 func getNamespace(client clientset.Interface, namespace string) (*v1.Namespace, error) {
 	return client.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
 }
 
-func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
+func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
 	encoded := base64.StdEncoding.EncodeToString(data)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
+}
+
+func createServiceAccount(ctx context.Context, f *framework.Framework, name string, fns ...func(*v1.ServiceAccount)) (*v1.ServiceAccount, func(context.Context)) {
+	ginkgo.By(fmt.Sprintf("Creating ServiceAccount %s in %s", name, f.Namespace.Name))
+	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+	var sa v1.ServiceAccount
+	sa.Name = name
+	sa.Annotations = make(map[string]string)
+	for _, fn := range fns {
+		fn(&sa)
+	}
+	_, err := client.Create(ctx, &sa, metav1.CreateOptions{})
+	framework.ExpectNoError(err)
+
+	return &sa, func(ctx context.Context) {
+		framework.ExpectNoError(client.Delete(ctx, sa.Name, metav1.DeleteOptions{}))
+	}
+}
+
+func annotateServiceAccountWithRole(roleARN string) func(*v1.ServiceAccount) {
+	return func(sa *v1.ServiceAccount) {
+		sa.Annotations[roleARNAnnotation] = roleARN
+	}
+}
+
+func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) func(context.Context) {
+	originalRoleARN := sa.Annotations[roleARNAnnotation]
+	ginkgo.By(fmt.Sprintf("Overriding ServiceAccount %s's role from %s to %s", sa.Name, originalRoleARN, roleARN))
+
+	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+	annotateServiceAccountWithRole(roleARN)(sa)
+	_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+	framework.ExpectNoError(err)
+
+	return func(ctx context.Context) {
+		annotateServiceAccountWithRole(originalRoleARN)(sa)
+		_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+		framework.ExpectNoError(err)
+	}
+}
+
+func getCSIDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.ServiceAccount {
+	dsClient := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := dsClient.Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+
+	saClient := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
+	sa, err := saClient.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	gomega.Expect(sa).NotTo(gomega.BeNil())
+
+	return sa
 }

@@ -19,15 +19,22 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"time"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
-	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"time"
+)
+
+const (
+	iamRoleS3FullAccess     = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+	iamRoleS3ReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
 )
 
 type s3CSICredentialsTestSuite struct {
@@ -49,7 +56,10 @@ func (t *s3CSICredentialsTestSuite) GetTestSuiteInfo() storageframework.TestSuit
 	return t.tsInfo
 }
 
-func (t *s3CSICredentialsTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver, _ storageframework.TestPattern) {
+func (t *s3CSICredentialsTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver, pattern storageframework.TestPattern) {
+	if pattern.VolType != storageframework.PreprovisionedPV {
+		e2eskipper.Skipf("Suite %q does not support %v", t.tsInfo.Name, pattern.VolType)
+	}
 }
 
 func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
@@ -57,13 +67,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		resources []*storageframework.VolumeResource
 		config    *storageframework.PerTestConfig
 	}
-	var (
-		l local
-	)
+	var l local
 
-	namespace := NamespacePrefix + "credentials"
-	f := framework.NewFrameworkWithCustomTimeouts(namespace, storageframework.GetDriverTimeouts(driver))
-	f.SkipNamespaceCreation = true
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"credentials", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	cleanup := func(ctx context.Context) {
@@ -74,58 +80,177 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup resource")
 	}
 	ginkgo.BeforeEach(func(ctx context.Context) {
-		namespaceObj, err := getNamespace(f.ClientSet, namespace)
-		framework.ExpectNoError(err)
-		f.Namespace = namespaceObj
-
 		l = local{}
 		l.config = driver.PrepareTest(ctx, f)
 		ginkgo.DeferCleanup(cleanup)
 	})
 	toWrite := 1024 // 1KB
 
-	testPodLevelIdentity := func(ctx context.Context, pvc *v1.PersistentVolumeClaim) {
-		node := l.config.ClientNodeSelection
-
-		ginkgo.By(fmt.Sprintf("Creating readWritePod with a volume on %+v", node))
-		readWritePod, err := createPodWithSA(ctx, f.ClientSet, namespace, []*v1.PersistentVolumeClaim{pvc}, "s3-csi-e2e-sa")
-		framework.ExpectNoError(err)
-		defer func() {
-			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, readWritePod))
-		}()
-
-		ginkgo.By(fmt.Sprintf("Creating readOnlyPod with a volume on %+v", node))
-		readOnlyPod, err := createPodWithSA(ctx, f.ClientSet, namespace, []*v1.PersistentVolumeClaim{pvc}, "s3-csi-e2e-read-only-sa")
-		framework.ExpectNoError(err)
-		defer func() {
-			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, readOnlyPod))
-		}()
-
+	expectWriteToSucceed := func(pod *v1.Pod) string {
 		seed := time.Now().UTC().UnixNano()
-
-		fileToWrite := fmt.Sprintf("/mnt/volume1/file.txt")
-		fileToFail := fmt.Sprintf("/mnt/volume1/file_to_fail.txt")
-
-		ginkgo.By(fmt.Sprintf("Checking write from readWritePod"))
-		checkWriteToPath(f, readWritePod, fileToWrite, toWrite, seed)
-		ginkgo.By(fmt.Sprintf("Checking read from readWritePod"))
-		checkReadFromPath(f, readWritePod, fileToWrite, toWrite, seed)
-		ginkgo.By(fmt.Sprintf("Checking write fails from readOnlyPod"))
-		checkWriteToPathFails(f, readOnlyPod, fileToFail, toWrite, seed)
-		ginkgo.By(fmt.Sprintf("Checking read from readOnlyPod"))
-		checkReadFromPath(f, readOnlyPod, fileToWrite, toWrite, seed)
+		path := "/mnt/volume1/file.txt"
+		ginkgo.By(fmt.Sprintf("checking writing to %s", path))
+		checkWriteToPath(f, pod, path, toWrite, seed)
+		return path
 	}
 
-	ginkgo.It("should use pod level credentials", func(ctx context.Context) {
-		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
-		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
-		l.resources = append(l.resources, resource)
-		testPodLevelIdentity(ctx, resource.Pvc)
-	})
-}
+	expectReadToSucceed := func(pod *v1.Pod, path string) {
+		seed := time.Now().UTC().UnixNano()
+		ginkgo.By(fmt.Sprintf("checking writing to %s", path))
+		checkReadFromPath(f, pod, path, toWrite, seed)
+	}
 
-func createPodWithSA(ctx context.Context, client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, serviceAccountName string) (*v1.Pod, error) {
-	pod := e2epod.MakePod(namespace, nil, pvclaims, admissionapi.LevelBaseline, "")
-	pod.Spec.ServiceAccountName = serviceAccountName
-	return createPod(ctx, client, namespace, pod)
+	expectWriteToFail := func(pod *v1.Pod) {
+		seed := time.Now().UTC().UnixNano()
+		path := "/mnt/volume1/file.txt"
+		ginkgo.By(fmt.Sprintf("checking if writing to %s fails", path))
+		checkWriteToPathFails(f, pod, path, toWrite, seed)
+	}
+
+	ginkgo.Context("Driver level", func() {
+		// TODO: Add tests for current functionality.
+	})
+
+	ginkgo.Context("Pod level", func() {
+		ginkgo.Context("should use correct credentials", func() {
+			ginkgo.It("full access role", func(ctx context.Context) {
+				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+				defer deleteSA(ctx)
+
+				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+				l.resources = append(l.resources, resource)
+
+				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+				framework.ExpectNoError(err)
+				defer func() {
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+				}()
+
+				path := expectWriteToSucceed(pod)
+				expectReadToSucceed(pod, path)
+			})
+
+			ginkgo.It("read-only role", func(ctx context.Context) {
+				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+				defer deleteSA(ctx)
+
+				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+				l.resources = append(l.resources, resource)
+
+				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+				framework.ExpectNoError(err)
+				defer func() {
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+				}()
+
+				expectWriteToFail(pod)
+			})
+		})
+
+		ginkgo.It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
+			// TODO:
+			// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
+			// 2. Assert new token file is written to the Pod
+		})
+
+		ginkgo.It("should use up to date role associated with service account", func(ctx context.Context) {
+			// Create a SA with full access role
+			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+			defer deleteSA(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+
+			path := expectWriteToSucceed(pod)
+			expectReadToSucceed(pod, path)
+
+			// Associate SA with read-only access role
+			saClient := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+			annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess)(sa)
+			_, err = saClient.Update(ctx, sa, metav1.UpdateOptions{})
+			framework.ExpectNoError(err)
+
+			// Re-create the pod
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}()
+
+			// The pod should only have a read-only access now
+			expectReadToSucceed(pod, path)
+			expectWriteToFail(pod)
+		})
+
+		ginkgo.It("should fail if service account does not have an associated role", func(ctx context.Context) {
+			// TODO: How this should fail?
+		})
+
+		ginkgo.It("should not use csi driver's service account tokens", func(ctx context.Context) {
+			driverSA := getCSIDriverServiceAccount(ctx, f)
+
+			restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, iamRoleS3FullAccess)
+			defer restoreDriverSA(ctx)
+
+			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+			defer deleteSA(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}()
+
+			expectWriteToFail(pod)
+		})
+
+		ginkgo.It("should not use mix different pod's service account tokens", func(ctx context.Context) {
+			saFullAccess, deleteSAFullAccess := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
+			defer deleteSAFullAccess(ctx)
+
+			saReadOnlyAccess, deleteSAReadOnlyAccess := createServiceAccount(ctx, f, "s3-csi-e2e-read-only-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
+			defer deleteSAReadOnlyAccess(ctx)
+
+			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+			l.resources = append(l.resources, resource)
+
+			podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saFullAccess.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess))
+			}()
+
+			podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saReadOnlyAccess.Name)
+			framework.ExpectNoError(err)
+			defer func() {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess))
+			}()
+
+			path := expectWriteToSucceed(podFullAccess)
+			expectReadToSucceed(podFullAccess, path)
+
+			expectWriteToFail(podReadOnlyAccess)
+		})
+
+		ginkgo.It("should not use pod's service account role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
+			// TODO:
+			// 1. Associate Pod's service account with S3 Full Access role
+			// 2. Associate driver's service account with S3 Read-only Access role
+			// 3. Assert write fails but read succeeds
+		})
+
+		ginkgo.It("should not use pod's service account role if 'authenticationSource' is not explicitly set to 'pod'", func(ctx context.Context) {
+			// TODO:
+			// 1. Associate Pod's service account with S3 Full Access role
+			// 2. Associate driver's service account with S3 Read-only Access role
+			// 3. Assert write fails but read succeeds
+		})
+	})
 }
