@@ -21,6 +21,7 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
+	admissionapi "k8s.io/pod-security-admission/api"
 )
 
 type jsonMap = map[string]interface{}
@@ -72,6 +73,10 @@ func checkDeletingPath(f *framework.Framework, pod *v1.Pod, path string) {
 
 func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
+}
+
+func checkListingPathFails(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("ls %s", path), 1)
 }
 
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
@@ -146,6 +151,16 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 	return pod, nil
 }
 
+func createPodWithServiceAccount(ctx context.Context, client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, serviceAccountName string) (*v1.Pod, error) {
+	pod := e2epod.MakePod(namespace, nil, pvclaims, admissionapi.LevelBaseline, "")
+	pod.Spec.ServiceAccountName = serviceAccountName
+	return createPod(ctx, client, namespace, pod)
+}
+
+func getNamespace(client clientset.Interface, namespace string) (*v1.Namespace, error) {
+	return client.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
+}
+
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
@@ -182,6 +197,7 @@ func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.Se
 
 	client := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
 	sa, err := client.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
+
 	framework.ExpectNoError(err)
 	gomega.Expect(sa).NotTo(gomega.BeNil())
 
