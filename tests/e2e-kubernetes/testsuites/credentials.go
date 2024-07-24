@@ -86,18 +86,22 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	})
 	toWrite := 1024 // 1KB
 
-	expectWriteToSucceed := func(pod *v1.Pod) string {
+	type writtenFile struct {
+		path string
+		seed int64
+	}
+
+	expectWriteToSucceed := func(pod *v1.Pod) writtenFile {
 		seed := time.Now().UTC().UnixNano()
 		path := "/mnt/volume1/file.txt"
 		ginkgo.By(fmt.Sprintf("checking writing to %s", path))
 		checkWriteToPath(f, pod, path, toWrite, seed)
-		return path
+		return writtenFile{path, seed}
 	}
 
-	expectReadToSucceed := func(pod *v1.Pod, path string) {
-		seed := time.Now().UTC().UnixNano()
-		ginkgo.By(fmt.Sprintf("checking writing to %s", path))
-		checkReadFromPath(f, pod, path, toWrite, seed)
+	expectReadToSucceed := func(pod *v1.Pod, file writtenFile) {
+		ginkgo.By(fmt.Sprintf("checking reading from %s", file.path))
+		checkReadFromPath(f, pod, file.path, toWrite, file.seed)
 	}
 
 	expectWriteToFail := func(pod *v1.Pod) {
@@ -126,8 +130,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
 				}()
 
-				path := expectWriteToSucceed(pod)
-				expectReadToSucceed(pod, path)
+				writtenFile := expectWriteToSucceed(pod)
+				expectReadToSucceed(pod, writtenFile)
 			})
 
 			ginkgo.It("read-only role", func(ctx context.Context) {
@@ -164,8 +168,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
 			framework.ExpectNoError(err)
 
-			path := expectWriteToSucceed(pod)
-			expectReadToSucceed(pod, path)
+			writtenFile := expectWriteToSucceed(pod)
+			expectReadToSucceed(pod, writtenFile)
 
 			// Associate SA with read-only access role
 			saClient := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
@@ -182,7 +186,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			}()
 
 			// The pod should only have a read-only access now
-			expectReadToSucceed(pod, path)
+			expectReadToSucceed(pod, writtenFile)
 			expectWriteToFail(pod)
 		})
 
@@ -192,7 +196,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 		ginkgo.It("should not use csi driver's service account tokens", func(ctx context.Context) {
 			driverSA := getCSIDriverServiceAccount(ctx, f)
-
 			restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, iamRoleS3FullAccess)
 			defer restoreDriverSA(ctx)
 
@@ -233,8 +236,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess))
 			}()
 
-			path := expectWriteToSucceed(podFullAccess)
-			expectReadToSucceed(podFullAccess, path)
+			writtenFile := expectWriteToSucceed(podFullAccess)
+			expectReadToSucceed(podFullAccess, writtenFile)
 
 			expectWriteToFail(podReadOnlyAccess)
 		})
