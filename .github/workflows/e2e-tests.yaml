@@ -104,7 +104,6 @@ jobs:
           export ACTION=install_tools
           tests/e2e-kubernetes/scripts/run.sh
       - name: Create cluster
-        if: matrix.cluster-type == 'kops'
         run: |
           export ACTION=create_cluster
           export AWS_REGION=${{ env.AWS_REGION }}
@@ -127,15 +126,6 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Pre e2e cleanup
-        if: matrix.cluster-type == 'eksctl'
-        run: |
-          export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
@@ -197,7 +187,7 @@ jobs:
           export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete cluster
-        if: always() && matrix.cluster-type == 'kops'
+        if: always()
         run: |
           export ACTION=delete_cluster
           export AWS_REGION=${{ env.AWS_REGION }}
