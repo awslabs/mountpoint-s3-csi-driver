@@ -35,6 +35,7 @@ import (
 const (
 	keyIdEnv             = "AWS_ACCESS_KEY_ID"
 	accessKeyEnv         = "AWS_SECRET_ACCESS_KEY"
+	sessionTokenEnv      = "AWS_SESSION_TOKEN"
 	regionEnv            = "AWS_REGION"
 	defaultRegionEnv     = "AWS_DEFAULT_REGION"
 	stsEndpointsEnv      = "AWS_STS_REGIONAL_ENDPOINTS"
@@ -49,6 +50,7 @@ const (
 type MountCredentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
+	SessionToken    string
 	Region          string
 	DefaultRegion   string
 	WebTokenPath    string
@@ -63,6 +65,9 @@ func (mc *MountCredentials) Env() []string {
 	if mc.AccessKeyID != "" && mc.SecretAccessKey != "" {
 		env = append(env, keyIdEnv+"="+mc.AccessKeyID)
 		env = append(env, accessKeyEnv+"="+mc.SecretAccessKey)
+		if mc.SessionToken != "" {
+			env = append(env, sessionTokenEnv+"="+mc.SessionToken)
+		}
 	}
 	if mc.WebTokenPath != "" {
 		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)

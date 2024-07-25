@@ -119,6 +119,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	credentials := &MountCredentials{
 		AccessKeyID:     os.Getenv(keyIdEnv),
 		SecretAccessKey: os.Getenv(accessKeyEnv),
+		SessionToken:    os.Getenv(sessionTokenEnv),
 		Region:          os.Getenv(regionEnv),
 		DefaultRegion:   os.Getenv(defaultRegionEnv),
 		WebTokenPath:    hostTokenPath,
