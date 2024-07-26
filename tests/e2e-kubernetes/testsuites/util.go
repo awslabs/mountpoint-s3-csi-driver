@@ -23,6 +23,8 @@ import (
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 )
 
+type jsonMap = map[string]interface{}
+
 const NamespacePrefix = "aws-s3-csi-e2e-"
 
 const (
@@ -164,7 +166,7 @@ func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
 	framework.ExpectNoError(err)
 
 	for _, pod := range pods.Items {
-		framework.ExpectNoError(client.Delete(ctx, pod.Name, metav1.DeleteOptions{}))
+		framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, &pod))
 	}
 }
 
@@ -174,6 +176,17 @@ func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.Dae
 	framework.ExpectNoError(err)
 	gomega.Expect(ds).ToNot(gomega.BeNil())
 	return ds
+}
+
+func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.ServiceAccount {
+	ds := csiDriverDaemonSet(ctx, f)
+
+	client := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
+	sa, err := client.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	gomega.Expect(sa).NotTo(gomega.BeNil())
+
+	return sa
 }
 
 func awsConfig(ctx context.Context) aws.Config {
