@@ -53,9 +53,10 @@ const (
 
 	// Since we create and immediately assume roles in our tests, the delay between IAM and STS causes
 	// "AccessDenied" exceptions until they are in sync. We're retrying on "AccessDenied" as a workaround.
+	stsAssumeRoleTimeout              = 2 * time.Minute
 	stsAssumeRoleRetryCode            = "AccessDenied"
-	stsAssumeRoleRetryMaxAttemps      = 5
-	stsAssumeRoleRetryMaxBackoffDelay = 45 * time.Second
+	stsAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	stsAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
 type s3CSICredentialsTestSuite struct {
@@ -327,6 +328,9 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 	framework.Logf("Assuming IAM role")
 
 	client := sts.NewFromConfig(awsConfig(ctx))
+
+	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
+	defer cancel()
 
 	output, err := client.AssumeRole(ctx, &sts.AssumeRoleInput{
 		RoleArn:         ptr.To(roleArn),
