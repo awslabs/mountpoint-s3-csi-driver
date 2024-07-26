@@ -310,6 +310,15 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				expectFailToMount(ctx)
 			})
 		})
+
+		ginkgo.Context("IAM Instance Profiles", func() {
+			// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
+			// see the comments in the beginning of this function.
+			ginkgo.It("should use ec2 instance profile's full access role", func(ctx context.Context) {
+				pod := createPodAllowsDelete(ctx)
+				expectFullAccess(pod)
+			})
+		})
 	})
 }
 
