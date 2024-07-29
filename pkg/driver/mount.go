@@ -157,9 +157,14 @@ func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error
 }
 
 func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
+	retryTimes := 3
 	mounts, err := os.ReadFile(pml.ProcMountPath)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read %s: %w", procMounts, err)
+	if err != nil && retryTimes == 0 {
+		return nil, fmt.Errorf("Failed to read %s after %d tries: %w", procMounts, retryTimes, err)
+	} else {
+		retryTimes -= 1
+		klog.V(4).Infof("Failed to read %s, left %d tries", procMounts, retryTimes)
+		mounts, err = os.ReadFile(pml.ProcMountPath)
 	}
 	return parseProcMounts(mounts)
 }
