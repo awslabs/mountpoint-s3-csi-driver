@@ -181,7 +181,7 @@ func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
 			break
 		}
 
-		klog.V(4).ErrorS(err, "Failed to read %s on %d try", pml.ProcMountPath, i)
+		klog.V(4).ErrorS(err, "Failed to read %s on try %d", pml.ProcMountPath, i)
 		time.Sleep(procMountsReadRetryBackoff)
 	}
 
