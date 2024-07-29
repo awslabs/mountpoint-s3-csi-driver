@@ -58,7 +58,6 @@ func checkWriteToPathFails(f *framework.Framework, pod *v1.Pod, path string, toW
 	encoded := base64.StdEncoding.EncodeToString(data)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
 	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
-	framework.Logf("written data with sha: %x", sha256.Sum256(data))
 }
 
 func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {

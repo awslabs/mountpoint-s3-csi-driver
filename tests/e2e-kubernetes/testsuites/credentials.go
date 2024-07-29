@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/google/uuid"
-	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -109,10 +109,10 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		}
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup resource")
 	}
-	ginkgo.BeforeEach(func(ctx context.Context) {
+	BeforeEach(func(ctx context.Context) {
 		l = local{}
 		l.config = driver.PrepareTest(ctx, f)
-		ginkgo.DeferCleanup(cleanup)
+		DeferCleanup(cleanup)
 	})
 
 	createVolume := func(ctx context.Context) *storageframework.VolumeResource {
@@ -224,13 +224,39 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	// Since we're modifying cluster-wide resources in driver-level tests,
 	// we shouldn't run them in parallel with other tests.
-	//                                    |
-	//                              -------------
-	ginkgo.Describe("Driver Level", ginkgo.Serial, func() {
-		ginkgo.BeforeEach(func(ctx context.Context) {
+	//                         |
+	//                       ------
+	Describe("Driver Level", Serial, Ordered, func() {
+		var afterAllCleanup []func(context.Context) error
+
+		policyRoleMapping := map[string]*iamtypes.Role{}
+		BeforeAll(func(ctx context.Context) {
+			By("Pre-creating IAM roles for common policies")
+			for _, policyARN := range []string{
+				iamPolicyS3FullAccess,
+				iamPolicyS3ReadOnlyAccess,
+				iamPolicyS3NoAccess,
+			} {
+				role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
+				policyRoleMapping[policyARN] = role
+				afterAllCleanup = append(afterAllCleanup, removeRole)
+			}
+		})
+
+		AfterAll(func(ctx context.Context) {
+			By("Cleaning up resources created for Driver-level tests")
+			var errs []error
+			for _, f := range afterAllCleanup {
+				errs = append(errs, f(ctx))
+			}
+			framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup global resource")
+		})
+
+		BeforeEach(func(ctx context.Context) {
 			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
-			// we need to clean up all crendential related resources before each test to ensure we've a
+			// we need to clean up all credential related resources before each test to ensure we've a
 			// clean starting point in each test.
+			By("Cleaning up cluster-wise resources")
 
 			sa := csiDriverServiceAccount(ctx, f)
 			overrideServiceAccountRole(ctx, f, sa, "")
@@ -241,46 +267,26 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			killCSIDriverPods(ctx, f)
 		})
 
-		ginkgo.Context("Credentials via Kubernetes Secrets", func() {
-			updateCredentials := func(ctx context.Context, policyARN string) {
-				credentials, cleanupCredentials := createTemporaryCredentialsForPolicy(ctx, f, policyARN)
-				deferCleanup(cleanupCredentials)
-
-				_, deleteSecret := createCredentialSecret(ctx, f, credentials)
-				deferCleanup(deleteSecret)
-
-				// Trigger recreation of our pods to use the new credentials
-				killCSIDriverPods(ctx, f)
-			}
-
-			ginkgo.It("should use read-only access aws credentials", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3ReadOnlyAccess)
-				pod := createPodWithVolume(ctx)
-				expectReadOnly(pod)
-			})
-
-			ginkgo.It("should use full access aws credentials", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3FullAccess)
+		Context("IAM Instance Profiles", func() {
+			// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
+			// see the comments in the beginning of this function.
+			It("should use ec2 instance profile's full access role", func(ctx context.Context) {
 				pod := createPodAllowsDelete(ctx)
 				expectFullAccess(pod)
 			})
-
-			ginkgo.It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3NoAccess)
-				expectFailToMount(ctx)
-			})
 		})
 
-		ginkgo.Context("IAM Roles for Service Accounts (IRSA)", ginkgo.Ordered, func() {
+		Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
 			var oidcProvider string
-			ginkgo.BeforeAll(func(ctx context.Context) {
+			BeforeAll(func(ctx context.Context) {
 				oidcProvider = oidcProviderForCluster(ctx, f)
 				if oidcProvider == "" {
-					ginkgo.Skip("OIDC provider is not configured, skipping IRSA tests")
+					Skip("OIDC provider is not configured, skipping IRSA tests")
 				}
 			})
 
 			updateServiceAccountRole := func(ctx context.Context, policyARN string) {
+				By("Updating CSI Driver's Service Account Role")
 				sa := csiDriverServiceAccount(ctx, f)
 
 				role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
@@ -293,50 +299,63 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				killCSIDriverPods(ctx, f)
 			}
 
-			ginkgo.It("should use service account's read-only role", func(ctx context.Context) {
+			It("should use service account's read-only role", func(ctx context.Context) {
 				updateServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
 				pod := createPodWithVolume(ctx)
 				expectReadOnly(pod)
 			})
 
-			ginkgo.It("should use service account's full access role", func(ctx context.Context) {
+			It("should use service account's full access role", func(ctx context.Context) {
 				updateServiceAccountRole(ctx, iamPolicyS3FullAccess)
 				pod := createPodAllowsDelete(ctx)
 				expectFullAccess(pod)
 			})
 
-			ginkgo.It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
+			It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
 				updateServiceAccountRole(ctx, iamPolicyS3NoAccess)
 				expectFailToMount(ctx)
 			})
 		})
 
-		ginkgo.Context("IAM Instance Profiles", func() {
-			// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
-			// see the comments in the beginning of this function.
-			ginkgo.It("should use ec2 instance profile's full access role", func(ctx context.Context) {
+		Context("Credentials via Kubernetes Secrets", func() {
+			updateCredentials := func(ctx context.Context, policyARN string) {
+				By("Updating Kubernetes Secret with temporary credentials")
+
+				role, ok := policyRoleMapping[policyARN]
+				if !ok {
+					framework.Failf("Missing role mapping for policy %s", policyARN)
+				}
+				assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
+
+				_, deleteSecret := createCredentialSecret(ctx, f, assumeRoleOutput.Credentials)
+				deferCleanup(deleteSecret)
+
+				// Trigger recreation of our pods to use the new credentials
+				killCSIDriverPods(ctx, f)
+			}
+
+			It("should use read-only access aws credentials", func(ctx context.Context) {
+				updateCredentials(ctx, iamPolicyS3ReadOnlyAccess)
+				pod := createPodWithVolume(ctx)
+				expectReadOnly(pod)
+			})
+
+			It("should use full access aws credentials", func(ctx context.Context) {
+				updateCredentials(ctx, iamPolicyS3FullAccess)
 				pod := createPodAllowsDelete(ctx)
 				expectFullAccess(pod)
 			})
+
+			It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
+				updateCredentials(ctx, iamPolicyS3NoAccess)
+				expectFailToMount(ctx)
+			})
 		})
+
 	})
 }
 
 //-- IAM & STS utils
-
-// createTemporaryCredentialsForPolicy creates a new IAM role with given `policyARN` and makes `sts::AssumeRole`
-// call to obtain temporary AWS credentials for the newly created IAM role.
-// The returned function removes created IAM role.
-func createTemporaryCredentialsForPolicy(ctx context.Context, f *framework.Framework, policyARN string) (*ststypes.Credentials, func(context.Context) error) {
-	framework.Logf("Creating temporary credentials")
-	role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
-	assumeRole := assumeRole(ctx, f, *role.Arn)
-
-	return assumeRole.Credentials, func(ctx context.Context) error {
-		framework.Logf("Cleaning up temporary credentials")
-		return removeRole(ctx)
-	}
-}
 
 func stsCallerIdentity(ctx context.Context) *sts.GetCallerIdentityOutput {
 	client := sts.NewFromConfig(awsConfig(ctx))
@@ -432,7 +451,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 }
 
 func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *sts.AssumeRoleOutput {
-	framework.Logf("Assuming IAM role")
+	framework.Logf("Assuming IAM role %s", roleArn)
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 
