@@ -137,6 +137,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	createPodAllowsDelete := func(ctx context.Context) *v1.Pod {
 		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
+		deferCleanup(vol.CleanupResource)
 		return createPod(ctx, vol)
 	}
 
@@ -233,7 +234,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
 			// we need to clean up all credential related resources before each test to ensure we've a
 			// clean starting point in each test.
-			By("Cleaning up cluster-wise resources")
+			By("Cleaning up cluster-wide resources")
 
 			sa := csiDriverServiceAccount(ctx, f)
 			overrideServiceAccountRole(ctx, f, sa, "")
