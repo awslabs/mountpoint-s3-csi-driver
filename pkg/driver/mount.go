@@ -46,6 +46,16 @@ const (
 	awsMaxAttemptsOption = "--aws-max-attempts"
 )
 
+const (
+	// Due to some reason that we haven't been able to identify, reading `/host/proc/mounts`
+	// fails on newly spawned Karpenter/GPU nodes with "invalid argument".
+	// It's reported that reading `/host/proc/mounts` works after some retries,
+	// and we decided to add retry mechanism until we find and fix the root cause of this problem.
+	// See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/174.
+	procMountsReadMaxRetry     = 3
+	procMountsReadRetryBackoff = 100 * time.Millisecond
+)
+
 type MountCredentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
@@ -157,15 +167,28 @@ func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error
 }
 
 func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
-	retryTimes := 3
-	mounts, err := os.ReadFile(pml.ProcMountPath)
-	if err != nil && retryTimes == 0 {
-		return nil, fmt.Errorf("Failed to read %s after %d tries: %w", procMounts, retryTimes, err)
-	} else {
-		retryTimes -= 1
-		klog.V(4).Infof("Failed to read %s, left %d tries", procMounts, retryTimes)
+	var (
+		mounts []byte
+		err    error
+	)
+
+	for i := 1; i <= procMountsReadMaxRetry; i += 1 {
 		mounts, err = os.ReadFile(pml.ProcMountPath)
+		if err == nil {
+			if i > 1 {
+				klog.V(4).Info(err, "Successfully read %s after %d retry", pml.ProcMountPath, i)
+			}
+			break
+		}
+
+		klog.V(4).ErrorS(err, "Failed to read %s on %d try", pml.ProcMountPath, i)
+		time.Sleep(procMountsReadRetryBackoff)
 	}
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read %s after %d tries: %w", pml.ProcMountPath, procMountsReadMaxRetry, err)
+	}
+
 	return parseProcMounts(mounts)
 }
 
