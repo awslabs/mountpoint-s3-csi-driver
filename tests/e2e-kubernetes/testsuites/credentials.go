@@ -229,6 +229,21 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	Describe("Driver Level", Serial, Ordered, func() {
 		var afterAllCleanup []func(context.Context) error
 
+		cleanClusterWideResources := func(ctx context.Context) {
+			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
+			// we need to clean up all credential related resources before each test to ensure we've a
+			// clean starting point in each test.
+			By("Cleaning up cluster-wise resources")
+
+			sa := csiDriverServiceAccount(ctx, f)
+			overrideServiceAccountRole(ctx, f, sa, "")
+
+			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
+
+			// Trigger recreation of our pods to ensure they're not using deleted resources
+			killCSIDriverPods(ctx, f)
+		}
+
 		policyRoleMapping := map[string]*iamtypes.Role{}
 		BeforeAll(func(ctx context.Context) {
 			By("Pre-creating IAM roles for common policies")
@@ -245,6 +260,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 		AfterAll(func(ctx context.Context) {
 			By("Cleaning up resources created for Driver-level tests")
+			cleanClusterWideResources(ctx)
+
 			var errs []error
 			for _, f := range afterAllCleanup {
 				errs = append(errs, f(ctx))
@@ -253,18 +270,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		})
 
 		BeforeEach(func(ctx context.Context) {
-			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
-			// we need to clean up all credential related resources before each test to ensure we've a
-			// clean starting point in each test.
-			By("Cleaning up cluster-wise resources")
-
-			sa := csiDriverServiceAccount(ctx, f)
-			overrideServiceAccountRole(ctx, f, sa, "")
-
-			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
-
-			// Trigger recreation of our pods to ensure they're not using deleted resources
-			killCSIDriverPods(ctx, f)
+			cleanClusterWideResources(ctx)
 		})
 
 		Context("IAM Instance Profiles", func() {
