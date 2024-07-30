@@ -8,7 +8,10 @@ import (
 	"math/rand"
 	"os"
 
-	"github.com/onsi/ginkgo/v2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,7 +23,14 @@ import (
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 )
 
+type jsonMap = map[string]interface{}
+
 const NamespacePrefix = "aws-s3-csi-e2e-"
+
+const (
+	csiDriverDaemonSetName      = "s3-csi-node"
+	csiDriverDaemonSetNamespace = "kube-system"
+)
 
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {
@@ -40,13 +50,28 @@ func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite 
 	encoded := base64.StdEncoding.EncodeToString(data)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite))
-	ginkgo.By(fmt.Sprintf("written data with sha: %x", sha256.Sum256(data)))
+	framework.Logf("written data with sha: %x", sha256.Sum256(data))
+}
+
+func checkWriteToPathFails(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+	data := genBinDataFromSeed(toWrite, seed)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
+	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
 }
 
 func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum", path, toWrite))
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
+}
+
+func checkDeletingPath(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm %s", path))
+}
+
+func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
 }
 
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
@@ -103,6 +128,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 }
 
 func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
+	framework.Logf("Creating Pod %s in %s (SA: %s)", pod.Name, namespace, pod.Spec.ServiceAccountName)
 	pod, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %w", err)
@@ -120,9 +146,50 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 	return pod, nil
 }
 
-func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
+func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
 	encoded := base64.StdEncoding.EncodeToString(data)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
+}
+
+// In some cases like changing Secret object, it's useful to trigger recreation of our pods.
+func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
+	framework.Logf("Killing CSI Driver Pods")
+	ds := csiDriverDaemonSet(ctx, f)
+	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
+
+	pods, err := client.List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
+	})
+	framework.ExpectNoError(err)
+
+	for _, pod := range pods.Items {
+		framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, &pod))
+	}
+}
+
+func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
+	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := client.Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	gomega.Expect(ds).ToNot(gomega.BeNil())
+	return ds
+}
+
+func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.ServiceAccount {
+	ds := csiDriverDaemonSet(ctx, f)
+
+	client := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
+	sa, err := client.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	gomega.Expect(sa).NotTo(gomega.BeNil())
+
+	return sa
+}
+
+func awsConfig(ctx context.Context) aws.Config {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	framework.ExpectNoError(err)
+	return cfg
 }

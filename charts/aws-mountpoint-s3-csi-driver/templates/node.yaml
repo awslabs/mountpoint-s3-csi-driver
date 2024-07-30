@@ -109,6 +109,12 @@ spec:
                   name: {{ .name }}
                   key: {{ .accessKey }}
                   optional: true
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .sessionToken }}
+                  optional: true
             {{- end }}
           volumeMounts:
             - name: kubelet-dir

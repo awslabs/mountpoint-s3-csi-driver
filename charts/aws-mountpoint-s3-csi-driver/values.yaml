@@ -27,7 +27,7 @@ node:
     name: s3-csi-driver-sa
     # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
     # annotations:
-      # "eks.amazonaws.com/role-arn": ""
+    # "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
   resources:
     requests:
@@ -63,7 +63,7 @@ sidecars:
         mountPath: /registration
     resources: {}
   livenessProbe:
-    image: 
+    image:
       repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
       tag: v2.12.0-eks-1-29-7
       pullPolicy: IfNotPresent
@@ -81,3 +81,4 @@ awsAccessSecret:
   name: aws-secret
   keyId: key_id
   accessKey: access_key
+  sessionToken: session_token

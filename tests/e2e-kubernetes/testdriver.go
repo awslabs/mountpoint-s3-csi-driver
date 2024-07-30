@@ -88,10 +88,11 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-e2e-kubernetes-%s-", BucketPrefix, CommitId))
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
-		// note: you need this if testing in non us-east-1 regions
-		// CreateBucketConfiguration: &types.CreateBucketConfiguration{
-		// 	LocationConstraint: types.BucketLocationConstraint(BucketRegion),
-		// },
+	}
+	if BucketRegion != "us-east-1" {
+		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(BucketRegion),
+		}
 	}
 
 	if config.Prefix == custom_testsuites.S3ExpressTestIdentifier {

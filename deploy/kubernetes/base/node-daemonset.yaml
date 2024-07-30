@@ -79,6 +79,12 @@ spec:
                   name: aws-secret
                   key: access_key
                   optional: true
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: session_token
+                  optional: true
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
