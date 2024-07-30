@@ -176,12 +176,12 @@ func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
 		mounts, err = os.ReadFile(pml.ProcMountPath)
 		if err == nil {
 			if i > 1 {
-				klog.V(4).Info(err, "Successfully read %s after %d retry", pml.ProcMountPath, i)
+				klog.V(4).Infof("Successfully read %s after %d retries", pml.ProcMountPath, i)
 			}
 			break
 		}
 
-		klog.V(4).ErrorS(err, "Failed to read %s on try %d", pml.ProcMountPath, i)
+		klog.Errorf("Failed to read %s on try %d: %v", pml.ProcMountPath, i, err)
 		time.Sleep(procMountsReadRetryBackoff)
 	}
 
