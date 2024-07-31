@@ -81,10 +81,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Fatalln(err)
 	}
 
+	nodeServer := NewS3NodeServer(nodeID, mounter, clientset.CoreV1())
+
 	return &Driver{
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
-		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter, K8sClient: clientset.CoreV1()},
+		NodeServer: nodeServer,
 	}, nil
 }
 

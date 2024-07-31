@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,8 +48,8 @@ const (
 	stsAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
+const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
-
 const credentialSecretName = "aws-secret"
 
 type s3CSICredentialsTestSuite struct {
@@ -77,14 +78,19 @@ func (t *s3CSICredentialsTestSuite) SkipUnsupportedTests(_ storageframework.Test
 }
 
 func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
-	// The CSI driver supports the following mechanisms (in order):
-	// 	 1) AWS credentials passed via Kubernetes secrets
-	// 	 2) IAM Roles for Service Accounts (IRSA)
-	// 	 3) IAM instance profile
+	// The CSI driver supports driver-level and pod-level credentials:
+	//   Driver-level (in order):
+	// 	 	1) AWS credentials passed via Kubernetes secrets
+	// 	 	2) IAM Roles for Service Accounts (IRSA)
+	// 	 	3) IAM instance profile
+	//   Pod-level:
+	// 		1) IAM Roles for Service Accounts (IRSA)
+	//
 	// In our test environment we add "AmazonS3FullAccess" policy to our EC2 instances
-	// (see "eksctl-patch.json" and "kops-patch.yaml") which allows 3) to work.
-	// In order to test if 1) and 2) works, we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
-	// to ensure 1) and 2) correctly works and it does not fallback to 3).
+	// (see "eksctl-patch.json" and "kops-patch.yaml") which allows Driver-level 3) to work.
+	// In order to test if other driver-level and pod-level credentials correctly work,
+	// we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
+	// in these test cases to ensure it does not fallback to Driver-level 3) credentials.
 
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"credentials", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
@@ -193,12 +199,16 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		expectListToSucceed(pod)
 	}
 
-	expectFailToMount := func(ctx context.Context) {
+	expectFailToMount := func(ctx context.Context, withServiceAccountName string) {
 		vol := createVolume(ctx)
 
 		client := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
 
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
+		if withServiceAccountName != "" {
+			pod.Spec.ServiceAccountName = withServiceAccountName
+		}
+
 		pod, err := client.Create(ctx, pod, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
 		deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
@@ -211,7 +221,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		}.AsSelector().String()
 		framework.Logf("Waiting for FailedMount event: %s", eventSelector)
 
-		err = e2eevents.WaitTimeoutForEvent(ctx, f.ClientSet, f.Namespace.Name, eventSelector, "MountVolume.SetUp failed", 30*time.Second)
+		err = e2eevents.WaitTimeoutForEvent(ctx, f.ClientSet, f.Namespace.Name, eventSelector, "MountVolume.SetUp failed", 5*time.Minute)
 		if err == nil {
 			framework.Logf("Got FailedMount event: %s", eventSelector)
 		} else {
@@ -223,287 +233,311 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		gomega.Expect(pod.Status.Phase).To(gomega.Equal(v1.PodPending))
 	}
 
-	// Since we're modifying cluster-wide resources in driver-level tests,
+	// Since we're modifying cluster-wide resources in credential tests,
 	// we shouldn't run them in parallel with other tests.
-	//                         |
-	//                       ------
-	Describe("Driver Level", Serial, Ordered, func() {
-		var afterAllCleanup []func(context.Context) error
+	//                        |
+	//                      ------
+	Describe("Credentials", Serial, func() {
+		Describe("Driver Level", Ordered, func() {
+			var afterAllCleanup []func(context.Context) error
 
-		cleanClusterWideResources := func(ctx context.Context) {
-			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
-			// we need to clean up all credential related resources before each test to ensure we've a
-			// clean starting point in each test.
-			By("Cleaning up cluster-wide resources")
+			cleanClusterWideResources := func(ctx context.Context) {
+				// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
+				// we need to clean up all credential related resources before each test to ensure we've a
+				// clean starting point in each test.
+				By("Cleaning up cluster-wide resources")
 
-			sa := csiDriverServiceAccount(ctx, f)
-			overrideServiceAccountRole(ctx, f, sa, "")
-
-			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
-
-			// Trigger recreation of our pods to ensure they're not using deleted resources
-			killCSIDriverPods(ctx, f)
-		}
-
-		policyRoleMapping := map[string]*iamtypes.Role{}
-		BeforeAll(func(ctx context.Context) {
-			By("Pre-creating IAM roles for common policies")
-			for _, policyARN := range []string{
-				iamPolicyS3FullAccess,
-				iamPolicyS3ReadOnlyAccess,
-				iamPolicyS3NoAccess,
-			} {
-				role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
-				policyRoleMapping[policyARN] = role
-				afterAllCleanup = append(afterAllCleanup, removeRole)
-			}
-		})
-
-		AfterAll(func(ctx context.Context) {
-			By("Cleaning up resources created for Driver-level tests")
-			cleanClusterWideResources(ctx)
-
-			var errs []error
-			for _, f := range afterAllCleanup {
-				errs = append(errs, f(ctx))
-			}
-			framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup global resource")
-		})
-
-		BeforeEach(func(ctx context.Context) {
-			cleanClusterWideResources(ctx)
-		})
-
-		Context("IAM Instance Profiles", func() {
-			// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
-			// see the comments in the beginning of this function.
-			It("should use ec2 instance profile's full access role", func(ctx context.Context) {
-				pod := createPodAllowsDelete(ctx)
-				expectFullAccess(pod)
-			})
-		})
-
-		Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
-			var oidcProvider string
-			BeforeAll(func(ctx context.Context) {
-				oidcProvider = oidcProviderForCluster(ctx, f)
-				if oidcProvider == "" {
-					Skip("OIDC provider is not configured, skipping IRSA tests")
-				}
-			})
-
-			updateServiceAccountRole := func(ctx context.Context, policyARN string) {
-				By("Updating CSI Driver's Service Account Role")
 				sa := csiDriverServiceAccount(ctx, f)
+				overrideServiceAccountRole(ctx, f, sa, "")
 
-				role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
-				deferCleanup(removeRole)
+				framework.ExpectNoError(deleteCredentialSecret(ctx, f))
 
-				restoreServiceAccountRole := overrideServiceAccountRole(ctx, f, sa, *role.Arn)
-				deferCleanup(restoreServiceAccountRole)
-
-				// Trigger recreation of our pods to use the new IAM role
+				// Trigger recreation of our pods to ensure they're not using deleted resources
 				killCSIDriverPods(ctx, f)
 			}
 
-			It("should use service account's read-only role", func(ctx context.Context) {
-				updateServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
-				pod := createPodWithVolume(ctx)
-				expectReadOnly(pod)
-			})
-
-			It("should use service account's full access role", func(ctx context.Context) {
-				updateServiceAccountRole(ctx, iamPolicyS3FullAccess)
-				pod := createPodAllowsDelete(ctx)
-				expectFullAccess(pod)
-			})
-
-			It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
-				updateServiceAccountRole(ctx, iamPolicyS3NoAccess)
-				expectFailToMount(ctx)
-			})
-		})
-
-		Context("Credentials via Kubernetes Secrets", func() {
-			updateCredentials := func(ctx context.Context, policyARN string) {
-				By("Updating Kubernetes Secret with temporary credentials")
-
-				role, ok := policyRoleMapping[policyARN]
-				if !ok {
-					framework.Failf("Missing role mapping for policy %s", policyARN)
+			policyRoleMapping := map[string]*iamtypes.Role{}
+			BeforeAll(func(ctx context.Context) {
+				By("Pre-creating IAM roles for common policies")
+				for _, policyARN := range []string{
+					iamPolicyS3FullAccess,
+					iamPolicyS3ReadOnlyAccess,
+					iamPolicyS3NoAccess,
+				} {
+					role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
+					policyRoleMapping[policyARN] = role
+					afterAllCleanup = append(afterAllCleanup, removeRole)
 				}
-				assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
+			})
 
-				_, deleteSecret := createCredentialSecret(ctx, f, assumeRoleOutput.Credentials)
-				deferCleanup(deleteSecret)
+			AfterAll(func(ctx context.Context) {
+				By("Cleaning up resources created for Driver-level tests")
+				cleanClusterWideResources(ctx)
 
-				// Trigger recreation of our pods to use the new credentials
-				killCSIDriverPods(ctx, f)
+				var errs []error
+				for _, f := range afterAllCleanup {
+					errs = append(errs, f(ctx))
+				}
+				framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup global resource")
+			})
+
+			BeforeEach(func(ctx context.Context) {
+				cleanClusterWideResources(ctx)
+			})
+
+			Context("IAM Instance Profiles", func() {
+				// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
+				// see the comments in the beginning of this function.
+				It("should use ec2 instance profile's full access role", func(ctx context.Context) {
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(pod)
+				})
+			})
+
+			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
+				var oidcProvider string
+				BeforeAll(func(ctx context.Context) {
+					oidcProvider = oidcProviderForCluster(ctx, f)
+					if oidcProvider == "" {
+						Skip("OIDC provider is not configured, skipping IRSA tests")
+					}
+				})
+
+				updateServiceAccountRole := func(ctx context.Context, policyARN string) {
+					By("Updating CSI Driver's Service Account Role")
+					sa := csiDriverServiceAccount(ctx, f)
+
+					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
+					deferCleanup(removeRole)
+
+					_, restoreServiceAccountRole := overrideServiceAccountRole(ctx, f, sa, *role.Arn)
+					deferCleanup(restoreServiceAccountRole)
+
+					// Trigger recreation of our pods to use the new IAM role
+					killCSIDriverPods(ctx, f)
+				}
+
+				It("should use service account's read-only role", func(ctx context.Context) {
+					updateServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
+					pod := createPodWithVolume(ctx)
+					expectReadOnly(pod)
+				})
+
+				It("should use service account's full access role", func(ctx context.Context) {
+					updateServiceAccountRole(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(pod)
+				})
+
+				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
+					updateServiceAccountRole(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(ctx, "")
+				})
+			})
+
+			Context("Credentials via Kubernetes Secrets", func() {
+				updateCredentials := func(ctx context.Context, policyARN string) {
+					By("Updating Kubernetes Secret with temporary credentials")
+
+					role, ok := policyRoleMapping[policyARN]
+					if !ok {
+						framework.Failf("Missing role mapping for policy %s", policyARN)
+					}
+					assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
+
+					_, deleteSecret := createCredentialSecret(ctx, f, assumeRoleOutput.Credentials)
+					deferCleanup(deleteSecret)
+
+					// Trigger recreation of our pods to use the new credentials
+					killCSIDriverPods(ctx, f)
+				}
+
+				It("should use read-only access aws credentials", func(ctx context.Context) {
+					updateCredentials(ctx, iamPolicyS3ReadOnlyAccess)
+					pod := createPodWithVolume(ctx)
+					expectReadOnly(pod)
+				})
+
+				It("should use full access aws credentials", func(ctx context.Context) {
+					updateCredentials(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(pod)
+				})
+
+				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
+					updateCredentials(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(ctx, "")
+				})
+			})
+		})
+
+		FDescribe("Pod level", func() {
+			enablePodLevelIdentity := func(ctx context.Context) context.Context {
+				return contextWithAuthenticationSource(ctx, "pod")
 			}
 
-			It("should use read-only access aws credentials", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3ReadOnlyAccess)
-				pod := createPodWithVolume(ctx)
-				expectReadOnly(pod)
-			})
+			enableDriverLevelIdentity := func(ctx context.Context) context.Context {
+				return contextWithAuthenticationSource(ctx, "driver")
+			}
 
-			It("should use full access aws credentials", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3FullAccess)
-				pod := createPodAllowsDelete(ctx)
-				expectFullAccess(pod)
-			})
+			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
+				var oidcProvider string
+				BeforeAll(func(ctx context.Context) {
+					oidcProvider = oidcProviderForCluster(ctx, f)
+					if oidcProvider == "" {
+						Skip("OIDC provider is not configured, skipping IRSA tests")
+					}
+				})
 
-			It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
-				updateCredentials(ctx, iamPolicyS3NoAccess)
-				expectFailToMount(ctx)
-			})
-		})
+				assignPolicyToServiceAccount := func(ctx context.Context, sa *v1.ServiceAccount, policyARN string) *v1.ServiceAccount {
+					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
+					deferCleanup(removeRole)
 
-	})
+					sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
+					waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+					return sa
+				}
 
-	Context("Pod level", func() {
-		Context("should use correct credentials", func() {
-			It("full access role", func(ctx context.Context) {
-				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
-				defer deleteSA(ctx)
+				createServiceAccountWithPolicy := func(ctx context.Context, policyARN string) *v1.ServiceAccount {
+					sa, removeSA := createServiceAccount(ctx, f)
+					deferCleanup(removeSA)
 
-				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-				l.resources = append(l.resources, resource)
+					return assignPolicyToServiceAccount(ctx, sa, policyARN)
+				}
 
-				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
-				framework.ExpectNoError(err)
-				defer func() {
+				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyARN string, allowDelete bool) (*v1.Pod, *v1.ServiceAccount) {
+					By("Creating Pod with ServiceAccount")
+
+					var mountOptions []string
+					if allowDelete {
+						mountOptions = append(mountOptions, "allow-delete")
+					}
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+					deferCleanup(vol.CleanupResource)
+
+					sa := createServiceAccountWithPolicy(ctx, policyARN)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+
+					return pod, sa
+				}
+
+				It("should use pod's service account's read-only role", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, false)
+					expectReadOnly(pod)
+				})
+
+				It("should use pod's service account's full access role", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true)
+					expectFullAccess(pod)
+				})
+
+				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
+					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+				})
+
+				It("should fail to mount if pod's service account does not have an associated role", func(ctx context.Context) {
+					sa, removeSA := createServiceAccount(ctx, f)
+					deferCleanup(removeSA)
+
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+				})
+
+				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
+					// TODO:
+					// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
+					// 2. Assert new token file is written to the Pod
+				})
+
+				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					deferCleanup(vol.CleanupResource)
+
+					// Create a SA with full access role
+					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+
+					expectFullAccess(pod)
+
+					// Associate SA with read-only access role
+					sa = assignPolicyToServiceAccount(ctx, sa, iamPolicyS3ReadOnlyAccess)
+
+					// Re-create the pod
 					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-				}()
+					pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					defer func() {
+						framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+					}()
 
-				writtenFile := expectWriteToSucceed(pod)
-				expectReadToSucceed(pod, writtenFile)
+					// The pod should only have a read-only access now
+					expectReadOnly(pod)
+				})
+
+				It("should not use csi driver's service account tokens", func(ctx context.Context) {
+					driverSA := csiDriverServiceAccount(ctx, f)
+
+					driverRole, removeDriverRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, driverSA), iamPolicyS3FullAccess)
+					deferCleanup(removeDriverRole)
+
+					_, restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, *driverRole.Arn)
+					deferCleanup(restoreDriverSA)
+
+					// Trigger recreation of CSI driver pods to use the new IAM role
+					killCSIDriverPods(ctx, f)
+
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true)
+					expectReadOnly(pod)
+				})
+
+				It("should not mix different pod's service account tokens even they are using same volume", func(ctx context.Context) {
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					deferCleanup(vol.CleanupResource)
+
+					saFullAccess := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
+					saReadOnlyAccess := createServiceAccountWithPolicy(ctx, iamPolicyS3ReadOnlyAccess)
+
+					podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saFullAccess.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess) })
+
+					podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saReadOnlyAccess.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
+
+					expectReadOnly(podReadOnlyAccess)
+					expectFullAccess(podFullAccess)
+				})
+
+				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
+					driverSA := csiDriverServiceAccount(ctx, f)
+
+					driverRole, removeDriverRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, driverSA), iamPolicyS3ReadOnlyAccess)
+					deferCleanup(removeDriverRole)
+
+					_, restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, *driverRole.Arn)
+					deferCleanup(restoreDriverSA)
+
+					// Trigger recreation of CSI driver pods to use the new IAM role
+					killCSIDriverPods(ctx, f)
+
+					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					deferCleanup(vol.CleanupResource)
+
+					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+
+					expectReadOnly(pod)
+				})
 			})
-
-			It("read-only role", func(ctx context.Context) {
-				sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
-				defer deleteSA(ctx)
-
-				resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-				l.resources = append(l.resources, resource)
-
-				pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
-				framework.ExpectNoError(err)
-				defer func() {
-					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-				}()
-
-				expectWriteToFail(pod)
-				expectListToSucceed(pod)
-			})
-		})
-
-		It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
-			// TODO:
-			// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
-			// 2. Assert new token file is written to the Pod
-		})
-
-		It("should use up to date role associated with service account", func(ctx context.Context) {
-			// Create a SA with full access role
-			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
-			defer deleteSA(ctx)
-
-			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-			l.resources = append(l.resources, resource)
-
-			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
-			framework.ExpectNoError(err)
-
-			writtenFile := expectWriteToSucceed(pod)
-			expectReadToSucceed(pod, writtenFile)
-
-			// Associate SA with read-only access role
-			saClient := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
-			annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess)(sa)
-			_, err = saClient.Update(ctx, sa, metav1.UpdateOptions{})
-			framework.ExpectNoError(err)
-
-			// Re-create the pod
-			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-			pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
-			framework.ExpectNoError(err)
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-			}()
-
-			// The pod should only have a read-only access now
-			expectReadToSucceed(pod, writtenFile)
-			expectListToSucceed(pod)
-			expectWriteToFail(pod)
-		})
-
-		It("should fail if service account does not have an associated role", func(ctx context.Context) {
-			// TODO: How this should fail?
-		})
-
-		It("should not use csi driver's service account tokens", func(ctx context.Context) {
-			driverSA := getCSIDriverServiceAccount(ctx, f)
-			restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, iamRoleS3FullAccess)
-			defer restoreDriverSA(ctx)
-
-			sa, deleteSA := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3NoAccess))
-			defer deleteSA(ctx)
-
-			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-			l.resources = append(l.resources, resource)
-
-			pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, sa.Name)
-			framework.ExpectNoError(err)
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-			}()
-
-			expectListToFail(pod)
-			expectWriteToFail(pod)
-		})
-
-		It("should not use mix different pod's service account tokens", func(ctx context.Context) {
-			saFullAccess, deleteSAFullAccess := createServiceAccount(ctx, f, "s3-csi-e2e-sa", annotateServiceAccountWithRole(iamRoleS3FullAccess))
-			defer deleteSAFullAccess(ctx)
-
-			saReadOnlyAccess, deleteSAReadOnlyAccess := createServiceAccount(ctx, f, "s3-csi-e2e-read-only-sa", annotateServiceAccountWithRole(iamRoleS3ReadOnlyAccess))
-			defer deleteSAReadOnlyAccess(ctx)
-
-			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-			l.resources = append(l.resources, resource)
-
-			podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saFullAccess.Name)
-			framework.ExpectNoError(err)
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess))
-			}()
-
-			podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, saReadOnlyAccess.Name)
-			framework.ExpectNoError(err)
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess))
-			}()
-
-			writtenFile := expectWriteToSucceed(podFullAccess)
-			expectReadToSucceed(podFullAccess, writtenFile)
-
-			expectListToSucceed(podReadOnlyAccess)
-			expectWriteToFail(podReadOnlyAccess)
-		})
-
-		It("should not use pod's service account role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
-			// TODO:
-			// 1. Associate Pod's service account with S3 Full Access role
-			// 2. Associate driver's service account with S3 Read-only Access role
-			// 3. Assert write fails but read succeeds
-		})
-
-		It("should not use pod's service account role if 'authenticationSource' is not explicitly set to 'pod'", func(ctx context.Context) {
-			// TODO:
-			// 1. Associate Pod's service account with S3 Full Access role
-			// 2. Associate driver's service account with S3 Read-only Access role
-			// 3. Assert write fails but read succeeds
 		})
 	})
 }
@@ -607,23 +641,50 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 	framework.Logf("Assuming IAM role %s", roleArn)
 
 	client := sts.NewFromConfig(awsConfig(ctx))
-
-	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
-	defer cancel()
-
-	output, err := client.AssumeRole(ctx, &sts.AssumeRoleInput{
+	return waitUntilRoleIsAssumable(ctx, client.AssumeRole, &sts.AssumeRoleInput{
 		RoleArn:         ptr.To(roleArn),
 		RoleSessionName: ptr.To(f.BaseName),
 		DurationSeconds: ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
-	}, func(o *sts.Options) {
+	})
+}
+
+// waitUntilRoleIsAssumable waits until the given role is assumable.
+// This is needed because we're creating new roles in our test cases and then trying to assume those roles,
+// but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
+func waitUntilRoleIsAssumable[Input any, Output any](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*sts.Options)) (*Output, error), input *Input) *Output {
+	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
+	defer cancel()
+
+	output, err := assumeFunc(ctx, input, func(o *sts.Options) {
 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
-
 	framework.ExpectNoError(err)
 	gomega.Expect(output).ToNot(gomega.BeNil())
+
 	return output
+}
+
+func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
+	roleARN := sa.Annotations[roleARNAnnotation]
+	framework.Logf("Waiting until IAM role %s for ServiceAccount %s is assumable with web identity", roleARN, sa.Name)
+
+	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
+		Spec: authenticationv1.TokenRequestSpec{
+			Audiences: []string{serviceAccountTokenAudienceSTS},
+		},
+	}, metav1.CreateOptions{})
+	framework.ExpectNoError(err)
+
+	client := sts.NewFromConfig(awsConfig(ctx))
+	waitUntilRoleIsAssumable(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
+		RoleArn:          ptr.To(roleARN),
+		RoleSessionName:  ptr.To(f.BaseName),
+		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),
+		DurationSeconds:  ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+	})
 }
 
 //-- Credential Secret utils
@@ -647,6 +708,8 @@ func createCredentialSecret(ctx context.Context, f *framework.Framework, credent
 		},
 	}, metav1.CreateOptions{})
 	framework.ExpectNoError(err)
+
+	framework.ExpectNoError(waitForKubernetesObject(ctx, framework.GetObject(client.Get, secret.Name, metav1.GetOptions{})))
 
 	return secret, func(ctx context.Context) error {
 		framework.Logf("Deleting Kubernetes Secret")
@@ -678,13 +741,16 @@ func deleteCredentialSecret(ctx context.Context, f *framework.Framework) error {
 //-- Service Account utils
 
 func annotateServiceAccountWithRole(sa *v1.ServiceAccount, roleARN string) {
+	if sa.Annotations == nil {
+		sa.Annotations = make(map[string]string)
+	}
 	sa.Annotations[roleARNAnnotation] = roleARN
 }
 
 // overrideServiceAccountRole overrides and updates given Service Account's EKS Role ARN annotation.
 // This causes pod's using this Service Account to assume this new `roleARN` while authenticating with AWS.
 // The returned function restored Service Account's EKS Role ARN annotation to it's original value.
-func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) func(context.Context) error {
+func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, func(context.Context) error) {
 	originalRoleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Overriding ServiceAccount %s's role", sa.Name)
 
@@ -693,7 +759,7 @@ func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa 
 	sa, err := client.Update(ctx, sa, metav1.UpdateOptions{})
 	framework.ExpectNoError(err)
 
-	return func(ctx context.Context) error {
+	return sa, func(ctx context.Context) error {
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
 		annotateServiceAccountWithRole(sa, originalRoleARN)
 		_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
@@ -732,4 +798,25 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 
 	// For EKS, OIDC provider ID is the URL of the provider without "https://"
 	return strings.TrimPrefix(issuer, "https://")
+}
+
+//-- Test Driver Context utils
+
+type contextKey string
+
+const authenticationSourceKey contextKey = "authenticationSource"
+
+// contextWithAdditionalVolumeAttributes enhances given context with given authentication source.
+// This value is used by `s3Volume.CreateVolume` and `s3Volume.GetPersistentVolumeSource`.
+//
+// This is kinda a magical way to pass values to those functions, but since Kubernetes Storage Test framework
+// does not allow us to passing extra values, this is the only way to achieve that without duplicating the framework code.
+func contextWithAuthenticationSource(ctx context.Context, authenticationSource string) context.Context {
+	return context.WithValue(ctx, authenticationSourceKey, authenticationSource)
+}
+
+// AuthenticationSourceFromContext returns authentication source set for given context.
+func AuthenticationSourceFromContext(ctx context.Context) string {
+	val, _ := ctx.Value(authenticationSourceKey).(string)
+	return val
 }

@@ -23,9 +23,8 @@ func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
 	server := &driver.S3NodeServer{
-		NodeID:          "test-nodeID",
-		BaseCredentials: &driver.MountCredentials{},
-		Mounter:         mockMounter,
+		NodeID:  "test-nodeID",
+		Mounter: mockMounter,
 	}
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
