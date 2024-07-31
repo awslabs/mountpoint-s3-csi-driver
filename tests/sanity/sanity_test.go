@@ -69,9 +69,8 @@ var _ = BeforeSuite(func() {
 		Endpoint: endpoint,
 		NodeID:   "fake_id",
 		NodeServer: &driver.S3NodeServer{
-			NodeID:          "fake_id",
-			BaseCredentials: &driver.MountCredentials{},
-			Mounter:         &driver.FakeMounter{},
+			NodeID:  "fake_id",
+			Mounter: &driver.FakeMounter{},
 		},
 	}
 	go func() {
