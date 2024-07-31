@@ -371,7 +371,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			})
 		})
 
-		FDescribe("Pod level", func() {
+		Describe("Pod level", func() {
 			enablePodLevelIdentity := func(ctx context.Context) context.Context {
 				return contextWithAuthenticationSource(ctx, "pod")
 			}
