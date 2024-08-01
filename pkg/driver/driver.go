@@ -81,7 +81,8 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Fatalln(err)
 	}
 
-	nodeServer := NewS3NodeServer(nodeID, mounter, clientset.CoreV1())
+	credentialProvider := NewCredentialProvider(clientset.CoreV1(), containerPluginDir)
+	nodeServer := NewS3NodeServer(nodeID, mounter, credentialProvider)
 
 	return &Driver{
 		Endpoint:   endpoint,

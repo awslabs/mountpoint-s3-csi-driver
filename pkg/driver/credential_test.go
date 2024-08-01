@@ -443,6 +443,30 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 	})
 }
 
+func TestCleaningUpTokenFileForAVolume(t *testing.T) {
+	t.Run("existing token", func(t *testing.T) {
+		pluginDir := t.TempDir()
+		volumeID := "test-vol-id"
+		tokenPath := path.Join(pluginDir, volumeID+".token")
+		os.WriteFile(tokenPath, []byte("test-service-account-token"), 0400)
+
+		provider := driver.NewCredentialProvider(nil, pluginDir)
+		err := provider.CleanupToken(volumeID)
+		assertEquals(t, nil, err)
+
+		_, err = os.ReadFile(tokenPath)
+		assertEquals(t, true, os.IsNotExist(err))
+
+	})
+
+	t.Run("non-existing token", func(t *testing.T) {
+		provider := driver.NewCredentialProvider(nil, t.TempDir())
+
+		err := provider.CleanupToken("non-existing-vol-id")
+		assertEquals(t, nil, err)
+	})
+}
+
 type tokens = map[string]struct {
 	Token               string `json:"token"`
 	ExpirationTimestamp time.Time

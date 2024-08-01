@@ -26,7 +26,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/sets"
-	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
@@ -57,8 +56,7 @@ type S3NodeServer struct {
 	credentialProvider *CredentialProvider
 }
 
-func NewS3NodeServer(nodeID string, mounter Mounter, corev1Client k8sv1.CoreV1Interface) *S3NodeServer {
-	credentialProvider := NewCredentialProvider(corev1Client, containerPluginDir)
+func NewS3NodeServer(nodeID string, mounter Mounter, credentialProvider *CredentialProvider) *S3NodeServer {
 	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
 }
 
@@ -68,6 +66,11 @@ type Token struct {
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	err := ns.credentialProvider.CleanupToken(req.GetVolumeId())
+	if err != nil {
+		klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for volume %s: %v", req.GetVolumeId(), err)
+	}
+
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -173,6 +176,12 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
+
+	err := ns.credentialProvider.CleanupToken(volumeID)
+	if err != nil {
+		klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for volume %s: %v", volumeID, err)
+	}
+
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")

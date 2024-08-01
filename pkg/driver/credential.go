@@ -52,6 +52,15 @@ func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir stri
 	return &CredentialProvider{client, containerPluginDir}
 }
 
+// CleanupToken cleans any created service token files for given volume.
+func (c *CredentialProvider) CleanupToken(volumeID string) error {
+	err := os.Remove(c.tokenPath(volumeID))
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 func (c *CredentialProvider) Provide(ctx context.Context, req *csi.NodePublishVolumeRequest, mountpointArgs []string) (*MountCredentials, error) {
 	authenticationSource := req.VolumeContext[volumeCtxAuthenticationSource]
 	switch authenticationSource {
@@ -119,9 +128,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 
 	volumeID := req.GetVolumeId()
 
-	// TODO: Cleanup these files on unmount and startup.
-	// TODO: Should we make the write atomic by writing to a temporary path and renaming afterwards?
-	err = os.WriteFile(path.Join(c.containerPluginDir, volumeID+".token"), []byte(stsToken.Token), 0400)
+	err = c.writeToken(volumeID, stsToken)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to write service account token: %v", err)
 	}
@@ -136,6 +143,15 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 		WebTokenPath:  hostTokenPath,
 		AwsRoleArn:    awsRoleARN,
 	}, nil
+}
+
+func (c *CredentialProvider) writeToken(volumeID string, token *Token) error {
+	// TODO: Should we make the write atomic by writing to a temporary path and renaming afterwards?
+	return os.WriteFile(c.tokenPath(volumeID), []byte(token.Token), 0400)
+}
+
+func (c *CredentialProvider) tokenPath(volumeID string) string {
+	return path.Join(c.containerPluginDir, volumeID+".token")
 }
 
 func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, req *csi.NodePublishVolumeRequest) (string, error) {
