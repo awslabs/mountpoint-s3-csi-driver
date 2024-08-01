@@ -3,9 +3,11 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,15 +37,26 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 
 const serviceAccountRoleAnnotation = "eks.amazonaws.com/role-arn"
 
-type credentialProvider struct {
-	client k8sv1.CoreV1Interface
+var errUnknownRegion = errors.New("NodePublishVolume: Pod-level: unknown region")
+
+type CredentialProvider struct {
+	client             k8sv1.CoreV1Interface
+	containerPluginDir string
 }
 
-func (c *credentialProvider) provide(ctx context.Context, req *csi.NodePublishVolumeRequest) (*MountCredentials, error) {
+func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir string) *CredentialProvider {
+	// `RegionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
+	// this call is basically here to pre-warm the cache of IMDS call.
+	go RegionFromIMDS()
+
+	return &CredentialProvider{client, containerPluginDir}
+}
+
+func (c *CredentialProvider) Provide(ctx context.Context, req *csi.NodePublishVolumeRequest, mountpointArgs []string) (*MountCredentials, error) {
 	authenticationSource := req.VolumeContext[volumeCtxAuthenticationSource]
 	switch authenticationSource {
 	case authenticationSourcePod:
-		return c.provideFromPod(ctx, req)
+		return c.provideFromPod(ctx, req, mountpointArgs)
 	case authenticationSourceUnspecified, authenticationSourceDriver:
 		return c.provideFromDriver()
 	default:
@@ -51,7 +64,7 @@ func (c *credentialProvider) provide(ctx context.Context, req *csi.NodePublishVo
 	}
 }
 
-func (c *credentialProvider) provideFromDriver() (*MountCredentials, error) {
+func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using driver identity")
 
 	hostPluginDir := hostPluginDirWithDefault()
@@ -69,7 +82,7 @@ func (c *credentialProvider) provideFromDriver() (*MountCredentials, error) {
 	}, nil
 }
 
-func (c *credentialProvider) provideFromPod(ctx context.Context, req *csi.NodePublishVolumeRequest) (*MountCredentials, error) {
+func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePublishVolumeRequest, mountpointArgs []string) (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using pod identity")
 
 	tokensJson := req.VolumeContext[volumeCtxServiceAccountTokens]
@@ -89,45 +102,32 @@ func (c *credentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudienceSTS)
 	}
 
+	awsRoleARN, err := c.findPodServiceAccountRole(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	region, err := c.stsRegion(req, mountpointArgs)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see TODO")
+	}
+
+	defaultRegion := os.Getenv(defaultRegionEnv)
+	if defaultRegion == "" {
+		defaultRegion = region
+	}
+
 	volumeID := req.GetVolumeId()
 
 	// TODO: Cleanup these files on unmount and startup.
 	// TODO: Should we make the write atomic by writing to a temporary path and renaming afterwards?
-	err := os.WriteFile(path.Join("/csi/", volumeID+".token"), []byte(stsToken.Token), 0400)
+	err = os.WriteFile(path.Join(c.containerPluginDir, volumeID+".token"), []byte(stsToken.Token), 0400)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to write service account token: %v", err)
 	}
 
 	hostPluginDir := hostPluginDirWithDefault()
 	hostTokenPath := path.Join(hostPluginDir, volumeID+".token")
-
-	awsRoleARN, err := c.findPodServiceAccountRole(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	region := os.Getenv(regionEnv)
-	defaultRegion := os.Getenv(defaultRegionEnv)
-
-	// TODO: How to handle missing region? We should ideally try the following:
-	//	1. Region set by users explicitly
-	//	2. Env variable
-	//	3. From IMDS
-	//	4. Fail
-	if region == "" {
-		if defaultRegion != "" {
-			region = defaultRegion
-		} else {
-			region, err = regionFromIMDS()
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "Failed to detect AWS Region using IMDS: %v, please explicitly set AWS Region", err)
-			}
-		}
-	}
-
-	if defaultRegion == "" {
-		defaultRegion = region
-	}
 
 	return &MountCredentials{
 		Region:        region,
@@ -138,7 +138,7 @@ func (c *credentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 	}, nil
 }
 
-func (c *credentialProvider) findPodServiceAccountRole(ctx context.Context, req *csi.NodePublishVolumeRequest) (string, error) {
+func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, req *csi.NodePublishVolumeRequest) (string, error) {
 	podNamespace := req.VolumeContext[volumeCtxPodNamespace]
 	podServiceAccount := req.VolumeContext[volumeCtxServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
@@ -153,11 +153,58 @@ func (c *credentialProvider) findPodServiceAccountRole(ctx context.Context, req 
 
 	roleArn := response.Annotations[serviceAccountRoleAnnotation]
 	if roleArn == "" {
-		klog.Error("`authenticationSource` configured to `pod` but pod's service account is not annoated with a role, see TODO")
+		klog.Error("`authenticationSource` configured to `pod` but pod's service account is not annotated with a role, see TODO")
 		return "", status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
 	}
 
 	return roleArn, nil
+}
+
+// stsRegion tries to detect AWS region to use for STS.
+//
+// It looks for the following (in-order):
+//  1. `stsRegion` passed via volume context
+//  2. Region set for S3 bucket via mount options
+//  3. `AWS_REGION` or `AWS_DEFAULT_REGION` env variables
+//  4. Calling IMDS to detect region
+//
+// It returns an error if all of them fails.
+func (c *CredentialProvider) stsRegion(req *csi.NodePublishVolumeRequest, mountpointArgs []string) (string, error) {
+	region := req.VolumeContext[volumeCtxSTSRegion]
+	if region != "" {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from volume context", region)
+		return region, nil
+	}
+
+	for _, arg := range mountpointArgs {
+		// we normalize all `mountpointArgs` to have `--arg=val` in `S3NodeServer.NodePublishVolume`
+		if strings.HasPrefix(arg, "--region=") {
+			region = strings.SplitN(arg, "=", 2)[1]
+			klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from S3 bucket region", region)
+			return region, nil
+		}
+	}
+
+	region = os.Getenv(regionEnv)
+	if region != "" {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from `AWS_REGION` env variable", region)
+		return region, nil
+	}
+
+	region = os.Getenv(defaultRegionEnv)
+	if region != "" {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from `AWS_DEFAULT_REGION` env variable", region)
+		return region, nil
+	}
+
+	// We're ignoring the error here, makes a call to IMDS only once and logs the error in case of error
+	region, _ = RegionFromIMDS()
+	if region != "" {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from IMDS", region)
+		return region, nil
+	}
+
+	return "", errUnknownRegion
 }
 
 func hostPluginDirWithDefault() string {
@@ -168,18 +215,22 @@ func hostPluginDirWithDefault() string {
 	return hostPluginDir
 }
 
-var regionFromIMDS = sync.OnceValues(func() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// RegionFromIMDS tries to detect AWS region by making a request to IMDS.
+// It only makes request to IMDS once and caches the value.
+var RegionFromIMDS = sync.OnceValues(func() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Failed to create config for IMDS client: %v", err)
 		return "", fmt.Errorf("could not create config for imds client: %w", err)
 	}
 
 	client := imds.NewFromConfig(cfg)
 	output, err := client.GetRegion(ctx, &imds.GetRegionInput{})
 	if err != nil {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Failed to get region from IMDS: %v", err)
 		return "", fmt.Errorf("failed to get region from imds: %w", err)
 	}
 

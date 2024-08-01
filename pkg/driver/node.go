@@ -32,13 +32,14 @@ import (
 )
 
 // This is the plugin directory for CSI driver mounted in the container.
-const pluginDir = "/csi"
+const containerPluginDir = "/csi"
 
 const hostPluginDirEnv = "HOST_PLUGIN_DIR"
 
 const (
 	volumeCtxBucketName           = "bucketName"
 	volumeCtxAuthenticationSource = "authenticationSource"
+	volumeCtxSTSRegion            = "stsRegion"
 
 	volumeCtxServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
 	volumeCtxServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
@@ -53,11 +54,11 @@ var (
 type S3NodeServer struct {
 	NodeID             string
 	Mounter            Mounter
-	credentialProvider *credentialProvider
+	credentialProvider *CredentialProvider
 }
 
 func NewS3NodeServer(nodeID string, mounter Mounter, corev1Client k8sv1.CoreV1Interface) *S3NodeServer {
-	credentialProvider := &credentialProvider{client: corev1Client}
+	credentialProvider := NewCredentialProvider(corev1Client, containerPluginDir)
 	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
 }
 
@@ -124,7 +125,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	credentials, err := ns.credentialProvider.provide(ctx, req)
+	credentials, err := ns.credentialProvider.Provide(ctx, req, mountpointArgs)
 	if err != nil {
 		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
 		return nil, err
