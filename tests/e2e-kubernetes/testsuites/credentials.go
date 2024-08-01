@@ -213,7 +213,11 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 		pod, err := client.Create(ctx, pod, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
-		deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+		deferCleanup(func(ctx context.Context) error {
+			// Since CSI driver returns an error in case of missing role annotation,
+			// it takes some time to delete the object, with `gracePeriod=0` we're forcing an immediate deletion.
+			return e2epod.DeletePodWithGracePeriod(ctx, f.ClientSet, pod, 0)
+		})
 
 		eventSelector := fields.Set{
 			"involvedObject.kind":      "Pod",
