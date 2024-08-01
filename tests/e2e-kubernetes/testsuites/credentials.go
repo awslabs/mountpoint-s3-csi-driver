@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,6 +111,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	cleanup := func(ctx context.Context) {
 		var errs []error
+		slices.Reverse(l.cleanup) // clean items in reverse order similar to how `defer` works
 		for _, f := range l.cleanup {
 			errs = append(errs, f(ctx))
 		}
