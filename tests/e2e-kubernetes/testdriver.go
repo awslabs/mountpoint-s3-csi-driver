@@ -35,7 +35,8 @@ type s3Driver struct {
 }
 
 type s3Volume struct {
-	bucketName string
+	bucketName           string
+	authenticationSource string
 }
 
 var _ framework.TestDriver = &s3Driver{}
@@ -126,19 +127,26 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 		}
 	}
 	f.Logf("Attempting to create bucket: %s", bucketName)
-	_, err := newS3Client().CreateBucket(context.TODO(), input)
+	_, err := newS3Client().CreateBucket(ctx, input)
 	f.ExpectNoError(err)
 	f.Logf("Created bucket: %s", bucketName)
-	return &s3Volume{bucketName: bucketName}
+	return &s3Volume{bucketName: bucketName, authenticationSource: custom_testsuites.AuthenticationSourceFromContext(ctx)}
 }
 
 func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testVolume framework.TestVolume) (*v1.PersistentVolumeSource, *v1.VolumeNodeAffinity) {
 	volume, _ := testVolume.(*s3Volume)
+
+	volumeAttributes := map[string]string{"bucketName": volume.bucketName}
+	if volume.authenticationSource != "" {
+		f.Logf("Using authencation source %s for volume", volume.authenticationSource)
+		volumeAttributes["authenticationSource"] = volume.authenticationSource
+	}
+
 	return &v1.PersistentVolumeSource{
 		CSI: &v1.CSIPersistentVolumeSource{
 			Driver:           d.driverInfo.Name,
 			VolumeHandle:     volume.bucketName,
-			VolumeAttributes: map[string]string{"bucketName": volume.bucketName},
+			VolumeAttributes: volumeAttributes,
 		},
 	}, nil
 }
