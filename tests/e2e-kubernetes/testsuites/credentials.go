@@ -501,7 +501,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectReadOnly(pod)
 				})
 
-				It("should not mix different pod's service account tokens even they are using same volume", func(ctx context.Context) {
+				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
 					deferCleanup(vol.CleanupResource)
 
