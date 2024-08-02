@@ -46,7 +46,7 @@ node:
                 values:
                   - fargate
   podInfoOnMountCompat:
-    enable: "false"
+    enable: false # TODO: Should be `true` for k8s > 1.30
 sidecars:
   nodeDriverRegistrar:
     image:

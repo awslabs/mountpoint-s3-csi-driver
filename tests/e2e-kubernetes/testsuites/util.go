@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -73,10 +74,6 @@ func checkDeletingPath(f *framework.Framework, pod *v1.Pod, path string) {
 
 func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
-}
-
-func checkListingPathFails(f *framework.Framework, pod *v1.Pod, path string) {
-	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("ls %s", path), 1)
 }
 
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
@@ -157,10 +154,6 @@ func createPodWithServiceAccount(ctx context.Context, client clientset.Interface
 	return createPod(ctx, client, namespace, pod)
 }
 
-func getNamespace(client clientset.Interface, namespace string) (*v1.Namespace, error) {
-	return client.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
-}
-
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
@@ -204,8 +197,29 @@ func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.Se
 	return sa
 }
 
+func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.ServiceAccount, func(context.Context) error) {
+	framework.Logf("Creating ServiceAccount")
+
+	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+	sa, err := client.Create(ctx, &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{GenerateName: f.BaseName + "-sa-"}}, metav1.CreateOptions{})
+	framework.ExpectNoError(err)
+
+	framework.ExpectNoError(waitForKubernetesObject(ctx, framework.GetObject(client.Get, sa.Name, metav1.GetOptions{})))
+
+	return sa, func(ctx context.Context) error {
+		framework.Logf("Removing ServiceAccount %s", sa.Name)
+		return client.Delete(ctx, sa.Name, metav1.DeleteOptions{})
+	}
+}
+
 func awsConfig(ctx context.Context) aws.Config {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	framework.ExpectNoError(err)
 	return cfg
+}
+
+func waitForKubernetesObject[T any](ctx context.Context, get framework.GetFunc[T]) error {
+	return framework.Gomega().Eventually(ctx, framework.RetryNotFound(get)).
+		WithTimeout(1 * time.Minute).
+		ShouldNot(gomega.BeNil())
 }
