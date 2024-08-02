@@ -18,26 +18,31 @@ package driver
 
 import (
 	"context"
-	"encoding/json"
 	"os"
-	"path"
 	"strings"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
 
+// This is the plugin directory for CSI driver mounted in the container.
+const containerPluginDir = "/csi"
+
+const hostPluginDirEnv = "HOST_PLUGIN_DIR"
+
 const (
-	hostPluginDirEnv      = "HOST_PLUGIN_DIR"
-	podInfoOnMountEnabled = "POD_INFO_MOUNT_ENABLED"
-	bucketName            = "bucketName"
+	volumeCtxBucketName           = "bucketName"
+	volumeCtxAuthenticationSource = "authenticationSource"
+	volumeCtxSTSRegion            = "stsRegion"
+
+	volumeCtxServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
+	volumeCtxServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
+	volumeCtxPodNamespace         = "csi.storage.k8s.io/pod.namespace"
 )
 
 var (
@@ -46,10 +51,13 @@ var (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID          string
-	BaseCredentials *MountCredentials
-	Mounter         Mounter
-	K8sClient       k8sv1.CoreV1Interface
+	NodeID             string
+	Mounter            Mounter
+	credentialProvider *CredentialProvider
+}
+
+func NewS3NodeServer(nodeID string, mounter Mounter, credentialProvider *CredentialProvider) *S3NodeServer {
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
 }
 
 type Token struct {
@@ -58,6 +66,11 @@ type Token struct {
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	err := ns.credentialProvider.CleanupToken(req.GetVolumeId())
+	if err != nil {
+		klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for volume %s: %v", req.GetVolumeId(), err)
+	}
+
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -66,6 +79,7 @@ func (ns *S3NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	// TODO: `req` might contain service account tokens, don't print the whole `req`.
 	klog.V(4).Infof("NodePublishVolume: req: %+v", req)
 
 	volumeID := req.GetVolumeId()
@@ -73,7 +87,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	bucket, ok := req.GetVolumeContext()[bucketName]
+	bucket, ok := req.GetVolumeContext()[volumeCtxBucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
@@ -99,6 +113,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	// get the mount(point) options (yaml list)
 	if capMount := volCap.GetMount(); capMount != nil {
+		// TODO: How to handle caching with pod-level identity? Should we disable caching in that case?
 		mountFlags := capMount.GetMountFlags()
 		for i := range mountFlags {
 			// trim left and right spaces
@@ -113,72 +128,13 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
-
-	hostPluginDir := os.Getenv(hostPluginDirEnv)
-	if hostPluginDir == "" {
-		// set the default in case the env variable isn't found
-		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+	credentials, err := ns.credentialProvider.Provide(ctx, req, mountpointArgs)
+	if err != nil {
+		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
+		return nil, err
 	}
-	hostTokenPath := path.Join(hostPluginDir, "token")
-
-	awsRoleArn := os.Getenv(roleArnEnv)
-
-	usePodIdentity := os.Getenv(podInfoOnMountEnabled)
-	if usePodIdentity == "true" {
-		klog.V(4).Infof("NodePublishVolume: Using pod identity")
-		tokensJson := req.VolumeContext["csi.storage.k8s.io/serviceAccount.tokens"]
-		if tokensJson != "" {
-			var tokens map[string]*Token
-			if err := json.Unmarshal([]byte(tokensJson), &tokens); err != nil {
-				return nil, status.Error(codes.InvalidArgument, "Tokens bad format")
-			}
-			stsToken := tokens["sts.amazonaws.com"]
-			if stsToken != nil {
-				klog.V(4).Infof("NodePublishVolume: stsToken exp: %v", stsToken.ExpirationTimestamp)
-				hostTokenPath = path.Join(hostPluginDir, volumeID+".token")
-				// TODO cleanup these files on unmount and startup
-				os.WriteFile(path.Join("/csi/", volumeID+".token"), []byte(stsToken.Token), 0400)
-			}
-		}
-
-		podNamespace := req.VolumeContext["csi.storage.k8s.io/pod.namespace"]
-		podServiceAccount := req.VolumeContext["csi.storage.k8s.io/serviceAccount.name"]
-
-		// Get role arn from kubernetes api
-		response, err := ns.K8sClient.ServiceAccounts(podNamespace).
-			Get(ctx, podServiceAccount, metav1.GetOptions{})
-		if err != nil {
-			klog.Errorf(
-				"Unable to get the service account description: '%s', "+
-					"Pod namespace: '%s', "+
-					"Service account name: '%s'",
-				err,
-				podNamespace,
-				podServiceAccount)
-			return nil, err
-		}
-		awsRoleArn = response.Annotations["eks.amazonaws.com/role-arn"]
-
-		//if len(awsRoleArn) <= 0 {
-		//	klog.Errorf("Need IAM role for service account %s (namespace: %s)", podServiceAccount, podNamespace)
-		//	err = fmt.Errorf("an IAM role must be associated with service account %s (namespace: %s)", podServiceAccount, podNamespace)
-		//	return nil, err
-		//}
-	}
-	klog.V(4).Infof("JJK roleArn: %s", awsRoleArn)
 
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
-	credentials := &MountCredentials{
-		AccessKeyID:     os.Getenv(keyIdEnv),
-		SecretAccessKey: os.Getenv(accessKeyEnv),
-		SessionToken:    os.Getenv(sessionTokenEnv),
-		Region:          os.Getenv(regionEnv),
-		DefaultRegion:   "eu-north-1",
-		WebTokenPath:    hostTokenPath,
-		StsEndpoints:    os.Getenv(stsEndpointsEnv),
-		AwsRoleArn:      awsRoleArn,
-	}
 
 	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
 		os.Remove(target)
@@ -220,6 +176,12 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
+
+	err := ns.credentialProvider.CleanupToken(volumeID)
+	if err != nil {
+		klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for volume %s: %v", volumeID, err)
+	}
+
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")

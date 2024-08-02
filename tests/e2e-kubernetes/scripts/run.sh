@@ -141,8 +141,7 @@ function delete_cluster() {
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
-      "$REGION" \
-      "$KUBECTL_BIN"
+      "$REGION"
   fi
 }
 
@@ -192,7 +191,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv -timeout 30m --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
