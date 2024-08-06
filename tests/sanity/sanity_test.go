@@ -71,7 +71,7 @@ var _ = BeforeSuite(func() {
 		NodeServer: driver.NewS3NodeServer(
 			"fake_id",
 			&driver.FakeMounter{},
-			driver.NewCredentialProvider(nil, GinkgoT().TempDir()),
+			driver.NewCredentialProvider(nil, GinkgoT().TempDir(), driver.RegionFromIMDSOnce),
 		),
 	}
 	go func() {
