@@ -26,7 +26,7 @@ GO111MODULE=on
 GOPROXY=direct
 GOPATH=$(shell go env GOPATH)
 GOOS=$(shell go env GOOS)
-GOBIN=$(shell pwd)/bin
+GOBIN=$(GOPATH)/bin
 
 REGISTRY?=""
 IMAGE_NAME?=""

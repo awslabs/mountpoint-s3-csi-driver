@@ -47,16 +47,17 @@ var errUnknownRegion = errors.New("NodePublishVolume: Pod-level: unknown region"
 type CredentialProvider struct {
 	client             k8sv1.CoreV1Interface
 	containerPluginDir string
+	regionFromIMDS     func() (string, error)
 }
 
-func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir string) *CredentialProvider {
-	// `RegionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
+func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir string, regionFromIMDS func() (string, error)) *CredentialProvider {
+	// `regionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
 	go func() {
-		_, _ = RegionFromIMDS()
+		_, _ = regionFromIMDS()
 	}()
 
-	return &CredentialProvider{client, containerPluginDir}
+	return &CredentialProvider{client, containerPluginDir, regionFromIMDS}
 }
 
 // CleanupToken cleans any created service token files for given volume and pod.
@@ -239,7 +240,7 @@ func (c *CredentialProvider) stsRegion(volumeContext map[string]string, mountpoi
 	}
 
 	// We're ignoring the error here, makes a call to IMDS only once and logs the error in case of error
-	region, _ = RegionFromIMDS()
+	region, _ = c.regionFromIMDS()
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from IMDS", region)
 		return region, nil
@@ -256,9 +257,9 @@ func hostPluginDirWithDefault() string {
 	return hostPluginDir
 }
 
-// RegionFromIMDS tries to detect AWS region by making a request to IMDS.
+// RegionFromIMDSOnce tries to detect AWS region by making a request to IMDS.
 // It only makes request to IMDS once and caches the value.
-var RegionFromIMDS = sync.OnceValues(func() (string, error) {
+var RegionFromIMDSOnce = sync.OnceValues(func() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
