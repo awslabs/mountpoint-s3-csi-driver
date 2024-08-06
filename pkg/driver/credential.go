@@ -13,6 +13,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+	"github.com/google/renameio"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -163,7 +164,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 }
 
 func (c *CredentialProvider) writeToken(podID string, volumeID string, token *Token) error {
-	return WriteFileAtomic(c.tokenPathContainer(podID, volumeID), []byte(token.Token), serviceAccountTokenPerm)
+	return renameio.WriteFile(c.tokenPathContainer(podID, volumeID), []byte(token.Token), serviceAccountTokenPerm)
 }
 
 func (c *CredentialProvider) tokenPathContainer(podID string, volumeID string) string {
