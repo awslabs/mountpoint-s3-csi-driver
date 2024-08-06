@@ -133,8 +133,8 @@ test:
 
 .PHONY: cover
 cover:
-    ${GOBIN}/go-test-coverage --config=./.testcoverage.yml
-    go tool cover -html=cover.out -o=cover.html
+	${GOBIN}/go-test-coverage --config=./.testcoverage.yml
+	go tool cover -html=cover.out -o=cover.html
 
 .PHONY: fmt
 fmt:
