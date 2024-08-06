@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -43,6 +44,7 @@ const (
 	volumeCtxServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
 	volumeCtxServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
 	volumeCtxPodNamespace         = "csi.storage.k8s.io/pod.namespace"
+	volumeCtxPodUID               = "csi.storage.k8s.io/pod.uid"
 )
 
 var (
@@ -54,10 +56,16 @@ type S3NodeServer struct {
 	NodeID             string
 	Mounter            Mounter
 	credentialProvider *CredentialProvider
+
+	// We need this mapping to cleanup service account tokens in `NodeUnpublishVolume`,
+	// we use "Pod ID" in service account token path and `NodeUnpublishVolume` does not receive "Pod ID"
+	// and it only receives "target path" and "volume id", we need to map "target path" back to "Pod ID"
+	// in order to clean up service account token file for that mount.
+	targetPathPodIDMapping sync.Map
 }
 
 func NewS3NodeServer(nodeID string, mounter Mounter, credentialProvider *CredentialProvider) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider, targetPathPodIDMapping: sync.Map{}}
 }
 
 type Token struct {
@@ -66,9 +74,16 @@ type Token struct {
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	err := ns.credentialProvider.CleanupToken(req.GetVolumeId())
-	if err != nil {
-		klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for volume %s: %v", req.GetVolumeId(), err)
+	volumeContext := req.GetVolumeContext()
+	if volumeContext[volumeCtxAuthenticationSource] == authenticationSourcePod {
+		podID := volumeContext[volumeCtxPodUID]
+		volumeID := req.GetVolumeId()
+		if podID != "" && volumeID != "" {
+			err := ns.credentialProvider.CleanupToken(volumeID, podID)
+			if err != nil {
+				klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
+			}
+		}
 	}
 
 	return nil, status.Error(codes.Unimplemented, "")
@@ -128,7 +143,9 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	credentials, err := ns.credentialProvider.Provide(ctx, req, mountpointArgs)
+	ns.targetPathPodIDMapping.Store(target, req.VolumeContext[volumeCtxPodUID])
+
+	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
 	if err != nil {
 		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
 		return nil, err
@@ -177,14 +194,18 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	err := ns.credentialProvider.CleanupToken(volumeID)
-	if err != nil {
-		klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for volume %s: %v", volumeID, err)
-	}
-
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
+	}
+
+	podIDAny, ok := ns.targetPathPodIDMapping.LoadAndDelete(target)
+	if ok {
+		podID := podIDAny.(string)
+		err := ns.credentialProvider.CleanupToken(volumeID, podID)
+		if err != nil {
+			klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
+		}
 	}
 
 	mounted, err := ns.Mounter.IsMountPoint(target)

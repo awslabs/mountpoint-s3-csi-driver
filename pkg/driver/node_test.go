@@ -22,7 +22,7 @@ func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	credentialProvider := driver.NewCredentialProvider(nil, t.TempDir())
+	credentialProvider := driver.NewCredentialProvider(nil, t.TempDir(), driver.RegionFromIMDSOnce)
 	server := driver.NewS3NodeServer(
 		"test-nodeID",
 		mockMounter,

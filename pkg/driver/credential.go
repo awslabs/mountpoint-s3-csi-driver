@@ -13,12 +13,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/google/renameio"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
+	k8sstrings "k8s.io/utils/strings"
 )
 
 type authenticationSource = string
@@ -29,6 +30,11 @@ const (
 	authenticationSourceUnspecified authenticationSource = ""
 	authenticationSourceDriver      authenticationSource = "driver"
 	authenticationSourcePod         authenticationSource = "pod"
+)
+
+const (
+	// This is to ensure only owner/group can read the file and no one else.
+	serviceAccountTokenPerm = 0440
 )
 
 const defaultHostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
@@ -42,30 +48,39 @@ var errUnknownRegion = errors.New("NodePublishVolume: Pod-level: unknown region"
 type CredentialProvider struct {
 	client             k8sv1.CoreV1Interface
 	containerPluginDir string
+	regionFromIMDS     func() (string, error)
 }
 
-func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir string) *CredentialProvider {
-	// `RegionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
+func NewCredentialProvider(client k8sv1.CoreV1Interface, containerPluginDir string, regionFromIMDS func() (string, error)) *CredentialProvider {
+	// `regionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
-	go RegionFromIMDS()
+	go func() {
+		_, _ = regionFromIMDS()
+	}()
 
-	return &CredentialProvider{client, containerPluginDir}
+	return &CredentialProvider{client, containerPluginDir, regionFromIMDS}
 }
 
-// CleanupToken cleans any created service token files for given volume.
-func (c *CredentialProvider) CleanupToken(volumeID string) error {
-	err := os.Remove(c.tokenPath(volumeID))
+// CleanupToken cleans any created service token files for given volume and pod.
+func (c *CredentialProvider) CleanupToken(volumeID string, podID string) error {
+	err := os.Remove(c.tokenPathContainer(podID, volumeID))
 	if err != nil && os.IsNotExist(err) {
 		return nil
 	}
 	return err
 }
 
-func (c *CredentialProvider) Provide(ctx context.Context, req *csi.NodePublishVolumeRequest, mountpointArgs []string) (*MountCredentials, error) {
-	authenticationSource := req.VolumeContext[volumeCtxAuthenticationSource]
+// Provide provides mount credentials for given volume and volume context.
+// Depending on the configuration, it either returns driver-level or pod-level credentials.
+func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volumeContext map[string]string, mountpointArgs []string) (*MountCredentials, error) {
+	if volumeContext == nil {
+		return nil, status.Error(codes.InvalidArgument, "Missing volume context")
+	}
+
+	authenticationSource := volumeContext[volumeCtxAuthenticationSource]
 	switch authenticationSource {
 	case authenticationSourcePod:
-		return c.provideFromPod(ctx, req, mountpointArgs)
+		return c.provideFromPod(ctx, volumeID, volumeContext, mountpointArgs)
 	case authenticationSourceUnspecified, authenticationSourceDriver:
 		return c.provideFromDriver()
 	default:
@@ -91,10 +106,10 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	}, nil
 }
 
-func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePublishVolumeRequest, mountpointArgs []string) (*MountCredentials, error) {
+func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeContext map[string]string, mountpointArgs []string) (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using pod identity")
 
-	tokensJson := req.VolumeContext[volumeCtxServiceAccountTokens]
+	tokensJson := volumeContext[volumeCtxServiceAccountTokens]
 	if tokensJson == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see TODO")
 		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens")
@@ -111,12 +126,12 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudienceSTS)
 	}
 
-	awsRoleARN, err := c.findPodServiceAccountRole(ctx, req)
+	awsRoleARN, err := c.findPodServiceAccountRole(ctx, volumeContext)
 	if err != nil {
 		return nil, err
 	}
 
-	region, err := c.stsRegion(req, mountpointArgs)
+	region, err := c.stsRegion(volumeContext, mountpointArgs)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see TODO")
 	}
@@ -126,15 +141,18 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 		defaultRegion = region
 	}
 
-	volumeID := req.GetVolumeId()
+	podID := volumeContext[volumeCtxPodUID]
+	if podID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Missing Pod info")
+	}
 
-	err = c.writeToken(volumeID, stsToken)
+	err = c.writeToken(podID, volumeID, stsToken)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to write service account token: %v", err)
 	}
 
 	hostPluginDir := hostPluginDirWithDefault()
-	hostTokenPath := path.Join(hostPluginDir, volumeID+".token")
+	hostTokenPath := path.Join(hostPluginDir, c.tokenFilename(podID, volumeID))
 
 	return &MountCredentials{
 		Region:        region,
@@ -145,18 +163,27 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, req *csi.NodePu
 	}, nil
 }
 
-func (c *CredentialProvider) writeToken(volumeID string, token *Token) error {
-	// TODO: Should we make the write atomic by writing to a temporary path and renaming afterwards?
-	return os.WriteFile(c.tokenPath(volumeID), []byte(token.Token), 0400)
+func (c *CredentialProvider) writeToken(podID string, volumeID string, token *Token) error {
+	return renameio.WriteFile(c.tokenPathContainer(podID, volumeID), []byte(token.Token), serviceAccountTokenPerm)
 }
 
-func (c *CredentialProvider) tokenPath(volumeID string) string {
-	return path.Join(c.containerPluginDir, volumeID+".token")
+func (c *CredentialProvider) tokenPathContainer(podID string, volumeID string) string {
+	return path.Join(c.containerPluginDir, c.tokenFilename(podID, volumeID))
 }
 
-func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, req *csi.NodePublishVolumeRequest) (string, error) {
-	podNamespace := req.VolumeContext[volumeCtxPodNamespace]
-	podServiceAccount := req.VolumeContext[volumeCtxServiceAccountName]
+func (c *CredentialProvider) tokenFilename(podID string, volumeID string) string {
+	var filename strings.Builder
+	filename.WriteString(podID)
+	filename.WriteRune('-')
+	// `volumeID` might contain `/`, we need to escape it
+	filename.WriteString(k8sstrings.EscapeQualifiedName(volumeID))
+	filename.WriteString(".token")
+	return filename.String()
+}
+
+func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volumeContext map[string]string) (string, error) {
+	podNamespace := volumeContext[volumeCtxPodNamespace]
+	podServiceAccount := volumeContext[volumeCtxServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see TODO")
 		return "", status.Error(codes.InvalidArgument, "Missing Pod info")
@@ -185,8 +212,8 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, req 
 //  4. Calling IMDS to detect region
 //
 // It returns an error if all of them fails.
-func (c *CredentialProvider) stsRegion(req *csi.NodePublishVolumeRequest, mountpointArgs []string) (string, error) {
-	region := req.VolumeContext[volumeCtxSTSRegion]
+func (c *CredentialProvider) stsRegion(volumeContext map[string]string, mountpointArgs []string) (string, error) {
+	region := volumeContext[volumeCtxSTSRegion]
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from volume context", region)
 		return region, nil
@@ -214,7 +241,7 @@ func (c *CredentialProvider) stsRegion(req *csi.NodePublishVolumeRequest, mountp
 	}
 
 	// We're ignoring the error here, makes a call to IMDS only once and logs the error in case of error
-	region, _ = RegionFromIMDS()
+	region, _ = c.regionFromIMDS()
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from IMDS", region)
 		return region, nil
@@ -231,9 +258,9 @@ func hostPluginDirWithDefault() string {
 	return hostPluginDir
 }
 
-// RegionFromIMDS tries to detect AWS region by making a request to IMDS.
+// RegionFromIMDSOnce tries to detect AWS region by making a request to IMDS.
 // It only makes request to IMDS once and caches the value.
-var RegionFromIMDS = sync.OnceValues(func() (string, error) {
+var RegionFromIMDSOnce = sync.OnceValues(func() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
