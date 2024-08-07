@@ -33,18 +33,21 @@ import (
 )
 
 const (
-	keyIdEnv             = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv         = "AWS_SECRET_ACCESS_KEY"
-	sessionTokenEnv      = "AWS_SESSION_TOKEN"
-	regionEnv            = "AWS_REGION"
-	defaultRegionEnv     = "AWS_DEFAULT_REGION"
-	stsEndpointsEnv      = "AWS_STS_REGIONAL_ENDPOINTS"
-	MountS3PathEnv       = "MOUNT_S3_PATH"
-	awsMaxAttemptsEnv    = "AWS_MAX_ATTEMPTS"
-	defaultMountS3Path   = "/usr/bin/mount-s3"
-	procMounts           = "/host/proc/mounts"
-	userAgentPrefix      = "--user-agent-prefix"
-	awsMaxAttemptsOption = "--aws-max-attempts"
+	keyIdEnv                 = "AWS_ACCESS_KEY_ID"
+	accessKeyEnv             = "AWS_SECRET_ACCESS_KEY"
+	sessionTokenEnv          = "AWS_SESSION_TOKEN"
+	configFileEnv            = "AWS_CONFIG_FILE"
+	sharedCredentialsFileEnv = "AWS_SHARED_CREDENTIALS_FILE"
+	disableIMDSProviderEnv   = "AWS_EC2_METADATA_DISABLED"
+	regionEnv                = "AWS_REGION"
+	defaultRegionEnv         = "AWS_DEFAULT_REGION"
+	stsEndpointsEnv          = "AWS_STS_REGIONAL_ENDPOINTS"
+	MountS3PathEnv           = "MOUNT_S3_PATH"
+	awsMaxAttemptsEnv        = "AWS_MAX_ATTEMPTS"
+	defaultMountS3Path       = "/usr/bin/mount-s3"
+	procMounts               = "/host/proc/mounts"
+	userAgentPrefix          = "--user-agent-prefix"
+	awsMaxAttemptsOption     = "--aws-max-attempts"
 )
 
 const (
@@ -58,20 +61,33 @@ const (
 )
 
 type MountCredentials struct {
+	// -- Env variable provider
 	AccessKeyID     string
 	SecretAccessKey string
 	SessionToken    string
-	Region          string
-	DefaultRegion   string
-	WebTokenPath    string
-	StsEndpoints    string
-	AwsRoleArn      string
+
+	// -- Profile provider
+	ConfigFilePath            string
+	SharedCredentialsFilePath string
+
+	// -- STS provider
+	WebTokenPath string
+	AwsRoleArn   string
+
+	// -- IMDS provider
+	DisableIMDSProvider bool
+
+	// -- Generic
+	Region        string
+	DefaultRegion string
+	StsEndpoints  string
 }
 
 // Get environment variables to pass to mount-s3 for authentication.
 func (mc *MountCredentials) Env() []string {
 	env := []string{}
 
+	// For env variable provider
 	if mc.AccessKeyID != "" && mc.SecretAccessKey != "" {
 		env = append(env, keyIdEnv+"="+mc.AccessKeyID)
 		env = append(env, accessKeyEnv+"="+mc.SecretAccessKey)
@@ -79,10 +95,27 @@ func (mc *MountCredentials) Env() []string {
 			env = append(env, sessionTokenEnv+"="+mc.SessionToken)
 		}
 	}
+
+	// For profile provider
+	if mc.ConfigFilePath != "" {
+		env = append(env, configFileEnv+"="+mc.ConfigFilePath)
+	}
+	if mc.SharedCredentialsFilePath != "" {
+		env = append(env, sharedCredentialsFileEnv+"="+mc.SharedCredentialsFilePath)
+	}
+
+	// For STS Web Identity provider
 	if mc.WebTokenPath != "" {
 		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)
 		env = append(env, roleArnEnv+"="+mc.AwsRoleArn)
 	}
+
+	// For disabling IMDS provider
+	if mc.DisableIMDSProvider {
+		env = append(env, disableIMDSProviderEnv+"=true")
+	}
+
+	// Generic variables
 	if mc.Region != "" {
 		env = append(env, regionEnv+"="+mc.Region)
 	}

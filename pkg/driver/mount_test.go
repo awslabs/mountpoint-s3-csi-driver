@@ -3,6 +3,8 @@ package driver_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -193,6 +195,123 @@ func TestS3MounterMount(t *testing.T) {
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
+	tests := map[string]struct {
+		credentials *driver.MountCredentials
+		expected    []string
+	}{
+		"Access Key and Secret Key": {
+			credentials: &driver.MountCredentials{
+				AccessKeyID:     "access_key",
+				SecretAccessKey: "secret_key",
+			},
+			expected: []string{
+				"AWS_ACCESS_KEY_ID=access_key",
+				"AWS_SECRET_ACCESS_KEY=secret_key",
+			},
+		},
+		"Access Key and Secret Key with Session Token": {
+			credentials: &driver.MountCredentials{
+				AccessKeyID:     "access_key",
+				SecretAccessKey: "secret_key",
+				SessionToken:    "session_token",
+			},
+			expected: []string{
+				"AWS_ACCESS_KEY_ID=access_key",
+				"AWS_SECRET_ACCESS_KEY=secret_key",
+				"AWS_SESSION_TOKEN=session_token",
+			},
+		},
+		"Profile Provider": {
+			credentials: &driver.MountCredentials{
+				ConfigFilePath:            "~/.aws/config",
+				SharedCredentialsFilePath: "~/.aws/credentials",
+			},
+			expected: []string{
+				"AWS_CONFIG_FILE=~/.aws/config",
+				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials",
+			},
+		},
+		"Disabling IMDS Provider": {
+			credentials: &driver.MountCredentials{
+				DisableIMDSProvider: true,
+			},
+			expected: []string{
+				"AWS_EC2_METADATA_DISABLED=true",
+			},
+		},
+		"STS Web Identity Provider": {
+			credentials: &driver.MountCredentials{
+				WebTokenPath: "/path/to/web/token",
+				AwsRoleArn:   "arn:aws:iam::123456789012:role/Role",
+			},
+			expected: []string{
+				"AWS_WEB_IDENTITY_TOKEN_FILE=/path/to/web/token",
+				"AWS_ROLE_ARN=arn:aws:iam::123456789012:role/Role",
+			},
+		},
+		"Region and Default Region": {
+			credentials: &driver.MountCredentials{
+				Region:        "us-west-2",
+				DefaultRegion: "us-east-1",
+			},
+			expected: []string{
+				"AWS_REGION=us-west-2",
+				"AWS_DEFAULT_REGION=us-east-1",
+			},
+		},
+		"STS Endpoints": {
+			credentials: &driver.MountCredentials{
+				StsEndpoints: "regional",
+			},
+			expected: []string{
+				"AWS_STS_REGIONAL_ENDPOINTS=regional",
+			},
+		},
+		"All Combined": {
+			credentials: &driver.MountCredentials{
+				AccessKeyID:               "access_key",
+				SecretAccessKey:           "secret_key",
+				SessionToken:              "session_token",
+				WebTokenPath:              "/path/to/web/token",
+				AwsRoleArn:                "arn:aws:iam::123456789012:role/Role",
+				Region:                    "us-west-2",
+				DefaultRegion:             "us-east-1",
+				StsEndpoints:              "legacy",
+				ConfigFilePath:            "~/.aws/config",
+				SharedCredentialsFilePath: "~/.aws/credentials",
+				DisableIMDSProvider:       true,
+			},
+			expected: []string{
+				"AWS_ACCESS_KEY_ID=access_key",
+				"AWS_SECRET_ACCESS_KEY=secret_key",
+				"AWS_SESSION_TOKEN=session_token",
+				"AWS_WEB_IDENTITY_TOKEN_FILE=/path/to/web/token",
+				"AWS_ROLE_ARN=arn:aws:iam::123456789012:role/Role",
+				"AWS_REGION=us-west-2",
+				"AWS_DEFAULT_REGION=us-east-1",
+				"AWS_STS_REGIONAL_ENDPOINTS=legacy",
+				"AWS_EC2_METADATA_DISABLED=true",
+				"AWS_CONFIG_FILE=~/.aws/config",
+				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials",
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			actual := test.credentials.Env()
+
+			slices.Sort(test.expected)
+			slices.Sort(actual)
+
+			if !reflect.DeepEqual(actual, test.expected) {
+				t.Errorf("Expected %v, but got %v", test.expected, actual)
 			}
 		})
 	}

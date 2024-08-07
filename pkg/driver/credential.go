@@ -160,6 +160,17 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		StsEndpoints:  os.Getenv(stsEndpointsEnv),
 		WebTokenPath:  hostTokenPath,
 		AwsRoleArn:    awsRoleARN,
+
+		// Ensure to disable env credential provider
+		AccessKeyID:     "",
+		SecretAccessKey: "",
+
+		// Ensure to disable profile provider
+		ConfigFilePath:            path.Join(hostPluginDir, "disable-config"),
+		SharedCredentialsFilePath: path.Join(hostPluginDir, "disable-credentials"),
+
+		// Ensure to disable IMDS provider
+		DisableIMDSProvider: true,
 	}, nil
 }
 
