@@ -316,3 +316,38 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractMountpointArgument(t *testing.T) {
+	for name, test := range map[string]struct {
+		input           []string
+		argument        string
+		expectedToFound bool
+		expectedValue   string
+	}{
+		"Extract Existing Argument": {
+			input: []string{
+				"--region=us-east-1",
+			},
+			argument:        "region",
+			expectedToFound: true,
+			expectedValue:   "us-east-1",
+		},
+		"Extract Non Existing Argument": {
+			input: []string{
+				"--bucket=test",
+			},
+			argument:        "region",
+			expectedToFound: false,
+		},
+		"Extract Non Existing Argument With Empty Input": {
+			argument:        "region",
+			expectedToFound: false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			val, found := driver.ExtractMountpointArgument(test.input, test.argument)
+			assertEquals(t, test.expectedToFound, found)
+			assertEquals(t, test.expectedValue, val)
+		})
+	}
+}

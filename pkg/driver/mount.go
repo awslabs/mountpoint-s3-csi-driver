@@ -409,3 +409,20 @@ func parseProcMounts(data []byte) ([]mount.MountPoint, error) {
 
 	return mounts, nil
 }
+
+const (
+	mountpointArgRegion = "region"
+)
+
+// ExtractMountpointArgument extracts value of a given argument from `mountpointArgs`.
+func ExtractMountpointArgument(mountpointArgs []string, argument string) (string, bool) {
+	// `mountpointArgs` normalized to `--arg=val` in `S3NodeServer.NodePublishVolume`.
+	prefix := fmt.Sprintf("--%s=", argument)
+	for _, arg := range mountpointArgs {
+		if strings.HasPrefix(arg, prefix) {
+			val := strings.SplitN(arg, "=", 2)[1]
+			return val, true
+		}
+	}
+	return "", false
+}
