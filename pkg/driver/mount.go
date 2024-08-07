@@ -412,6 +412,7 @@ func parseProcMounts(data []byte) ([]mount.MountPoint, error) {
 
 const (
 	mountpointArgRegion = "region"
+	mountpointArgCache  = "cache"
 )
 
 // ExtractMountpointArgument extracts value of a given argument from `mountpointArgs`.

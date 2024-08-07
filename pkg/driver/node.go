@@ -102,7 +102,9 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	bucket, ok := req.GetVolumeContext()[volumeCtxBucketName]
+	volumeContext := req.GetVolumeContext()
+
+	bucket, ok := volumeContext[volumeCtxBucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
@@ -128,7 +130,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	// get the mount(point) options (yaml list)
 	if capMount := volCap.GetMount(); capMount != nil {
-		// TODO: How to handle caching with pod-level identity? Should we disable caching in that case?
 		mountFlags := capMount.GetMountFlags()
 		for i := range mountFlags {
 			// trim left and right spaces
@@ -141,6 +142,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 			}
 		}
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
+	}
+
+	if volumeContext[volumeCtxAuthenticationSource] == authenticationSourcePod {
+		if _, ok := ExtractMountpointArgument(mountpointArgs, mountpointArgCache); ok {
+			return nil, status.Error(codes.InvalidArgument, "Caching with `authenticationSource=pod` is not supported at the moment, see TODO")
+		}
 	}
 
 	ns.targetPathPodIDMapping.Store(target, req.VolumeContext[volumeCtxPodUID])

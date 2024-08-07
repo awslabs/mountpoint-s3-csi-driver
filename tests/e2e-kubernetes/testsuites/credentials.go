@@ -201,8 +201,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		expectListToSucceed(pod)
 	}
 
-	expectFailToMount := func(ctx context.Context, withServiceAccountName string) {
-		vol := createVolume(ctx)
+	expectFailToMount := func(ctx context.Context, withServiceAccountName string, mountOptions []string) {
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, mountOptions)
+		deferCleanup(vol.CleanupResource)
 
 		client := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
 
@@ -358,7 +359,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(ctx, "")
+					expectFailToMount(ctx, "", nil)
 				})
 			})
 
@@ -377,7 +378,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					updateDriverLevelCredentials(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(ctx, "")
+					expectFailToMount(ctx, "", nil)
 				})
 			})
 		})
@@ -445,14 +446,19 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
 				})
 
 				It("should fail to mount if pod's service account does not have an associated role", func(ctx context.Context) {
 					sa, removeSA := createServiceAccount(ctx, f)
 					deferCleanup(removeSA)
 
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
+				})
+
+				It("should fail to mount if cache is enabled", func(ctx context.Context) {
+					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, []string{"cache /tmp"})
 				})
 
 				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
