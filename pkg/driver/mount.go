@@ -309,8 +309,6 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
 	options = addUserAgentToOptions(options, UserAgent(m.kubernetesVersion))
 
-	klog.V(4).Infof("FIXME: MP env (with credentials): %v", env)
-
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",

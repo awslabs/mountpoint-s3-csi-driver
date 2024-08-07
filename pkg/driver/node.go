@@ -18,6 +18,7 @@ package driver
 
 import (
 	"context"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -94,8 +95,7 @@ func (ns *S3NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	// TODO: `req` might contain service account tokens, don't print the whole `req`.
-	klog.V(4).Infof("NodePublishVolume: req: %+v", req)
+	klog.V(4).Infof("NodePublishVolume: new request: %+v", logSafeNodePublishVolumeRequest(req))
 
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
@@ -288,4 +288,21 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 		}
 	}
 	return foundAll
+}
+
+// logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
+// with sensitive fields removed.
+func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) csi.NodePublishVolumeRequest {
+	safeVolumeContext := maps.Clone(req.VolumeContext)
+	delete(safeVolumeContext, volumeCtxServiceAccountTokens)
+
+	return csi.NodePublishVolumeRequest{
+		VolumeId:          req.VolumeId,
+		PublishContext:    req.PublishContext,
+		StagingTargetPath: req.StagingTargetPath,
+		TargetPath:        req.TargetPath,
+		VolumeCapability:  req.VolumeCapability,
+		Readonly:          req.Readonly,
+		VolumeContext:     safeVolumeContext,
+	}
 }
