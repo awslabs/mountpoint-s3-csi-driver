@@ -18,6 +18,7 @@ package driver
 
 import (
 	"context"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -94,15 +95,16 @@ func (ns *S3NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	// TODO: `req` might contain service account tokens, don't print the whole `req`.
-	klog.V(4).Infof("NodePublishVolume: req: %+v", req)
+	klog.V(4).Infof("NodePublishVolume: new request: %+v", logSafeNodePublishVolumeRequest(req))
 
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	bucket, ok := req.GetVolumeContext()[volumeCtxBucketName]
+	volumeContext := req.GetVolumeContext()
+
+	bucket, ok := volumeContext[volumeCtxBucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
@@ -128,7 +130,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	// get the mount(point) options (yaml list)
 	if capMount := volCap.GetMount(); capMount != nil {
-		// TODO: How to handle caching with pod-level identity? Should we disable caching in that case?
 		mountFlags := capMount.GetMountFlags()
 		for i := range mountFlags {
 			// trim left and right spaces
@@ -141,6 +142,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 			}
 		}
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
+	}
+
+	if volumeContext[volumeCtxAuthenticationSource] == authenticationSourcePod {
+		if _, ok := ExtractMountpointArgument(mountpointArgs, mountpointArgCache); ok {
+			return nil, status.Error(codes.InvalidArgument, "Caching with `authenticationSource=pod` is not supported at the moment, see TODO")
+		}
 	}
 
 	ns.targetPathPodIDMapping.Store(target, req.VolumeContext[volumeCtxPodUID])
@@ -281,4 +288,21 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 		}
 	}
 	return foundAll
+}
+
+// logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
+// with sensitive fields removed.
+func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) csi.NodePublishVolumeRequest {
+	safeVolumeContext := maps.Clone(req.VolumeContext)
+	delete(safeVolumeContext, volumeCtxServiceAccountTokens)
+
+	return csi.NodePublishVolumeRequest{
+		VolumeId:          req.VolumeId,
+		PublishContext:    req.PublishContext,
+		StagingTargetPath: req.StagingTargetPath,
+		TargetPath:        req.TargetPath,
+		VolumeCapability:  req.VolumeCapability,
+		Readonly:          req.Readonly,
+		VolumeContext:     safeVolumeContext,
+	}
 }

@@ -201,8 +201,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		expectListToSucceed(pod)
 	}
 
-	expectFailToMount := func(ctx context.Context, withServiceAccountName string) {
-		vol := createVolume(ctx)
+	expectFailToMount := func(ctx context.Context, withServiceAccountName string, mountOptions []string) {
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, mountOptions)
+		deferCleanup(vol.CleanupResource)
 
 		client := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
 
@@ -243,50 +244,89 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// we shouldn't run them in parallel with other tests.
 	//                        |
 	//                      ------
-	Describe("Credentials", Serial, func() {
-		Describe("Driver Level", Ordered, func() {
+	Describe("Credentials", Serial, Ordered, func() {
+		cleanClusterWideResources := func(ctx context.Context) {
+			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
+			// we need to clean up all credential related resources before each test to ensure we've a
+			// clean starting point in each test.
+			By("Cleaning up cluster-wide resources")
+
+			sa := csiDriverServiceAccount(ctx, f)
+			overrideServiceAccountRole(ctx, f, sa, "")
+
+			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
+
+			// Trigger recreation of our pods to ensure they're not using deleted resources
+			killCSIDriverPods(ctx, f)
+		}
+
+		var (
+			oidcProvider      string
+			policyRoleMapping = map[string]*iamtypes.Role{}
+		)
+
+		BeforeAll(func(ctx context.Context) {
+			oidcProvider = oidcProviderForCluster(ctx, f)
+
 			var afterAllCleanup []func(context.Context) error
 
-			cleanClusterWideResources := func(ctx context.Context) {
-				// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
-				// we need to clean up all credential related resources before each test to ensure we've a
-				// clean starting point in each test.
-				By("Cleaning up cluster-wide resources")
-
-				sa := csiDriverServiceAccount(ctx, f)
-				overrideServiceAccountRole(ctx, f, sa, "")
-
-				framework.ExpectNoError(deleteCredentialSecret(ctx, f))
-
-				// Trigger recreation of our pods to ensure they're not using deleted resources
-				killCSIDriverPods(ctx, f)
+			By("Pre-creating IAM roles for common policies")
+			for _, policyARN := range []string{
+				iamPolicyS3FullAccess,
+				iamPolicyS3ReadOnlyAccess,
+				iamPolicyS3NoAccess,
+			} {
+				role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
+				policyRoleMapping[policyARN] = role
+				afterAllCleanup = append(afterAllCleanup, removeRole)
 			}
 
-			policyRoleMapping := map[string]*iamtypes.Role{}
-			BeforeAll(func(ctx context.Context) {
-				By("Pre-creating IAM roles for common policies")
-				for _, policyARN := range []string{
-					iamPolicyS3FullAccess,
-					iamPolicyS3ReadOnlyAccess,
-					iamPolicyS3NoAccess,
-				} {
-					role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
-					policyRoleMapping[policyARN] = role
-					afterAllCleanup = append(afterAllCleanup, removeRole)
-				}
-			})
-
-			AfterAll(func(ctx context.Context) {
-				By("Cleaning up resources created for Driver-level tests")
-				cleanClusterWideResources(ctx)
-
+			DeferCleanup(func(ctx context.Context) {
 				var errs []error
 				for _, f := range afterAllCleanup {
 					errs = append(errs, f(ctx))
 				}
 				framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup global resource")
 			})
+		})
 
+		AfterEach(func(ctx context.Context) {
+			cleanClusterWideResources(ctx)
+		})
+
+		updateCSIDriversServiceAccountRole := func(ctx context.Context, policyARN string) {
+			By("Updating CSI Driver's Service Account Role")
+			sa := csiDriverServiceAccount(ctx, f)
+
+			role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
+			deferCleanup(removeRole)
+
+			sa, restoreServiceAccountRole := overrideServiceAccountRole(ctx, f, sa, *role.Arn)
+			deferCleanup(restoreServiceAccountRole)
+
+			waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+
+			// Trigger recreation of our pods to use the new IAM role
+			killCSIDriverPods(ctx, f)
+		}
+
+		updateDriverLevelKubernetesSecret := func(ctx context.Context, policyARN string) {
+			By("Updating Kubernetes Secret with temporary credentials")
+
+			role, ok := policyRoleMapping[policyARN]
+			if !ok {
+				framework.Failf("Missing role mapping for policy %s", policyARN)
+			}
+			assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
+
+			_, deleteSecret := createCredentialSecret(ctx, f, assumeRoleOutput.Credentials)
+			deferCleanup(deleteSecret)
+
+			// Trigger recreation of our pods to use the new credentials
+			killCSIDriverPods(ctx, f)
+		}
+
+		Describe("Driver Level", Ordered, func() {
 			BeforeEach(func(ctx context.Context) {
 				cleanClusterWideResources(ctx)
 			})
@@ -301,78 +341,46 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			})
 
 			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
-				var oidcProvider string
-				BeforeAll(func(ctx context.Context) {
-					oidcProvider = oidcProviderForCluster(ctx, f)
+				BeforeEach(func(ctx context.Context) {
 					if oidcProvider == "" {
 						Skip("OIDC provider is not configured, skipping IRSA tests")
 					}
 				})
 
-				updateServiceAccountRole := func(ctx context.Context, policyARN string) {
-					By("Updating CSI Driver's Service Account Role")
-					sa := csiDriverServiceAccount(ctx, f)
-
-					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
-					deferCleanup(removeRole)
-
-					_, restoreServiceAccountRole := overrideServiceAccountRole(ctx, f, sa, *role.Arn)
-					deferCleanup(restoreServiceAccountRole)
-
-					// Trigger recreation of our pods to use the new IAM role
-					killCSIDriverPods(ctx, f)
-				}
-
 				It("should use service account's read-only role", func(ctx context.Context) {
-					updateServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
 					pod := createPodWithVolume(ctx)
 					expectReadOnly(pod)
 				})
 
 				It("should use service account's full access role", func(ctx context.Context) {
-					updateServiceAccountRole(ctx, iamPolicyS3FullAccess)
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(pod)
 				})
 
 				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
-					updateServiceAccountRole(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(ctx, "")
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(ctx, "", nil)
 				})
 			})
 
 			Context("Credentials via Kubernetes Secrets", func() {
-				updateCredentials := func(ctx context.Context, policyARN string) {
-					By("Updating Kubernetes Secret with temporary credentials")
-
-					role, ok := policyRoleMapping[policyARN]
-					if !ok {
-						framework.Failf("Missing role mapping for policy %s", policyARN)
-					}
-					assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
-
-					_, deleteSecret := createCredentialSecret(ctx, f, assumeRoleOutput.Credentials)
-					deferCleanup(deleteSecret)
-
-					// Trigger recreation of our pods to use the new credentials
-					killCSIDriverPods(ctx, f)
-				}
-
 				It("should use read-only access aws credentials", func(ctx context.Context) {
-					updateCredentials(ctx, iamPolicyS3ReadOnlyAccess)
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
 					pod := createPodWithVolume(ctx)
 					expectReadOnly(pod)
 				})
 
 				It("should use full access aws credentials", func(ctx context.Context) {
-					updateCredentials(ctx, iamPolicyS3FullAccess)
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(pod)
 				})
 
 				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
-					updateCredentials(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(ctx, "")
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(ctx, "", nil)
 				})
 			})
 		})
@@ -387,9 +395,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			}
 
 			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
-				var oidcProvider string
-				BeforeAll(func(ctx context.Context) {
-					oidcProvider = oidcProviderForCluster(ctx, f)
+				BeforeEach(func(ctx context.Context) {
 					if oidcProvider == "" {
 						Skip("OIDC provider is not configured, skipping IRSA tests")
 					}
@@ -442,14 +448,19 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3NoAccess)
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
 				})
 
 				It("should fail to mount if pod's service account does not have an associated role", func(ctx context.Context) {
 					sa, removeSA := createServiceAccount(ctx, f)
 					deferCleanup(removeSA)
 
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
+				})
+
+				It("should fail to mount if cache is enabled", func(ctx context.Context) {
+					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, []string{"cache /tmp"})
 				})
 
 				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
@@ -486,16 +497,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not use csi driver's service account tokens", func(ctx context.Context) {
-					driverSA := csiDriverServiceAccount(ctx, f)
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 
-					driverRole, removeDriverRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, driverSA), iamPolicyS3FullAccess)
-					deferCleanup(removeDriverRole)
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true)
+					expectReadOnly(pod)
+				})
 
-					_, restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, *driverRole.Arn)
-					deferCleanup(restoreDriverSA)
-
-					// Trigger recreation of CSI driver pods to use the new IAM role
-					killCSIDriverPods(ctx, f)
+				It("should not use driver-level kubernetes secrets", func(ctx context.Context) {
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true)
 					expectReadOnly(pod)
@@ -527,16 +536,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
-					driverSA := csiDriverServiceAccount(ctx, f)
-
-					driverRole, removeDriverRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, driverSA), iamPolicyS3ReadOnlyAccess)
-					deferCleanup(removeDriverRole)
-
-					_, restoreDriverSA := overrideServiceAccountRole(ctx, f, driverSA, *driverRole.Arn)
-					deferCleanup(restoreDriverSA)
-
-					// Trigger recreation of CSI driver pods to use the new IAM role
-					killCSIDriverPods(ctx, f)
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
 
 					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
 					deferCleanup(vol.CleanupResource)
@@ -772,9 +772,17 @@ func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa 
 	framework.ExpectNoError(err)
 
 	return sa, func(ctx context.Context) error {
+		sa, err := client.Get(ctx, sa.Name, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
 		annotateServiceAccountWithRole(sa, originalRoleARN)
-		_, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
 		return err
 	}
 }
