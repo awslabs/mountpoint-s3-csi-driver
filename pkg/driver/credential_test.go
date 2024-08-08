@@ -95,14 +95,25 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 	}, nil)
 	assertEquals(t, nil, err)
 
+	// Should disable env variable provider
 	assertEquals(t, credentials.AccessKeyID, "")
 	assertEquals(t, credentials.SecretAccessKey, "")
 	assertEquals(t, credentials.SessionToken, "")
+
+	// Should disable profile provider
+	assertEquals(t, credentials.ConfigFilePath, "/test/csi/plugin/dir/disable-config")
+	assertEquals(t, credentials.SharedCredentialsFilePath, "/test/csi/plugin/dir/disable-credentials")
+
+	// Should disable IMDS provider
+	assertEquals(t, credentials.DisableIMDSProvider, true)
+
+	// Should populate env variables for STS Web Identity provider
+	assertEquals(t, credentials.WebTokenPath, "/test/csi/plugin/dir/test-pod-test-vol-id.token")
+	assertEquals(t, credentials.AwsRoleArn, "arn:aws:iam::123456789012:role/Test")
+
 	assertEquals(t, credentials.Region, "eu-west-1")
 	assertEquals(t, credentials.DefaultRegion, "eu-north-1")
-	assertEquals(t, credentials.WebTokenPath, "/test/csi/plugin/dir/test-pod-test-vol-id.token")
 	assertEquals(t, credentials.StsEndpoints, "regional")
-	assertEquals(t, credentials.AwsRoleArn, "arn:aws:iam::123456789012:role/Test")
 
 	token, err := os.ReadFile(tokenFilePath(credentials, pluginDir))
 	assertEquals(t, nil, err)
@@ -573,10 +584,4 @@ func serviceAccount(name, namespace string, annotations map[string]string) *v1.S
 
 func tokenFilePath(credentials *driver.MountCredentials, pluginDir string) string {
 	return path.Join(pluginDir, path.Base(credentials.WebTokenPath))
-}
-
-func assertEquals[T comparable](t *testing.T, expected T, got T) {
-	if expected != got {
-		t.Errorf("Expected %#v, Got %#v", expected, got)
-	}
 }

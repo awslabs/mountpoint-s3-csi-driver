@@ -160,6 +160,17 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		StsEndpoints:  os.Getenv(stsEndpointsEnv),
 		WebTokenPath:  hostTokenPath,
 		AwsRoleArn:    awsRoleARN,
+
+		// Ensure to disable env credential provider
+		AccessKeyID:     "",
+		SecretAccessKey: "",
+
+		// Ensure to disable profile provider
+		ConfigFilePath:            path.Join(hostPluginDir, "disable-config"),
+		SharedCredentialsFilePath: path.Join(hostPluginDir, "disable-credentials"),
+
+		// Ensure to disable IMDS provider
+		DisableIMDSProvider: true,
 	}, nil
 }
 
@@ -219,13 +230,9 @@ func (c *CredentialProvider) stsRegion(volumeContext map[string]string, mountpoi
 		return region, nil
 	}
 
-	for _, arg := range mountpointArgs {
-		// we normalize all `mountpointArgs` to have `--arg=val` in `S3NodeServer.NodePublishVolume`
-		if strings.HasPrefix(arg, "--region=") {
-			region = strings.SplitN(arg, "=", 2)[1]
-			klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from S3 bucket region", region)
-			return region, nil
-		}
+	if region, ok := ExtractMountpointArgument(mountpointArgs, mountpointArgRegion); ok {
+		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from S3 bucket region", region)
+		return region, nil
 	}
 
 	region = os.Getenv(regionEnv)
