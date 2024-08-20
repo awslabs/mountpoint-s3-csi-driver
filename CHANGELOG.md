@@ -1,3 +1,13 @@
+# v1.8.0
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.8.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.8.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.8.0),
+  * Mountpoint now offers two new command-line arguments `--read-part-size <SIZE>` and `--write-part-size <SIZE>` which allow to specify different part sizes to be used when reading and writing respectively. ([mountpoint-s3#949](https://github.com/awslabs/mountpoint-s3/pull/949))
+  * Fix issue where empty environment variables for STS web identity credentials could cause segmentation fault. ([mountpoint-s3#963](https://github.com/awslabs/mountpoint-s3/pull/963))
+* Add retry to reading `/proc/mounts` ([#234](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/234))
+* Add Kubernetes version to user-agent ([#224](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/224))
+
 # v1.7.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.7.0/README.md)
 
