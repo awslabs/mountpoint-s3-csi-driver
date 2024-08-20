@@ -3,6 +3,6 @@ kind: Kustomization
 resources:
   - ../../base
 images:
-- name: csi-driver
-  newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
-  newTag: v1.7.0
+  - name: csi-driver
+    newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
+    newTag: v1.8.0
