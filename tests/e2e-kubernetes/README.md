@@ -5,12 +5,12 @@
 All of the following commands are expected to be executed from repo root:
 
 ```bash
-export K8S_VERSION="1.30.0" # must be a full version
 export KOPS_STATE_FILE="s3://vlaad-kops-state-store" # set KOPS_STATE_FILE to your bucket when running locally
 export AWS_REGION=us-east-1
 export TAG=20cb9d919704522d93ac40914b760dbd0487bcf3 # CSI Driver image tag to install
 export IMAGE_NAME="s3-csi-driver" # repository is infered from current AWS account and region
 export SSH_KEY=/home/csiuser/.ssh/k8s.private.pub # optional
+export K8S_VERSION="1.30.0" # optional, must be a full version
 
 ACTION=install_tools tests/e2e-kubernetes/scripts/run.sh
 ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh

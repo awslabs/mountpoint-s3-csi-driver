@@ -67,6 +67,7 @@ CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
 # 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
+K8S_VERSION=${K8S_VERSION:-1.30.4}
 K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION}}
 K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
