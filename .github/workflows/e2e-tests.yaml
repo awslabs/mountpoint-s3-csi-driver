@@ -2,16 +2,16 @@ name: E2E Tests
 
 on:
   push:
-    branches: [ "main", "release-**", "feature/*" ]
+    branches: ["main", "release-**", "feature/*"]
   pull_request:
-    branches: [ "main", "feature/*" ]
+    branches: ["main", "feature/*"]
     paths:
-      - 'tests/**'
-      - 'pkg/**'
-      - 'cmd/**'
-      - 'charts/**'
-      - '.github/workflows/**'
-      - 'Dockerfile'
+      - "tests/**"
+      - "pkg/**"
+      - "cmd/**"
+      - "charts/**"
+      - ".github/workflows/**"
+      - "Dockerfile"
 
 # This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
 # already deployed to it, which provides the driver with access to s3.
@@ -24,7 +24,7 @@ on:
 # - uploaded images will be later promoted to public repository by "release" workflow
 concurrency: e2e-cluster
 env:
-  AWS_REGION : "us-east-1"
+  AWS_REGION: "us-east-1"
   COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
   TMP_IMAGE_NAME: "s3-csi-driver-tmp"
   PROMOTED_IMAGE_NAME: "s3-csi-driver"
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version-file: 'go.mod'
+          go-version-file: "go.mod"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Set up QEMU
@@ -74,6 +74,7 @@ jobs:
         cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
+        kubernetes-version: ["1.28.13", "1.29.8", "1.30.4"]
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
@@ -90,10 +91,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version-file: 'go.mod'
+          go-version-file: "go.mod"
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
@@ -110,6 +111,7 @@ jobs:
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
+          export K8S_VERSION=${{ matrix.kubernetes-version }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Update kubeconfig
         run: |
@@ -157,7 +159,7 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          tool: 'customBiggerIsBetter'
+          tool: "customBiggerIsBetter"
           output-file-path: tests/e2e-kubernetes/csi-test-artifacts/output.json
           alert-threshold: "200%"
           fail-on-alert: true
@@ -203,20 +205,20 @@ jobs:
       id-token: write
       contents: read
     steps:
-    - name: Set up crane
-      uses: imjasonh/setup-crane@v0.1
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@master
-      with:
-        role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-        aws-region: ${{ env.AWS_REGION }}
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-    - name: Promote image for release branch
-      env:
-        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      run: |
-        export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-        export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-        crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
+      - name: Set up crane
+        uses: imjasonh/setup-crane@v0.1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Promote image for release branch
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
+          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
+          crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}

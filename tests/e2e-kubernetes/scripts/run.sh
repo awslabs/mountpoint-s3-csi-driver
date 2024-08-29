@@ -39,7 +39,7 @@ elif [[ "${CLUSTER_TYPE}" == "eksctl" && "${ARCH}" == "arm" ]]; then
 fi
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
-KOPS_VERSION=1.28.0
+KOPS_VERSION=1.30.0
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
@@ -60,13 +60,15 @@ KOPS_STATE_FILE=${KOPS_STATE_FILE:-$KOPS_STATE_FILE_DEFAULT}
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.161.0}
+EKSCTL_VERSION=${EKSCTL_VERSION:-0.189.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
-K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION:-1.28.2}}
+# 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
+K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION}}
+K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -127,7 +129,8 @@ function create_cluster() {
       "$ZONES" \
       "$CI_ROLE_ARN" \
       "$INSTANCE_TYPE" \
-      "$AMI_FAMILY"
+      "$AMI_FAMILY" \
+      "$K8S_VERSION_EKSCTL"
   fi
 }
 

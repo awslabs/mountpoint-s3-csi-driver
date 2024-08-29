@@ -24,6 +24,7 @@ function eksctl_create_cluster() {
   CI_ROLE_ARN=${9}
   NODE_TYPE=${10}
   AMI_FAMILY=${11}
+  K8S_VERSION=${12}
 
   eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
 
@@ -35,6 +36,7 @@ function eksctl_create_cluster() {
     --node-ami-family $AMI_FAMILY \
     --with-oidc \
     --zones $ZONES \
+    --version $K8S_VERSION \
     --dry-run > $CLUSTER_FILE
 
   CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
