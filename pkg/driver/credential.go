@@ -154,6 +154,10 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 	hostPluginDir := hostPluginDirWithDefault()
 	hostTokenPath := path.Join(hostPluginDir, c.tokenFilename(podID, volumeID))
 
+	podNamespace := volumeContext[volumeCtxPodNamespace]
+	podServiceAccount := volumeContext[volumeCtxServiceAccountName]
+	cacheKey := podNamespace + "/" + podServiceAccount
+
 	return &MountCredentials{
 		Region:        region,
 		DefaultRegion: defaultRegion,
@@ -171,6 +175,8 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 		// Ensure to disable IMDS provider
 		DisableIMDSProvider: true,
+
+		MountpointCacheKey: cacheKey,
 	}, nil
 }
 
