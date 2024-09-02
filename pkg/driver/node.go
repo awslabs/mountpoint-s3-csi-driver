@@ -144,12 +144,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	if volumeContext[volumeCtxAuthenticationSource] == authenticationSourcePod {
-		if _, ok := ExtractMountpointArgument(mountpointArgs, mountpointArgCache); ok {
-			return nil, status.Error(codes.InvalidArgument, "Caching with `authenticationSource=pod` is not supported at the moment, see TODO")
-		}
-	}
-
 	ns.targetPathPodIDMapping.Store(target, req.VolumeContext[volumeCtxPodUID])
 
 	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)

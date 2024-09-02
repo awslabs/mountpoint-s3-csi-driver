@@ -46,6 +46,7 @@ const (
 	stsEndpointsEnv             = "AWS_STS_REGIONAL_ENDPOINTS"
 	MountS3PathEnv              = "MOUNT_S3_PATH"
 	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
+	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
 	defaultMountS3Path          = "/usr/bin/mount-s3"
 	procMounts                  = "/host/proc/mounts"
 	userAgentPrefix             = "--user-agent-prefix"
@@ -83,6 +84,9 @@ type MountCredentials struct {
 	Region        string
 	DefaultRegion string
 	StsEndpoints  string
+
+	// -- TODO - Move somewhere better
+	MountpointCacheKey string
 }
 
 // Get environment variables to pass to mount-s3 for authentication.
@@ -124,6 +128,10 @@ func (mc *MountCredentials) Env(awsProfile AWSProfile) []string {
 	}
 	if mc.StsEndpoints != "" {
 		env = append(env, stsEndpointsEnv+"="+mc.StsEndpoints)
+	}
+
+	if mc.MountpointCacheKey != "" {
+		env = append(env, MountpointCacheKey+"="+mc.MountpointCacheKey)
 	}
 
 	return env

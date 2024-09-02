@@ -115,6 +115,8 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 	assertEquals(t, credentials.DefaultRegion, "eu-north-1")
 	assertEquals(t, credentials.StsEndpoints, "regional")
 
+	assertEquals(t, credentials.MountpointCacheKey, "test-ns/test-sa")
+
 	token, err := os.ReadFile(tokenFilePath(credentials, pluginDir))
 	assertEquals(t, nil, err)
 	assertEquals(t, "test-service-account-token", string(token))
@@ -479,6 +481,7 @@ func TestProvidingPodLevelCredentialsForDifferentPodsWithDifferentRoles(t *testi
 	assertEquals(t, credentialsPodOne.WebTokenPath, "/test/csi/plugin/dir/test-pod-1-test-vol-id.token")
 	assertEquals(t, credentialsPodOne.StsEndpoints, "regional")
 	assertEquals(t, credentialsPodOne.AwsRoleArn, "arn:aws:iam::123456789012:role/Test1")
+	assertEquals(t, credentialsPodOne.MountpointCacheKey, "test-ns/test-sa-1")
 
 	token, err := os.ReadFile(tokenFilePath(credentialsPodOne, pluginDir))
 	assertEquals(t, nil, err)
@@ -493,6 +496,7 @@ func TestProvidingPodLevelCredentialsForDifferentPodsWithDifferentRoles(t *testi
 	assertEquals(t, credentialsPodTwo.WebTokenPath, "/test/csi/plugin/dir/test-pod-2-test-vol-id.token")
 	assertEquals(t, credentialsPodTwo.StsEndpoints, "regional")
 	assertEquals(t, credentialsPodTwo.AwsRoleArn, "arn:aws:iam::123456789012:role/Test2")
+	assertEquals(t, credentialsPodTwo.MountpointCacheKey, "test-ns/test-sa-2")
 
 	token, err = os.ReadFile(tokenFilePath(credentialsPodTwo, pluginDir))
 	assertEquals(t, nil, err)
