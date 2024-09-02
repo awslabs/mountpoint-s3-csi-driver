@@ -458,11 +458,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
 				})
 
-				It("should fail to mount if cache is enabled", func(ctx context.Context) {
-					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, []string{"cache /tmp"})
-				})
-
 				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
 					// TODO:
 					// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce

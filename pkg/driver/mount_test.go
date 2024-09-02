@@ -273,6 +273,14 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 				"AWS_STS_REGIONAL_ENDPOINTS=regional",
 			},
 		},
+		"Mountpoint Cache Key": {
+			credentials: &driver.MountCredentials{
+				MountpointCacheKey: "test_cache_key",
+			},
+			expected: []string{
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY=test_cache_key",
+			},
+		},
 		"All Combined": {
 			credentials: &driver.MountCredentials{
 				AccessKeyID:               "access_key",
@@ -286,6 +294,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 				ConfigFilePath:            "~/.aws/config",
 				SharedCredentialsFilePath: "~/.aws/credentials",
 				DisableIMDSProvider:       true,
+				MountpointCacheKey:        "test/cache/key",
 			},
 			expected: []string{
 				"AWS_ACCESS_KEY_ID=access_key",
@@ -299,6 +308,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 				"AWS_EC2_METADATA_DISABLED=true",
 				"AWS_CONFIG_FILE=~/.aws/config",
 				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials",
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY=test/cache/key",
 			},
 		},
 	}
