@@ -74,7 +74,7 @@ jobs:
         cluster-type: ["kops"]
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
-        kubernetes-version: ["1.30.4"]
+        kubernetes-version: ["1.28.13"]
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
