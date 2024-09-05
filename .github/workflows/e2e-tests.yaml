@@ -71,7 +71,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        cluster-type: ["eksctl", "kops"]
+        cluster-type: ["kops"]
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
         kubernetes-version: ["1.30.4"]
