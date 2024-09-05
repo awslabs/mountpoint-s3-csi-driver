@@ -37,7 +37,7 @@ K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 # We need to ensure that we're using all testing matrix variables in the cluster name
 # because they all run in parallel and conflicting name would break other tests.
-CLUSTER_NAME="s3-csi-cluster-${AMI_FAMILY,,}-${ARCH}"
+CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}"
 
 if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
