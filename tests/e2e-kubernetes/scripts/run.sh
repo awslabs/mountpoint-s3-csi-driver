@@ -57,18 +57,16 @@ NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-state-store
 else
   INSTANCE_TYPE_DEFAULT=m7g.medium
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-arm-state-store
 fi
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
 AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
-KOPS_STATE_FILE=${KOPS_STATE_FILE:-$KOPS_STATE_FILE_DEFAULT}
+KOPS_STATE_FILE=${KOPS_STATE_FILE:-"s3://mountpoint-s3-csi-driver-kops-state-store/${CLUSTER_NAME}"}
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
