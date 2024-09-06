@@ -74,13 +74,19 @@ jobs:
         cluster-type: ["kops"]
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
-        kubernetes-version: ["1.28.13", "1.29.8"]
+        kubernetes-version: ["1.28.13"]
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
           - cluster-type: "eksctl"
             arch: "arm"
             family: "Bottlerocket"
+        include:
+          # Our tests are failing on clusters created with kops 1.29+.
+          # Until we fix that issue, we use kops 1.28 which only supports k8s versions up to 1.28.
+          # So, we only run our tests in k8s versions 1.29 and 1.30 on eksctl.
+          - cluster-type: "eksctl"
+            kubernetes-version: ["1.29.8", "1.30.4"]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
