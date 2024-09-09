@@ -21,7 +21,6 @@ import (
 	"maps"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -57,16 +56,10 @@ type S3NodeServer struct {
 	NodeID             string
 	Mounter            Mounter
 	credentialProvider *CredentialProvider
-
-	// We need this mapping to cleanup service account tokens in `NodeUnpublishVolume`,
-	// we use "Pod ID" in service account token path and `NodeUnpublishVolume` does not receive "Pod ID"
-	// and it only receives "target path" and "volume id", we need to map "target path" back to "Pod ID"
-	// in order to clean up service account token file for that mount.
-	targetPathPodIDMapping sync.Map
 }
 
 func NewS3NodeServer(nodeID string, mounter Mounter, credentialProvider *CredentialProvider) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider, targetPathPodIDMapping: sync.Map{}}
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
 }
 
 type Token struct {
@@ -144,8 +137,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
-	ns.targetPathPodIDMapping.Store(target, req.VolumeContext[volumeCtxPodUID])
-
 	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
 	if err != nil {
 		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
@@ -200,13 +191,18 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	podIDAny, ok := ns.targetPathPodIDMapping.LoadAndDelete(target)
-	if ok {
-		podID := podIDAny.(string)
-		err := ns.credentialProvider.CleanupToken(volumeID, podID)
-		if err != nil {
-			klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
+	targetPath, err := ParseTargetPath(target)
+	if err != nil {
+		if targetPath.VolumeID != volumeID {
+			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
+		} else {
+			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
+			if err != nil {
+				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
+			}
 		}
+	} else {
+		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
 	}
 
 	mounted, err := ns.Mounter.IsMountPoint(target)
