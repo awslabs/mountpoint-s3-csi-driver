@@ -54,6 +54,10 @@ func TestParsingTargetPath(t *testing.T) {
 			targetPath: "/kubelet/kubernetes.io~csi/vol-id/mount",
 			err:        driver.ErrInvalidTargetPath,
 		},
+		"empty string": {
+			targetPath: "",
+			err:        driver.ErrInvalidTargetPath,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			parsed, err := driver.ParseTargetPath(test.targetPath)
