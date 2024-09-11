@@ -316,7 +316,7 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 		env = credentials.Env(awsProfile)
 	}
 	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
-	options = addUserAgentToOptions(options, UserAgent(m.kubernetesVersion, authenticationSource))
+	options = addUserAgentToOptions(options, UserAgent(authenticationSource, m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",

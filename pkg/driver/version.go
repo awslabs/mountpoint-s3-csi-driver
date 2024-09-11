@@ -65,25 +65,23 @@ func GetVersionJSON() (string, error) {
 }
 
 // UserAgent returns user-agent for the CSI driver.
-func UserAgent(kubernetesVersion string, authenticationSource string) string {
+func UserAgent(authenticationSource string, kubernetesVersion string) string {
 	var b strings.Builder
 
 	// s3-csi-driver/v0.0.0
 	b.WriteString(userAgentCsiDriverPrefix)
 	b.WriteString(GetVersion().DriverVersion)
 
+	// credential-source#pod
+	b.WriteRune(' ')
+	b.WriteString(userAgentCredentialSourcePrefix)
+	b.WriteString(authenticationSource)
+
 	if kubernetesVersion != "" {
 		// k8s/v0.0.0
 		b.WriteRune(' ')
 		b.WriteString(userAgentK8sPrefix)
 		b.WriteString(kubernetesVersion)
-	}
-
-	if authenticationSource != "" {
-		// credential-source#pod
-		b.WriteRune(' ')
-		b.WriteString(userAgentCredentialSourcePrefix)
-		b.WriteString(authenticationSource)
 	}
 
 	return b.String()

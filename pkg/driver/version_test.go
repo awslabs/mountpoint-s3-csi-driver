@@ -65,35 +65,34 @@ func TestUserAgent(t *testing.T) {
 		authenticationSource string
 		result               string
 	}{
-		"empty k8s version": {
-			k8sVersion: "",
-			result:     "s3-csi-driver/",
+		"empty versions": {
+			result: "s3-csi-driver/ credential-source#",
 		},
 		"stock k8s version": {
 			k8sVersion: "v1.29.6",
-			result:     "s3-csi-driver/ k8s/v1.29.6",
+			result:     "s3-csi-driver/ credential-source# k8s/v1.29.6",
 		},
 		"eks k8s version": {
 			k8sVersion: "v1.30.2-eks-db838b0",
-			result:     "s3-csi-driver/ k8s/v1.30.2-eks-db838b0",
+			result:     "s3-csi-driver/ credential-source# k8s/v1.30.2-eks-db838b0",
 		},
 		"driver authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: authenticationSourceDriver,
-			result:               "s3-csi-driver/ k8s/v1.30.2-eks-db838b0 credential-source#driver",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0",
 		},
 		"pod authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: authenticationSourcePod,
-			result:               "s3-csi-driver/ k8s/v1.30.2-eks-db838b0 credential-source#pod",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
 		},
 	}
 
 	for name, test := range tests {
 		test := test
 		t.Run(name, func(t *testing.T) {
-			if got, expected := UserAgent(test.k8sVersion, test.authenticationSource), test.result; got != expected {
-				t.Fatalf("UserAgent(%q) returned %q; expected %q", test.k8sVersion, got, expected)
+			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion), test.result; got != expected {
+				t.Fatalf("UserAgent(%q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, got, expected)
 			}
 		})
 	}
