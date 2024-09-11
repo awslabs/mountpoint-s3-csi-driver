@@ -95,14 +95,15 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	hostTokenPath := path.Join(hostPluginDir, "token")
 
 	return &MountCredentials{
-		AccessKeyID:     os.Getenv(keyIdEnv),
-		SecretAccessKey: os.Getenv(accessKeyEnv),
-		SessionToken:    os.Getenv(sessionTokenEnv),
-		Region:          os.Getenv(regionEnv),
-		DefaultRegion:   os.Getenv(defaultRegionEnv),
-		WebTokenPath:    hostTokenPath,
-		StsEndpoints:    os.Getenv(stsEndpointsEnv),
-		AwsRoleArn:      os.Getenv(roleArnEnv),
+		authenticationSource: authenticationSourceDriver,
+		AccessKeyID:          os.Getenv(keyIdEnv),
+		SecretAccessKey:      os.Getenv(accessKeyEnv),
+		SessionToken:         os.Getenv(sessionTokenEnv),
+		Region:               os.Getenv(regionEnv),
+		DefaultRegion:        os.Getenv(defaultRegionEnv),
+		WebTokenPath:         hostTokenPath,
+		StsEndpoints:         os.Getenv(stsEndpointsEnv),
+		AwsRoleArn:           os.Getenv(roleArnEnv),
 	}, nil
 }
 
@@ -159,6 +160,8 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 	cacheKey := podNamespace + "/" + podServiceAccount
 
 	return &MountCredentials{
+		authenticationSource: authenticationSourcePod,
+
 		Region:        region,
 		DefaultRegion: defaultRegion,
 		StsEndpoints:  os.Getenv(stsEndpointsEnv),

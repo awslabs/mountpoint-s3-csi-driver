@@ -61,8 +61,9 @@ func TestGetVersionJSON(t *testing.T) {
 
 func TestUserAgent(t *testing.T) {
 	tests := map[string]struct {
-		k8sVersion string
-		result     string
+		k8sVersion           string
+		authenticationSource string
+		result               string
 	}{
 		"empty k8s version": {
 			k8sVersion: "",
@@ -76,12 +77,22 @@ func TestUserAgent(t *testing.T) {
 			k8sVersion: "v1.30.2-eks-db838b0",
 			result:     "s3-csi-driver/ k8s/v1.30.2-eks-db838b0",
 		},
+		"driver authentication source": {
+			k8sVersion:           "v1.30.2-eks-db838b0",
+			authenticationSource: authenticationSourceDriver,
+			result:               "s3-csi-driver/ k8s/v1.30.2-eks-db838b0 credential-source#driver",
+		},
+		"pod authentication source": {
+			k8sVersion:           "v1.30.2-eks-db838b0",
+			authenticationSource: authenticationSourcePod,
+			result:               "s3-csi-driver/ k8s/v1.30.2-eks-db838b0 credential-source#pod",
+		},
 	}
 
 	for name, test := range tests {
 		test := test
 		t.Run(name, func(t *testing.T) {
-			if got, expected := UserAgent(test.k8sVersion), test.result; got != expected {
+			if got, expected := UserAgent(test.k8sVersion, test.authenticationSource), test.result; got != expected {
 				t.Fatalf("UserAgent(%q) returned %q; expected %q", test.k8sVersion, got, expected)
 			}
 		})
