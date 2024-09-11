@@ -3,6 +3,7 @@ package driver_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,7 +27,6 @@ type mounterTestEnv struct {
 	ctx             context.Context
 	mockCtl         *gomock.Controller
 	mockRunner      *mock_driver.MockServiceRunner
-	mockFs          *mock_driver.MockFs
 	mockMountLister *mock_driver.MockMountLister
 	mounter         *driver.S3Mounter
 }
@@ -36,7 +36,6 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockRunner := mock_driver.NewMockServiceRunner(mockCtl)
-	mockFs := mock_driver.NewMockFs(mockCtl)
 	mockMountLister := mock_driver.NewMockMountLister(mockCtl)
 	mountpointVersion := "TEST_MP_VERSION-v1.1"
 
@@ -44,12 +43,10 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 		ctx:             ctx,
 		mockCtl:         mockCtl,
 		mockRunner:      mockRunner,
-		mockFs:          mockFs,
 		mockMountLister: mockMountLister,
 		mounter: &driver.S3Mounter{
 			Ctx:         ctx,
 			Runner:      mockRunner,
-			Fs:          mockFs,
 			MountLister: mockMountLister,
 			MpVersion:   mountpointVersion,
 			MountS3Path: driver.MountS3Path(),
@@ -59,7 +56,7 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 
 func TestS3MounterMount(t *testing.T) {
 	testBucketName := "test-bucket"
-	testTargetPath := "/mnt/my-mountpoint/bucket/"
+	testTargetPath := filepath.Join(t.TempDir(), "mount")
 	testCredentials := &driver.MountCredentials{
 		AccessKeyID:     "test-access-key",
 		SecretAccessKey: "test-secret-key",
@@ -80,13 +77,12 @@ func TestS3MounterMount(t *testing.T) {
 		before      func(*testing.T, *mounterTestEnv)
 	}{
 		{
-			name:        "success: mounts without empty options",
+			name:        "success: mounts with empty options",
 			bucketName:  testBucketName,
 			targetPath:  testTargetPath,
 			credentials: testCredentials,
 			options:     []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
 				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
@@ -98,7 +94,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
 				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
@@ -110,7 +105,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{"--user-agent-prefix=mycustomuseragent"},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
 				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, a := range config.Args {
@@ -129,7 +123,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{"--aws-max-attempts=10"},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
 				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, e := range config.Env {
@@ -150,7 +143,6 @@ func TestS3MounterMount(t *testing.T) {
 			options:     []string{},
 			expectedErr: true,
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
 				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("fail", errors.New("test failure"))
 			},
@@ -168,18 +160,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: testCredentials,
 			options:     []string{},
 			expectedErr: true,
-		},
-		{
-			name:        "failure: mounts without empty options",
-			bucketName:  testBucketName,
-			targetPath:  testTargetPath,
-			credentials: testCredentials,
-			options:     []string{},
-			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockFs.EXPECT().Stat(gomock.Any()).Return(nil, nil)
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
-				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
-			},
 		},
 	}
 	for _, testCase := range testCases {
