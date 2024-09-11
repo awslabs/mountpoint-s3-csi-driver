@@ -24,7 +24,7 @@ graph LR;
     CSI[CSI Driver]
 
     P["`Pod
-    *Uses IAM Credentials - Driver*`"]
+    *Driver IAM Credentials*`"]
 
     SA_D[Service Account - Driver]
     SA_P[Service Account - Pod]
@@ -60,7 +60,7 @@ graph LR;
     CSI[CSI Driver]
 
     P["`Pod
-    *Uses IAM Credentials - Pod*`"]
+    *Pod IAM Credentials*`"]
 
     SA_D[Service Account - Driver]
     SA_P[Service Account - Pod]
