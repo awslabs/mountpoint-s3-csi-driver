@@ -44,10 +44,19 @@ func TestCreatingAWSProfile(t *testing.T) {
 		assertEquals(t, 0400, credentialsStat.Mode())
 	})
 
-	t.Run("ensure special values are sanitized in config and credentials files", func(t *testing.T) {
-		profile, err := driver.CreateAWSProfile(t.TempDir(), testAccessKeyId+"\n\t\r credential_process=exit", testSecretAccessKey+"#;credential_process=exit", testSessionToken+";\n[profile foo]")
-		assertNoError(t, err)
-		assertCredentialsFromAWSProfile(t, profile, testAccessKeyId+"credential_process=exit", testSecretAccessKey+"credential_process=exit", testSessionToken+"profilefoo")
+	t.Run("fail if credentials contains non-ascii characters", func(t *testing.T) {
+		t.Run("access key ID", func(t *testing.T) {
+			_, err := driver.CreateAWSProfile(t.TempDir(), testAccessKeyId+"\n\t\r credential_process=exit", testSecretAccessKey, testSessionToken)
+			assertEquals(t, true, errors.Is(err, driver.ErrInvalidCredentials))
+		})
+		t.Run("secret access key", func(t *testing.T) {
+			_, err := driver.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey+"\n", testSessionToken)
+			assertEquals(t, true, errors.Is(err, driver.ErrInvalidCredentials))
+		})
+		t.Run("session token", func(t *testing.T) {
+			_, err := driver.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken+"\n\r")
+			assertEquals(t, true, errors.Is(err, driver.ErrInvalidCredentials))
+		})
 	})
 }
 

@@ -258,8 +258,8 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 		var awsProfile AWSProfile
 		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
 			// Kubernetes creates target path in the form of "/var/lib/kubelet/pods/<pod-uuid>/volumes/kubernetes.io~csi/<volume-id>/mount".
-			// So the directory of the target path is unique for this mount,and we can use it to write credentials and config files.
-			// These files will be claned up in `Unmount`.
+			// So the directory of the target path is unique for this mount, and we can use it to write credentials and config files.
+			// These files will be cleaned up in `Unmount`.
 			basepath := filepath.Dir(target)
 			awsProfile, err = CreateAWSProfile(basepath, credentials.AccessKeyID, credentials.SecretAccessKey, credentials.SessionToken)
 			if err != nil {

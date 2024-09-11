@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -15,6 +16,9 @@ const (
 	awsProfileCredentialsFilename = "s3-csi-credentials"
 	awsProfileFilePerm            = fs.FileMode(0400) // only owner readable
 )
+
+// ErrInvalidCredentials is returned when given AWS Credentials contains invalid characters.
+var ErrInvalidCredentials = errors.New("aws-profile: Invalid AWS Credentials")
 
 // An AWSProfile represents an AWS profile with it's credentials and config files.
 type AWSProfile struct {
@@ -26,6 +30,10 @@ type AWSProfile struct {
 // CreateAWSProfile creates an AWS Profile with credentials and config files from given credentials.
 // Created credentials and config files can be clean up with `CleanupAWSProfile`.
 func CreateAWSProfile(basepath string, accessKeyID string, secretAccessKey string, sessionToken string) (AWSProfile, error) {
+	if !isValidCredential(accessKeyID) || !isValidCredential(secretAccessKey) || !isValidCredential(sessionToken) {
+		return AWSProfile{}, ErrInvalidCredentials
+	}
+
 	name := awsProfileName
 
 	configPath := filepath.Join(basepath, awsProfileConfigFilename)
@@ -59,7 +67,7 @@ func CleanupAWSProfile(basepath string) error {
 	credentialsPath := filepath.Join(basepath, awsProfileCredentialsFilename)
 	if err := os.Remove(credentialsPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("aws-profile: Failed to credentials config file %s: %v", credentialsPath, err)
+			return fmt.Errorf("aws-profile: Failed to remove credentials file %s: %v", credentialsPath, err)
 		}
 	}
 
@@ -76,43 +84,25 @@ func writeAWSProfileFile(path string, content string) error {
 	return os.Chmod(path, awsProfileFilePerm)
 }
 
-var credentialFileSpecialValueReplacer = strings.NewReplacer(
-	// Newlines and whitespaces
-	"\n", "",
-	"\t", "",
-	"\r", "",
-	" ", "",
-	// Comment characters
-	";", "",
-	"#", "",
-	// Section start-end characters
-	"[", "",
-	"]", "",
-)
-
-func sanitizeCredentialFileValue(value string) string {
-	return credentialFileSpecialValueReplacer.Replace(value)
-}
-
 func credentialsFileContents(profile string, accessKeyID string, secretAccessKey string, sessionToken string) string {
 	var b strings.Builder
 	b.Grow(128)
 	b.WriteRune('[')
-	b.WriteString(sanitizeCredentialFileValue(profile))
+	b.WriteString(profile)
 	b.WriteRune(']')
 	b.WriteRune('\n')
 
 	b.WriteString("aws_access_key_id=")
-	b.WriteString(sanitizeCredentialFileValue(accessKeyID))
+	b.WriteString(accessKeyID)
 	b.WriteRune('\n')
 
 	b.WriteString("aws_secret_access_key=")
-	b.WriteString(sanitizeCredentialFileValue(secretAccessKey))
+	b.WriteString(secretAccessKey)
 	b.WriteRune('\n')
 
 	if sessionToken != "" {
 		b.WriteString("aws_session_token=")
-		b.WriteString(sanitizeCredentialFileValue(sessionToken))
+		b.WriteString(sessionToken)
 		b.WriteRune('\n')
 	}
 
@@ -120,5 +110,10 @@ func credentialsFileContents(profile string, accessKeyID string, secretAccessKey
 }
 
 func configFileContents(profile string) string {
-	return fmt.Sprintf("[profile %s]\n", sanitizeCredentialFileValue(profile))
+	return fmt.Sprintf("[profile %s]\n", profile)
+}
+
+// isValidCredential checks whether given credential file contains any non-printable characters.
+func isValidCredential(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsPrint(r) })
 }
