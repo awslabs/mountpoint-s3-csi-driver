@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,18 +34,21 @@ import (
 )
 
 const (
-	keyIdEnv             = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv         = "AWS_SECRET_ACCESS_KEY"
-	sessionTokenEnv      = "AWS_SESSION_TOKEN"
-	regionEnv            = "AWS_REGION"
-	defaultRegionEnv     = "AWS_DEFAULT_REGION"
-	stsEndpointsEnv      = "AWS_STS_REGIONAL_ENDPOINTS"
-	MountS3PathEnv       = "MOUNT_S3_PATH"
-	awsMaxAttemptsEnv    = "AWS_MAX_ATTEMPTS"
-	defaultMountS3Path   = "/usr/bin/mount-s3"
-	procMounts           = "/host/proc/mounts"
-	userAgentPrefix      = "--user-agent-prefix"
-	awsMaxAttemptsOption = "--aws-max-attempts"
+	awsProfileEnv               = "AWS_PROFILE"
+	awsConfigFileEnv            = "AWS_CONFIG_FILE"
+	awsSharedCredentialsFileEnv = "AWS_SHARED_CREDENTIALS_FILE"
+	keyIdEnv                    = "AWS_ACCESS_KEY_ID"
+	accessKeyEnv                = "AWS_SECRET_ACCESS_KEY"
+	sessionTokenEnv             = "AWS_SESSION_TOKEN"
+	regionEnv                   = "AWS_REGION"
+	defaultRegionEnv            = "AWS_DEFAULT_REGION"
+	stsEndpointsEnv             = "AWS_STS_REGIONAL_ENDPOINTS"
+	MountS3PathEnv              = "MOUNT_S3_PATH"
+	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
+	defaultMountS3Path          = "/usr/bin/mount-s3"
+	procMounts                  = "/host/proc/mounts"
+	userAgentPrefix             = "--user-agent-prefix"
+	awsMaxAttemptsOption        = "--aws-max-attempts"
 )
 
 const (
@@ -69,15 +73,13 @@ type MountCredentials struct {
 }
 
 // Get environment variables to pass to mount-s3 for authentication.
-func (mc *MountCredentials) Env() []string {
+func (mc *MountCredentials) Env(awsProfile AWSProfile) []string {
 	env := []string{}
 
-	if mc.AccessKeyID != "" && mc.SecretAccessKey != "" {
-		env = append(env, keyIdEnv+"="+mc.AccessKeyID)
-		env = append(env, accessKeyEnv+"="+mc.SecretAccessKey)
-		if mc.SessionToken != "" {
-			env = append(env, sessionTokenEnv+"="+mc.SessionToken)
-		}
+	if awsProfile.Name != "" {
+		env = append(env, awsProfileEnv+"="+awsProfile.Name)
+		env = append(env, awsConfigFileEnv+"="+awsProfile.ConfigPath)
+		env = append(env, awsSharedCredentialsFileEnv+"="+awsProfile.CredentialsPath)
 	}
 	if mc.WebTokenPath != "" {
 		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)
@@ -94,26 +96,6 @@ func (mc *MountCredentials) Env() []string {
 	}
 
 	return env
-}
-
-type Fs interface {
-	Stat(name string) (os.FileInfo, error)
-	MkdirAll(path string, perm os.FileMode) error
-	Remove(name string) error
-}
-
-type OsFs struct{}
-
-func (OsFs) Stat(name string) (os.FileInfo, error) {
-	return os.Stat(name)
-}
-
-func (OsFs) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
-
-func (OsFs) Remove(path string) error {
-	return os.Remove(path)
 }
 
 // Mounter is an interface for mount operations
@@ -139,7 +121,6 @@ type ProcMountLister struct {
 type S3Mounter struct {
 	Ctx               context.Context
 	Runner            ServiceRunner
-	Fs                Fs
 	MountLister       MountLister
 	MpVersion         string
 	MountS3Path       string
@@ -163,7 +144,6 @@ func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error
 	return &S3Mounter{
 		Ctx:               ctx,
 		Runner:            runner,
-		Fs:                &OsFs{},
 		MountLister:       &ProcMountLister{ProcMountPath: procMounts},
 		MpVersion:         mpVersion,
 		MountS3Path:       MountS3Path(),
@@ -198,7 +178,7 @@ func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
 }
 
 func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
-	if _, err := m.Fs.Stat(target); os.IsNotExist(err) {
+	if _, err := os.Stat(target); os.IsNotExist(err) {
 		return false, err
 	}
 
@@ -214,13 +194,17 @@ func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
 	return false, nil
 }
 
-// Mount the given bucket at the target path. Options will be passed through mostly unchanged,
-// with the exception of the user agent prefix which will be added to the Mountpoint headers.
+// Mount mounts the given bucket at the target path using provided credentials.
+//
+// Options will be passed through mostly unchanged, with the exception of
+// the user agent prefix which will be added to the Mountpoint headers.
+//
+// Long-term credentials will be passed via credentials file and
+// the rest will be passed through environment variables.
+//
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *S3Mounter) Mount(bucketName string, target string,
-	credentials *MountCredentials, options []string) error {
-
+func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCredentials, options []string) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -233,17 +217,17 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 	cleanupDir := false
 
 	// check if the target path exists
-	_, statErr := m.Fs.Stat(target)
+	_, statErr := os.Stat(target)
 	if statErr != nil {
 		// does not exist, create the directory
 		if os.IsNotExist(statErr) {
-			if err := m.Fs.MkdirAll(target, 0755); err != nil {
+			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("Failed to create target directory: %w", err)
 			}
 			cleanupDir = true
 			defer func() {
 				if cleanupDir {
-					if err := m.Fs.Remove(target); err != nil {
+					if err := os.Remove(target); err != nil {
 						klog.V(4).Infof("Mount: Failed to delete target dir: %s.", target)
 					}
 				}
@@ -271,7 +255,20 @@ func (m *S3Mounter) Mount(bucketName string, target string,
 
 	env := []string{}
 	if credentials != nil {
-		env = credentials.Env()
+		var awsProfile AWSProfile
+		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
+			// Kubernetes creates target path in the form of "/var/lib/kubelet/pods/<pod-uuid>/volumes/kubernetes.io~csi/<volume-id>/mount".
+			// So the directory of the target path is unique for this mount,and we can use it to write credentials and config files.
+			// These files will be claned up in `Unmount`.
+			basepath := filepath.Dir(target)
+			awsProfile, err = CreateAWSProfile(basepath, credentials.AccessKeyID, credentials.SecretAccessKey, credentials.SessionToken)
+			if err != nil {
+				klog.V(4).Infof("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
+				return fmt.Errorf("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
+			}
+		}
+
+		env = credentials.Env(awsProfile)
 	}
 	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
 	options = addUserAgentToOptions(options, UserAgent(m.kubernetesVersion))
@@ -329,6 +326,12 @@ func addUserAgentToOptions(options []string, userAgent string) []string {
 func (m *S3Mounter) Unmount(target string) error {
 	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
+
+	basepath := filepath.Dir(target)
+	err := CleanupAWSProfile(basepath)
+	if err != nil {
+		klog.V(4).Infof("Unmount: Failed to clean up AWS Profile in %s: %v", basepath, err)
+	}
 
 	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-umount-" + uuid.New().String() + ".service",
