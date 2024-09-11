@@ -10,7 +10,7 @@ var (
 )
 
 var (
-	targetPathRegexp              = regexp.MustCompile("pods/(?P<podid>.+)/volumes/kubernetes.io~csi/(?P<volumeid>.+)/mount$")
+	targetPathRegexp              = regexp.MustCompile("/pods/(?P<podid>[^/]+)/volumes/kubernetes.io~csi/(?P<volumeid>[^/]+)/mount$")
 	targetPathRegexpPodIdIndex    = targetPathRegexp.SubexpIndex("podid")
 	targetPathRegexpVolumeIdIndex = targetPathRegexp.SubexpIndex("volumeid")
 )
