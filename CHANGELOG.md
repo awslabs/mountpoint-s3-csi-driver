@@ -1,3 +1,9 @@
+# v1.8.1
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.8.1/README.md)
+
+### Notable changes
+* Pass long-term AWS credentials via file ([#252](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/252))
+
 # v1.8.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.8.0/README.md)
 
