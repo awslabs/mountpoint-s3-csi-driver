@@ -64,6 +64,9 @@ const (
 )
 
 type MountCredentials struct {
+	// Identifies how these credentials are obtained.
+	authenticationSource authenticationSource
+
 	// -- Env variable provider
 	AccessKeyID     string
 	SecretAccessKey string
@@ -293,6 +296,7 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 	}
 
 	env := []string{}
+	var authenticationSource authenticationSource
 	if credentials != nil {
 		var awsProfile AWSProfile
 		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
@@ -307,10 +311,12 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 			}
 		}
 
+		authenticationSource = credentials.authenticationSource
+
 		env = credentials.Env(awsProfile)
 	}
 	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
-	options = addUserAgentToOptions(options, UserAgent(m.kubernetesVersion))
+	options = addUserAgentToOptions(options, UserAgent(authenticationSource, m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
