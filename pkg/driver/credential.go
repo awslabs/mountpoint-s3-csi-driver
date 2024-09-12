@@ -193,7 +193,8 @@ func (c *CredentialProvider) tokenPathContainer(podID string, volumeID string) s
 
 func (c *CredentialProvider) tokenFilename(podID string, volumeID string) string {
 	var filename strings.Builder
-	filename.WriteString(podID)
+	// `podID` is a UUID, but escape it to ensure it doesn't contain `/`
+	filename.WriteString(k8sstrings.EscapeQualifiedName(podID))
 	filename.WriteRune('-')
 	// `volumeID` might contain `/`, we need to escape it
 	filename.WriteString(k8sstrings.EscapeQualifiedName(volumeID))
