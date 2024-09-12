@@ -19,11 +19,16 @@ See [install.md](./install.md) for more details on this approach.
 
 **TODO** - Migrate driver level setup here.
 
+### Driver Level Credentials with IRSA
+
+Configuring [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA)
+is the recommended way to set up the CSI Driver if you want to use Driver Level credentials.
+
 ```mermaid
 graph LR;
     CSI[CSI Driver]
 
-    P["`Pod
+    P["`Application Pod
     *Driver IAM Credentials*`"]
 
     SA_D[Service Account - Driver]
@@ -48,7 +53,80 @@ graph LR;
     SA_P --> IAM_P
 ```
 
-### Pod Level Credentials
+### Driver Level Credentials with K8s Secrets
+
+The Mountpoint CSI Driver also supports sourcing long term AWS credentials from k8s secrets, though this is not 
+recommended.
+
+```mermaid
+graph LR;
+    CSI[CSI Driver]
+
+    P["`Application Pod
+    *K8s Secret Credentials*`"]
+
+    K8sS[K8s Secret]
+
+    IAM_LT["Long Term IAM Credentials"]
+
+    PV[Persistent Volume]
+    PVC[PVC]
+
+    P --> PVC
+
+    PVC --> PV
+
+    PV --> CSI
+
+    CSI --> K8sS
+
+    K8sS --> IAM_LT
+```
+
+By default, the CSI Driver checks the existence of a secret `aws-secret` in the installation namespace 
+(default `kube-system`). 
+The secret name configurable if installing with helm: `awsAccessSecret.name`, and the installation namespace is 
+configurable with the `--namespace` helm parameter.
+
+```bash
+kubectl create secret generic aws-secret \
+    --namespace kube-system \
+    --from-literal "key_id=${AWS_ACCESS_KEY_ID}" \
+    --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
+```
+
+To use K8s secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be 
+restarted to use the secret.
+
+### Driver Level Credentials with Node IAM Profiles
+
+To use an IAM [instance profile](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html),
+attach the policy to the instance profile IAM role and turn on access to [instance metadata](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html)
+for the instance(s) on which the driver will run.
+
+```mermaid
+graph LR;
+    CSI[CSI Driver]
+
+    P["`Application Pod
+    *Node Instance Profile*`"]
+
+    IAM_Instance["Instance IAM Credentials"]
+
+    PV[Persistent Volume]
+    PVC[PVC]
+
+    P --> PVC
+
+    PVC --> PV
+
+    PV --> CSI
+
+    CSI --> IAM_Instance
+```
+
+
+## Pod Level Credentials
 
 Alternatively, you can configure the CSI Driver to use a pod's Service Account on your volumes. 
 With this approach, a multi-tenant architecture is possible using [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA).
@@ -59,7 +137,7 @@ each pod.
 graph LR;
     CSI[CSI Driver]
 
-    P["`Pod
+    P["`Application Pod
     *Pod IAM Credentials*`"]
 
     SA_D[Service Account - Driver]
