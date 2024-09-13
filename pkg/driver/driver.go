@@ -36,6 +36,8 @@ const (
 	driverName          = "s3.csi.aws.com"
 	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
 	roleArnEnv          = "AWS_ROLE_ARN"
+
+	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 )
 
 var (
@@ -108,6 +110,22 @@ func (d *Driver) Run() error {
 	listener, err := net.Listen(scheme, addr)
 	if err != nil {
 		return err
+	}
+
+	if scheme == "unix" {
+		// Go's `net` package does not support specifying permissions on Unix sockets it creates.
+		// There are two ways to change permissions:
+		// 	 - Using `syscall.Umask` before `net.Listen`
+		//   - Calling `os.Chmod` after `net.Listen`
+		// The first one is not nice because it affects all files created in the process,
+		// the second one has a time-window where the permissions of Unix socket would depend on `umask`
+		// between `net.Listen` and `os.Chmod`. Since we don't start accepting connections on the socket until
+		// `grpc.Serve` call, we should be fine with `os.Chmod` option.
+		// See https://github.com/golang/go/issues/11822#issuecomment-123850227.
+		if err := os.Chmod(addr, unixSocketPerm); err != nil {
+			klog.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+			return fmt.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+		}
 	}
 
 	logErr := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
