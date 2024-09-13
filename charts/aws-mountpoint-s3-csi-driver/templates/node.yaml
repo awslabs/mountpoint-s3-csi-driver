@@ -49,14 +49,16 @@ spec:
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- with .Values.node.seLinuxOptions }}
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
               type: {{ .type }}
               role: {{ .role }}
               level: {{ .level }}
-          {{- end }}
+            {{- end }}
           imagePullPolicy: IfNotPresent
           command:
             - "/bin/install-mp"
@@ -69,14 +71,16 @@ spec:
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- with .Values.node.seLinuxOptions }}
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
               type: {{ .type }}
               role: {{ .role }}
               level: {{ .level }}
-          {{- end }}
+            {{- end }}
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
@@ -146,6 +150,9 @@ spec:
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -179,6 +186,9 @@ spec:
         - name: liveness-probe
           image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
           volumeMounts:
