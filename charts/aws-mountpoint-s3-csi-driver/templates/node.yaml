@@ -84,7 +84,6 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --logtostderr
             - --v={{ .Values.node.logLevel }}
           env:
             - name: CSI_ENDPOINT

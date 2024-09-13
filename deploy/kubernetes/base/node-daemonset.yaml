@@ -61,7 +61,6 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --logtostderr
             - --v=4
           env:
             - name: CSI_ENDPOINT
