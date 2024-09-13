@@ -20,6 +20,15 @@ spec:
         kubernetes.io/os: linux
       serviceAccountName: s3-csi-driver-sa
       priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: eks.amazonaws.com/compute-type
+                    operator: NotIn
+                    values:
+                      - fargate
       tolerations:
         - key: CriticalAddonsOnly
           operator: Exists
@@ -124,7 +133,7 @@ spec:
               cpu: 10m
               memory: 40Mi
         - name: node-driver-registrar
-          image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.7.0-eks-1-23-13
+          image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.10.0-eks-1-29-7
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true
@@ -141,6 +150,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          livenessProbe:
+            exec:
+              command:
+                - /csi-node-driver-registrar
+                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+                - --mode=kubelet-registration-probe
+            initialDelaySeconds: 30
+            timeoutSeconds: 15
+            periodSeconds: 90
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
@@ -153,7 +171,7 @@ spec:
               cpu: 10m
               memory: 40Mi
         - name: liveness-probe
-          image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.9.0-eks-1-23-13
+          image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.12.0-eks-1-29-7
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true
@@ -177,7 +195,7 @@ spec:
             type: Directory
         - name: mp-install
           hostPath:
-            path: /opt/mountpoint-s3-csi/bin
+            path: /opt/mountpoint-s3-csi/bin/
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:
@@ -189,7 +207,7 @@ spec:
             type: Socket
         - name: kubelet-dir
           hostPath:
-            path: /var/lib/kubelet/
+            path: /var/lib/kubelet
             type: Directory
         - name: registration-dir
           hostPath:
