@@ -282,11 +282,11 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
 // with sensitive fields removed.
-func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) csi.NodePublishVolumeRequest {
+func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
 	delete(safeVolumeContext, volumeCtxServiceAccountTokens)
 
-	return csi.NodePublishVolumeRequest{
+	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,
 		PublishContext:    req.PublishContext,
 		StagingTargetPath: req.StagingTargetPath,
