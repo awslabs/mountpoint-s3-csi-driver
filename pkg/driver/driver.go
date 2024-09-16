@@ -37,6 +37,8 @@ const (
 	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
 	roleArnEnv          = "AWS_ROLE_ARN"
 
+	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
+
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 )
 
@@ -137,6 +139,7 @@ func (d *Driver) Run() error {
 	}
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(logErr),
+		grpc.MaxRecvMsgSize(grpcServerMaxReceiveMessageSize),
 	}
 	d.Srv = grpc.NewServer(opts...)
 

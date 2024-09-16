@@ -3,6 +3,8 @@ package driver_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -324,6 +326,70 @@ func TestExtractMountpointArgument(t *testing.T) {
 			val, found := driver.ExtractMountpointArgument(test.input, test.argument)
 			assertEquals(t, test.expectedToFound, found)
 			assertEquals(t, test.expectedValue, val)
+		})
+	}
+}
+
+func TestIsMountPoint(t *testing.T) {
+	testDir := t.TempDir()
+	mountpointS3MountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/46efe8aa-75d9-4b12-8fdd-0ce0c2cabd99/volumes/kubernetes.io~csi/s3-mp-csi-pv/mount")
+	tmpFsMountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/3af4cdb5-6131-4d4b-bed3-4b7a74d357e4/volumes/kubernetes.io~projected/kube-api-access-tmxk4")
+	testProcMountsContent := []byte(
+		fmt.Sprintf(`proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0
+tmpfs %s tmpfs rw,seclabel,relatime,size=3364584k 0 0
+mountpoint-s3 %s fuse rw,nosuid,nodev,noatime,user_id=0,group_id=0,default_permissions 0 0`,
+			tmpFsMountPath,
+			mountpointS3MountPath),
+	)
+	os.MkdirAll(tmpFsMountPath, 0755)
+	os.MkdirAll(mountpointS3MountPath, 0755)
+
+	tests := map[string]struct {
+		procMountsContent []byte
+		target            string
+		isMountPoint      bool
+		expectErr         bool
+	}{
+		"mountpoint-s3 mount": {
+			procMountsContent: testProcMountsContent,
+			target:            mountpointS3MountPath,
+			isMountPoint:      true,
+			expectErr:         false,
+		},
+		"tmpfs mount": {
+			procMountsContent: testProcMountsContent,
+			target:            tmpFsMountPath,
+			isMountPoint:      false,
+			expectErr:         false,
+		},
+		"non existing mount on /proc/mounts": {
+			procMountsContent: []byte(`proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
+			target:       mountpointS3MountPath,
+			isMountPoint: false,
+			expectErr:    false,
+		},
+		"non existing mount on filesystem": {
+			procMountsContent: testProcMountsContent,
+			target:            "/var/lib/kubelet/pods/46efe8aa-75d9-4b12-8fdd-0ce0c2cabd99/volumes/kubernetes.io~csi/s3-mp-csi-pv/mount",
+			isMountPoint:      false,
+			expectErr:         true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			procMountsPath := filepath.Join(t.TempDir(), "proc", "mounts")
+			err := os.MkdirAll(filepath.Dir(procMountsPath), 0755)
+			assertNoError(t, err)
+			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
+			assertNoError(t, err)
+
+			mounter := &driver.S3Mounter{MountLister: &driver.ProcMountLister{ProcMountPath: procMountsPath}}
+			isMountPoint, err := mounter.IsMountPoint(test.target)
+			assertEquals(t, test.isMountPoint, isMountPoint)
+			assertEquals(t, test.expectErr, err != nil)
 		})
 	}
 }

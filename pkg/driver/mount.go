@@ -53,6 +53,9 @@ const (
 	awsMaxAttemptsOption        = "--aws-max-attempts"
 )
 
+// https://github.com/awslabs/mountpoint-s3/blob/9ed8b6243f4511e2013b2f4303a9197c3ddd4071/mountpoint-s3/src/cli.rs#L421
+const mountpointDeviceName = "mountpoint-s3"
+
 const (
 	// Due to some reason that we haven't been able to identify, reading `/host/proc/mounts`
 	// fails on newly spawned Karpenter/GPU nodes with "invalid argument".
@@ -219,6 +222,7 @@ func (pml *ProcMountLister) ListMounts() ([]mount.MountPoint, error) {
 	return parseProcMounts(mounts)
 }
 
+// IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
 	if _, err := os.Stat(target); os.IsNotExist(err) {
 		return false, err
@@ -230,6 +234,11 @@ func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
 	}
 	for _, mp := range mountPoints {
 		if mp.Path == target {
+			if mp.Device != mountpointDeviceName {
+				klog.V(4).Infof("IsMountPoint: %s is not a `mount-s3` mount. Expected device type to be %s but got %s, skipping unmount", target, mountpointDeviceName, mp.Device)
+				continue
+			}
+
 			return true, nil
 		}
 	}

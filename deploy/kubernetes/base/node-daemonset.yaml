@@ -29,6 +29,8 @@ spec:
       initContainers:
         - name: install-mountpoint
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
             seLinuxOptions:
               user: system_u
               type: super_t
@@ -47,6 +49,8 @@ spec:
       containers:
         - name: s3-plugin
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
             privileged: false
             seLinuxOptions:
               user: system_u
@@ -57,7 +61,6 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --logtostderr
             - --v=4
           env:
             - name: CSI_ENDPOINT
@@ -123,6 +126,9 @@ spec:
         - name: node-driver-registrar
           image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.7.0-eks-1-23-13
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -149,6 +155,9 @@ spec:
         - name: liveness-probe
           image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.9.0-eks-1-23-13
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
             - --health-port=9810
