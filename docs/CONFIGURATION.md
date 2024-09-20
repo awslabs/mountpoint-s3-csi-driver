@@ -188,6 +188,10 @@ graph LR;
 
 ## Pod-Level Credentials
 
+> [!WARNING]
+> To enable Pod-Level credentials on K8s clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
+> your Helm installation.
+
 You can configure Mountpoint CSI Driver to use the credentials associated with the pod's Service Account rather than the
 driver's own credentials.
 
@@ -287,6 +291,21 @@ kubectl describe sa s3-pod-sa --namespace $POD_NAMESPACE
 ```
 For more validation steps see the [EKS documentation](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html).
 
+
+### Configuring the STS region
+
+You can manually configure the STS region that's used for Pod-Level credentials with the `stsRegion` volume attribute.
+This may be required in case the CSI Driver is unable to automatically configure a value.
+
+```yaml
+csi:
+  driver: s3.csi.aws.com
+  volumeHandle: example-s3-pv
+  volumeAttributes:
+    bucketName: amzn-s3-demo-bucket
+    authenticationSource: pod
+    stsRegion: us-east-1
+```
 
 ## Configure driver toleration settings
 Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add 
