@@ -6,6 +6,7 @@ metadata:
   name: s3.csi.aws.com
 spec:
   attachRequired: false
+  podInfoOnMount: true
   tokenRequests:
     - audience: "sts.amazonaws.com"
       expirationSeconds: 3600

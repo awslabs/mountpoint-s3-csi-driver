@@ -43,6 +43,9 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 
 const serviceAccountRoleAnnotation = "eks.amazonaws.com/role-arn"
 
+const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
+const stsConfigDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#configuring-the-sts-region"
+
 var errUnknownRegion = errors.New("NodePublishVolume: Pod-level: unknown region")
 
 type CredentialProvider struct {
@@ -112,7 +115,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 	tokensJson := volumeContext[volumeCtxServiceAccountTokens]
 	if tokensJson == "" {
-		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see TODO")
+		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens")
 	}
 
@@ -123,7 +126,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 	stsToken := tokens[serviceAccountTokenAudienceSTS]
 	if stsToken == nil {
-		klog.Errorf("`authenticationSource` configured to `pod` but no service account tokens for %s received. Please make sure to enable `podInfoOnMountCompat`, see TODO", serviceAccountTokenAudienceSTS)
+		klog.Errorf("`authenticationSource` configured to `pod` but no service account tokens for %s received. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage, serviceAccountTokenAudienceSTS)
 		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudienceSTS)
 	}
 
@@ -134,7 +137,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 	region, err := c.stsRegion(volumeContext, mountpointArgs)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see TODO")
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
 	}
 
 	defaultRegion := os.Getenv(defaultRegionEnv)
@@ -206,7 +209,7 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 	podNamespace := volumeContext[volumeCtxPodNamespace]
 	podServiceAccount := volumeContext[volumeCtxServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
-		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see TODO")
+		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return "", status.Error(codes.InvalidArgument, "Missing Pod info")
 	}
 
@@ -217,7 +220,7 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 
 	roleArn := response.Annotations[serviceAccountRoleAnnotation]
 	if roleArn == "" {
-		klog.Error("`authenticationSource` configured to `pod` but pod's service account is not annotated with a role, see TODO")
+		klog.Error("`authenticationSource` configured to `pod` but pod's service account is not annotated with a role, see " + podLevelCredentialsDocsPage)
 		return "", status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
 	}
 
