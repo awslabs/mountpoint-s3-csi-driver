@@ -6,7 +6,7 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   attachRequired: false
-  {{- if .Values.node.podInfoOnMountCompat.enable }}
+  {{- if or (.Values.node.podInfoOnMountCompat.enable) (semverCompare ">=1.30" .Capabilities.KubeVersion.GitVersion) }}
   podInfoOnMount: true
   {{- end }}
   tokenRequests:
