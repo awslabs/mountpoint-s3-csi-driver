@@ -47,10 +47,8 @@ graph LR;
     *Driver IAM Credentials*`"]
 
     SA_D[Service Account - Driver]
-    SA_P[Service Account - Pod]
 
     IAM_D[IAM Credentials - Driver]
-    IAM_P[IAM Credentials - Pod]
 
     PV[Persistent Volume]
     PVC[Persistent Volume Claim]
@@ -62,10 +60,8 @@ graph LR;
     PV --> CSI
 
     CSI --> SA_D
-    P --> SA_P
 
     SA_D --> IAM_D
-    SA_P --> IAM_P
 
     style IAM_D stroke:#0000ff,fill:#ccccff,color:#0000ff
     style P stroke:#0000ff,fill:#ccccff,color:#0000ff
@@ -199,6 +195,16 @@ With this approach, a multi-tenant architecture is possible using [IAM Roles for
 Using Pod-Level Credentials with IRSA authentication allows the Mountpoint CSI Driver to use multiple credentials for
 each pod. 
 
+
+> [!NOTE]
+> If you configure a driver-level credential source when using `authenticationSource: pod`, it will be ignored.
+
+
+> [!NOTE]
+> Only IRSA is supported with Pod-Level credentials. You cannot configure K8s secrets or use instance profiles.
+
+
+
 ```mermaid
 graph LR;
     CSI[CSI Driver]
@@ -206,10 +212,8 @@ graph LR;
     P["`Application Pod
     *Pod IAM Credentials*`"]
 
-    SA_D[Service Account - Driver]
     SA_P[Service Account - Pod]
 
-    IAM_D[IAM Credentials - Driver]
     IAM_P[IAM Credentials - Pod]
 
     PV[Persistent Volume]
@@ -221,10 +225,8 @@ graph LR;
 
     PV --> CSI
 
-    CSI --> SA_D
     P --> SA_P
 
-    SA_D --> IAM_D
     SA_P --> IAM_P
 
 
