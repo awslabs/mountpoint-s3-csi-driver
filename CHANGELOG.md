@@ -1,3 +1,15 @@
+# v1.9.0
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.9.0/README.md)
+
+### Notable changes
+* Add support for pod-level authentication in volumes ([#111](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/111))
+  * See documentation for this feature in the [configuration documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md)
+* Support Mountpoint [version 1.9.1](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.9.1)
+  * Add AWS ISO partitions to STS credential provider, resolving IRSA authentication issues. ([awslabs/aws-c-auth#253](https://github.com/awslabs/aws-c-auth/pull/253))
+  * Mountpoint now offers multi-nic configuration. See the Mountpoint documentation for details.
+  * Customers may experience improvements in bandwidth usage when reading multiple files concurrently and reduced memory consumption.
+
+
 # v1.8.1
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.8.1/README.md)
 
