@@ -45,6 +45,8 @@ node:
                 operator: NotIn
                 values:
                   - fargate
+  podInfoOnMountCompat:
+    enable: false
 sidecars:
   nodeDriverRegistrar:
     image:

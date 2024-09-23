@@ -36,6 +36,10 @@ const (
 	driverName          = "s3.csi.aws.com"
 	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
 	roleArnEnv          = "AWS_ROLE_ARN"
+
+	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
+
+	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 )
 
 var (
@@ -81,10 +85,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Fatalln(err)
 	}
 
+	credentialProvider := NewCredentialProvider(clientset.CoreV1(), containerPluginDir, RegionFromIMDSOnce)
+	nodeServer := NewS3NodeServer(nodeID, mounter, credentialProvider)
+
 	return &Driver{
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
-		NodeServer: &S3NodeServer{NodeID: nodeID, Mounter: mounter},
+		NodeServer: nodeServer,
 	}, nil
 }
 
@@ -107,6 +114,22 @@ func (d *Driver) Run() error {
 		return err
 	}
 
+	if scheme == "unix" {
+		// Go's `net` package does not support specifying permissions on Unix sockets it creates.
+		// There are two ways to change permissions:
+		// 	 - Using `syscall.Umask` before `net.Listen`
+		//   - Calling `os.Chmod` after `net.Listen`
+		// The first one is not nice because it affects all files created in the process,
+		// the second one has a time-window where the permissions of Unix socket would depend on `umask`
+		// between `net.Listen` and `os.Chmod`. Since we don't start accepting connections on the socket until
+		// `grpc.Serve` call, we should be fine with `os.Chmod` option.
+		// See https://github.com/golang/go/issues/11822#issuecomment-123850227.
+		if err := os.Chmod(addr, unixSocketPerm); err != nil {
+			klog.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+			return fmt.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+		}
+	}
+
 	logErr := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		resp, err := handler(ctx, req)
 		if err != nil {
@@ -116,6 +139,7 @@ func (d *Driver) Run() error {
 	}
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(logErr),
+		grpc.MaxRecvMsgSize(grpcServerMaxReceiveMessageSize),
 	}
 	d.Srv = grpc.NewServer(opts...)
 

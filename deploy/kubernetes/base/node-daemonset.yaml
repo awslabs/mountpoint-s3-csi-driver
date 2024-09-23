@@ -20,6 +20,15 @@ spec:
         kubernetes.io/os: linux
       serviceAccountName: s3-csi-driver-sa
       priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: eks.amazonaws.com/compute-type
+                    operator: NotIn
+                    values:
+                      - fargate
       tolerations:
         - key: CriticalAddonsOnly
           operator: Exists
@@ -28,13 +37,15 @@ spec:
           tolerationSeconds: 300
       initContainers:
         - name: install-mountpoint
+          image: csi-driver
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
             seLinuxOptions:
               user: system_u
               type: super_t
               role: system_r
               level: s0
-          image: csi-driver
           imagePullPolicy: IfNotPresent
           command:
             - "/bin/install-mp"
@@ -46,18 +57,19 @@ spec:
               mountPath: /target
       containers:
         - name: s3-plugin
+          image: csi-driver
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
             privileged: false
             seLinuxOptions:
               user: system_u
               type: super_t
               role: system_r
               level: s0
-          image: csi-driver
           imagePullPolicy: IfNotPresent
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --logtostderr
             - --v=4
           env:
             - name: CSI_ENDPOINT
@@ -67,6 +79,12 @@ spec:
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
               value: /opt/mountpoint-s3-csi/bin/mount-s3
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HOST_PLUGIN_DIR
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -85,12 +103,6 @@ spec:
                   name: aws-secret
                   key: session_token
                   optional: true
-            - name: CSI_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            - name: HOST_PLUGIN_DIR
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
@@ -103,17 +115,17 @@ spec:
             - name: proc-mounts
               mountPath: /host/proc/mounts
           ports:
-            - containerPort: 9810
-              name: healthz
+            - name: healthz
+              containerPort: 9810
               protocol: TCP
           livenessProbe:
-            failureThreshold: 5
             httpGet:
               path: /healthz
               port: healthz
             initialDelaySeconds: 10
             timeoutSeconds: 3
             periodSeconds: 2
+            failureThreshold: 5
           resources:
             limits:
               memory: 256Mi
@@ -121,8 +133,11 @@ spec:
               cpu: 10m
               memory: 40Mi
         - name: node-driver-registrar
-          image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.7.0-eks-1-23-13
+          image: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar:v2.10.0-eks-1-29-7
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -135,6 +150,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          livenessProbe:
+            exec:
+              command:
+                - /csi-node-driver-registrar
+                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+                - --mode=kubelet-registration-probe
+            initialDelaySeconds: 30
+            timeoutSeconds: 15
+            periodSeconds: 90
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
@@ -147,14 +171,17 @@ spec:
               cpu: 10m
               memory: 40Mi
         - name: liveness-probe
-          image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.9.0-eks-1-23-13
+          image: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe:v2.12.0-eks-1-29-7
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
             - --health-port=9810
           volumeMounts:
-            - mountPath: /csi
-              name: plugin-dir
+            - name: plugin-dir
+              mountPath: /csi
           resources:
             limits:
               memory: 256Mi
@@ -168,7 +195,7 @@ spec:
             type: Directory
         - name: mp-install
           hostPath:
-            path: /opt/mountpoint-s3-csi/bin
+            path: /opt/mountpoint-s3-csi/bin/
             type: DirectoryOrCreate
         - name: proc-mounts
           hostPath:
@@ -180,13 +207,13 @@ spec:
             type: Socket
         - name: kubelet-dir
           hostPath:
-            path: /var/lib/kubelet/
-            type: Directory
-        - name: registration-dir
-          hostPath:
-            path: /var/lib/kubelet/plugins_registry/
+            path: /var/lib/kubelet
             type: Directory
         - name: plugin-dir
           hostPath:
             path: /var/lib/kubelet/plugins/s3.csi.aws.com/
             type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+            type: Directory

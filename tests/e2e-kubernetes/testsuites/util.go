@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -21,6 +22,7 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
+	admissionapi "k8s.io/pod-security-admission/api"
 )
 
 type jsonMap = map[string]interface{}
@@ -146,6 +148,12 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 	return pod, nil
 }
 
+func createPodWithServiceAccount(ctx context.Context, client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, serviceAccountName string) (*v1.Pod, error) {
+	pod := e2epod.MakePod(namespace, nil, pvclaims, admissionapi.LevelBaseline, "")
+	pod.Spec.ServiceAccountName = serviceAccountName
+	return createPod(ctx, client, namespace, pod)
+}
+
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
@@ -182,14 +190,36 @@ func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.Se
 
 	client := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
 	sa, err := client.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
+
 	framework.ExpectNoError(err)
 	gomega.Expect(sa).NotTo(gomega.BeNil())
 
 	return sa
 }
 
+func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.ServiceAccount, func(context.Context) error) {
+	framework.Logf("Creating ServiceAccount")
+
+	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
+	sa, err := client.Create(ctx, &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{GenerateName: f.BaseName + "-sa-"}}, metav1.CreateOptions{})
+	framework.ExpectNoError(err)
+
+	framework.ExpectNoError(waitForKubernetesObject(ctx, framework.GetObject(client.Get, sa.Name, metav1.GetOptions{})))
+
+	return sa, func(ctx context.Context) error {
+		framework.Logf("Removing ServiceAccount %s", sa.Name)
+		return client.Delete(ctx, sa.Name, metav1.DeleteOptions{})
+	}
+}
+
 func awsConfig(ctx context.Context) aws.Config {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	framework.ExpectNoError(err)
 	return cfg
+}
+
+func waitForKubernetesObject[T any](ctx context.Context, get framework.GetFunc[T]) error {
+	return framework.Gomega().Eventually(ctx, framework.RetryNotFound(get)).
+		WithTimeout(1 * time.Minute).
+		ShouldNot(gomega.BeNil())
 }
