@@ -300,13 +300,15 @@ either troubleshoot the automatic setup, or manually configure the volume's STS 
 
 #### Troubleshooting the automatic STS region detection
 
-The STS region uses IMDS to detect the EC2 instance's region if not configured manually.
+The S3 CSI Driver uses IMDS to detect the EC2 instance's region if not configured manually.
 For this to function correctly, IMDS must be enabled on your cluster, and the `HttpPutResponseHopLimit` Metadata Option 
 must be 2 or greater.
 You can detect what the current hop limit is with 
+
 `aws ec2 describe-instances --instance-ids i-123456789 --region aa-example-1`.
 
-
+See the [AWS documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-IMDS-new-instances.html#configure-IMDS-new-instances-instance-settings)
+for how to configure the hop limit for new and existing instances.
 
 #### Manually configuring the STS region
 
