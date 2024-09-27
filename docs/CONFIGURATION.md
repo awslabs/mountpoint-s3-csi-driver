@@ -69,13 +69,19 @@ graph LR;
 
 #### Service Account configuration for EKS Clusters
 
-EKS allows [using Kubernetes service accounts to authenticate requests to S3](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html). 
-To set this up follow these steps:
+EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+This is supported for both driver-level and pod-level identity.
 
-##### Create a Kubernetes service account for the driver and attach the policy to the service account
+The following sections describe how to create the supporting resources for IRSA with driver-level identity.
 
-> [!NOTE]
-> The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver 
+##### Create an IAM role for use by the CSI driver's service account
+
+The following command will use `eksctl` to create the IAM role that will be used by the CSI driver's service account.
+The service account is not created by this command, only the IAM role.
+It will be created when the Mountpoint CSI driver is installed.
+
+> [!IMPORTANT]
+> The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver
 > pod (in the pod spec `deploy/kubernetes/base/node-daemonset.yaml`, Helm value `node.serviceAccount.name`).
 
 ```
@@ -89,11 +95,6 @@ eksctl create iamserviceaccount \
     --region $REGION \
     --role-only
 ```
-##### [Optional] Validate the account was successfully created
-```
-kubectl describe sa s3-csi-driver-sa --namespace kube-system
-```
-For more validation steps see the [EKS documentation](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html).
 
 ### Driver-Level Credentials with K8s Secrets
 
@@ -186,7 +187,7 @@ graph LR;
 ```
 
 
-## Pod-Level Credentials
+### Pod-Level Credentials
 
 > [!WARNING]
 > To enable Pod-Level credentials on K8s clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
@@ -263,12 +264,17 @@ spec:
 Pods mounting the specified PV will use the pod's own Service Account for IRSA authentication.
 
 
-#### Pod Level Service Account configuration for EKS Clusters
+#### Pod-Level Identity Service Account configuration for EKS Clusters
 
-See the docs for configuring [Service Account](./CONFIGURATION.md#service-account-configuration-for-eks-clusters) for 
-driver level configuration.
+EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+This is supported for both driver-level and pod-level identity.
 
-##### Create a Kubernetes service account for the pod and attach the policy to the service account
+The following sections describe how to create the supporting resources for IRSA with pod-level identity.
+
+##### Create an IAM role for use by the pod's service account
+
+The following command will use `eksctl` to create the IAM role that will be used by the pod's service account.
+The service account is not created by this command, only the IAM role.
 
 ```
 eksctl create iamserviceaccount \
@@ -282,15 +288,7 @@ eksctl create iamserviceaccount \
     --role-only
 ```
 
-See [Pod-Level identity](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning/pod_level_identity.yaml)
-examples for how to set up Pod-Level identity with IRSA.
-
-##### [Optional] Validate the account was successfully created
-```
-kubectl describe sa s3-pod-sa --namespace $POD_NAMESPACE
-```
-For more validation steps see the [EKS documentation](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html).
-
+See the [example spec for pod-level identity](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning/pod_level_identity.yaml) for how to set up pod-level identity with IRSA.
 
 ### Configuring the STS region
 
