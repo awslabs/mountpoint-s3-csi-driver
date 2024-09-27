@@ -294,6 +294,22 @@ For more validation steps see the [EKS documentation](https://docs.aws.amazon.co
 
 ### Configuring the STS region
 
+In order to use Pod-Level credentials, the CSI Driver needs to know the STS region to request AWS credentials from.
+The CSI Driver can normally automatically detect the current region to use as the STS region, but in case it can't, 
+either troubleshoot the automatic setup, or manually configure the volume's STS region.
+
+#### Troubleshooting the automatic STS region detection
+
+The STS region uses IMDS to detect the EC2 instance's region if not configured manually.
+For this to function correctly, IMDS must be enabled on your cluster, and the `HttpPutResponseHopLimit` Metadata Option 
+must be 2 or greater.
+You can detect what the current hop limit is with 
+`aws ec2 describe-instances --instance-ids i-123456789 --region aa-example-1`.
+
+
+
+#### Manually configuring the STS region
+
 You can manually configure the STS region that's used for Pod-Level credentials with the `stsRegion` volume attribute.
 This may be required in case the CSI Driver is unable to automatically configure a value.
 
@@ -306,6 +322,8 @@ csi:
     authenticationSource: pod
     stsRegion: us-east-1
 ```
+
+Alternatively, the CSI Driver will detect the `--region` argument specified in the Mountpoint options.
 
 ## Configure driver toleration settings
 Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add 
