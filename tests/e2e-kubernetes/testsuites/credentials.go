@@ -804,7 +804,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 
 	issuer, _ := configuration["issuer"].(string)
 
-	if !strings.HasPrefix(issuer, "https://oidc.eks") {
+	if !strings.HasPrefix(issuer, "https://oidc.") {
 		// For now, we only set up a _public_ OIDC provider via `eksctl`,
 		// with `kops` we're setting up a _local_ OIDC provider which wouldn't work with AWS IAM.
 		// So, we're ignoring non-EKS OIDC providers.
