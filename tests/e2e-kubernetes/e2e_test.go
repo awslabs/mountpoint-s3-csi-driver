@@ -61,7 +61,10 @@ var _ = utils.SIGDescribe("CSI Volumes", func() {
 		CSITestSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
 	}
 	curDriver := initS3Driver()
-	ginkgo.Context(framework.GetDriverNameWithFeatureTags(curDriver), func() {
+
+	args := framework.GetDriverNameWithFeatureTags(curDriver)
+	args = append(args, func() {
 		framework.DefineTestSuites(curDriver, CSITestSuites)
 	})
+	f.Context(args...)
 })

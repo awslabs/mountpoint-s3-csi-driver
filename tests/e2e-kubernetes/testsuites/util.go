@@ -108,7 +108,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 		Spec: v1.PersistentVolumeClaimSpec{
 			StorageClassName: &f.Namespace.Name,
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
-			Resources: v1.ResourceRequirements{
+			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{
 					v1.ResourceStorage: resource.MustParse("1200Gi"),
 				},
