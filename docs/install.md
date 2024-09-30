@@ -39,7 +39,10 @@ aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
 
 ### Configure access to S3
 
-See [CONFIGURATION.md](./CONFIGURATION.md) for configuration instructions.
+Assuming you have a cluster created, the next step is to ensure the CSI Driver will be able to access Amazon S3.
+
+There's a few different options for providing credentials for the Mountpoint CSI Driver to use when accessing Amazon S3.
+See the [AWS credentials section of CONFIGURATION.md](./CONFIGURATION.md#aws-credentials) for instructions on how to setup IAM principals for accessing Amazon S3.
 
 ### Deploy driver
 You may deploy the Mountpoint for Amazon S3 CSI driver via Kustomize, Helm, or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
