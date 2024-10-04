@@ -1,68 +1,55 @@
 name: E2E Tests
 
 on:
-  push:
-    branches: ["main", "release-**", "feature/*"]
-  pull_request:
-    branches: ["main", "feature/*"]
-    paths:
-      - "tests/**"
-      - "pkg/**"
-      - "cmd/**"
-      - "charts/**"
-      - ".github/workflows/**"
-      - "Dockerfile"
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+    secrets:
+      TEST_IAM_ROLE:
+        required: true
 
-# This workflow runs e2e tests and relies on existence of EKS cluster with a `s3-csi-driver-sa` service account
-# already deployed to it, which provides the driver with access to s3.
-#
-# Since we have a single cluster for e2e tests, we ensure that no more than one instance of this workflow is
-# running by `concurrency: e2e-cluster` option.
-#
-# Successful workflows triggered by push to main will upload tested image to the private repository "PROMOTED_IMAGE_NAME":
-# - uploaded images will be tagged with main branch commit number
-# - uploaded images will be later promoted to public repository by "release" workflow
 concurrency: e2e-cluster
 env:
-  AWS_REGION: "us-east-1"
-  COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
-  TMP_IMAGE_NAME: "s3-csi-driver-tmp"
-  PROMOTED_IMAGE_NAME: "s3-csi-driver"
-  BENCHMARK_RESULTS_BUCKET: "s3://mountpoint-s3-csi-driver-benchmark"
-  BENCHMARK_RESULTS_REGION: "us-east-1"
+  COMMIT_ID: ${{ inputs.ref }}
+  IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 jobs:
   build:
-    # this is to prevent the job to run at forked projects
-    if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version-file: "go.mod"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
       - name: Build, tag, and push docker image to Amazon ECR Private Repository
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
@@ -113,12 +100,16 @@ jobs:
           - cluster-type: "kops"
             kubernetes-version: "1.31.0"
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
@@ -130,7 +121,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@master
         with:
           role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
       - name: Install tools
         run: |
           export ACTION=install_tools
@@ -146,7 +137,7 @@ jobs:
       - name: Create cluster
         run: |
           export ACTION=create_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
@@ -155,7 +146,7 @@ jobs:
       - name: Update kubeconfig
         run: |
           export ACTION=update_kubeconfig
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
@@ -164,9 +155,9 @@ jobs:
       - name: Install the driver
         run: |
           export ACTION=install_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
+          export IMAGE_NAME=${{ env.IMAGE_NAME }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
@@ -175,7 +166,7 @@ jobs:
       - name: Run E2E Tests
         run: |
           export ACTION=run_tests
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
@@ -186,7 +177,7 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           export ACTION=run_perf
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export TAG=${{ env.COMMIT_ID }}
           export ARCH=${{ matrix.arch }}
@@ -197,7 +188,7 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
-          aws s3 cp --region ${{ env.BENCHMARK_RESULTS_REGION }} ${{ env.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
+          aws s3 cp --region ${{ vars.BENCHMARK_RESULTS_REGION }} ${{ vars.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
       - name: Update benchmark result file
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         uses: benchmark-action/github-action-benchmark@v1
@@ -217,7 +208,7 @@ jobs:
         if: always()
         run: |
           export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
@@ -227,7 +218,7 @@ jobs:
         if: always()
         run: |
           export ACTION=uninstall_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
@@ -237,34 +228,9 @@ jobs:
         if: always()
         run: |
           export ACTION=delete_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
+          export AWS_REGION=${{ vars.AWS_REGION }}
           export CLUSTER_TYPE=${{ matrix.cluster-type }}
           export ARCH=${{ matrix.arch }}
           export AMI_FAMILY=${{ matrix.family }}
           export K8S_VERSION=${{ matrix.kubernetes-version }}
           tests/e2e-kubernetes/scripts/run.sh
-  promote:
-    if: startsWith(github.ref_name, 'release')
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Set up crane
-        uses: imjasonh/setup-crane@v0.1
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
-        with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Promote image for release branch
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
