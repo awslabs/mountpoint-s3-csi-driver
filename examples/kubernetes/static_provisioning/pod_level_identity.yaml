@@ -31,7 +31,7 @@ spec:
   storageClassName: "" # Required for static provisioning
   resources:
     requests:
-      storage: 1200Gi # Ignored, required
+      storage: 1Gi
   volumeName: s3-pv # Name of your PV
 ---
 apiVersion: v1
