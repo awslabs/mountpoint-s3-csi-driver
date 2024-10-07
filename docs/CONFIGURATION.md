@@ -3,6 +3,40 @@
 See [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) for
 Mountpoint specific configuration.
 
+## Static Provisioning
+
+The driver only supports Static Provisioning as of today, and you need an existing S3 Bucket to use.
+
+To use Static Provisioning, you should set `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (empty string).
+Also, in order to make sure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-pv
+spec:
+  ...
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc # Name of your PVC
+  csi:
+    driver: s3.csi.aws.com
+    ...
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-pvc
+spec:
+  ...
+  storageClassName: "" # Required for static provisioning
+  volumeName: s3-pv # Name of your PV
+```
+
+See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
+
 ## AWS Credentials
 
 The driver requires IAM permissions to access your Amazon S3 bucket.
@@ -14,15 +48,15 @@ Mountpoint CSI driver. For more details on creating a policy and an IAM role, re
 ["Creating an IAM role"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-role) from the
 EKS User Guide.
 
-The Mountpoint CSI Driver can be configured to ingest credentials via two approaches: globally for the entire 
+The Mountpoint CSI Driver can be configured to ingest credentials via two approaches: globally for the entire
 Kubernetes cluster, or using credentials assigned to pods.
 
 ### Driver-Level Credentials
 
-By setting driver-level credentials, the whole cluster uses the same set of credentials. 
+By setting driver-level credentials, the whole cluster uses the same set of credentials.
 
 Using this configuration, the credentials that are used are set at installation time, either using Service
-Accounts, or using K8s secrets. 
+Accounts, or using K8s secrets.
 
 The CSI Driver uses the following load order for credentials:
 
@@ -36,7 +70,7 @@ The CSI Driver uses the following load order for credentials:
 Configuring [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA)
 is the recommended way to set up the CSI Driver if you want to use Driver-Level credentials.
 
-This approach associates your AWS role to a Service Account used by the CSI Driver. 
+This approach associates your AWS role to a Service Account used by the CSI Driver.
 The role is then assumed by the CSI Driver for all volumes with a `driver` authentication source.
 
 ```mermaid
@@ -69,13 +103,13 @@ graph LR;
 
 #### Service Account configuration for EKS Clusters
 
-EKS allows [using Kubernetes service accounts to authenticate requests to S3](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html). 
+EKS allows [using Kubernetes service accounts to authenticate requests to S3](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
 To set this up follow these steps:
 
 ##### Create a Kubernetes service account for the driver and attach the policy to the service account
 
 > [!NOTE]
-> The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver 
+> The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver
 > pod (in the pod spec `deploy/kubernetes/base/node-daemonset.yaml`, Helm value `node.serviceAccount.name`).
 
 ```
@@ -97,7 +131,7 @@ For more validation steps see the [EKS documentation](https://docs.aws.amazon.co
 
 ### Driver-Level Credentials with K8s Secrets
 
-Where IAM Roles for Service Accounts (IRSA) isn't a viable option, Mountpoint CSI Driver also supports sourcing static 
+Where IAM Roles for Service Accounts (IRSA) isn't a viable option, Mountpoint CSI Driver also supports sourcing static
 AWS credentials from K8s secrets.
 
 > [!WARNING]
@@ -127,8 +161,8 @@ graph LR;
     CSI --> K8sS
 
     K8sS --> IAM_LT
-    
-    
+
+
     style IAM_LT stroke:#0000ff,fill:#ccccff,color:#0000ff
     style P stroke:#0000ff,fill:#ccccff,color:#0000ff
 ```
@@ -137,7 +171,7 @@ The CSI driver will read K8s secrets at `aws-secret.key_id` and `aws-secret.acce
 The secret name configurable if installing with helm: `awsAccessSecret.name`, and the installation namespace is
 configurable with the `--namespace` helm parameter.
 
-These keys are only read on startup, so must be in place before the driver starts. 
+These keys are only read on startup, so must be in place before the driver starts.
 The following snippet can be used to create these secrets in the cluster:
 
 ```
@@ -147,7 +181,7 @@ kubectl create secret generic aws-secret \
     --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
 ```
 
-To use K8s secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be 
+To use K8s secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be
 restarted to use the secret.
 
 > [!WARNING]
@@ -197,7 +231,7 @@ driver's own credentials.
 
 With this approach, a multi-tenant architecture is possible using [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA).
 Using Pod-Level Credentials with IRSA authentication allows the Mountpoint CSI Driver to use multiple credentials for
-each pod. 
+each pod.
 
 
 > [!NOTE]
@@ -265,7 +299,7 @@ Pods mounting the specified PV will use the pod's own Service Account for IRSA a
 
 #### Pod Level Service Account configuration for EKS Clusters
 
-See the docs for configuring [Service Account](./CONFIGURATION.md#service-account-configuration-for-eks-clusters) for 
+See the docs for configuring [Service Account](./CONFIGURATION.md#service-account-configuration-for-eks-clusters) for
 driver level configuration.
 
 ##### Create a Kubernetes service account for the pod and attach the policy to the service account
@@ -295,15 +329,15 @@ For more validation steps see the [EKS documentation](https://docs.aws.amazon.co
 ### Configuring the STS region
 
 In order to use Pod-Level credentials, the CSI Driver needs to know the STS region to request AWS credentials from.
-The CSI Driver can normally automatically detect the current region to use as the STS region, but in case it can't, 
+The CSI Driver can normally automatically detect the current region to use as the STS region, but in case it can't,
 either troubleshoot the automatic setup, or manually configure the volume's STS region.
 
 #### Troubleshooting the automatic STS region detection
 
 The S3 CSI Driver uses IMDS to detect the EC2 instance's region if not configured manually.
-For this to function correctly, IMDS must be enabled on your cluster, and the `HttpPutResponseHopLimit` Metadata Option 
+For this to function correctly, IMDS must be enabled on your cluster, and the `HttpPutResponseHopLimit` Metadata Option
 must be 2 or greater.
-You can detect what the current hop limit is with 
+You can detect what the current hop limit is with
 
 `aws ec2 describe-instances --instance-ids i-123456789 --region aa-example-1`.
 
@@ -328,5 +362,5 @@ csi:
 Alternatively, the CSI Driver will detect the `--region` argument specified in the Mountpoint options.
 
 ## Configure driver toleration settings
-Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add 
+Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
