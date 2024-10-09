@@ -25,6 +25,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -36,22 +37,13 @@ import (
 const (
 	driverName          = "s3.csi.aws.com"
 	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	roleArnEnv          = "AWS_ROLE_ARN"
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
-)
 
-var (
-	volumeCaps = []csi.VolumeCapability_AccessMode{
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-		},
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
-		},
-	}
+	// This is the plugin directory for CSI driver mounted in the container.
+	containerPluginDir = "/csi"
 )
 
 type Driver struct {
@@ -59,7 +51,7 @@ type Driver struct {
 	Srv      *grpc.Server
 	NodeID   string
 
-	NodeServer *S3NodeServer
+	NodeServer *node.S3NodeServer
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error) {
@@ -82,13 +74,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
-	mounter, err := NewS3Mounter(mpVersion, kubernetesVersion)
+	mounter, err := node.NewS3Mounter(mpVersion, kubernetesVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
 
-	credentialProvider := NewCredentialProvider(clientset.CoreV1(), containerPluginDir, RegionFromIMDSOnce)
-	nodeServer := NewS3NodeServer(nodeID, mounter, credentialProvider)
+	credentialProvider := node.NewCredentialProvider(clientset.CoreV1(), containerPluginDir, node.RegionFromIMDSOnce)
+	nodeServer := node.NewS3NodeServer(nodeID, mounter, credentialProvider)
 
 	return &Driver{
 		Endpoint:   endpoint,

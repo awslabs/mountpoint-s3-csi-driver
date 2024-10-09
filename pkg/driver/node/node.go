@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package node
 
 import (
 	"context"
@@ -31,9 +31,6 @@ import (
 	"k8s.io/mount-utils"
 )
 
-// This is the plugin directory for CSI driver mounted in the container.
-const containerPluginDir = "/csi"
-
 const hostPluginDirEnv = "HOST_PLUGIN_DIR"
 
 const (
@@ -49,6 +46,17 @@ const (
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
+)
+
+var (
+	volumeCaps = []csi.VolumeCapability_AccessMode{
+		{
+			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+		},
+		{
+			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		},
+	}
 )
 
 // S3NodeServer is the implementation of the csi.NodeServer interface

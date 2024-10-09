@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package node
 
 import (
 	"bufio"
@@ -44,6 +44,8 @@ const (
 	regionEnv                   = "AWS_REGION"
 	defaultRegionEnv            = "AWS_DEFAULT_REGION"
 	stsEndpointsEnv             = "AWS_STS_REGIONAL_ENDPOINTS"
+	roleArnEnv                  = "AWS_ROLE_ARN"
+	webIdentityTokenEnv         = "AWS_WEB_IDENTITY_TOKEN_FILE"
 	MountS3PathEnv              = "MOUNT_S3_PATH"
 	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
 	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"

@@ -1,12 +1,12 @@
-package driver_test
+package node_test
 
 import (
 	"errors"
 	"io/fs"
 	"testing"
 
-	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"golang.org/x/net/context"
@@ -15,15 +15,15 @@ import (
 type nodeServerTestEnv struct {
 	mockCtl     *gomock.Controller
 	mockMounter *mock_driver.MockMounter
-	server      *driver.S3NodeServer
+	server      *node.S3NodeServer
 }
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	credentialProvider := driver.NewCredentialProvider(nil, t.TempDir(), driver.RegionFromIMDSOnce)
-	server := driver.NewS3NodeServer(
+	credentialProvider := node.NewCredentialProvider(nil, t.TempDir(), node.RegionFromIMDSOnce)
+	server := node.NewS3NodeServer(
 		"test-nodeID",
 		mockMounter,
 		credentialProvider,

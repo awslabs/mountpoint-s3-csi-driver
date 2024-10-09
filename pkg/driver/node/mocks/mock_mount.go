@@ -6,80 +6,13 @@ package mock_driver
 
 import (
 	context "context"
-	os "os"
 	reflect "reflect"
 
-	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	node "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
 	mount "k8s.io/mount-utils"
 )
-
-// MockFs is a mock of Fs interface.
-type MockFs struct {
-	ctrl     *gomock.Controller
-	recorder *MockFsMockRecorder
-}
-
-// MockFsMockRecorder is the mock recorder for MockFs.
-type MockFsMockRecorder struct {
-	mock *MockFs
-}
-
-// NewMockFs creates a new mock instance.
-func NewMockFs(ctrl *gomock.Controller) *MockFs {
-	mock := &MockFs{ctrl: ctrl}
-	mock.recorder = &MockFsMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockFs) EXPECT() *MockFsMockRecorder {
-	return m.recorder
-}
-
-// MkdirAll mocks base method.
-func (m *MockFs) MkdirAll(path string, perm os.FileMode) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "MkdirAll", path, perm)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// MkdirAll indicates an expected call of MkdirAll.
-func (mr *MockFsMockRecorder) MkdirAll(path, perm interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MkdirAll", reflect.TypeOf((*MockFs)(nil).MkdirAll), path, perm)
-}
-
-// Remove mocks base method.
-func (m *MockFs) Remove(name string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Remove", name)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Remove indicates an expected call of Remove.
-func (mr *MockFsMockRecorder) Remove(name interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Remove", reflect.TypeOf((*MockFs)(nil).Remove), name)
-}
-
-// Stat mocks base method.
-func (m *MockFs) Stat(name string) (os.FileInfo, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Stat", name)
-	ret0, _ := ret[0].(os.FileInfo)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Stat indicates an expected call of Stat.
-func (mr *MockFsMockRecorder) Stat(name interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stat", reflect.TypeOf((*MockFs)(nil).Stat), name)
-}
 
 // MockMounter is a mock of Mounter interface.
 type MockMounter struct {
@@ -120,7 +53,7 @@ func (mr *MockMounterMockRecorder) IsMountPoint(target interface{}) *gomock.Call
 }
 
 // Mount mocks base method.
-func (m *MockMounter) Mount(bucketName, target string, credentials *driver.MountCredentials, options []string) error {
+func (m *MockMounter) Mount(bucketName, target string, credentials *node.MountCredentials, options []string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Mount", bucketName, target, credentials, options)
 	ret0, _ := ret[0].(error)

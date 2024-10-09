@@ -28,6 +28,7 @@ import (
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 )
 
 const (
@@ -68,10 +69,10 @@ var _ = BeforeSuite(func() {
 	s3Driver = &driver.Driver{
 		Endpoint: endpoint,
 		NodeID:   "fake_id",
-		NodeServer: driver.NewS3NodeServer(
+		NodeServer: node.NewS3NodeServer(
 			"fake_id",
-			&driver.FakeMounter{},
-			driver.NewCredentialProvider(nil, GinkgoT().TempDir(), driver.RegionFromIMDSOnce),
+			&node.FakeMounter{},
+			node.NewCredentialProvider(nil, GinkgoT().TempDir(), node.RegionFromIMDSOnce),
 		),
 	}
 	go func() {
