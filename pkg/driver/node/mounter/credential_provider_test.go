@@ -1,4 +1,4 @@
-package node_test
+package mounter_test
 
 import (
 	"context"
@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -40,7 +41,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		},
 	} {
 
-		provider := node.NewCredentialProvider(nil, "", node.RegionFromIMDSOnce)
+		provider := mounter.NewCredentialProvider(nil, "", mounter.RegionFromIMDSOnce)
 		credentials, err := provider.Provide(context.Background(), test.volumeID, test.volumeContext, nil)
 		assertEquals(t, nil, err)
 
@@ -56,7 +57,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 }
 
 func TestProvidingDriverLevelCredentialsWithEmptyEnv(t *testing.T) {
-	provider := node.NewCredentialProvider(nil, "", node.RegionFromIMDSOnce)
+	provider := mounter.NewCredentialProvider(nil, "", mounter.RegionFromIMDSOnce)
 	credentials, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{"authenticationSource": "driver"}, nil)
 	assertEquals(t, nil, err)
 
@@ -80,7 +81,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 	t.Setenv("HOST_PLUGIN_DIR", "/test/csi/plugin/dir")
 	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "regional")
 
-	provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, node.RegionFromIMDSOnce)
+	provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, mounter.RegionFromIMDSOnce)
 
 	credentials, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{
 		"authenticationSource":                   "pod",
@@ -131,7 +132,7 @@ func TestProvidingPodLevelCredentialsWithMissingInformation(t *testing.T) {
 		serviceAccount("test-sa-missing-role", "test-ns", map[string]string{}),
 	)
 
-	provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, node.RegionFromIMDSOnce)
+	provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, mounter.RegionFromIMDSOnce)
 
 	for name, test := range map[string]struct {
 		volumeID      string
@@ -247,7 +248,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("no region", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "", errors.New("unknown region")
 		})
 
@@ -263,7 +264,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from imds", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -279,7 +280,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from env", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -297,7 +298,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("default region from env", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -315,7 +316,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("default and regular region from env", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -334,7 +335,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from mountpoint options", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -352,7 +353,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("missing region from mountpoint options", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -370,7 +371,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from mountpoint options with default region from env", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -389,7 +390,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from volume context", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -409,7 +410,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 	t.Run("region from volume context with default region from env", func(t *testing.T) {
 		pluginDir := t.TempDir()
-		provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
+		provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, func() (string, error) {
 			return "us-east-1", nil
 		})
 
@@ -444,7 +445,7 @@ func TestProvidingPodLevelCredentialsForDifferentPodsWithDifferentRoles(t *testi
 	t.Setenv("HOST_PLUGIN_DIR", "/test/csi/plugin/dir")
 	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "regional")
 
-	provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, node.RegionFromIMDSOnce)
+	provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, mounter.RegionFromIMDSOnce)
 
 	credentialsPodOne, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{
 		"authenticationSource":                   "pod",
@@ -513,7 +514,7 @@ func TestProvidingPodLevelCredentialsWithSlashInVolumeID(t *testing.T) {
 	t.Setenv("HOST_PLUGIN_DIR", "/test/csi/plugin/dir")
 	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "regional")
 
-	provider := node.NewCredentialProvider(clientset.CoreV1(), pluginDir, node.RegionFromIMDSOnce)
+	provider := mounter.NewCredentialProvider(clientset.CoreV1(), pluginDir, mounter.RegionFromIMDSOnce)
 
 	credentials, err := provider.Provide(context.Background(), "test-vol-id/1", map[string]string{
 		"authenticationSource":                   "pod",
@@ -551,7 +552,7 @@ func TestCleaningUpTokenFileForAVolume(t *testing.T) {
 		err := os.WriteFile(tokenPath, []byte("test-service-account-token"), 0400)
 		assertEquals(t, nil, err)
 
-		provider := node.NewCredentialProvider(nil, pluginDir, node.RegionFromIMDSOnce)
+		provider := mounter.NewCredentialProvider(nil, pluginDir, mounter.RegionFromIMDSOnce)
 		err = provider.CleanupToken(volumeID, podID)
 		assertEquals(t, nil, err)
 
@@ -560,7 +561,7 @@ func TestCleaningUpTokenFileForAVolume(t *testing.T) {
 	})
 
 	t.Run("non-existing token", func(t *testing.T) {
-		provider := node.NewCredentialProvider(nil, t.TempDir(), node.RegionFromIMDSOnce)
+		provider := mounter.NewCredentialProvider(nil, t.TempDir(), mounter.RegionFromIMDSOnce)
 
 		err := provider.CleanupToken("non-existing-vol-id", "non-existing-pod-id")
 		assertEquals(t, nil, err)
@@ -586,7 +587,7 @@ func serviceAccount(name, namespace string, annotations map[string]string) *v1.S
 	}}
 }
 
-func tokenFilePath(credentials *node.MountCredentials, pluginDir string) string {
+func tokenFilePath(credentials *mounter.MountCredentials, pluginDir string) string {
 	return path.Join(pluginDir, path.Base(credentials.WebTokenPath))
 }
 

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package node
+package mounter
 
 import (
 	"testing"
@@ -39,12 +39,12 @@ func TestUserAgent(t *testing.T) {
 		},
 		"driver authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
-			authenticationSource: authenticationSourceDriver,
+			authenticationSource: AuthenticationSourceDriver,
 			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0",
 		},
 		"pod authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
-			authenticationSource: authenticationSourcePod,
+			authenticationSource: AuthenticationSourcePod,
 			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
 		},
 	}

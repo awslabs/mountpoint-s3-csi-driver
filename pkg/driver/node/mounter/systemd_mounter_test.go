@@ -1,4 +1,4 @@
-package node_test
+package mounter_test
 
 import (
 	"context"
@@ -11,10 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
@@ -34,7 +33,7 @@ type mounterTestEnv struct {
 	mockCtl         *gomock.Controller
 	mockRunner      *mock_driver.MockServiceRunner
 	mockMountLister *mock_driver.MockMountLister
-	mounter         *node.S3Mounter
+	mounter         *mounter.S3Mounter
 }
 
 func initMounterTestEnv(t *testing.T) *mounterTestEnv {
@@ -50,12 +49,12 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 		mockCtl:         mockCtl,
 		mockRunner:      mockRunner,
 		mockMountLister: mockMountLister,
-		mounter: &node.S3Mounter{
+		mounter: &mounter.S3Mounter{
 			Ctx:         ctx,
 			Runner:      mockRunner,
 			MountLister: mockMountLister,
 			MpVersion:   mountpointVersion,
-			MountS3Path: node.MountS3Path(),
+			MountS3Path: mounter.MountS3Path(),
 		},
 	}
 }
@@ -63,7 +62,7 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 func TestS3MounterMount(t *testing.T) {
 	testBucketName := "test-bucket"
 	testTargetPath := filepath.Join(t.TempDir(), "mount")
-	testCredentials := &node.MountCredentials{
+	testCredentials := &mounter.MountCredentials{
 		AccessKeyID:     "test-access-key",
 		SecretAccessKey: "test-secret-key",
 		Region:          "test-region",
@@ -77,7 +76,7 @@ func TestS3MounterMount(t *testing.T) {
 		name        string
 		bucketName  string
 		targetPath  string
-		credentials *node.MountCredentials
+		credentials *mounter.MountCredentials
 		options     []string
 		expectedErr bool
 		before      func(*testing.T, *mounterTestEnv)
@@ -187,7 +186,7 @@ func TestS3MounterMount(t *testing.T) {
 func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 	tests := map[string]struct {
 		profile     awsprofile.AWSProfile
-		credentials *node.MountCredentials
+		credentials *mounter.MountCredentials
 		expected    []string
 	}{
 		"Profile Provider for long-term credentials": {
@@ -196,7 +195,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 				ConfigPath:      "~/.aws/s3-csi-config",
 				CredentialsPath: "~/.aws/s3-csi-credentials",
 			},
-			credentials: &node.MountCredentials{},
+			credentials: &mounter.MountCredentials{},
 			expected: []string{
 				"AWS_PROFILE=profile",
 				"AWS_CONFIG_FILE=~/.aws/s3-csi-config",
@@ -204,7 +203,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"Profile Provider": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				ConfigFilePath:            "~/.aws/config",
 				SharedCredentialsFilePath: "~/.aws/credentials",
 			},
@@ -214,7 +213,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"Disabling IMDS Provider": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				DisableIMDSProvider: true,
 			},
 			expected: []string{
@@ -222,7 +221,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"STS Web Identity Provider": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				WebTokenPath: "/path/to/web/token",
 				AwsRoleArn:   "arn:aws:iam::123456789012:role/Role",
 			},
@@ -232,7 +231,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"Region and Default Region": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				Region:        "us-west-2",
 				DefaultRegion: "us-east-1",
 			},
@@ -242,7 +241,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"STS Endpoints": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				StsEndpoints: "regional",
 			},
 			expected: []string{
@@ -250,7 +249,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"Mountpoint Cache Key": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				MountpointCacheKey: "test_cache_key",
 			},
 			expected: []string{
@@ -258,7 +257,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			},
 		},
 		"All Combined": {
-			credentials: &node.MountCredentials{
+			credentials: &mounter.MountCredentials{
 				WebTokenPath:              "/path/to/web/token",
 				AwsRoleArn:                "arn:aws:iam::123456789012:role/Role",
 				Region:                    "us-west-2",
@@ -325,7 +324,7 @@ func TestExtractMountpointArgument(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			val, found := node.ExtractMountpointArgument(test.input, test.argument)
+			val, found := mounter.ExtractMountpointArgument(test.input, test.argument)
 			assertEquals(t, test.expectedToFound, found)
 			assertEquals(t, test.expectedValue, val)
 		})
@@ -388,7 +387,7 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
 			assertNoError(t, err)
 
-			mounter := &node.S3Mounter{MountLister: &mounter.ProcMountLister{ProcMountPath: procMountsPath}}
+			mounter := &mounter.S3Mounter{MountLister: &mounter.ProcMountLister{ProcMountPath: procMountsPath}}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)

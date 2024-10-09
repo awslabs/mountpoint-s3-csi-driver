@@ -1,4 +1,4 @@
-package node
+package mounter
 
 type FakeMounter struct{}
 

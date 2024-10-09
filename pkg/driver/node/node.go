@@ -21,7 +21,6 @@ import (
 	"maps"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -29,19 +28,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 )
 
-const hostPluginDirEnv = "HOST_PLUGIN_DIR"
-
 const (
-	volumeCtxBucketName           = "bucketName"
-	volumeCtxAuthenticationSource = "authenticationSource"
-	volumeCtxSTSRegion            = "stsRegion"
-
-	volumeCtxServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
-	volumeCtxServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
-	volumeCtxPodNamespace         = "csi.storage.k8s.io/pod.namespace"
-	volumeCtxPodUID               = "csi.storage.k8s.io/pod.uid"
+	volumeCtxBucketName = "bucketName"
 )
 
 var (
@@ -62,23 +54,18 @@ var (
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
 	NodeID             string
-	Mounter            Mounter
-	credentialProvider *CredentialProvider
+	Mounter            mounter.Mounter
+	credentialProvider *mounter.CredentialProvider
 }
 
-func NewS3NodeServer(nodeID string, mounter Mounter, credentialProvider *CredentialProvider) *S3NodeServer {
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider *mounter.CredentialProvider) *S3NodeServer {
 	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
-}
-
-type Token struct {
-	Token               string    `json:"token"`
-	ExpirationTimestamp time.Time `json:"expirationTimestamp"`
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	volumeContext := req.GetVolumeContext()
-	if volumeContext[volumeCtxAuthenticationSource] == authenticationSourcePod {
-		podID := volumeContext[volumeCtxPodUID]
+	if volumeContext[mounter.VolumeCtxAuthenticationSource] == mounter.AuthenticationSourcePod {
+		podID := volumeContext[mounter.VolumeCtxPodUID]
 		volumeID := req.GetVolumeId()
 		if podID != "" && volumeID != "" {
 			err := ns.credentialProvider.CleanupToken(volumeID, podID)
@@ -292,7 +279,7 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 // with sensitive fields removed.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
-	delete(safeVolumeContext, volumeCtxServiceAccountTokens)
+	delete(safeVolumeContext, mounter.VolumeCtxServiceAccountTokens)
 
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,

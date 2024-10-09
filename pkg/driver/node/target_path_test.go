@@ -69,3 +69,9 @@ func TestParsingTargetPath(t *testing.T) {
 		})
 	}
 }
+
+func assertEquals[T comparable](t *testing.T, expected T, got T) {
+	if expected != got {
+		t.Errorf("Expected %#v, Got %#v", expected, got)
+	}
+}

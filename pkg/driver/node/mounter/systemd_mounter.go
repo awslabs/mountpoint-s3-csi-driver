@@ -1,21 +1,4 @@
-//go:generate mockgen -source=mount.go -destination=./mocks/mock_mount.go -package=mock_driver
-/*
-Copyright 2022 The Kubernetes Authors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-package node
+package mounter
 
 import (
 	"context"
@@ -26,142 +9,22 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
 
-const (
-	awsProfileEnv               = "AWS_PROFILE"
-	awsConfigFileEnv            = "AWS_CONFIG_FILE"
-	awsSharedCredentialsFileEnv = "AWS_SHARED_CREDENTIALS_FILE"
-	keyIdEnv                    = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv                = "AWS_SECRET_ACCESS_KEY"
-	sessionTokenEnv             = "AWS_SESSION_TOKEN"
-	disableIMDSProviderEnv      = "AWS_EC2_METADATA_DISABLED"
-	regionEnv                   = "AWS_REGION"
-	defaultRegionEnv            = "AWS_DEFAULT_REGION"
-	stsEndpointsEnv             = "AWS_STS_REGIONAL_ENDPOINTS"
-	roleArnEnv                  = "AWS_ROLE_ARN"
-	webIdentityTokenEnv         = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	MountS3PathEnv              = "MOUNT_S3_PATH"
-	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
-	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
-	defaultMountS3Path          = "/usr/bin/mount-s3"
-	procMounts                  = "/host/proc/mounts"
-	userAgentPrefix             = "--user-agent-prefix"
-	awsMaxAttemptsOption        = "--aws-max-attempts"
-)
-
 // https://github.com/awslabs/mountpoint-s3/blob/9ed8b6243f4511e2013b2f4303a9197c3ddd4071/mountpoint-s3/src/cli.rs#L421
 const mountpointDeviceName = "mountpoint-s3"
-
-type MountCredentials struct {
-	// Identifies how these credentials are obtained.
-	authenticationSource authenticationSource
-
-	// -- Env variable provider
-	AccessKeyID     string
-	SecretAccessKey string
-	SessionToken    string
-
-	// -- Profile provider
-	ConfigFilePath            string
-	SharedCredentialsFilePath string
-
-	// -- STS provider
-	WebTokenPath string
-	AwsRoleArn   string
-
-	// -- IMDS provider
-	DisableIMDSProvider bool
-
-	// -- Generic
-	Region        string
-	DefaultRegion string
-	StsEndpoints  string
-
-	// -- TODO - Move somewhere better
-	MountpointCacheKey string
-}
-
-// Get environment variables to pass to mount-s3 for authentication.
-func (mc *MountCredentials) Env(awsProfile awsprofile.AWSProfile) []string {
-	env := []string{}
-
-	// For profile provider from long-term credentials
-	if awsProfile.Name != "" {
-		env = append(env, awsProfileEnv+"="+awsProfile.Name)
-		env = append(env, awsConfigFileEnv+"="+awsProfile.ConfigPath)
-		env = append(env, awsSharedCredentialsFileEnv+"="+awsProfile.CredentialsPath)
-	} else {
-		// For profile provider
-		if mc.ConfigFilePath != "" {
-			env = append(env, awsConfigFileEnv+"="+mc.ConfigFilePath)
-		}
-		if mc.SharedCredentialsFilePath != "" {
-			env = append(env, awsSharedCredentialsFileEnv+"="+mc.SharedCredentialsFilePath)
-		}
-	}
-
-	// For STS Web Identity provider
-	if mc.WebTokenPath != "" {
-		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)
-		env = append(env, roleArnEnv+"="+mc.AwsRoleArn)
-	}
-
-	// For disabling IMDS provider
-	if mc.DisableIMDSProvider {
-		env = append(env, disableIMDSProviderEnv+"=true")
-	}
-
-	// Generic variables
-	if mc.Region != "" {
-		env = append(env, regionEnv+"="+mc.Region)
-	}
-	if mc.DefaultRegion != "" {
-		env = append(env, defaultRegionEnv+"="+mc.DefaultRegion)
-	}
-	if mc.StsEndpoints != "" {
-		env = append(env, stsEndpointsEnv+"="+mc.StsEndpoints)
-	}
-
-	if mc.MountpointCacheKey != "" {
-		env = append(env, MountpointCacheKey+"="+mc.MountpointCacheKey)
-	}
-
-	return env
-}
-
-// Mounter is an interface for mount operations
-type Mounter interface {
-	Mount(bucketName string, target string, credentials *MountCredentials, options []string) error
-	Unmount(target string) error
-	IsMountPoint(target string) (bool, error)
-}
-
-type ServiceRunner interface {
-	StartService(ctx context.Context, config *system.ExecConfig) (string, error)
-	RunOneshot(ctx context.Context, config *system.ExecConfig) (string, error)
-}
 
 type S3Mounter struct {
 	Ctx               context.Context
 	Runner            ServiceRunner
-	MountLister       mounter.MountLister
+	MountLister       MountLister
 	MpVersion         string
 	MountS3Path       string
 	kubernetesVersion string
-}
-
-func MountS3Path() string {
-	mountS3Path := os.Getenv(MountS3PathEnv)
-	if mountS3Path == "" {
-		mountS3Path = defaultMountS3Path
-	}
-	return mountS3Path
 }
 
 func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error) {
@@ -173,7 +36,7 @@ func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error
 	return &S3Mounter{
 		Ctx:               ctx,
 		Runner:            runner,
-		MountLister:       &mounter.ProcMountLister{ProcMountPath: procMounts},
+		MountLister:       &ProcMountLister{ProcMountPath: procMounts},
 		MpVersion:         mpVersion,
 		MountS3Path:       MountS3Path(),
 		kubernetesVersion: kubernetesVersion,
@@ -263,7 +126,7 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 	}
 
 	env := []string{}
-	var authenticationSource authenticationSource
+	var authenticationSource AuthenticationSource
 	if credentials != nil {
 		var awsProfile awsprofile.AWSProfile
 		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
@@ -278,7 +141,7 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 			}
 		}
 
-		authenticationSource = credentials.authenticationSource
+		authenticationSource = credentials.AuthenticationSource
 
 		env = credentials.Env(awsProfile)
 	}

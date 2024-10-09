@@ -22,10 +22,6 @@ const (
 	procMountsReadRetryBackoff = 100 * time.Millisecond
 )
 
-type MountLister interface {
-	ListMounts() ([]mount.MountPoint, error)
-}
-
 type ProcMountLister struct {
 	ProcMountPath string
 }

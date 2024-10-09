@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"golang.org/x/net/context"
@@ -22,7 +23,7 @@ func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	credentialProvider := node.NewCredentialProvider(nil, t.TempDir(), node.RegionFromIMDSOnce)
+	credentialProvider := mounter.NewCredentialProvider(nil, t.TempDir(), mounter.RegionFromIMDSOnce)
 	server := node.NewS3NodeServer(
 		"test-nodeID",
 		mockMounter,
