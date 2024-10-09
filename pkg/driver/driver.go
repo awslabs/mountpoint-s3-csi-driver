@@ -75,13 +75,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
-	s3_mounter, err := mounter.NewS3Mounter(mpVersion, kubernetesVersion)
+	systemd_mounter, err := mounter.NewSystemdMounter(mpVersion, kubernetesVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
 
 	credentialProvider := mounter.NewCredentialProvider(clientset.CoreV1(), containerPluginDir, mounter.RegionFromIMDSOnce)
-	nodeServer := node.NewS3NodeServer(nodeID, s3_mounter, credentialProvider)
+	nodeServer := node.NewS3NodeServer(nodeID, systemd_mounter, credentialProvider)
 
 	return &Driver{
 		Endpoint:   endpoint,

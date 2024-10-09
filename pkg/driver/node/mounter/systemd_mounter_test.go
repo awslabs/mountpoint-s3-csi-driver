@@ -33,7 +33,7 @@ type mounterTestEnv struct {
 	mockCtl         *gomock.Controller
 	mockRunner      *mock_driver.MockServiceRunner
 	mockMountLister *mock_driver.MockMountLister
-	mounter         *mounter.S3Mounter
+	mounter         *mounter.SystemdMounter
 }
 
 func initMounterTestEnv(t *testing.T) *mounterTestEnv {
@@ -49,7 +49,7 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 		mockCtl:         mockCtl,
 		mockRunner:      mockRunner,
 		mockMountLister: mockMountLister,
-		mounter: &mounter.S3Mounter{
+		mounter: &mounter.SystemdMounter{
 			Ctx:         ctx,
 			Runner:      mockRunner,
 			MountLister: mockMountLister,
@@ -387,7 +387,7 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
 			assertNoError(t, err)
 
-			mounter := &mounter.S3Mounter{MountLister: &mounter.ProcMountLister{ProcMountPath: procMountsPath}}
+			mounter := &mounter.SystemdMounter{MountLister: &mounter.ProcMountLister{ProcMountPath: procMountsPath}}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)

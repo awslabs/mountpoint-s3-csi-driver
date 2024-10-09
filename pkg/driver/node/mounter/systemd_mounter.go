@@ -18,7 +18,7 @@ import (
 // https://github.com/awslabs/mountpoint-s3/blob/9ed8b6243f4511e2013b2f4303a9197c3ddd4071/mountpoint-s3/src/cli.rs#L421
 const mountpointDeviceName = "mountpoint-s3"
 
-type S3Mounter struct {
+type SystemdMounter struct {
 	Ctx               context.Context
 	Runner            ServiceRunner
 	MountLister       MountLister
@@ -27,13 +27,13 @@ type S3Mounter struct {
 	kubernetesVersion string
 }
 
-func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error) {
+func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
 	ctx := context.Background()
 	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
-	return &S3Mounter{
+	return &SystemdMounter{
 		Ctx:               ctx,
 		Runner:            runner,
 		MountLister:       &ProcMountLister{ProcMountPath: procMounts},
@@ -44,7 +44,7 @@ func NewS3Mounter(mpVersion string, kubernetesVersion string) (*S3Mounter, error
 }
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
-func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
+func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 	if _, err := os.Stat(target); os.IsNotExist(err) {
 		return false, err
 	}
@@ -76,7 +76,7 @@ func (m *S3Mounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCredentials, options []string) error {
+func (m *SystemdMounter) Mount(bucketName string, target string, credentials *MountCredentials, options []string) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -198,7 +198,7 @@ func addUserAgentToOptions(options []string, userAgent string) []string {
 	return append(options, userAgentPrefix+"="+userAgent)
 }
 
-func (m *S3Mounter) Unmount(target string) error {
+func (m *SystemdMounter) Unmount(target string) error {
 	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
 
