@@ -14,6 +14,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
@@ -387,7 +388,7 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
 			assertNoError(t, err)
 
-			mounter := &node.S3Mounter{MountLister: &node.ProcMountLister{ProcMountPath: procMountsPath}}
+			mounter := &node.S3Mounter{MountLister: &mounter.ProcMountLister{ProcMountPath: procMountsPath}}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)
