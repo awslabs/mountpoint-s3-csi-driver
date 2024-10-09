@@ -589,3 +589,9 @@ func serviceAccount(name, namespace string, annotations map[string]string) *v1.S
 func tokenFilePath(credentials *node.MountCredentials, pluginDir string) string {
 	return path.Join(pluginDir, path.Base(credentials.WebTokenPath))
 }
+
+func assertEquals[T comparable](t *testing.T, expected T, got T) {
+	if expected != got {
+		t.Errorf("Expected %#v, Got %#v", expected, got)
+	}
+}

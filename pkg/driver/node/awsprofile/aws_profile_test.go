@@ -1,4 +1,4 @@
-package node_test
+package awsprofile_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
 )
 
 const testAccessKeyId = "test-access-key-id"
@@ -18,19 +18,19 @@ const testSessionToken = "test-session-token"
 
 func TestCreatingAWSProfile(t *testing.T) {
 	t.Run("create config and credentials files", func(t *testing.T) {
-		profile, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken)
+		profile, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken)
 		assertNoError(t, err)
 		assertCredentialsFromAWSProfile(t, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 	})
 
 	t.Run("create config and credentials files with empty session token", func(t *testing.T) {
-		profile, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, "")
+		profile, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, "")
 		assertNoError(t, err)
 		assertCredentialsFromAWSProfile(t, profile, testAccessKeyId, testSecretAccessKey, "")
 	})
 
 	t.Run("ensure config and credentials files are owner readable only", func(t *testing.T) {
-		profile, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken)
+		profile, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken)
 		assertNoError(t, err)
 		assertCredentialsFromAWSProfile(t, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 
@@ -45,16 +45,16 @@ func TestCreatingAWSProfile(t *testing.T) {
 
 	t.Run("fail if credentials contains non-ascii characters", func(t *testing.T) {
 		t.Run("access key ID", func(t *testing.T) {
-			_, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId+"\n\t\r credential_process=exit", testSecretAccessKey, testSessionToken)
-			assertEquals(t, true, errors.Is(err, node.ErrInvalidCredentials))
+			_, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId+"\n\t\r credential_process=exit", testSecretAccessKey, testSessionToken)
+			assertEquals(t, true, errors.Is(err, awsprofile.ErrInvalidCredentials))
 		})
 		t.Run("secret access key", func(t *testing.T) {
-			_, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey+"\n", testSessionToken)
-			assertEquals(t, true, errors.Is(err, node.ErrInvalidCredentials))
+			_, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey+"\n", testSessionToken)
+			assertEquals(t, true, errors.Is(err, awsprofile.ErrInvalidCredentials))
 		})
 		t.Run("session token", func(t *testing.T) {
-			_, err := node.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken+"\n\r")
-			assertEquals(t, true, errors.Is(err, node.ErrInvalidCredentials))
+			_, err := awsprofile.CreateAWSProfile(t.TempDir(), testAccessKeyId, testSecretAccessKey, testSessionToken+"\n\r")
+			assertEquals(t, true, errors.Is(err, awsprofile.ErrInvalidCredentials))
 		})
 	})
 }
@@ -63,11 +63,11 @@ func TestCleaningUpAWSProfile(t *testing.T) {
 	t.Run("clean config and credentials files", func(t *testing.T) {
 		basepath := t.TempDir()
 
-		profile, err := node.CreateAWSProfile(basepath, testAccessKeyId, testSecretAccessKey, testSessionToken)
+		profile, err := awsprofile.CreateAWSProfile(basepath, testAccessKeyId, testSecretAccessKey, testSessionToken)
 		assertNoError(t, err)
 		assertCredentialsFromAWSProfile(t, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 
-		err = node.CleanupAWSProfile(basepath)
+		err = awsprofile.CleanupAWSProfile(basepath)
 		assertNoError(t, err)
 
 		_, err = os.Stat(profile.ConfigPath)
@@ -78,19 +78,19 @@ func TestCleaningUpAWSProfile(t *testing.T) {
 	})
 
 	t.Run("cleaning non-existent config and credentials files should not be an error", func(t *testing.T) {
-		err := node.CleanupAWSProfile(t.TempDir())
+		err := awsprofile.CleanupAWSProfile(t.TempDir())
 		assertNoError(t, err)
 	})
 }
 
-func assertCredentialsFromAWSProfile(t *testing.T, profile node.AWSProfile, accessKeyID string, secretAccessKey string, sessionToken string) {
+func assertCredentialsFromAWSProfile(t *testing.T, profile awsprofile.AWSProfile, accessKeyID string, secretAccessKey string, sessionToken string) {
 	credentials := parseAWSProfile(t, profile)
 	assertEquals(t, accessKeyID, credentials.AccessKeyID)
 	assertEquals(t, secretAccessKey, credentials.SecretAccessKey)
 	assertEquals(t, sessionToken, credentials.SessionToken)
 }
 
-func parseAWSProfile(t *testing.T, profile node.AWSProfile) aws.Credentials {
+func parseAWSProfile(t *testing.T, profile awsprofile.AWSProfile) aws.Credentials {
 	sharedConfig, err := config.LoadSharedConfigProfile(context.Background(), profile.Name, func(c *config.LoadSharedConfigOptions) {
 		c.ConfigFiles = []string{profile.ConfigPath}
 		c.CredentialsFiles = []string{profile.CredentialsPath}

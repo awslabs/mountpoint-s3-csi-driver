@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/golang/mock/gomock"
@@ -184,12 +185,12 @@ func TestS3MounterMount(t *testing.T) {
 
 func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 	tests := map[string]struct {
-		profile     node.AWSProfile
+		profile     awsprofile.AWSProfile
 		credentials *node.MountCredentials
 		expected    []string
 	}{
 		"Profile Provider for long-term credentials": {
-			profile: node.AWSProfile{
+			profile: awsprofile.AWSProfile{
 				Name:            "profile",
 				ConfigPath:      "~/.aws/s3-csi-config",
 				CredentialsPath: "~/.aws/s3-csi-credentials",
@@ -391,5 +392,11 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)
 		})
+	}
+}
+
+func assertNoError(t *testing.T, err error) {
+	if err != nil {
+		t.Errorf("Expected no error, but got: %s", err)
 	}
 }

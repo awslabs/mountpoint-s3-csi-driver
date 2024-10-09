@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
@@ -98,7 +99,7 @@ type MountCredentials struct {
 }
 
 // Get environment variables to pass to mount-s3 for authentication.
-func (mc *MountCredentials) Env(awsProfile AWSProfile) []string {
+func (mc *MountCredentials) Env(awsProfile awsprofile.AWSProfile) []string {
 	env := []string{}
 
 	// For profile provider from long-term credentials
@@ -309,13 +310,13 @@ func (m *S3Mounter) Mount(bucketName string, target string, credentials *MountCr
 	env := []string{}
 	var authenticationSource authenticationSource
 	if credentials != nil {
-		var awsProfile AWSProfile
+		var awsProfile awsprofile.AWSProfile
 		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
 			// Kubernetes creates target path in the form of "/var/lib/kubelet/pods/<pod-uuid>/volumes/kubernetes.io~csi/<volume-id>/mount".
 			// So the directory of the target path is unique for this mount, and we can use it to write credentials and config files.
 			// These files will be cleaned up in `Unmount`.
 			basepath := filepath.Dir(target)
-			awsProfile, err = CreateAWSProfile(basepath, credentials.AccessKeyID, credentials.SecretAccessKey, credentials.SessionToken)
+			awsProfile, err = awsprofile.CreateAWSProfile(basepath, credentials.AccessKeyID, credentials.SecretAccessKey, credentials.SessionToken)
 			if err != nil {
 				klog.V(4).Infof("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
 				return fmt.Errorf("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
@@ -384,7 +385,7 @@ func (m *S3Mounter) Unmount(target string) error {
 	defer cancel()
 
 	basepath := filepath.Dir(target)
-	err := CleanupAWSProfile(basepath)
+	err := awsprofile.CleanupAWSProfile(basepath)
 	if err != nil {
 		klog.V(4).Infof("Unmount: Failed to clean up AWS Profile in %s: %v", basepath, err)
 	}
