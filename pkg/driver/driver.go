@@ -25,6 +25,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -77,8 +78,9 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Errorf("failed to get kubernetes version: %v", err)
 	}
 
+	version := version.GetVersion()
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
-		driverVersion, gitCommit, buildDate, nodeID, mpVersion, kubernetesVersion)
+		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
 	mounter, err := NewS3Mounter(mpVersion, kubernetesVersion)
 	if err != nil {
