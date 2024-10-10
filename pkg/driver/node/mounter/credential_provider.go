@@ -1,4 +1,4 @@
-package driver
+package mounter
 
 import (
 	"context"
@@ -22,14 +22,25 @@ import (
 	k8sstrings "k8s.io/utils/strings"
 )
 
-type authenticationSource = string
+const hostPluginDirEnv = "HOST_PLUGIN_DIR"
+
+type AuthenticationSource = string
 
 const (
 	// This is when users don't provide a `authenticationSource` option in their volume attributes.
 	// We're defaulting to `driver` in this case.
-	authenticationSourceUnspecified authenticationSource = ""
-	authenticationSourceDriver      authenticationSource = "driver"
-	authenticationSourcePod         authenticationSource = "pod"
+	AuthenticationSourceUnspecified AuthenticationSource = ""
+	AuthenticationSourceDriver      AuthenticationSource = "driver"
+	AuthenticationSourcePod         AuthenticationSource = "pod"
+)
+
+const (
+	VolumeCtxAuthenticationSource = "authenticationSource"
+	VolumeCtxSTSRegion            = "stsRegion"
+	VolumeCtxServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
+	VolumeCtxServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
+	VolumeCtxPodNamespace         = "csi.storage.k8s.io/pod.namespace"
+	VolumeCtxPodUID               = "csi.storage.k8s.io/pod.uid"
 )
 
 const (
@@ -47,6 +58,11 @@ const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-cs
 const stsConfigDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#configuring-the-sts-region"
 
 var errUnknownRegion = errors.New("NodePublishVolume: Pod-level: unknown region")
+
+type Token struct {
+	Token               string    `json:"token"`
+	ExpirationTimestamp time.Time `json:"expirationTimestamp"`
+}
 
 type CredentialProvider struct {
 	client             k8sv1.CoreV1Interface
@@ -80,11 +96,11 @@ func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volum
 		return nil, status.Error(codes.InvalidArgument, "Missing volume context")
 	}
 
-	authenticationSource := volumeContext[volumeCtxAuthenticationSource]
+	authenticationSource := volumeContext[VolumeCtxAuthenticationSource]
 	switch authenticationSource {
-	case authenticationSourcePod:
+	case AuthenticationSourcePod:
 		return c.provideFromPod(ctx, volumeID, volumeContext, mountpointArgs)
-	case authenticationSourceUnspecified, authenticationSourceDriver:
+	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		return c.provideFromDriver()
 	default:
 		return nil, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified) and `pod` supported", authenticationSource)
@@ -98,7 +114,7 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	hostTokenPath := path.Join(hostPluginDir, "token")
 
 	return &MountCredentials{
-		authenticationSource: authenticationSourceDriver,
+		AuthenticationSource: AuthenticationSourceDriver,
 		AccessKeyID:          os.Getenv(keyIdEnv),
 		SecretAccessKey:      os.Getenv(accessKeyEnv),
 		SessionToken:         os.Getenv(sessionTokenEnv),
@@ -113,7 +129,7 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeContext map[string]string, mountpointArgs []string) (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using pod identity")
 
-	tokensJson := volumeContext[volumeCtxServiceAccountTokens]
+	tokensJson := volumeContext[VolumeCtxServiceAccountTokens]
 	if tokensJson == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens")
@@ -145,7 +161,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		defaultRegion = region
 	}
 
-	podID := volumeContext[volumeCtxPodUID]
+	podID := volumeContext[VolumeCtxPodUID]
 	if podID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Missing Pod info")
 	}
@@ -158,12 +174,12 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 	hostPluginDir := hostPluginDirWithDefault()
 	hostTokenPath := path.Join(hostPluginDir, c.tokenFilename(podID, volumeID))
 
-	podNamespace := volumeContext[volumeCtxPodNamespace]
-	podServiceAccount := volumeContext[volumeCtxServiceAccountName]
+	podNamespace := volumeContext[VolumeCtxPodNamespace]
+	podServiceAccount := volumeContext[VolumeCtxServiceAccountName]
 	cacheKey := podNamespace + "/" + podServiceAccount
 
 	return &MountCredentials{
-		authenticationSource: authenticationSourcePod,
+		AuthenticationSource: AuthenticationSourcePod,
 
 		Region:        region,
 		DefaultRegion: defaultRegion,
@@ -206,8 +222,8 @@ func (c *CredentialProvider) tokenFilename(podID string, volumeID string) string
 }
 
 func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volumeContext map[string]string) (string, error) {
-	podNamespace := volumeContext[volumeCtxPodNamespace]
-	podServiceAccount := volumeContext[volumeCtxServiceAccountName]
+	podNamespace := volumeContext[VolumeCtxPodNamespace]
+	podServiceAccount := volumeContext[VolumeCtxServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return "", status.Error(codes.InvalidArgument, "Missing Pod info")
@@ -237,7 +253,7 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 //
 // It returns an error if all of them fails.
 func (c *CredentialProvider) stsRegion(volumeContext map[string]string, mountpointArgs []string) (string, error) {
-	region := volumeContext[volumeCtxSTSRegion]
+	region := volumeContext[VolumeCtxSTSRegion]
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from volume context", region)
 		return region, nil
