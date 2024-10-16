@@ -346,7 +346,7 @@ func (d *dummyMounter) Unmount(target string) error {
 	return nil
 }
 func (d *dummyMounter) IsMountPoint(target string) (bool, error) {
-	return false, nil
+	return true, nil
 }
 
 func assertNotEquals[T comparable](t *testing.T, expected T, got T) {

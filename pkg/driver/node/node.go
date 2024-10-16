@@ -186,20 +186,6 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	targetPath, err := ParseTargetPath(target)
-	if err == nil {
-		if targetPath.VolumeID != volumeID {
-			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
-		} else {
-			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
-			if err != nil {
-				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
-			}
-		}
-	} else {
-		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
-	}
-
 	mounted, err := ns.Mounter.IsMountPoint(target)
 	if err != nil && os.IsNotExist(err) {
 		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
@@ -219,6 +205,20 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	err = ns.Mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+	}
+
+	targetPath, err := ParseTargetPath(target)
+	if err == nil {
+		if targetPath.VolumeID != volumeID {
+			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
+		} else {
+			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
+			if err != nil {
+				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
+			}
+		}
+	} else {
+		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
