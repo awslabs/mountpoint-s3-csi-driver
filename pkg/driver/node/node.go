@@ -187,7 +187,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	}
 
 	targetPath, err := ParseTargetPath(target)
-	if err != nil {
+	if err == nil {
 		if targetPath.VolumeID != volumeID {
 			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
 		} else {
