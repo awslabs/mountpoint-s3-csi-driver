@@ -163,7 +163,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 	podID := volumeContext[VolumeCtxPodUID]
 	if podID == "" {
-		return nil, status.Error(codes.InvalidArgument, "Missing Pod info")
+		return nil, status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
 
 	err = c.writeToken(podID, volumeID, stsToken)
@@ -226,7 +226,7 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 	podServiceAccount := volumeContext[VolumeCtxServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
-		return "", status.Error(codes.InvalidArgument, "Missing Pod info")
+		return "", status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
 
 	response, err := c.client.ServiceAccounts(podNamespace).Get(ctx, podServiceAccount, metav1.GetOptions{})
