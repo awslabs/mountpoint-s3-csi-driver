@@ -364,3 +364,109 @@ Alternatively, the CSI Driver will detect the `--region` argument specified in t
 ## Configure driver toleration settings
 Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
+
+## Cross-account bucket access via bucket policies
+You can grant access Amazon S3 buckets from different AWS accounts using [bucket policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html).
+Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
+
+For example, in order have the following setup:
+
+```mermaid
+flowchart LR
+    subgraph AWS Account A
+        subgraph EKS Cluster
+            pod-a[Pod A]
+        end
+    end
+
+    subgraph AWS Account B
+        s3-b[S3 Bucket]
+    end
+
+    pod-a --Access--> s3-b
+```
+
+
+1. Allow Pod A in AWS Account A (`111122223333`) to access S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`)
+  - Ensure Pod A and it's Service Account have IRSA configured
+    ```yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: pod-a-sa
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/pod-a-role
+    ---
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-a
+    spec:
+      serviceAccountName: pod-a-sa
+    ```
+  - Attach policy to `arn:aws:iam::111122223333:role/pod-a-role` to access S3 Bucket (`amzn-s3-demo-bucket`)
+    ```json
+    {
+       "Version": "2012-10-17",
+       "Statement": [
+          {
+             "Effect": "Allow",
+             "Action": [
+                "s3:ListBucket"
+             ],
+             "Resource": [
+                "arn:aws:s3:::amzn-s3-demo-bucket"
+             ]
+          },
+          {
+             "Effect": "Allow",
+             "Action": [
+                "s3:GetObject"
+             ],
+             "Resource": [
+                "arn:aws:s3:::amzn-s3-demo-bucket/*"
+             ]
+          }
+       ]
+    }
+    ```
+
+2. Attach a bucket policy to S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`) to grant permissions for Pod A in AWS Account A (`111122223333`)
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Condition": {
+                "StringEquals": {
+                    "aws:FederatedProvider": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.region-code.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE",
+                    "aws:PrincipalArn": "arn:aws:iam::111122223333:role/pod-a-role"
+                }
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::amzn-s3-demo-bucket"
+        },
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Condition": {
+                "StringEquals": {
+                    "aws:FederatedProvider": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.region-code.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE",
+                    "aws:PrincipalArn": "arn:aws:iam::111122223333:role/pod-a-role"
+                }
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::amzn-s3-demo-bucket/*"
+        }
+    ]
+}
+```
+This policy only allows `arn:aws:iam::111122223333:role/pod-a-role` when it's assumed with `AssumeRoleWithWebIdentity` (i.e., IRSA),
+assuming only Pod A in AWS Account A (`111122223333`) is allowed to assume this role, it only allows Pod A in AWS Account A (`111122223333`) to access this bucket.
+See [AWS global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html) for more details on conditions you can use.
