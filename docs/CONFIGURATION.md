@@ -398,7 +398,7 @@ You can either use bucket policies or cross-account IRSA to access the bucket.
 You can grant access Amazon S3 buckets from different AWS accounts using [bucket policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html).
 
 1. Allow Pod A in AWS Account A (`111122223333`) to access S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`)
-  - Ensure Pod A and it's Service Account have IRSA configured
+  - Ensure Pod A and its Service Account have IRSA configured
     ```yaml
     apiVersion: v1
     kind: ServiceAccount
