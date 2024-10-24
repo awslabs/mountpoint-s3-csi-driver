@@ -364,3 +364,129 @@ Alternatively, the CSI Driver will detect the `--region` argument specified in t
 ## Configure driver toleration settings
 Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
+
+## Cross-account bucket access
+You can grant access Amazon S3 buckets from different AWS accounts.
+Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
+
+For example, to achieve the following setup:
+
+```mermaid
+flowchart LR
+    subgraph AWS Account A
+        subgraph EKS Cluster
+            pod-a[Pod A]
+        end
+    end
+
+    subgraph AWS Account B
+        s3-b[S3 Bucket]
+    end
+
+    pod-a --Access--> s3-b
+```
+
+| Resource      | ID                  |
+| ------------- | ------------------- |
+| AWS Account A | 111122223333        |
+| AWS Account B | 444455556666        |
+| S3 Bucket     | amzn-s3-demo-bucket |
+
+You can either use bucket policies or cross-account IRSA to access the bucket.
+
+### Cross-account bucket access using bucket policies
+You can grant access Amazon S3 buckets from different AWS accounts using [bucket policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html).
+
+1. Allow Pod A in AWS Account A (`111122223333`) to access S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`)
+  - Ensure Pod A and its Service Account have IRSA configured
+    ```yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: pod-a-sa
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/pod-a-role
+    ---
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-a
+    spec:
+      serviceAccountName: pod-a-sa
+    ```
+  - Attach policy to `arn:aws:iam::111122223333:role/pod-a-role` to access S3 Bucket (`amzn-s3-demo-bucket`)
+    ```json
+    {
+       "Version": "2012-10-17",
+       "Statement": [
+          {
+             "Effect": "Allow",
+             "Action": [
+                "s3:ListBucket"
+             ],
+             "Resource": [
+                "arn:aws:s3:::amzn-s3-demo-bucket"
+             ]
+          },
+          {
+             "Effect": "Allow",
+             "Action": [
+                "s3:GetObject"
+             ],
+             "Resource": [
+                "arn:aws:s3:::amzn-s3-demo-bucket/*"
+             ]
+          }
+       ]
+    }
+    ```
+
+2. Attach a bucket policy to S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`) to grant permissions for Pod A in AWS Account A (`111122223333`)
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Condition": {
+                "StringEquals": {
+                    "aws:FederatedProvider": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.region-code.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE",
+                    "aws:PrincipalArn": "arn:aws:iam::111122223333:role/pod-a-role"
+                }
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::amzn-s3-demo-bucket"
+        },
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Condition": {
+                "StringEquals": {
+                    "aws:FederatedProvider": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.region-code.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE",
+                    "aws:PrincipalArn": "arn:aws:iam::111122223333:role/pod-a-role"
+                }
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::amzn-s3-demo-bucket/*"
+        }
+    ]
+}
+```
+This policy only allows `arn:aws:iam::111122223333:role/pod-a-role` when it's assumed with `AssumeRoleWithWebIdentity` (i.e., IRSA),
+assuming only Pod A in AWS Account A (`111122223333`) is allowed to assume this role, it only allows Pod A in AWS Account A (`111122223333`) to access this bucket.
+See [AWS global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html) for more details on conditions you can use.
+
+### Cross-account bucket access using IRSA with an identity provider from a different account
+You can grant access Amazon S3 buckets from different AWS accounts by using IRSA.
+See [Authenticate to another account with IRSA](https://docs.aws.amazon.com/eks/latest/userguide/cross-account-access.html) for more details.
+
+1. [Create an IAM OIDC provider](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html) in AWS Account B (`444455556666`) for the cluster in AWS Account A (`111122223333`).
+
+2. Create and assign an IAM role in AWS Account B (`444455556666`) that trusts the cluster and the Pod in AWS Account A (`111122223333`)
+  - Follow [Assign IAM roles to Kubernetes service accounts](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html) to configure the IAM role.
+    Ensure to add permissions to access S3 Bucket (`amzn-s3-demo-bucket`).
