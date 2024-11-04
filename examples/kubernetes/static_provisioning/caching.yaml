@@ -7,6 +7,10 @@ spec:
     storage: 1200Gi # ignored, required
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc # Name of your PVC
   mountOptions:
     - cache /tmp/s3-pv1-cache # specify cache directory, relative to root host filesystem
                               # the directory must be unique per mount on a host
@@ -21,15 +25,15 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: s3-claim
+  name: s3-pvc
 spec:
   accessModes:
-    - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
-  storageClassName: "" # required for static provisioning
+    - ReadWriteMany # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
   resources:
     requests:
-      storage: 1200Gi # ignored, required
-  volumeName: s3-pv
+      storage: 1200Gi # Ignored, required
+  volumeName: s3-pv # Name of your PV
 ---
 apiVersion: v1
 kind: Pod
@@ -47,4 +51,4 @@ spec:
   volumes:
     - name: persistent-storage
       persistentVolumeClaim:
-        claimName: s3-claim
+        claimName: s3-pvc

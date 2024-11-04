@@ -25,6 +25,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -35,22 +38,13 @@ import (
 const (
 	driverName          = "s3.csi.aws.com"
 	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	roleArnEnv          = "AWS_ROLE_ARN"
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
-)
 
-var (
-	volumeCaps = []csi.VolumeCapability_AccessMode{
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-		},
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
-		},
-	}
+	// This is the plugin directory for CSI driver mounted in the container.
+	containerPluginDir = "/csi"
 )
 
 type Driver struct {
@@ -58,7 +52,7 @@ type Driver struct {
 	Srv      *grpc.Server
 	NodeID   string
 
-	NodeServer *S3NodeServer
+	NodeServer *node.S3NodeServer
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error) {
@@ -77,16 +71,17 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Errorf("failed to get kubernetes version: %v", err)
 	}
 
+	version := version.GetVersion()
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
-		driverVersion, gitCommit, buildDate, nodeID, mpVersion, kubernetesVersion)
+		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
-	mounter, err := NewS3Mounter(mpVersion, kubernetesVersion)
+	systemd_mounter, err := mounter.NewSystemdMounter(mpVersion, kubernetesVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
 
-	credentialProvider := NewCredentialProvider(clientset.CoreV1(), containerPluginDir, RegionFromIMDSOnce)
-	nodeServer := NewS3NodeServer(nodeID, mounter, credentialProvider)
+	credentialProvider := mounter.NewCredentialProvider(clientset.CoreV1(), containerPluginDir, mounter.RegionFromIMDSOnce)
+	nodeServer := node.NewS3NodeServer(nodeID, systemd_mounter, credentialProvider)
 
 	return &Driver{
 		Endpoint:   endpoint,

@@ -1,4 +1,5 @@
-package driver
+// Package awsprofile provides utilities for creating and deleting AWS Profile (i.e., credentials & config files).
+package awsprofile
 
 import (
 	"errors"

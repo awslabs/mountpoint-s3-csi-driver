@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"k8s.io/klog/v2"
 )
 
@@ -34,10 +35,10 @@ const (
 
 func main() {
 	var (
-		endpoint  = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
-		version   = flag.Bool("version", false, "Print the version and exit")
-		mpVersion = flag.String("mp-version", os.Getenv("MOUNTPOINT_VERSION"), "mp version to report in service name")
-		nodeID    = flag.String("node-id", os.Getenv(NodeIDEnvVar), "node-id to report in NodeGetInfo RPC")
+		endpoint     = flag.String("endpoint", "unix://tmp/csi.sock", "CSI Endpoint")
+		printVersion = flag.Bool("version", false, "Print the version and exit")
+		mpVersion    = flag.String("mp-version", os.Getenv("MOUNTPOINT_VERSION"), "mp version to report in service name")
+		nodeID       = flag.String("node-id", os.Getenv(NodeIDEnvVar), "node-id to report in NodeGetInfo RPC")
 	)
 	klog.InitFlags(nil)
 	// Set logging to stderr false otherwise klog won't call our logger set via
@@ -48,8 +49,8 @@ func main() {
 
 	klog.SetOutput(&newlineEscapingStderrWriter{})
 
-	if *version {
-		info, err := driver.GetVersionJSON()
+	if *printVersion {
+		info, err := version.GetVersionJSON()
 		if err != nil {
 			klog.Fatalln(err)
 		}

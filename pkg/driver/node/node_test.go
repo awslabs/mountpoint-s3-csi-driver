@@ -1,29 +1,34 @@
-package driver_test
+package node_test
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
-	driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"golang.org/x/net/context"
 )
 
 type nodeServerTestEnv struct {
 	mockCtl     *gomock.Controller
 	mockMounter *mock_driver.MockMounter
-	server      *driver.S3NodeServer
+	server      *node.S3NodeServer
 }
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	credentialProvider := driver.NewCredentialProvider(nil, t.TempDir(), driver.RegionFromIMDSOnce)
-	server := driver.NewS3NodeServer(
+	credentialProvider := mounter.NewCredentialProvider(nil, t.TempDir(), mounter.RegionFromIMDSOnce)
+	server := node.NewS3NodeServer(
 		"test-nodeID",
 		mockMounter,
 		credentialProvider,
@@ -284,6 +289,31 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
 	}
+
+	t.Run("Cleaning Service Account Token", func(t *testing.T) {
+		containerPluginDir := t.TempDir()
+		credentialProvider := mounter.NewCredentialProvider(nil, containerPluginDir, mounter.RegionFromIMDSOnce)
+		nodeServer := node.NewS3NodeServer("test-node-id", &dummyMounter{}, credentialProvider)
+
+		podID := uuid.New().String()
+		volID := "test-vol-id"
+
+		serviceAccountTokenPath := filepath.Join(containerPluginDir, fmt.Sprintf("%s-%s.token", podID, volID))
+		_, err := os.Create(serviceAccountTokenPath)
+		assertEquals(t, nil, err)
+
+		targetPath := fmt.Sprintf("/var/lib/kubelet/pods/%s/volumes/kubernetes.io~csi/%s/mount", podID, volID)
+
+		_, err = nodeServer.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+			VolumeId:   volID,
+			TargetPath: targetPath,
+		})
+		assertEquals(t, nil, err)
+
+		_, err = os.Stat(serviceAccountTokenPath)
+		assertNotEquals(t, nil, err)
+		assertEquals(t, true, errors.Is(err, fs.ErrNotExist))
+	})
 }
 
 func TestNodeGetCapabilities(t *testing.T) {
@@ -302,4 +332,25 @@ func TestNodeGetCapabilities(t *testing.T) {
 	}
 
 	nodeTestEnv.mockCtl.Finish()
+}
+
+var _ mounter.Mounter = &dummyMounter{}
+
+type dummyMounter struct {
+}
+
+func (d *dummyMounter) Mount(bucketName string, target string, credentials *mounter.MountCredentials, options []string) error {
+	return nil
+}
+func (d *dummyMounter) Unmount(target string) error {
+	return nil
+}
+func (d *dummyMounter) IsMountPoint(target string) (bool, error) {
+	return true, nil
+}
+
+func assertNotEquals[T comparable](t *testing.T, expected T, got T) {
+	if expected == got {
+		t.Errorf("Expected %#v to not equal %#v", expected, got)
+	}
 }

@@ -14,13 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package mounter
 
 import (
-	"encoding/json"
-	"fmt"
-	"runtime"
 	"strings"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 )
 
 const (
@@ -29,48 +28,13 @@ const (
 	userAgentCredentialSourcePrefix = "credential-source#"
 )
 
-var (
-	driverVersion string
-	gitCommit     string
-	buildDate     string
-)
-
-type VersionInfo struct {
-	DriverVersion string `json:"driverVersion"`
-	GitCommit     string `json:"gitCommit"`
-	BuildDate     string `json:"buildDate"`
-	GoVersion     string `json:"goVersion"`
-	Compiler      string `json:"compiler"`
-	Platform      string `json:"platform"`
-}
-
-func GetVersion() VersionInfo {
-	return VersionInfo{
-		DriverVersion: driverVersion,
-		GitCommit:     gitCommit,
-		BuildDate:     buildDate,
-		GoVersion:     runtime.Version(),
-		Compiler:      runtime.Compiler,
-		Platform:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-	}
-}
-
-func GetVersionJSON() (string, error) {
-	info := GetVersion()
-	marshalled, err := json.MarshalIndent(&info, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(marshalled), nil
-}
-
 // UserAgent returns user-agent for the CSI driver.
 func UserAgent(authenticationSource string, kubernetesVersion string) string {
 	var b strings.Builder
 
 	// s3-csi-driver/v0.0.0
 	b.WriteString(userAgentCsiDriverPrefix)
-	b.WriteString(GetVersion().DriverVersion)
+	b.WriteString(version.GetVersion().DriverVersion)
 
 	// credential-source#pod
 	b.WriteRune(' ')
