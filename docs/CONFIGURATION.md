@@ -104,14 +104,15 @@ graph LR;
 #### Service Account configuration for EKS Clusters
 
 EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
-This is supported for both driver-level and pod-level identity.
+This is supported for both [driver-level identity](#driver-level-credentials-with-irsa)
+and [pod-level identity](#pod-level-credentials).
 
 The following sections describe how to create the supporting resources for IRSA with driver-level identity.
 
 ##### Create an IAM role for use by the CSI driver's service account
 
 The following command will use `eksctl` to create the IAM role that will be used by the CSI driver's service account.
-The service account is not created by this command, only the IAM role.
+The service account is not created by this command, only the IAM role due to the `--role-only` option.
 It will be created when the Mountpoint CSI driver is installed.
 
 > [!IMPORTANT]
@@ -301,14 +302,15 @@ Pods mounting the specified PV will use the pod's own Service Account for IRSA a
 #### Pod-Level Identity Service Account configuration for EKS Clusters
 
 EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
-This is supported for both driver-level and pod-level identity.
+This is supported for both [driver-level identity](#driver-level-credentials-with-irsa)
+and [pod-level identity](#pod-level-credentials).
 
 The following sections describe how to create the supporting resources for IRSA with pod-level identity.
 
 ##### Create an IAM role for use by the pod's service account
 
 The following command will use `eksctl` to create the IAM role that will be used by the pod's service account.
-The service account is not created by this command, only the IAM role.
+The service account is not created by this command, only the IAM role due to the `--role-only` option.
 
 ```
 eksctl create iamserviceaccount \
