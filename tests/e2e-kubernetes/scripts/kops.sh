@@ -49,6 +49,7 @@ function kops_create_cluster() {
     --node-size="${INSTANCE_TYPE}" \
     --image="${AMI_ID}" \
     --kubernetes-version="${K8S_VERSION}" \
+    --dns=none \
     --dry-run \
     --cloud aws \
     -o yaml \
