@@ -43,6 +43,8 @@ if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
     CLUSTER_NAME="${CLUSTER_NAME}-${K8S_VERSION_EKSCTL/./-}"
 else
+    # In kops, cluster names must be valid domain names,
+    # that's why we're lowercasing "CLUSTER_NAME" and replacing "." with "-".
     CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}"
 fi
 
