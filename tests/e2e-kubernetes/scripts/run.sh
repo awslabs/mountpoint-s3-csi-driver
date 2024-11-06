@@ -43,10 +43,7 @@ if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
     CLUSTER_NAME="${CLUSTER_NAME}-${K8S_VERSION_EKSCTL/./-}"
 else
-    # In kops, cluster names must end with ".k8s.local" to use Gossip DNS.
-    # See https://kops.sigs.k8s.io/gossip/#configuring-a-cluster-to-use-gossip
-    # They also need to be valid domain names, that's why we're lowercasing "CLUSTER_NAME" and replacing "." with "-".
-    CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}.k8s.local"
+    CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}"
 fi
 
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
