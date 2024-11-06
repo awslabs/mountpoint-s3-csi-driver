@@ -45,7 +45,7 @@ if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
 else
     # In kops, cluster names must be valid domain names,
     # that's why we're lowercasing "CLUSTER_NAME" and replacing "." with "-".
-    CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}"
+    CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}.local"
 fi
 
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
