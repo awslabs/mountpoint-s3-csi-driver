@@ -71,7 +71,10 @@ jobs:
     needs: build
     strategy:
       matrix:
-        cluster-type: ["eksctl", "kops"]
+        cluster-type:
+          - "eksctl"
+          # kOps clusters are disabled temporarily due to https://github.com/awslabs/mountpoint-s3-csi-driver/issues/288.
+          # - "kops"
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
         kubernetes-version: ["1.28.13", "1.29.8", "1.30.4", "1.31.0"]
