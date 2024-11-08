@@ -1,3 +1,9 @@
+# v1.10.0
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.10.0/README.md)
+
+### Notable changes
+* Support Mountpoint version 1.10.0, including adaptive prefetching for better memory utilization
+
 # v1.9.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.9.0/README.md)
 
