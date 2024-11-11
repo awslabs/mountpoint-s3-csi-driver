@@ -9,7 +9,7 @@ import (
 )
 
 // Equals fails the test if `want` and `got` are not equal.
-func Equals[T interface{}](t *testing.T, want T, got T) {
+func Equals(t *testing.T, want interface{}, got interface{}) {
 	t.Helper()
 	if diff := cmp.Diff(want, got, cmpopts.EquateErrors()); diff != "" {
 		t.Errorf("Assertion failure (-want +got):\n%s", diff)
