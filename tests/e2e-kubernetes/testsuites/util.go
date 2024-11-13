@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -74,6 +75,27 @@ func checkDeletingPath(f *framework.Framework, pod *v1.Pod, path string) {
 
 func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
+}
+
+// checkBasicFileOperations verifies basic file operations works in the given `basePath` inside the `pod`.
+func checkBasicFileOperations(f *framework.Framework, pod *v1.Pod, basePath string) {
+	framework.Logf("Checking basic file operations inside pod %s at %s", pod.UID, basePath)
+
+	dir := filepath.Join(basePath, "test-dir")
+	first := filepath.Join(basePath, "first")
+	second := filepath.Join(dir, "second")
+
+	seed := time.Now().UTC().UnixNano()
+	testWriteSize := 1024 // 1KB
+
+	checkWriteToPath(f, pod, first, testWriteSize, seed)
+	checkReadFromPath(f, pod, first, testWriteSize, seed)
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && touch %s", dir, dir, second))
+	checkListingPath(f, pod, dir)
+	checkListingPath(f, pod, basePath)
+	checkListingPath(f, pod, second)
+	checkDeletingPath(f, pod, first)
+	checkDeletingPath(f, pod, second)
 }
 
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
