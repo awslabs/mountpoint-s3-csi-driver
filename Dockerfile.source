@@ -1,0 +1,71 @@
+# A Dockerfile that builds the CSI Driver by compiling Mountpoint from its source.
+# This is useful for testing unreleased Mountpoint versions.
+
+#
+# Configuration
+#
+ARG MOUNTPOINT_REPOSITORY="https://github.com/awslabs/mountpoint-s3"
+ARG MOUNTPOINT_BRANCH="main"
+ARG MOUNTPOINT_VERSION="unreleased"
+ARG MOUNTPOINT_BUILD_ARGS="" # e.g., --features express_cache
+
+#
+# Build Mountpoint
+#
+FROM --platform=$TARGETPLATFORM amazonlinux:2023 as mp_builder
+ARG MOUNTPOINT_REPOSITORY
+ARG MOUNTPOINT_BRANCH
+ARG MOUNTPOINT_BUILD_ARGS
+
+# Install build tools
+RUN dnf upgrade -y && \
+    dnf install -y \
+    fuse \
+    fuse-devel \
+    cmake3 \
+    clang \
+    git \
+    pkg-config && \
+    dnf clean all
+
+# Install rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Clone Mountpoint
+RUN git clone --recurse-submodules -j8 \
+    --single-branch --branch ${MOUNTPOINT_BRANCH} --depth 1 \
+    ${MOUNTPOINT_REPOSITORY} mountpoint-s3
+
+# Build Mountpoint
+RUN cd mountpoint-s3 && \
+    cargo build ${MOUNTPOINT_BUILD_ARGS} --release
+
+#
+# Build CSI Driver
+#
+
+# Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.22-bullseye as builder
+ARG TARGETARCH
+
+WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    TARGETARCH=${TARGETARCH} make bin
+
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base:latest AS linux-amazon
+ARG MOUNTPOINT_VERSION
+ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
+ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
+
+# MP Installer
+COPY --from=mp_builder /mountpoint-s3/target/release/mount-s3 /mountpoint-s3/bin/mount-s3
+COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
+COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
+
+# Install driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
+
+ENTRYPOINT ["/bin/aws-s3-csi-driver"]
