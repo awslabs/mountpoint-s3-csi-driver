@@ -33,6 +33,8 @@ IMAGE_NAME?=""
 IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
 
+DOCKERFILE?="Dockerfile"
+
 OS?=linux
 ARCH?=amd64
 OSVERSION?=amazon
@@ -66,7 +68,7 @@ all-push: create-manifest-and-images
 
 .PHONY: build_image
 build_image:
-	DOCKER_BUILDKIT=1 docker buildx build -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
+	DOCKER_BUILDKIT=1 docker buildx build -f ${DOCKERFILE} -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
 
 .PHONY: push-manifest
 push-manifest: create-manifest
@@ -95,6 +97,7 @@ sub-image-%:
 image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION):
 	DOCKER_BUILDKIT=1 docker buildx build \
+		-f ${DOCKERFILE} \
 		--platform=$(OS)/$(ARCH) \
 		--progress=plain \
 		--target=$(OS)-$(OSVERSION) \
