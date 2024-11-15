@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
@@ -80,11 +83,45 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		DeferCleanup(cleanup)
 	})
 
-	createPod := func(ctx context.Context, additionalMountOptions []string, podModifiers ...func(*v1.Pod)) *v1.Pod {
+	// checkBasicFileOperations verifies basic file operations works in the given `basePath` inside the `pod`.
+	checkBasicFileOperations := func(ctx context.Context, pod *v1.Pod, bucketName, basePath string) {
+		framework.Logf("Checking basic file operations inside pod %s at %s", pod.UID, basePath)
+
+		dir := filepath.Join(basePath, "test-dir")
+		first := filepath.Join(basePath, "first")
+		second := filepath.Join(dir, "second")
+
+		seed := time.Now().UTC().UnixNano()
+		testWriteSize := 1024 // 1KB
+
+		checkWriteToPath(f, pod, first, testWriteSize, seed)
+		checkListingPathWithEntries(f, pod, basePath, []string{"first"})
+		// Test reading multiple times to ensure cached-read works
+		for i := 0; i < 3; i++ {
+			checkReadFromPath(f, pod, first, testWriteSize, seed)
+		}
+
+		// Now remove the file from S3
+		deleteObjectFromS3(ctx, bucketName, "first")
+
+		// Ensure the data still read from the cache - without cache this would fail as its removed from underlying bucket
+		checkReadFromPath(f, pod, first, testWriteSize, seed)
+
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s", dir, dir, second))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
+		checkListingPathWithEntries(f, pod, dir, []string{"second"})
+		checkListingPathWithEntries(f, pod, basePath, []string{"test-dir"})
+		checkDeletingPath(f, pod, first)
+		checkDeletingPath(f, pod, second)
+	}
+
+	createPod := func(ctx context.Context, additionalMountOptions []string, podModifiers ...func(*v1.Pod)) (*v1.Pod, string) {
 		cacheDir := randomCacheDir()
 
 		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, append(additionalMountOptions, fmt.Sprintf("cache %s", cacheDir)))
 		deferCleanup(vol.CleanupResource)
+
+		bucketName := bucketNameFromVolumeResource(vol)
 
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
 		ensureCacheDirExistsInNode(pod, cacheDir)
@@ -96,17 +133,17 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		framework.ExpectNoError(err)
 		deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
-		return pod
+		return pod, bucketName
 	}
 
 	Describe("Cache", func() {
 		Describe("Local", func() {
 			It("basic file operations as root", func(ctx context.Context) {
-				pod := createPod(ctx, []string{"allow-delete"}, func(pod *v1.Pod) {
+				pod, bucketName := createPod(ctx, []string{"allow-delete"}, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
 					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
 				})
-				checkBasicFileOperations(f, pod, e2epod.VolumeMountPath1)
+				checkBasicFileOperations(ctx, pod, bucketName, e2epod.VolumeMountPath1)
 			})
 
 			It("basic file operations as non-root", func(ctx context.Context) {
@@ -116,19 +153,19 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 					fmt.Sprintf("uid=%d", *e2epod.GetDefaultNonRootUser()),
 					fmt.Sprintf("gid=%d", defaultNonRootGroup),
 				}
-				pod := createPod(ctx, mountOptions, func(pod *v1.Pod) {
+				pod, bucketName := createPod(ctx, mountOptions, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = e2epod.GetDefaultNonRootUser()
 					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
 					pod.Spec.Containers[0].SecurityContext.RunAsNonRoot = ptr.To(true)
 				})
 
-				checkBasicFileOperations(f, pod, e2epod.VolumeMountPath1)
+				checkBasicFileOperations(ctx, pod, bucketName, e2epod.VolumeMountPath1)
 			})
 
 			It("two containers in the same pod using the same cache", func(ctx context.Context) {
 				testFile := filepath.Join(e2epod.VolumeMountPath1, "helloworld.txt")
 
-				pod := createPod(ctx, []string{"allow-delete"}, func(pod *v1.Pod) {
+				pod, _ := createPod(ctx, []string{"allow-delete"}, func(pod *v1.Pod) {
 					// Make it init container to ensure it runs before regular containers
 					pod.Spec.InitContainers = append(pod.Spec.InitContainers, v1.Container{
 						Name:  "populate-cache",
@@ -148,6 +185,17 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 		})
 	})
+}
+
+// deleteObjectFromS3 deletes an object from given bucket by using S3 SDK.
+// This is useful to create some side-effects by bypassing Mountpoint.
+func deleteObjectFromS3(ctx context.Context, bucket string, key string) {
+	client := s3.NewFromConfig(awsConfig(ctx))
+	_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	framework.ExpectNoError(err)
 }
 
 func randomCacheDir() string {

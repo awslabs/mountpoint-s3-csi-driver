@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -88,30 +87,6 @@ func checkListingPathWithEntries(f *framework.Framework, pod *v1.Pod, path strin
 	gomega.Expect(strings.Fields(stdout)).To(gomega.Equal(entries))
 }
 
-// checkBasicFileOperations verifies basic file operations works in the given `basePath` inside the `pod`.
-func checkBasicFileOperations(f *framework.Framework, pod *v1.Pod, basePath string) {
-	framework.Logf("Checking basic file operations inside pod %s at %s", pod.UID, basePath)
-
-	dir := filepath.Join(basePath, "test-dir")
-	first := filepath.Join(basePath, "first")
-	second := filepath.Join(dir, "second")
-
-	seed := time.Now().UTC().UnixNano()
-	testWriteSize := 1024 // 1KB
-
-	checkWriteToPath(f, pod, first, testWriteSize, seed)
-	// Test reading multiple times to ensure cached-read works
-	for i := 0; i < 3; i++ {
-		checkReadFromPath(f, pod, first, testWriteSize, seed)
-	}
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s", dir, dir, second))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
-	checkListingPathWithEntries(f, pod, dir, []string{"second"})
-	checkListingPathWithEntries(f, pod, basePath, []string{"first", "test-dir"})
-	checkDeletingPath(f, pod, first)
-	checkDeletingPath(f, pod, second)
-}
-
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
 	f := config.Framework
 	r := storageframework.VolumeResource{
@@ -163,6 +138,11 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
 	framework.ExpectNoError(err, "PVC, PV failed to bind")
 	return &r
+}
+
+func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
+	pvc := vol.Pv.Spec.PersistentVolumeSource
+	return pvc.CSI.VolumeHandle
 }
 
 func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
