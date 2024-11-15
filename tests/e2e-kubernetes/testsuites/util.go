@@ -100,7 +100,10 @@ func checkBasicFileOperations(f *framework.Framework, pod *v1.Pod, basePath stri
 	testWriteSize := 1024 // 1KB
 
 	checkWriteToPath(f, pod, first, testWriteSize, seed)
-	checkReadFromPath(f, pod, first, testWriteSize, seed)
+	// Test reading multiple times to ensure cached-read works
+	for i := 0; i < 3; i++ {
+		checkReadFromPath(f, pod, first, testWriteSize, seed)
+	}
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s", dir, dir, second))
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
 	checkListingPathWithEntries(f, pod, dir, []string{"second"})
