@@ -50,6 +50,7 @@ func (t *s3CSICacheTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver
 
 func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"cache", storageframework.GetDriverTimeouts(driver))
+	// This is required for now due to hack mentioned in `ensureCacheDirExistsInNode` function, see the comments there for more context.
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
 	type local struct {
@@ -85,7 +86,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, append(additionalMountOptions, fmt.Sprintf("cache %s", cacheDir)))
 		deferCleanup(vol.CleanupResource)
 
-		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelPrivileged, "")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
 		ensureCacheDirExistsInNode(pod, cacheDir)
 		for _, pm := range podModifiers {
 			pm(pod)
