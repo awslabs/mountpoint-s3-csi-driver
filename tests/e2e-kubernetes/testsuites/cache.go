@@ -134,7 +134,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 						Name:  "populate-cache",
 						Image: e2epod.GetDefaultTestImage(),
 						Command: e2epod.GenerateScriptCmd(
-							fmt.Sprintf("echo 'hello world!' > %s", testFile)),
+							fmt.Sprintf("echo 'hello world!' > %s && cat %s | grep -q 'hello world!'", testFile, testFile)),
 						VolumeMounts: []v1.VolumeMount{
 							{
 								Name:      volumeName1,
