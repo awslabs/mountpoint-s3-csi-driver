@@ -4,6 +4,7 @@ import (
 	"flag"
 	"testing"
 
+	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
 	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -25,6 +26,8 @@ func init() {
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.Parse()
+
+	s3client.DefaultRegion = BucketRegion
 }
 
 func TestE2E(t *testing.T) {
