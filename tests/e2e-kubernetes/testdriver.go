@@ -2,14 +2,12 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
 	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apiserver/pkg/storage/names"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
@@ -82,13 +80,12 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 		f.Failf("Unsupported volType: %v is specified", volumeType)
 	}
 
-	bucketName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-e2e-kubernetes-%s-", BucketPrefix, CommitId))
-
+	var bucketName string
 	var deleteBucket s3client.DeleteBucketFunc
 	if config.Prefix == custom_testsuites.S3ExpressTestIdentifier {
-		bucketName, deleteBucket = d.client.CreateDirectoryBucket(ctx, bucketName)
+		bucketName, deleteBucket = d.client.CreateDirectoryBucket(ctx)
 	} else {
-		bucketName, deleteBucket = d.client.CreateStandardBucket(ctx, bucketName)
+		bucketName, deleteBucket = d.client.CreateStandardBucket(ctx)
 	}
 
 	return &s3Volume{
@@ -103,7 +100,7 @@ func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testV
 
 	volumeAttributes := map[string]string{"bucketName": volume.bucketName}
 	if volume.authenticationSource != "" {
-		f.Logf("Using authencation source %s for volume", volume.authenticationSource)
+		f.Logf("Using authentication source %s for volume", volume.authenticationSource)
 		volumeAttributes["authenticationSource"] = volume.authenticationSource
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
@@ -24,7 +25,8 @@ var expressAZs = map[string]string{
 	"eu-north-1": "eun1-az1",
 }
 
-const maxS3ExpressBucketNameLength = 63
+const s3BucketNameMaxLength = 63
+const s3BucketNamePrefix = "s3-csi-k8s-e2e-"
 
 // DeleteBucketFunc is a cleanup function thats returned as a result of "Create*Bucket" calls.
 // It clears the content of the bucket if not empty, and then deletes the bucket.
@@ -50,9 +52,11 @@ func NewWithRegion(region string) *Client {
 	return &Client{region: region, client: s3.NewFromConfig(cfg)}
 }
 
-// CreateStandardBucket creates a standard S3 bucket with the given name,
+// CreateStandardBucket creates a new standard S3 bucket with a random name,
 // and returns the bucket name and a clean up function.
-func (c *Client) CreateStandardBucket(ctx context.Context, bucketName string) (string, DeleteBucketFunc) {
+func (c *Client) CreateStandardBucket(ctx context.Context) (string, DeleteBucketFunc) {
+	bucketName := c.randomBucketName("")
+
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}
@@ -66,9 +70,9 @@ func (c *Client) CreateStandardBucket(ctx context.Context, bucketName string) (s
 	return bucketName, c.create(ctx, input)
 }
 
-// CreateDirectoryBucket creates a directory S3 bucket with the given name by modifying it according to
-// "Directory bucket naming rules" and returns the bucket name and a clean up function.
-func (c *Client) CreateDirectoryBucket(ctx context.Context, bucketName string) (string, DeleteBucketFunc) {
+// CreateDirectoryBucket creates a new directory S3 bucket with a random name (by following
+// "Directory bucket naming rules") and returns the bucket name and a clean up function.
+func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucketFunc) {
 	regionAz := expressAZs[c.region]
 	if regionAz == "" {
 		framework.Failf("Unknown S3 Express region %s\n", c.region)
@@ -77,12 +81,10 @@ func (c *Client) CreateDirectoryBucket(ctx context.Context, bucketName string) (
 	// refer to s3 express bucket naming conventions
 	// https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-naming-rules.html
 	suffix := fmt.Sprintf("--%s--x-s3", regionAz)
+	bucketName := c.randomBucketName(suffix)
+
 	// s3 express doesn't allow non-virtually routable names
 	bucketName = strings.Replace(bucketName, ".", "", -1)
-	if len(bucketName)+len(suffix) > maxS3ExpressBucketNameLength {
-		bucketName = strings.TrimRight(bucketName[:maxS3ExpressBucketNameLength-len(suffix)], "-")
-	}
-	bucketName = fmt.Sprintf("%s%s", bucketName, suffix)
 
 	return bucketName, c.create(ctx, &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
@@ -151,4 +153,13 @@ func (c *Client) delete(ctx context.Context, bucketName string) error {
 	framework.Logf("S3 Bucket %s deleted", bucketName)
 
 	return nil
+}
+
+// randomBucketName generates a random bucket name by using prefix (`s3BucketNamePrefix`) and `suffix`
+// and generating random string for the remaining space according to S3's limit (63 as of today).
+func (c *Client) randomBucketName(suffix string) string {
+	prefixLen := len(s3BucketNamePrefix)
+	suffixLen := len(suffix)
+	rand := utilrand.String(s3BucketNameMaxLength - prefixLen - suffixLen)
+	return s3BucketNamePrefix + rand + suffix
 }
