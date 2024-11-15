@@ -70,6 +70,9 @@ jobs:
   test:
     needs: build
     strategy:
+      # Failing fast causes some resources created during the test to leak,
+      # so we disable it to ensure all resources created during test are properly cleaned up.
+      fail-fast: false
       matrix:
         cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
