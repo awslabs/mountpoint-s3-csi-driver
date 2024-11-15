@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -77,6 +78,16 @@ func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
 }
 
+func checkListingPathWithEntries(f *framework.Framework, pod *v1.Pod, path string, entries []string) {
+	cmd := fmt.Sprintf("ls %s", path)
+	stdout, stderr, err := e2evolume.PodExec(f, pod, cmd)
+	framework.ExpectNoError(err,
+		"%q should succeed, but failed with error message %q\nstdout: %s\nstderr: %s",
+		cmd, err, stdout, stderr)
+
+	gomega.Expect(strings.Fields(stdout)).To(gomega.Equal(entries))
+}
+
 // checkBasicFileOperations verifies basic file operations works in the given `basePath` inside the `pod`.
 func checkBasicFileOperations(f *framework.Framework, pod *v1.Pod, basePath string) {
 	framework.Logf("Checking basic file operations inside pod %s at %s", pod.UID, basePath)
@@ -91,9 +102,8 @@ func checkBasicFileOperations(f *framework.Framework, pod *v1.Pod, basePath stri
 	checkWriteToPath(f, pod, first, testWriteSize, seed)
 	checkReadFromPath(f, pod, first, testWriteSize, seed)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && touch %s", dir, dir, second))
-	checkListingPath(f, pod, dir)
-	checkListingPath(f, pod, basePath)
-	checkListingPath(f, pod, second)
+	checkListingPathWithEntries(f, pod, dir, []string{"second"})
+	checkListingPathWithEntries(f, pod, basePath, []string{"first", "test-dir"})
 	checkDeletingPath(f, pod, first)
 	checkDeletingPath(f, pod, second)
 }
