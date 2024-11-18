@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -76,6 +77,16 @@ func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
 }
 
+func checkListingPathWithEntries(f *framework.Framework, pod *v1.Pod, path string, entries []string) {
+	cmd := fmt.Sprintf("ls %s", path)
+	stdout, stderr, err := e2evolume.PodExec(f, pod, cmd)
+	framework.ExpectNoError(err,
+		"%q should succeed, but failed with error message %q\nstdout: %s\nstderr: %s",
+		cmd, err, stdout, stderr)
+
+	gomega.Expect(strings.Fields(stdout)).To(gomega.Equal(entries))
+}
+
 func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
 	f := config.Framework
 	r := storageframework.VolumeResource{
@@ -127,6 +138,11 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
 	framework.ExpectNoError(err, "PVC, PV failed to bind")
 	return &r
+}
+
+func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
+	pvc := vol.Pv.Spec.PersistentVolumeSource
+	return pvc.CSI.VolumeHandle
 }
 
 func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
