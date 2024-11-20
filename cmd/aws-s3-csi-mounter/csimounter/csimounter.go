@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"slices"
 
+	"k8s.io/klog/v2"
+
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 )
 
@@ -64,6 +66,8 @@ func Run(options Options) (int, error) {
 	// so Mountpoint logs can be viewable with `kubectl logs`.
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	klog.Info("Starting Mountpoint process")
 
 	return options.CmdRunner(cmd)
 }

@@ -19,7 +19,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 )
 
-var mountSockPath = flag.String("mount-sock-path", "/sock/mount.sock", "Path of the Unix socket to receive mount options from.")
+var mountSockPath = flag.String("mount-sock-path", "/comm/mount.sock", "Path of the Unix socket to receive mount options from.")
 var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
 var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
 
@@ -39,15 +39,18 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to run Mountpoint: %v\n", err)
 	}
+	klog.Infof("Mountpoint exited with %d exit code\n", exitCode)
 	os.Exit(exitCode)
 }
 
 func recvMountOptions() mountoptions.Options {
 	ctx, cancel := context.WithTimeout(context.Background(), *mountSockRecvTimeout)
 	defer cancel()
+	klog.Infof("Trying to receive mount options from %s", *mountSockPath)
 	options, err := mountoptions.Recv(ctx, *mountSockPath)
 	if err != nil {
 		klog.Fatalf("Failed to receive mount options from %s: %v\n", *mountSockPath, err)
 	}
+	klog.Infof("Mount options has been received from %s", *mountSockPath)
 	return options
 }
