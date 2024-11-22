@@ -48,8 +48,8 @@ func Run(options Options) (int, error) {
 
 	// By default Mountpoint runs in a detached mode. Here we want to monitor it by relaying its output,
 	// and also we want to wait until it terminates. We're passing `--foreground` to achieve this.
-	const foreground = "--foreground"
-	if !slices.Contains(args, foreground) {
+	const foreground, foregroundShort = "--foreground", "-f"
+	if !(slices.Contains(args, foreground) || slices.Contains(args, foregroundShort)) {
 		args = append(args, foreground)
 	}
 
