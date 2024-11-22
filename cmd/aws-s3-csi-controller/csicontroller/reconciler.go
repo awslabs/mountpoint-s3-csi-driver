@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.uber.org/zap/zapcore"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -17,7 +16,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-const debugLevel = int(zapcore.DebugLevel)
+const debugLevel = 4
 
 const mountpointCSIDriverName = "s3.csi.aws.com"
 
@@ -54,6 +53,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, req.NamespacedName, pod)
 	if err != nil {
+		// This is not an error situation as sometimes we schedule retries for `req`s,
+		// and they might got deleted once we try to re-process them again.
 		if apierrors.IsNotFound(err) {
 			log.Info("Pod not found - ignoring")
 			return reconcile.Result{}, nil
