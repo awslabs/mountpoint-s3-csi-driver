@@ -17,11 +17,13 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-var mountSockPath = flag.String("mount-sock-path", "/comm/mount.sock", "Path of the Unix socket to receive mount options from.")
 var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
 var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
+
+var mountSockPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
 
 const mountpointBin = "mount-s3"
 
@@ -46,11 +48,11 @@ func main() {
 func recvMountOptions() mountoptions.Options {
 	ctx, cancel := context.WithTimeout(context.Background(), *mountSockRecvTimeout)
 	defer cancel()
-	klog.Infof("Trying to receive mount options from %s", *mountSockPath)
-	options, err := mountoptions.Recv(ctx, *mountSockPath)
+	klog.Infof("Trying to receive mount options from %s", mountSockPath)
+	options, err := mountoptions.Recv(ctx, mountSockPath)
 	if err != nil {
-		klog.Fatalf("Failed to receive mount options from %s: %v\n", *mountSockPath, err)
+		klog.Fatalf("Failed to receive mount options from %s: %v\n", mountSockPath, err)
 	}
-	klog.Infof("Mount options has been received from %s", *mountSockPath)
+	klog.Infof("Mount options has been received from %s", mountSockPath)
 	return options
 }
