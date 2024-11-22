@@ -52,6 +52,9 @@ E2E_REGION?=us-east-1
 E2E_COMMIT_ID?=local
 E2E_KUBECONFIG?=""
 
+# Kubernetes version to use in envtest for controller tests.
+ENVTEST_K8S_VERSION ?= 1.30.x
+
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
 
@@ -143,8 +146,13 @@ cover:
 fmt:
 	go fmt ./...
 
+# Run controller tests with envtest.
+.PHONY: e2e-controller
+e2e-controller: envtest
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
+
 .PHONY: e2e
-e2e:
+e2e: e2e-controller
 	pushd tests/e2e-kubernetes; \
 	KUBECONFIG=${E2E_KUBECONFIG} go test -timeout 30m -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
 	EXIT_CODE=$$?; \
@@ -158,3 +166,34 @@ check_style:
 .PHONY: clean
 clean:
 	rm -rf bin/ && docker system prune
+
+## Binaries used in tests.
+
+TESTBIN ?= $(shell pwd)/tests/bin
+$(TESTBIN):
+	mkdir -p $(TESTBIN)
+
+ENVTEST ?= $(TESTBIN)/setup-envtest
+ENVTEST_VERSION ?= release-0.19
+
+.PHONY: envtest
+envtest: $(ENVTEST)
+$(ENVTEST): $(TESTBIN)
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# Copied from kubebuilder.
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(TESTBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef
