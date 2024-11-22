@@ -116,6 +116,8 @@ jobs:
         run: |
           export ACTION=install_tools
           tests/e2e-kubernetes/scripts/run.sh
+      - name: Run Controller Tests
+        run: make e2e-controller
       - name: Create cluster
         run: |
           export ACTION=create_cluster
