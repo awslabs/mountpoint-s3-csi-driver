@@ -117,7 +117,11 @@ jobs:
           export ACTION=install_tools
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Controller Tests
-        run: make e2e-controller
+        run: |
+          # K8S_VERSION is a full version, like 1.28.13, but envtest only supports minor and major, like 1.28
+          export K8S_VERSION=${{ matrix.kubernetes-version }}
+          export ENVTEST_K8S_VERSION="${K8S_VERSION%.*}"
+          make e2e-controller
       - name: Create cluster
         run: |
           export ACTION=create_cluster
