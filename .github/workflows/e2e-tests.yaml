@@ -118,7 +118,8 @@ jobs:
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Controller Tests
         run: |
-          # K8S_VERSION is a full version, like 1.28.13, but envtest only supports minor and major, like 1.28
+          # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,
+          # and in order to get latest supported version by envtest we convert it to 1.28.
           export K8S_VERSION=${{ matrix.kubernetes-version }}
           export ENVTEST_K8S_VERSION="${K8S_VERSION%.*}"
           make e2e-controller
