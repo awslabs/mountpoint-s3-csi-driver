@@ -376,6 +376,49 @@ var _ = Describe("Mountpoint Controller", func() {
 
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
+
+		It("should not schedule a Mountpoint Pod if the Workload Pod is terminating", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule("test-node")
+
+			// `pod` got a `mountpointPod`
+			mountpointPod := waitForMountpointPodFor(pod, vol)
+			verifyMountpointPodFor(pod, vol, mountpointPod)
+
+			// `mountpointPod` got terminated
+			mountpointPod.succeed()
+			waitForObjectToDisappear(mountpointPod.Pod)
+
+			// `pod` got terminated
+			pod.terminate()
+
+			// Since `pod` was in `Pending` state, termination of Pod will still keep that in
+			// `Pending` state but will populate `DeletionTimestamp` to indicate this Pod is terminating.
+			// In this case, there shouldn't be a new Mountpoint Pod spawned for it.
+			expectNoMountpointPodFor(pod, vol)
+		})
+
+		It("should delete Mountpoint Pod if the Workload Pod is terminated", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule("test-node")
+
+			// `pod` got a `mountpointPod`
+			mountpointPod := waitForMountpointPodFor(pod, vol)
+			verifyMountpointPodFor(pod, vol, mountpointPod)
+
+			// `pod` got terminated
+			pod.terminate()
+			waitForObjectToDisappear(pod.Pod)
+
+			// `mountpointPod` scheduled for `pod` should also get terminated
+			waitForObjectToDisappear(mountpointPod.Pod)
+		})
 	})
 })
 
@@ -404,6 +447,11 @@ func (p *testPod) succeed() {
 	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
 		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
 	})
+}
+
+// terminate simulates `testPod` to be terminating.
+func (p *testPod) terminate() {
+	Expect(k8sClient.Delete(ctx, p.Pod)).To(Succeed())
 }
 
 // withPVC returns a `podModifier` that adds given `pvc` to the Pods volumes.
@@ -604,8 +652,12 @@ func waitForObjectToDisappear(obj client.Object) {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
 		err := k8sClient.Get(ctx, key, obj)
-		g.Expect(err).ToNot(BeNil(), "The object expected not to exists but its found: %#v", obj)
-		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Expected not found error but fond: %v", err)
+		if err == nil {
+			g.Expect(obj.GetDeletionTimestamp()).ToNot(BeNil(), "Expected deletion timestamp to be non-nil: %#v", obj)
+		} else {
+			g.Expect(err).ToNot(BeNil(), "The object expected not to exists but its found: %#v", obj)
+			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Expected not found error but fond: %v", err)
+		}
 	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
 }
 
