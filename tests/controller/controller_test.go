@@ -361,6 +361,50 @@ var _ = Describe("Mountpoint Controller", func() {
 		})
 	})
 
+	Context("Different Volume Types", func() {
+		It("should not schedule a Mountpoint Pod if the Pod only uses an emptyDir volume", func() {
+			pod := createPod(withVolume("empty-dir", corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			}))
+			pod.schedule("test-node")
+
+			expectNoMountpointPodForWorkloadPod(pod)
+		})
+
+		It("should not schedule a Mountpoint Pod if the Pod only uses a hostPath volume", func() {
+			pod := createPod(withVolume("host-path", corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/tmp/mountpoint-test",
+					Type: ptr.To(corev1.HostPathDirectoryOrCreate),
+				},
+			}))
+			pod.schedule("test-node")
+
+			expectNoMountpointPodForWorkloadPod(pod)
+		})
+
+		It("should not schedule a Mountpoint Pod if the Pod only different volume-types/CSI-drivers", func() {
+			vol := createVolume(withCSIDriver(ebsCSIDriver))
+			vol.bind()
+
+			pod := createPod(
+				withPVC(vol.pvc),
+				withVolume("host-path", corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/tmp/mountpoint-test",
+						Type: ptr.To(corev1.HostPathDirectoryOrCreate),
+					},
+				}),
+				withVolume("empty-dir", corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				}),
+			)
+			pod.schedule("test-node")
+
+			expectNoMountpointPodForWorkloadPod(pod)
+		})
+	})
+
 	Context("Mountpoint Pod Management", func() {
 		It("should delete completed Mountpoint Pods", func() {
 			vol := createVolume()
@@ -464,6 +508,16 @@ func withPVC(pvc *corev1.PersistentVolumeClaim) podModifier {
 					ClaimName: pvc.Name,
 				},
 			},
+		})
+	}
+}
+
+// withVolume returns a `podModifier` that adds given volume to the Pods volumes.
+func withVolume(name string, vol corev1.VolumeSource) podModifier {
+	return func(pod *corev1.Pod) {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name:         name,
+			VolumeSource: vol,
 		})
 	}
 }
@@ -605,6 +659,22 @@ func expectNoMountpointPodFor(pod *testPod, vol *testVolume) {
 		Name:      mountpointPodKey.Name,
 		Namespace: mountpointPodKey.Namespace,
 	}})
+}
+
+// expectNoMountpointPodForWorkloadPod verifies that there is no Mountpoint Pod scheduled for given `pod`.
+// `expectNoMountpointPodFor` is preferable to this method if the `vol` is known as this performs a slower list operation.
+func expectNoMountpointPodForWorkloadPod(pod *testPod) {
+	Consistently(func(g Gomega) {
+		podList := &corev1.PodList{}
+		g.Expect(k8sClient.List(ctx, podList,
+			client.InNamespace(mountpointNamespace), client.MatchingLabels{
+				mppod.LabelPodUID: string(pod.UID),
+			},
+		)).To(Succeed())
+
+		g.Expect(podList.Items).To(BeEmpty(), "Expected empty list but got: %#v", podList)
+		g.Expect(podList.Continue).To(BeEmpty(), "Continue token on list must be empty but got: %s", podList.Continue)
+	}, defaultWaitTimeout/2, defaultWaitTimeout/4).Should(Succeed())
 }
 
 // waitAndVerifyMountpointPodFor waits and verifies Mountpoint Pod scheduled for given `pod` and `vol.`
