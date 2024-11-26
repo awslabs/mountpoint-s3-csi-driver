@@ -21,6 +21,7 @@ func TestGeneratingMountpointPodName(t *testing.T) {
 			Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "test-vol"},
 		}
 
+		// Ensure `MountpointPodNameFor` returns a consistent output for the same Pod and PVC.
 		assert.Equals(t,
 			mppod.MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName),
 			mppod.MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName))
