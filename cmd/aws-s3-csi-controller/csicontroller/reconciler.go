@@ -80,8 +80,8 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 	case corev1.PodRunning:
 		log.V(debugLevel).Info("Pod is running")
 	case corev1.PodSucceeded:
-		err := r.Delete(ctx, pod)
-		if err != nil && !apierrors.IsNotFound(err) {
+		err := r.deleteMountpointPod(ctx, pod)
+		if err != nil {
 			log.Error(err, "Failed to delete succeeded Pod")
 			return reconcile.Result{}, err
 		}
@@ -99,11 +99,6 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 // reconcileWorkloadPod reconciles given workload `pod` to spawn a Mountpoint Pod to provide a volume for it if needed.
 func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("pod", types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
-
-	if pod.Status.Phase != corev1.PodPending {
-		log.V(debugLevel).Info("Pod is not pending - ignoring", "status", pod.Status.Phase)
-		return reconcile.Result{}, nil
-	}
 
 	if pod.Spec.NodeName == "" {
 		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
@@ -144,7 +139,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 
 		log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
 
-		err = r.spawnMountpointPodIfNeeded(ctx, pod, pvc, pv, csiSpec)
+		err = r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv, csiSpec)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -154,9 +149,15 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	return reconcile.Result{Requeue: requeue}, errors.Join(errs...)
 }
 
-// spawnMountpointPodIfNeeded spawns a new Mountpoint Pod for given `pod` and volume
-// if there isn't already existing Mountpoint Pod.
-func (r *Reconciler) spawnMountpointPodIfNeeded(
+// spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `pod` and volume if needed.
+//
+// If `pod` is `Pending` and without any associated Mountpoint Pod, a new Mountpoint Pod will be created for it to provide volume.
+//
+// If `pod` is `Pending` and scheduled for termination (i.e., `DeletionTimestamp` is non-nil), and there is an existing Mountpoint Pod for it,
+// the Mountpoint Pod will be scheduled for termination as well. This is because if `pod` never transition into its `Running` state,
+// the Mountpoint Pod might never got a successful mount operation, and thus it might never get unmount operation to cleanly exit
+// and might hang there until it reaches its timeout. We just terminate it in this case to prevent unnecessary waits.
+func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	ctx context.Context,
 	pod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
@@ -170,13 +171,38 @@ func (r *Reconciler) spawnMountpointPodIfNeeded(
 		"mountpointPod", mpPodName,
 		"pvc", pvc.Name, "volumeName", pv.Name)
 
-	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: mpPodName}, &corev1.Pod{})
+	mpPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: mpPodName}, mpPod)
 	if err != nil && !apierrors.IsNotFound(err) {
 		log.Error(err, "Failed to get Mountpoint Pod")
 		return err
 	}
 
 	isMpExists := err == nil
+
+	// `pod` is not active, its either terminated (i.e., `phase == Succeeded or phase == Failed`) or
+	// its scheduled for termination (i.e., `DeletionTimestamp != nil`)
+	if !isPodActive(pod) {
+		// if its scheduled for termination and its still in `Pending` phase,
+		// delete if there is an existing Mountpoint Pod as otherwise this
+		// Mountpoint Pod might take some time to terminate on its own.
+		if isMpExists && pod.Status.Phase == corev1.PodPending {
+			log.Info("Deleting scheduled Mountpoint Pod")
+			err := r.deleteMountpointPod(ctx, mpPod)
+			if err != nil {
+				log.Error(err, "Failed to delete scheduled Mountpoint Pod")
+				return err
+			}
+
+			log.Info("Scheduled Mountpoint Pod deleted")
+			return err
+		}
+
+		// No need to do anything - either there was no Mountpoint Pod for `pod` or it was in `Running` state,
+		// so a clean unmount operation will be performed and Mountpoint Pod will cleany exit (and get deleted by `reconcileMountpointPod`).
+		return nil
+	}
+
 	if isMpExists {
 		log.V(debugLevel).Info("Mountpoint Pod already exists - ignoring")
 		return nil
@@ -221,6 +247,26 @@ func (r *Reconciler) spawnMountpointPod(
 
 	log.Info("Mountpoint Pod spawned", "mountpointPodUID", mpPod.UID)
 	return nil
+}
+
+// deleteMountpointPod deletes given `mountpointPod`.
+// It does not return an error if `mountpointPod` does not exists in the control plane.
+func (r *Reconciler) deleteMountpointPod(ctx context.Context, mountpointPod *corev1.Pod) error {
+	log := logf.FromContext(ctx).WithValues("mountpointPod", mountpointPod.Name)
+
+	err := r.Delete(ctx, mountpointPod)
+	if err == nil {
+		log.Info("Mountpoint Pod deleted")
+		return nil
+	}
+
+	if apierrors.IsNotFound(err) {
+		log.Info("Mountpoint Pod has been deleted already")
+		return nil
+	}
+
+	log.Error(err, "Failed to delete Mountpoint Pod")
+	return err
 }
 
 // errPVCIsNotBoundToAPV is returned when given PVC is not bound to a PV yet.
@@ -281,4 +327,12 @@ func extractCSISpecFromPV(pv *corev1.PersistentVolume) *corev1.CSIPersistentVolu
 		return nil
 	}
 	return csi
+}
+
+// isPodActive returns whether given Pod is active and not in the process of termination.
+// Copied from https://github.com/kubernetes/kubernetes/blob/8770bd58d04555303a3a15b30c245a58723d0f4a/pkg/controller/controller_utils.go#L1009-L1013.
+func isPodActive(p *corev1.Pod) bool {
+	return corev1.PodSucceeded != p.Status.Phase &&
+		corev1.PodFailed != p.Status.Phase &&
+		p.DeletionTimestamp == nil
 }
