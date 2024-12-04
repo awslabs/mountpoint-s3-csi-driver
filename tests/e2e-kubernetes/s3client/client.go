@@ -101,23 +101,8 @@ func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucke
 	})
 }
 
-func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) DeleteBucketFunc {
-	bucketName := *input.Bucket
-
-	_, err := c.client.CreateBucket(ctx, input)
-	framework.ExpectNoError(err, "Failed to create S3 bucket")
-	if err == nil {
-		framework.Logf("S3 Bucket %s created", bucketName)
-	}
-
-	return func(ctx context.Context) error {
-		return c.delete(ctx, bucketName)
-	}
-}
-
-func (c *Client) delete(ctx context.Context, bucketName string) error {
-	framework.Logf("Deleting S3 Bucket %s...", bucketName)
-
+// WipeoutBucket removes all objects from given `bucketName`.
+func (c *Client) WipeoutBucket(ctx context.Context, bucketName string) error {
 	objects, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 	})
@@ -140,6 +125,31 @@ func (c *Client) delete(ctx context.Context, bucketName string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) DeleteBucketFunc {
+	bucketName := *input.Bucket
+
+	_, err := c.client.CreateBucket(ctx, input)
+	framework.ExpectNoError(err, "Failed to create S3 bucket")
+	if err == nil {
+		framework.Logf("S3 Bucket %s created", bucketName)
+	}
+
+	return func(ctx context.Context) error {
+		return c.delete(ctx, bucketName)
+	}
+}
+
+func (c *Client) delete(ctx context.Context, bucketName string) error {
+	framework.Logf("Deleting S3 Bucket %s...", bucketName)
+
+	err := c.WipeoutBucket(ctx, bucketName)
+	if err != nil {
+		return err
 	}
 
 	// finally delete the bucket
