@@ -1,3 +1,17 @@
+# v1.11.0
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.11.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.13.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.13.0)
+  * Mountpoint now supports AWS Dedicated Local Zones. ([awslabs/aws-c-s3#465](https://github.com/awslabs/aws-c-s3/pull/465))
+  * Mountpoint now offers a new command-line flag `--incremental-upload`, available when mounting directory buckets in S3 Express One Zone.
+    When set, Mountpoint will perform all uploads incrementally and support appending to existing objects. ([mountpoint-s3#1165](https://github.com/awslabs/mountpoint-s3/pull/1165))
+  * Mountpoint now offers a new command-line argument `--cache-xz <BUCKET>` which enables caching of object content to the specified bucket on S3 Express One Zone.
+    To get started, see the [shared cache section of the configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#shared-cache).
+    ([mountpoint-s3#1145](https://github.com/awslabs/mountpoint-s3/pull/1145))
+  * Mountpoint now implements statfs to report non-zero synthetic values.
+    This may unblock applications which rely on verifying there is available space before creating new files. ([mountpoint-s3#1118](https://github.com/awslabs/mountpoint-s3/pull/1118))
+
 # v1.10.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.10.0/README.md)
 
