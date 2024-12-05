@@ -29,6 +29,7 @@ spec:
                     operator: NotIn
                     values:
                       - fargate
+                      - hybrid
       tolerations:
         - key: CriticalAddonsOnly
           operator: Exists
