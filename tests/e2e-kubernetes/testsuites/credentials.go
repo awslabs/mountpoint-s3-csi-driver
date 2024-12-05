@@ -53,6 +53,10 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
 
+// DefaultRegion specifies the STS region to use explicitly when IMDS is unavailable,
+// particularly for EKS beta clusters where IMDS access is not configured by default.
+var DefaultRegion string
+
 type s3CSICredentialsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
 }
@@ -144,7 +148,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	}
 
 	createPodAllowsDelete := func(ctx context.Context) *v1.Pod {
-		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)})
 		deferCleanup(vol.CleanupResource)
 		return createPod(ctx, vol)
 	}
@@ -420,7 +424,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyARN string, allowDelete bool) (*v1.Pod, *v1.ServiceAccount) {
 					By("Creating Pod with ServiceAccount")
 
-					var mountOptions []string
+					mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
 					if allowDelete {
 						mountOptions = append(mountOptions, "allow-delete")
 					}
@@ -465,7 +469,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
-					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)})
 					deferCleanup(vol.CleanupResource)
 
 					// Create a SA with full access role
@@ -506,7 +510,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
-					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)})
 					deferCleanup(vol.CleanupResource)
 
 					saFullAccess := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
@@ -533,7 +537,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
 
-					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, []string{"allow-delete"})
+					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)})
 					deferCleanup(vol.CleanupResource)
 
 					sa := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)

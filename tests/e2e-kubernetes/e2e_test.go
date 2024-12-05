@@ -28,6 +28,7 @@ func init() {
 	flag.Parse()
 
 	s3client.DefaultRegion = BucketRegion
+	custom_testsuites.DefaultRegion = BucketRegion
 }
 
 func TestE2E(t *testing.T) {
