@@ -23,7 +23,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
-      priorityClassName: system-node-critical
+      priorityClassName: {{ .Values.node.priorityClassName }}
       {{- with .Values.node.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}

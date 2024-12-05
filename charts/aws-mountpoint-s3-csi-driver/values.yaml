@@ -28,6 +28,7 @@ node:
     # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
+  priorityClassName: "system-node-critical"
   nodeSelector: {}
   resources:
     requests:
