@@ -40,10 +40,10 @@ func TestE2E(t *testing.T) {
 
 var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitCapacityTestSuite,
-	testsuites.InitVolumesTestSuite, // success: writes 53 bytes to index.html file, reads and verifies content from another pod
-	// testsuites.InitVolumeIOTestSuite,   // tries to open a file for writing multiple times, which is unsupported by MP
-	// testsuites.InitVolumeModeTestSuite, // fail: tries to mount in block mode, success: check unused volume is not mounted
-	// testsuites.InitSubPathTestSuite,
+	testsuites.InitVolumesTestSuite, // Passed - Verifies writing 53 bytes to index.html and reading from another pod.
+	// testsuites.InitVolumeIOTestSuite,   // Failed - Requires specified MountOption for append mode, which is unsupported by the test framework.
+	testsuites.InitVolumeModeTestSuite, // Passed - Validates PV, PVC, and S3 bucket creation, failure handling for block mode, and absence of unused volumes in the pod.
+	// testsuites.InitSubPathTestSuite, // Failed - Hard links and symbolic links are both unsupported in Mountpoint.
 	// testsuites.InitProvisioningTestSuite,
 	// testsuites.InitMultiVolumeTestSuite,
 	// testsuites.InitVolumeExpandTestSuite,
