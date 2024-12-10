@@ -60,9 +60,11 @@ spec:
         - name: s3-plugin
           image: csi-driver
           securityContext:
+            # This is needed because we do `Bidirectional` mount on `/var/lib/kubelet` to propagate mounts
+            # from host to our Pod. This relation will reverse once we implement https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279,
+            # then we will do the mount on the Pod and will propagate that mount to host for other Pods to consume.
+            privileged: true
             readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            privileged: false
             seLinuxOptions:
               user: system_u
               type: super_t
@@ -107,14 +109,13 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /host/dev
-            - name: proc-mounts
-              mountPath: /host/proc/mounts
           ports:
             - name: healthz
               containerPort: 9810
@@ -198,10 +199,6 @@ spec:
           hostPath:
             path: /opt/mountpoint-s3-csi/bin/
             type: DirectoryOrCreate
-        - name: proc-mounts
-          hostPath:
-            path: /proc/mounts
-            type: File
         - name: systemd-bus
           hostPath:
             path: /run/systemd/private
