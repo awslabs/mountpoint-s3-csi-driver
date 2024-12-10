@@ -472,7 +472,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
-					var mountOptions = append([]string{"allow-delete"}, fmt.Sprintf("region %s", DefaultRegion))
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
 
@@ -514,7 +514,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
-					var mountOptions = append([]string{"allow-delete"}, fmt.Sprintf("region %s", DefaultRegion))
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
 
@@ -542,7 +542,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
 
-					var mountOptions = append([]string{"allow-delete"}, fmt.Sprintf("region %s", DefaultRegion))
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
 
