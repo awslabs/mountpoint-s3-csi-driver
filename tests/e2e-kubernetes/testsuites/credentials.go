@@ -53,7 +53,7 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
 
-// DefaultRegion specifies the STS region explicitl.
+// DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
 
 // IMDSAvailable indicates whether the Instance Metadata Service is accessible.
