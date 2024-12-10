@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	CommitId     string
-	BucketRegion string // assumed to be the same as k8s cluster's region
-	BucketPrefix string
-	Performance  bool
+	CommitId      string
+	BucketRegion  string // assumed to be the same as k8s cluster's region
+	BucketPrefix  string
+	Performance   bool
+	IMDSAvailable bool
 )
 
 type s3Driver struct {
