@@ -25,9 +25,12 @@ func init() {
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
+	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
 	flag.Parse()
 
 	s3client.DefaultRegion = BucketRegion
+	custom_testsuites.DefaultRegion = BucketRegion
+	custom_testsuites.IMDSAvailable = IMDSAvailable
 }
 
 func TestE2E(t *testing.T) {
