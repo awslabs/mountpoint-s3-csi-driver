@@ -198,14 +198,14 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv -timeout 30m --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv -timeout 30m --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true
   EXIT_CODE=$?
   print_cluster_info
   popd
