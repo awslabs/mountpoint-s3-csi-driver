@@ -10,6 +10,8 @@ import (
 	"io"
 	"net"
 	"syscall"
+
+	"k8s.io/klog/v2"
 )
 
 // An Options struct represents mount options to use while invoking Mountpoint.
@@ -23,6 +25,8 @@ type Options struct {
 
 // Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.
 func Send(ctx context.Context, sockPath string, options Options) error {
+	warnAboutLongUnixSocketPath(sockPath)
+
 	message, err := json.Marshal(&options)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message to send %s: %w", sockPath, err)
@@ -57,6 +61,8 @@ var (
 
 // Recv receives passed mount options via `Send` function through given `sockPath`.
 func Recv(ctx context.Context, sockPath string) (Options, error) {
+	warnAboutLongUnixSocketPath(sockPath)
+
 	l, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return Options{}, fmt.Errorf("failed to listen unix socket %s: %w", sockPath, err)
@@ -127,4 +133,14 @@ func parseUnixRights(buf []byte) ([]int, error) {
 	}
 
 	return fds, nil
+}
+
+// warnAboutLongUnixSocketPath emits a warning if `path` is longer than 108 characters.
+// There is a limit on Unix domain socket path on some platforms and
+// Go returns `bind: invalid argument` in this case which is hard to debug.
+// See https://github.com/golang/go/issues/6895 for more details.
+func warnAboutLongUnixSocketPath(path string) {
+	if len(path) > 108 {
+		klog.Warningf("Length of Unix domain socket is larger than 108 characters and it might not work in some platforms, see https://github.com/golang/go/issues/6895. Fullpath: %q", path)
+	}
 }
