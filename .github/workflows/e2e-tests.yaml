@@ -13,13 +13,13 @@ on:
       - ".github/workflows/**"
       - "Dockerfile"
 
-# This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
+# This workflow runs e2e tests and relies on existence of EKS cluster with a `s3-csi-driver-sa` service account
 # already deployed to it, which provides the driver with access to s3.
 #
 # Since we have a single cluster for e2e tests, we ensure that no more than one instance of this workflow is
 # running by `concurrency: e2e-cluster` option.
 #
-# Succesfull workflows triggered by push to main will upload tested image to the private repository "PROMOTED_IMAGE_NAME":
+# Successful workflows triggered by push to main will upload tested image to the private repository "PROMOTED_IMAGE_NAME":
 # - uploaded images will be tagged with main branch commit number
 # - uploaded images will be later promoted to public repository by "release" workflow
 concurrency: e2e-cluster
@@ -78,6 +78,25 @@ jobs:
         arch: ["x86", "arm"]
         family: ["AmazonLinux2", "Bottlerocket"]
         kubernetes-version: ["1.28.13", "1.29.8", "1.30.4", "1.31.0"]
+        include:
+          # Ubuntu2004 supported for EKS <= 1.29 and Ubuntu2204 supported for EKS >= 1.29.
+          # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "Ubuntu2004"
+            kubernetes-version: "1.28.13"
+          - cluster-type: "eksctl"
+            arch: "arm"
+            family: "Ubuntu2004"
+            kubernetes-version: "1.29.8"
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "Ubuntu2204"
+            kubernetes-version: "1.30.4"
+          - cluster-type: "eksctl"
+            arch: "arm"
+            family: "Ubuntu2204"
+            kubernetes-version: "1.31.0"
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
