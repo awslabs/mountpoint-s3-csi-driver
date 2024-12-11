@@ -88,8 +88,8 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 		log.Info("Pod succeeded and successfully deleted")
 	case corev1.PodFailed:
 		// TODO: We should probably delete failed Pods after some time to trigger a retry on the whole operation.
-		// 		 Maybe just returning a `reconcile.Result{RequeueAfter: ...}`
-		// 	     and deleting in next cycle would be a good way?
+		//       Maybe just returning a `reconcile.Result{RequeueAfter: ...}`
+		//       and deleting in next cycle would be a good way?
 		log.Info("Pod failed", "reason", pod.Status.Reason)
 	}
 
@@ -149,25 +149,25 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	return reconcile.Result{Requeue: requeue}, errors.Join(errs...)
 }
 
-// spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `pod` and volume if needed.
+// spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `workloadPod` and volume if needed.
 //
-// If `pod` is `Pending` and without any associated Mountpoint Pod, a new Mountpoint Pod will be created for it to provide volume.
+// If `workloadPod` is `Pending` and without any associated Mountpoint Pod, a new Mountpoint Pod will be created for it to provide volume.
 //
-// If `pod` is `Pending` and scheduled for termination (i.e., `DeletionTimestamp` is non-nil), and there is an existing Mountpoint Pod for it,
-// the Mountpoint Pod will be scheduled for termination as well. This is because if `pod` never transition into its `Running` state,
+// If `workloadPod` is `Pending` and scheduled for termination (i.e., `DeletionTimestamp` is non-nil), and there is an existing Mountpoint Pod for it,
+// the Mountpoint Pod will be scheduled for termination as well. This is because if `workloadPod` never transition into its `Running` state,
 // the Mountpoint Pod might never got a successful mount operation, and thus it might never get unmount operation to cleanly exit
 // and might hang there until it reaches its timeout. We just terminate it in this case to prevent unnecessary waits.
 func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	ctx context.Context,
-	pod *corev1.Pod,
+	workloadPod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
 	pv *corev1.PersistentVolume,
 	csiSpec *corev1.CSIPersistentVolumeSource,
 ) error {
-	mpPodName := mppod.MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName)
+	mpPodName := mppod.MountpointPodNameFor(string(workloadPod.UID), pvc.Spec.VolumeName)
 
 	log := logf.FromContext(ctx).WithValues(
-		"pod", types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
+		"workloadPod", types.NamespacedName{Namespace: workloadPod.Namespace, Name: workloadPod.Name},
 		"mountpointPod", mpPodName,
 		"pvc", pvc.Name, "volumeName", pv.Name)
 
@@ -178,15 +178,15 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 		return err
 	}
 
-	isMpExists := err == nil
+	isMountpointPodExists := err == nil
 
-	// `pod` is not active, its either terminated (i.e., `phase == Succeeded or phase == Failed`) or
+	// `workloadPod` is not active, its either terminated (i.e., `phase == Succeeded or phase == Failed`) or
 	// its scheduled for termination (i.e., `DeletionTimestamp != nil`)
-	if !isPodActive(pod) {
+	if !isPodActive(workloadPod) {
 		// if its scheduled for termination and its still in `Pending` phase,
 		// delete if there is an existing Mountpoint Pod as otherwise this
 		// Mountpoint Pod might take some time to terminate on its own.
-		if isMpExists && pod.Status.Phase == corev1.PodPending {
+		if isMountpointPodExists && workloadPod.Status.Phase == corev1.PodPending {
 			log.Info("Deleting scheduled Mountpoint Pod")
 			err := r.deleteMountpointPod(ctx, mpPod)
 			if err != nil {
@@ -203,36 +203,38 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 		return nil
 	}
 
-	if isMpExists {
+	if isMountpointPodExists {
 		log.V(debugLevel).Info("Mountpoint Pod already exists - ignoring")
 		return nil
 	}
 
-	if err := r.spawnMountpointPod(ctx, pod, pvc, pv, csiSpec, mpPodName); err != nil {
+	if err := r.spawnMountpointPod(ctx, workloadPod, pvc, pv, csiSpec, mpPodName); err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
+		return err
 	}
+
 	return nil
 }
 
-// spawnMountpointPod spawns a new Mountpoint Pod for given `pod` and volume.
-// The Mountpoint Pod will be spawned into the same node as `pod`, which then the mount operation
+// spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.
+// The Mountpoint Pod will be spawned into the same node as `workloadPod`, which then the mount operation
 // will be continued by the CSI Driver Node component in that node.
 func (r *Reconciler) spawnMountpointPod(
 	ctx context.Context,
-	pod *corev1.Pod,
+	workloadPod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
 	pv *corev1.PersistentVolume,
 	_ *corev1.CSIPersistentVolumeSource,
 	name string,
 ) error {
 	log := logf.FromContext(ctx).WithValues(
-		"pod", types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
+		"workloadPod", types.NamespacedName{Namespace: workloadPod.Namespace, Name: workloadPod.Name},
 		"mountpointPod", name,
 		"pvc", pvc.Name, "volumeName", pv.Name)
 
 	log.Info("Spawning Mountpoint Pod")
 
-	mpPod := r.mountpointPodCreator.Create(pod, pvc)
+	mpPod := r.mountpointPodCreator.Create(workloadPod, pvc)
 	if mpPod.Name != name {
 		err := fmt.Errorf("Mountpoint Pod name mismatch %s vs %s", mpPod.Name, name)
 		log.Error(err, "Name mismatch on Mountpoint Pod")
