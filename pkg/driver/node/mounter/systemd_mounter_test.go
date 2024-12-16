@@ -1,6 +1,8 @@
 package mounter_test
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -331,9 +333,27 @@ func TestExtractMountpointArgument(t *testing.T) {
 	}
 }
 
-func TestIsMountPoint(t *testing.T) {
-	t.Skip("TODO: This test needs to be fixed")
+func parseProcMounts(data []byte) []mount.MountPoint {
+	var mounts []mount.MountPoint
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			continue // Skip invalid lines
+		}
+		mountPoint := mount.MountPoint{
+			Device: fields[0],
+			Path:   fields[1],
+			Type:   fields[2],
+			Opts:   strings.Split(fields[3], ","),
+		}
+		mounts = append(mounts, mountPoint)
+	}
+	return mounts
+}
 
+func TestIsMountPoint(t *testing.T) {
 	testDir := t.TempDir()
 	mountpointS3MountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/46efe8aa-75d9-4b12-8fdd-0ce0c2cabd99/volumes/kubernetes.io~csi/s3-mp-csi-pv/mount")
 	tmpFsMountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/3af4cdb5-6131-4d4b-bed3-4b7a74d357e4/volumes/kubernetes.io~projected/kube-api-access-tmxk4")
@@ -389,8 +409,7 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
 			assertNoError(t, err)
 
-			// TODO: This test needs to be refactored to provide list of mounts to `mount.NewFakeMounter`.
-			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(nil)}
+			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(parseProcMounts(test.procMountsContent))}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)
