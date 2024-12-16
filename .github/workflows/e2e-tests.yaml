@@ -53,7 +53,7 @@ jobs:
         run: |
           export PLATFORM=linux/amd64,linux/arm64
           export TAG=${{ env.COMMIT_ID }}
-          make -j `nproc` all-push
+          make -j `nproc` all-push-skip-if-present
   test:
     needs: build
     strategy:
