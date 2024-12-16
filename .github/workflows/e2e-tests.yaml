@@ -19,6 +19,8 @@ env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  KOPS_STATE_FILE: "s3://${{ vars.KOPS_STATE_FILE }}"
+  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -187,7 +189,7 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
-          aws s3 cp --region ${{ vars.BENCHMARK_RESULTS_REGION }} ${{ vars.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
+          aws s3 cp --region ${{ vars.BENCHMARK_RESULTS_REGION }} ${{ vars.BENCHMARK_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
       - name: Update benchmark result file
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         uses: benchmark-action/github-action-benchmark@v1
@@ -202,7 +204,7 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
-          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
+          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} ${{ env.BENCHMARK_BUCKET }} --recursive
       - name: Post e2e cleanup
         if: always()
         run: |
