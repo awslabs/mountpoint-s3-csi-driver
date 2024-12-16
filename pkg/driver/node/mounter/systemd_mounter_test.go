@@ -1,11 +1,8 @@
 package mounter_test
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,21 +18,11 @@ import (
 	"k8s.io/mount-utils"
 )
 
-type TestMountLister struct {
-	Mounts []mount.MountPoint
-	Err    error
-}
-
-func (l *TestMountLister) ListMounts() ([]mount.MountPoint, error) {
-	return l.Mounts, l.Err
-}
-
 type mounterTestEnv struct {
-	ctx             context.Context
-	mockCtl         *gomock.Controller
-	mockRunner      *mock_driver.MockServiceRunner
-	mockMountLister *mock_driver.MockMountLister
-	mounter         *mounter.SystemdMounter
+	ctx        context.Context
+	mockCtl    *gomock.Controller
+	mockRunner *mock_driver.MockServiceRunner
+	mounter    *mounter.SystemdMounter
 }
 
 func initMounterTestEnv(t *testing.T) *mounterTestEnv {
@@ -43,14 +30,12 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockRunner := mock_driver.NewMockServiceRunner(mockCtl)
-	mockMountLister := mock_driver.NewMockMountLister(mockCtl)
 	mountpointVersion := "TEST_MP_VERSION-v1.1"
 
 	return &mounterTestEnv{
-		ctx:             ctx,
-		mockCtl:         mockCtl,
-		mockRunner:      mockRunner,
-		mockMountLister: mockMountLister,
+		ctx:        ctx,
+		mockCtl:    mockCtl,
+		mockRunner: mockRunner,
 		mounter: &mounter.SystemdMounter{
 			Ctx:         ctx,
 			Runner:      mockRunner,
@@ -90,7 +75,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: testCredentials,
 			options:     []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
 		},
@@ -101,7 +85,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
 		},
@@ -112,7 +95,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{"--user-agent-prefix=mycustomuseragent"},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, a := range config.Args {
 						if strings.Contains(a, "mycustomuseragent") {
@@ -130,7 +112,6 @@ func TestS3MounterMount(t *testing.T) {
 			credentials: nil,
 			options:     []string{"--aws-max-attempts=10"},
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, e := range config.Env {
 						if e == "AWS_MAX_ATTEMPTS=10" {
@@ -150,7 +131,6 @@ func TestS3MounterMount(t *testing.T) {
 			options:     []string{},
 			expectedErr: true,
 			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockMountLister.EXPECT().ListMounts().Return(nil, nil)
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("fail", errors.New("test failure"))
 			},
 		},
@@ -333,43 +313,50 @@ func TestExtractMountpointArgument(t *testing.T) {
 	}
 }
 
-func parseProcMounts(data []byte) []mount.MountPoint {
-	var mounts []mount.MountPoint
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue // Skip invalid lines
-		}
-		mountPoint := mount.MountPoint{
-			Device: fields[0],
-			Path:   fields[1],
-			Type:   fields[2],
-			Opts:   strings.Split(fields[3], ","),
-		}
-		mounts = append(mounts, mountPoint)
-	}
-	return mounts
-}
-
 func TestIsMountPoint(t *testing.T) {
 	testDir := t.TempDir()
 	mountpointS3MountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/46efe8aa-75d9-4b12-8fdd-0ce0c2cabd99/volumes/kubernetes.io~csi/s3-mp-csi-pv/mount")
 	tmpFsMountPath := filepath.Join(testDir, "/var/lib/kubelet/pods/3af4cdb5-6131-4d4b-bed3-4b7a74d357e4/volumes/kubernetes.io~projected/kube-api-access-tmxk4")
-	testProcMountsContent := []byte(
-		fmt.Sprintf(`proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
-sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0
-tmpfs %s tmpfs rw,seclabel,relatime,size=3364584k 0 0
-mountpoint-s3 %s fuse rw,nosuid,nodev,noatime,user_id=0,group_id=0,default_permissions 0 0`,
-			tmpFsMountPath,
-			mountpointS3MountPath),
-	)
+	testProcMountsContent := []mount.MountPoint{
+		{
+			Device: "proc",
+			Path:   "/proc",
+			Type:   "proc",
+			Opts:   []string{"rw", "nosuid", "nodev", "noexec", "relatime"},
+			Freq:   0,
+			Pass:   0,
+		},
+		{
+			Device: "sysfs",
+			Path:   "/sys",
+			Type:   "sysfs",
+			Opts:   []string{"rw", "seclabel", "nosuid", "nodev", "noexec", "relatime"},
+			Freq:   0,
+			Pass:   0,
+		},
+		{
+			Device: "tmpfs",
+			Path:   tmpFsMountPath,
+			Type:   "tmpfs",
+			Opts:   []string{"rw", "seclabel", "relatime", "size=3364584k"},
+			Freq:   0,
+			Pass:   0,
+		},
+		{
+			Device: "mountpoint-s3",
+			Path:   mountpointS3MountPath,
+			Type:   "fuse",
+			Opts:   []string{"rw", "nosuid", "nodev", "noatime", "user_id=0", "group_id=0", "default_permissions"},
+			Freq:   0,
+			Pass:   0,
+		},
+	}
+
 	os.MkdirAll(tmpFsMountPath, 0755)
 	os.MkdirAll(mountpointS3MountPath, 0755)
 
 	tests := map[string]struct {
-		procMountsContent []byte
+		procMountsContent []mount.MountPoint
 		target            string
 		isMountPoint      bool
 		expectErr         bool
@@ -387,11 +374,10 @@ mountpoint-s3 %s fuse rw,nosuid,nodev,noatime,user_id=0,group_id=0,default_permi
 			expectErr:         false,
 		},
 		"non existing mount on /proc/mounts": {
-			procMountsContent: []byte(`proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
-sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
-			target:       mountpointS3MountPath,
-			isMountPoint: false,
-			expectErr:    false,
+			procMountsContent: testProcMountsContent[:2],
+			target:            mountpointS3MountPath,
+			isMountPoint:      false,
+			expectErr:         false,
 		},
 		"non existing mount on filesystem": {
 			procMountsContent: testProcMountsContent,
@@ -403,22 +389,10 @@ sysfs /sys sysfs rw,seclabel,nosuid,nodev,noexec,relatime 0 0`),
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			procMountsPath := filepath.Join(t.TempDir(), "proc", "mounts")
-			err := os.MkdirAll(filepath.Dir(procMountsPath), 0755)
-			assertNoError(t, err)
-			err = os.WriteFile(procMountsPath, test.procMountsContent, 0755)
-			assertNoError(t, err)
-
-			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(parseProcMounts(test.procMountsContent))}
+			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(test.procMountsContent)}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assertEquals(t, test.isMountPoint, isMountPoint)
 			assertEquals(t, test.expectErr, err != nil)
 		})
-	}
-}
-
-func assertNoError(t *testing.T, err error) {
-	if err != nil {
-		t.Errorf("Expected no error, but got: %s", err)
 	}
 }
