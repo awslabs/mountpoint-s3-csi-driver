@@ -1,10 +1,7 @@
-name: "E2E Tests (Push)"
+name: "E2E Tests (Untrusted)"
 
 on:
-  push:
-    branches: [ "main", "feature/**", "release-**", "workflow/**" ]
-  merge_group:
-    types: [ "checks_requested" ]
+  pull_request_target:
 
 permissions:
   id-token: write
