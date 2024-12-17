@@ -1,0 +1,20 @@
+name: "E2E Tests (Trusted)"
+
+on:
+  push:
+    branches: [ "main", "feature/**", "release-**", "workflow/**" ]
+  merge_group:
+    types: [ "checks_requested" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E Tests
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      environment: "trusted"
+      ref: ${{ github.sha }}
+    secrets: inherit
