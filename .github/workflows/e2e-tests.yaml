@@ -9,9 +9,6 @@ on:
       ref:
         required: true
         type: string
-    secrets:
-      TEST_IAM_ROLE:
-        required: true
 
 concurrency: e2e-cluster
 env:
@@ -43,7 +40,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
+          role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
@@ -122,7 +119,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
+          role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
       - name: Install tools
         run: |
