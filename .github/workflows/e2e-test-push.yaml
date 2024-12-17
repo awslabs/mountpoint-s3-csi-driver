@@ -15,6 +15,6 @@ jobs:
     name: E2E Tests
     uses: ./.github/workflows/e2e-tests.yaml
     with:
-      environment: "Push"
+      environment: "untrusted"
       ref: ${{ github.sha }}
     secrets: inherit
