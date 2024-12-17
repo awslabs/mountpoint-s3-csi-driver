@@ -11,46 +11,7 @@ import (
 	mounter "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
-	mount "k8s.io/mount-utils"
 )
-
-// MockMountLister is a mock of MountLister interface.
-type MockMountLister struct {
-	ctrl     *gomock.Controller
-	recorder *MockMountListerMockRecorder
-}
-
-// MockMountListerMockRecorder is the mock recorder for MockMountLister.
-type MockMountListerMockRecorder struct {
-	mock *MockMountLister
-}
-
-// NewMockMountLister creates a new mock instance.
-func NewMockMountLister(ctrl *gomock.Controller) *MockMountLister {
-	mock := &MockMountLister{ctrl: ctrl}
-	mock.recorder = &MockMountListerMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMountLister) EXPECT() *MockMountListerMockRecorder {
-	return m.recorder
-}
-
-// ListMounts mocks base method.
-func (m *MockMountLister) ListMounts() ([]mount.MountPoint, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListMounts")
-	ret0, _ := ret[0].([]mount.MountPoint)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListMounts indicates an expected call of ListMounts.
-func (mr *MockMountListerMockRecorder) ListMounts() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMounts", reflect.TypeOf((*MockMountLister)(nil).ListMounts))
-}
 
 // MockServiceRunner is a mock of ServiceRunner interface.
 type MockServiceRunner struct {
