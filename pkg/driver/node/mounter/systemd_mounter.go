@@ -44,6 +44,9 @@ func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMoun
 }
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
+// We implement the IsMountPoint interface instead of using Kubernetes' implementation
+// because we need to verify not only that the target is a mount point but also that it is specifically a mount-s3 mount point.
+// This is achieved by calling the mounter.List() method to enumerate all mount points.
 func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 	if _, err := os.Stat(target); os.IsNotExist(err) {
 		return false, err
