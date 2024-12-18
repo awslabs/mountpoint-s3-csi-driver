@@ -109,7 +109,10 @@ function delete_security_group() {
   remaining_attemps=20
   while (( remaining_attemps-- > 0 ))
   do
-      if $(aws ec2 delete-security-group --region ${REGION} --group-id ${SECURITY_GROUP}); then
+      if output=$(aws ec2 delete-security-group --region ${REGION} --group-id ${SECURITY_GROUP} 2>&1); then
+        return
+      fi
+      if [[ $output == *"InvalidGroup.NotFound"* ]]; then
         return
       fi
       sleep 30
