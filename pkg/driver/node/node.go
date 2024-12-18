@@ -34,6 +34,7 @@ import (
 
 const (
 	volumeCtxBucketName = "bucketName"
+	defaultKubeletPath  = "/var/lib/kubelet"
 )
 
 var (
@@ -100,6 +101,16 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
+	}
+
+	kubeletPath := func() string {
+		if p := os.Getenv("KUBELET_PATH"); p != "" {
+			return p
+		}
+		return defaultKubeletPath
+	}()
+	if !strings.HasPrefix(target, kubeletPath) {
+		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
 	}
 
 	volCap := req.GetVolumeCapability()
