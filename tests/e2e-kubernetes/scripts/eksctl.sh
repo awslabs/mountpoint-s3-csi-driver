@@ -106,10 +106,13 @@ function delete_security_group() {
   REGION=${1}
   SECURITY_GROUP=${2}
 
-  remaining_attemps=20
-  while (( remaining_attemps-- > 0 ))
+  remaining_attempts=20
+  while (( remaining_attempts-- > 0 ))
   do
-      if $(aws ec2 delete-security-group --region ${REGION} --group-id ${SECURITY_GROUP}); then
+      if output=$(aws ec2 delete-security-group --region ${REGION} --group-id ${SECURITY_GROUP} 2>&1); then
+        return
+      fi
+      if [[ $output == *"InvalidGroup.NotFound"* ]]; then
         return
       fi
       sleep 30
@@ -120,8 +123,8 @@ function delete_eni() {
   REGION=${1}
   ENI_ID=${2}
 
-  remaining_attemps=20
-  while (( remaining_attemps-- > 0 ))
+  remaining_attempts=20
+  while (( remaining_attempts-- > 0 ))
   do
       if output=$(aws ec2 delete-network-interface --network-interface-id ${ENI_ID} --region ${REGION} 2>&1); then
         return
