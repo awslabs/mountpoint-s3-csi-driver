@@ -18,7 +18,7 @@ env:
 jobs:
   build:
     # this is to prevent the job to run at forked projects
-    # if: ${{ ! github.repository.fork }}
+    if: ${{ ! github.repository.fork }}
     environment: release
     runs-on: ubuntu-latest
     permissions:
