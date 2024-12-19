@@ -109,7 +109,7 @@ jobs:
       ARCH: "${{ matrix.arch }}"
       AMI_FAMILY: "${{ matrix.family }}"
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
-      TAG: "untested_${{ inputs.ref }}"
+      TAG: "${{ env.TAG_UNTESTED }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

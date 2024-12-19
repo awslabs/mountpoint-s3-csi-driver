@@ -33,7 +33,7 @@ jobs:
       - name: Set up crane
         uses: imjasonh/setup-crane@v0.1
 
-      - name: Configure AWS Credentials from CI Trusted acccount
+      - name: Configure AWS Credentials from CI Trusted account
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.CI_TRUSTED_IAM_ROLE }}
@@ -74,7 +74,7 @@ jobs:
           SOURCE_REGISTRY: ${{ steps.login-ecr-trusted.outputs.registry }}
         run: |
           crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${ARS_REGISTRY}:${GIT_TAG}
-          if [ -n "$VAR" ]; then
+          if [ -n "${PUBLIC_REGISTRY}" ]; then
             crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${PUBLIC_REGISTRY}:${GIT_TAG}
           fi
 
