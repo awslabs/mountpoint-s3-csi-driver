@@ -81,7 +81,7 @@ spec:
               role: {{ .role }}
               level: {{ .level }}
             {{- end }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --endpoint=$(CSI_ENDPOINT)
             - --v={{ .Values.node.logLevel }}
