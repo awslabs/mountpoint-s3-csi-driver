@@ -69,6 +69,11 @@ all: all-image-docker
 all-push: create-manifest-and-images
 	docker manifest push --purge $(IMAGE):$(TAG)
 
+# Builds images only if not present with the tag
+.PHONY: all-push-skip-if-present
+all-push-skip-if-present:
+	docker manifest inspect $(IMAGE):$(TAG) > /dev/null || $(MAKE) all-push
+
 .PHONY: build_image
 build_image:
 	DOCKER_BUILDKIT=1 docker buildx build -f ${DOCKERFILE} -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
