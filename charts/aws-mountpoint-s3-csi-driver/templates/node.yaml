@@ -93,6 +93,8 @@ spec:
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
               value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
+            - name: KUBELET_PATH
+              value: {{ .Values.node.kubeletPath }}
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
