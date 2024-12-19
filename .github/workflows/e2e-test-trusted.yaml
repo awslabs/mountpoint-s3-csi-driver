@@ -16,5 +16,5 @@ jobs:
     uses: ./.github/workflows/e2e-tests.yaml
     with:
       environment: "trusted"
-      ref: ${{ github.sha }}
+      ref: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
     secrets: inherit
