@@ -21,7 +21,7 @@ const mountpointDeviceName = "mountpoint-s3"
 type SystemdMounter struct {
 	Ctx               context.Context
 	Runner            ServiceRunner
-	MountLister       MountLister
+	Mounter           mount.Interface
 	MpVersion         string
 	MountS3Path       string
 	kubernetesVersion string
@@ -36,7 +36,7 @@ func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMoun
 	return &SystemdMounter{
 		Ctx:               ctx,
 		Runner:            runner,
-		MountLister:       &ProcMountLister{ProcMountPath: procMounts},
+		Mounter:           mount.New(""),
 		MpVersion:         mpVersion,
 		MountS3Path:       MountS3Path(),
 		kubernetesVersion: kubernetesVersion,
@@ -44,12 +44,15 @@ func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMoun
 }
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
+// We implement the IsMountPoint interface instead of using Kubernetes' implementation
+// because we need to verify not only that the target is a mount point but also that it is specifically a mount-s3 mount point.
+// This is achieved by calling the mounter.List() method to enumerate all mount points.
 func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 	if _, err := os.Stat(target); os.IsNotExist(err) {
 		return false, err
 	}
 
-	mountPoints, err := m.MountLister.ListMounts()
+	mountPoints, err := m.Mounter.List()
 	if err != nil {
 		return false, fmt.Errorf("Failed to list mounts: %w", err)
 	}
@@ -114,15 +117,14 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		}
 	}
 
-	mounts, err := m.MountLister.ListMounts()
+	isMountPoint, err := m.IsMountPoint(target)
 	if err != nil {
 		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, statErr, err)
 	}
-	for _, m := range mounts {
-		if m.Path == target {
-			klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
-			return nil
-		}
+
+	if isMountPoint {
+		klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
+		return nil
 	}
 
 	env := []string{}

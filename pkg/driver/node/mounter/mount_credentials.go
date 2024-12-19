@@ -19,7 +19,6 @@ const (
 	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
 	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
 	defaultMountS3Path          = "/usr/bin/mount-s3"
-	procMounts                  = "/host/proc/mounts"
 	userAgentPrefix             = "--user-agent-prefix"
 	awsMaxAttemptsOption        = "--aws-max-attempts"
 )
