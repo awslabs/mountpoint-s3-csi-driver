@@ -93,6 +93,8 @@ spec:
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
               value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
+            - name: KUBELET_PATH
+              value: {{ .Values.node.kubeletPath }}
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -122,14 +124,17 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletPath }}
+              # Currently we spawn Mountpoint instances on the host using systemd,
+              # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
+              # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
+              # without needing to mount "/proc/mounts" from host.
+              mountPropagation: HostToContainer
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /host/dev
-            - name: proc-mounts
-              mountPath: /host/proc/mounts
           ports:
             - name: healthz
               containerPort: 9808
@@ -206,10 +211,6 @@ spec:
           hostPath:
             path: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}
             type: DirectoryOrCreate
-        - name: proc-mounts
-          hostPath:
-            path: {{ default "/proc/mounts" .Values.node.procMountPath }}
-            type: File
         - name: systemd-bus
           hostPath:
             path: /run/systemd/private
