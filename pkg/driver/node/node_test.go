@@ -11,8 +11,10 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
 	"golang.org/x/net/context"
 )
@@ -300,7 +302,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 
 		serviceAccountTokenPath := filepath.Join(containerPluginDir, fmt.Sprintf("%s-%s.token", podID, volID))
 		_, err := os.Create(serviceAccountTokenPath)
-		assertEquals(t, nil, err)
+		assert.Equals(t, nil, err)
 
 		targetPath := fmt.Sprintf("/var/lib/kubelet/pods/%s/volumes/kubernetes.io~csi/%s/mount", podID, volID)
 
@@ -308,11 +310,11 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			VolumeId:   volID,
 			TargetPath: targetPath,
 		})
-		assertEquals(t, nil, err)
+		assert.Equals(t, nil, err)
 
 		_, err = os.Stat(serviceAccountTokenPath)
-		assertNotEquals(t, nil, err)
-		assertEquals(t, true, errors.Is(err, fs.ErrNotExist))
+		assert.Equals(t, cmpopts.AnyError, err)
+		assert.Equals(t, true, errors.Is(err, fs.ErrNotExist))
 	})
 }
 
@@ -347,10 +349,4 @@ func (d *dummyMounter) Unmount(target string) error {
 }
 func (d *dummyMounter) IsMountPoint(target string) (bool, error) {
 	return true, nil
-}
-
-func assertNotEquals[T comparable](t *testing.T, expected T, got T) {
-	if expected == got {
-		t.Errorf("Expected %#v to not equal %#v", expected, got)
-	}
 }

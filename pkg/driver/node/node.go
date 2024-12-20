@@ -30,6 +30,7 @@ import (
 	"k8s.io/mount-utils"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 )
 
 const (
@@ -222,7 +223,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
 
-	targetPath, err := ParseTargetPath(target)
+	targetPath, err := targetpath.Parse(target)
 	if err == nil {
 		if targetPath.VolumeID != volumeID {
 			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
