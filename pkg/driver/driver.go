@@ -19,8 +19,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
-	"io/fs"
 	"net"
 	"os"
 	"time"
@@ -28,6 +26,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -154,7 +153,7 @@ func (d *Driver) Stop() {
 func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {
 	for {
 		timer := time.After(10 * time.Second)
-		err := ReplaceFile(destPath, sourcePath, 0600)
+		err := util.ReplaceFile(destPath, sourcePath, 0600)
 		if err != nil {
 			klog.Infof("Failed to sync AWS web token file: %v", err)
 		}
@@ -165,37 +164,6 @@ func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {
 			return
 		}
 	}
-}
-
-// replaceFile safely replaces a file with a new file by copying to a temporary location first
-// then renaming.
-func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
-	tmpDest := destPath + ".tmp"
-
-	sourceFile, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.OpenFile(tmpDest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	buf := make([]byte, 64*1024)
-	_, err = io.CopyBuffer(destFile, sourceFile, buf)
-	if err != nil {
-		return err
-	}
-
-	err = os.Rename(tmpDest, destPath)
-	if err != nil {
-		return fmt.Errorf("Failed to rename file %s: %w", destPath, err)
-	}
-
-	return nil
 }
 
 func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {

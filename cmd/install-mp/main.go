@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -49,7 +49,7 @@ func installFiles(binDir string, installDir string) error {
 		destFile := filepath.Join(installDir, name)
 
 		// First copy to a temporary location then rename to handle replacing running binaries
-		err = driver.ReplaceFile(destFile, filepath.Join(binDir, name), 0755)
+		err = util.ReplaceFile(destFile, filepath.Join(binDir, name), 0755)
 		if err != nil {
 			return fmt.Errorf("Failed to copy file %s: %w", name, err)
 		}
