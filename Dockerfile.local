@@ -70,6 +70,8 @@ COPY --from=mp_builder /mountpoint-s3/target/release/mount-s3 /mountpoint-s3/bin
 
 # Copy CSI Driver binaries
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-controller /bin/aws-s3-csi-controller
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-mounter /bin/aws-s3-csi-mounter
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
 
 ENTRYPOINT ["/bin/aws-s3-csi-driver"]
