@@ -34,7 +34,10 @@ import (
 
 const (
 	volumeCtxBucketName = "bucketName"
+	defaultKubeletPath  = "/var/lib/kubelet"
 )
+
+var kubeletPath = getKubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
@@ -100,6 +103,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
+	}
+
+	if !strings.HasPrefix(target, kubeletPath) {
+		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -171,6 +178,14 @@ func compileMountOptions(currentOptions []string, newOptions []string) []string 
 	}
 
 	return allMountOptions.List()
+}
+
+func getKubeletPath() string {
+	kubeletPath := os.Getenv("KUBELET_PATH")
+	if kubeletPath == "" {
+		return defaultKubeletPath
+	}
+	return kubeletPath
 }
 
 func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {

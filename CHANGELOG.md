@@ -1,3 +1,9 @@
+# Unreleased
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/README.md)
+
+### Notable changes
+* Add `HostToContainer` mount propagation, replacing the previous method of reading mount points via `/host/proc/mounts`. ([#321](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/321))
+
 # v1.11.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.11.0/README.md)
 

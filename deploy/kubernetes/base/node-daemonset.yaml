@@ -107,14 +107,17 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
+              # Currently we spawn Mountpoint instances on the host using systemd,
+              # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
+              # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
+              # without needing to mount "/proc/mounts" from host.
+              mountPropagation: HostToContainer
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /host/dev
-            - name: proc-mounts
-              mountPath: /host/proc/mounts
           ports:
             - name: healthz
               containerPort: 9810
@@ -198,10 +201,6 @@ spec:
           hostPath:
             path: /opt/mountpoint-s3-csi/bin/
             type: DirectoryOrCreate
-        - name: proc-mounts
-          hostPath:
-            path: /proc/mounts
-            type: File
         - name: systemd-bus
           hostPath:
             path: /run/systemd/private

@@ -6,12 +6,7 @@ import (
 	"os"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
-	"k8s.io/mount-utils"
 )
-
-type MountLister interface {
-	ListMounts() ([]mount.MountPoint, error)
-}
 
 type ServiceRunner interface {
 	StartService(ctx context.Context, config *system.ExecConfig) (string, error)
