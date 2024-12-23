@@ -32,6 +32,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
 
 const (
@@ -121,24 +122,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	mountpointArgs := []string{}
 	if req.GetReadonly() || volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
-		mountpointArgs = append(mountpointArgs, "--read-only")
+		mountpointArgs = append(mountpointArgs, mountpoint.ArgReadOnly)
 	}
 
-	// get the mount(point) options (yaml list)
 	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
-		for i := range mountFlags {
-			// trim left and right spaces
-			// trim spaces in between from multiple spaces to just one i.e. uid   1001 would turn into uid 1001
-			// if there is a space between, replace it with an = sign
-			mountFlags[i] = strings.Replace(strings.Join(strings.Fields(strings.Trim(mountFlags[i], " ")), " "), " ", "=", -1)
-			// prepend -- if it's not already there
-			if !strings.HasPrefix(mountFlags[i], "-") {
-				mountFlags[i] = "--" + mountFlags[i]
-			}
-		}
-		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
+		mountpointArgs = append(mountpointArgs, mountFlags...)
 	}
+
+	args := mountpoint.ParseArgs(mountpointArgs)
 
 	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
 	if err != nil {
@@ -148,7 +140,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
 
-	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
+	if err := ns.Mounter.Mount(bucket, target, credentials, args); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}

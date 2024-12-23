@@ -11,6 +11,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
@@ -100,7 +101,7 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext: map[string]string{"bucketName": bucketName},
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq([]string{"--read-only"}))
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})))
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -131,7 +132,7 @@ func TestNodePublishVolume(t *testing.T) {
 					Readonly:      true,
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq([]string{"--bar", "--foo", "--read-only", "--test=123"}))
+				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--test=123"})))
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -164,7 +165,7 @@ func TestNodePublishVolume(t *testing.T) {
 
 				nodeTestEnv.mockMounter.EXPECT().Mount(
 					gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(),
-					gomock.Eq([]string{"--read-only", "--test=123"})).Return(nil)
+					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--test=123"}))).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -341,7 +342,7 @@ var _ mounter.Mounter = &dummyMounter{}
 type dummyMounter struct {
 }
 
-func (d *dummyMounter) Mount(bucketName string, target string, credentials *mounter.MountCredentials, options []string) error {
+func (d *dummyMounter) Mount(bucketName string, target string, credentials *mounter.MountCredentials, args mountpoint.Args) error {
 	return nil
 }
 func (d *dummyMounter) Unmount(target string) error {

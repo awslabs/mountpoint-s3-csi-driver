@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 )
 
@@ -15,7 +16,7 @@ type ServiceRunner interface {
 
 // Mounter is an interface for mount operations
 type Mounter interface {
-	Mount(bucketName string, target string, credentials *MountCredentials, options []string) error
+	Mount(bucketName string, target string, credentials *MountCredentials, args mountpoint.Args) error
 	Unmount(target string) error
 	IsMountPoint(target string) (bool, error)
 }
