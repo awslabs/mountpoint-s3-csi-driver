@@ -26,7 +26,6 @@ import (
 
 const volumeName1 = "volume1"
 const root = int64(0)
-const defaultNonRootGroup = int64(2000)
 
 type s3CSICacheTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -183,13 +182,9 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			mountOptions := append(baseMountOptions,
 				"allow-delete",
 				"allow-other",
-				fmt.Sprintf("uid=%d", *e2epod.GetDefaultNonRootUser()),
+				fmt.Sprintf("uid=%d", defaultNonRootUser),
 				fmt.Sprintf("gid=%d", defaultNonRootGroup))
-			podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-				pod.Spec.Containers[0].SecurityContext.RunAsUser = e2epod.GetDefaultNonRootUser()
-				pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
-				pod.Spec.Containers[0].SecurityContext.RunAsNonRoot = ptr.To(true)
-			})
+			podModifiers := append(basePodModifiers, podModifierNonRoot)
 
 			pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
 			checkBasicFileOperations(ctx, pod, bucketName, e2epod.VolumeMountPath1)
