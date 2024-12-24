@@ -267,7 +267,7 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			actual := test.credentials.Env(test.profile)
+			actual := test.credentials.Env(test.profile).List()
 
 			slices.Sort(test.expected)
 			slices.Sort(actual)

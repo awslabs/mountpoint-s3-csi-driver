@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
@@ -127,7 +128,7 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		return nil
 	}
 
-	env := []string{}
+	env := envprovider.Default()
 	var authenticationSource AuthenticationSource
 	if credentials != nil {
 		var awsProfile awsprofile.AWSProfile
@@ -147,7 +148,12 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 
 		env = credentials.Env(awsProfile)
 	}
-	args, env = moveArgumentsToEnv(args, env)
+
+	// Move `--aws-max-attempts` to env if provided
+	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
+		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
+	}
+
 	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
@@ -155,7 +161,7 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
 		ExecPath:    m.MountS3Path,
 		Args:        append(args.SortedList(), bucketName, target),
-		Env:         env,
+		Env:         env.List(),
 	})
 
 	if err != nil {
@@ -166,13 +172,6 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 	}
 	cleanupDir = false
 	return nil
-}
-
-func moveArgumentsToEnv(args mountpoint.Args, env []string) (mountpoint.Args, []string) {
-	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
-		env = append(env, fmt.Sprintf("%s=%s", awsMaxAttemptsEnv, maxAttempts))
-	}
-	return args, env
 }
 
 func (m *SystemdMounter) Unmount(target string) error {

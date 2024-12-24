@@ -21,6 +21,9 @@ type Mounter interface {
 	IsMountPoint(target string) (bool, error)
 }
 
+const MountS3PathEnv = "MOUNT_S3_PATH"
+const defaultMountS3Path = "/usr/bin/mount-s3"
+
 func MountS3Path() string {
 	mountS3Path := os.Getenv(MountS3PathEnv)
 	if mountS3Path == "" {
