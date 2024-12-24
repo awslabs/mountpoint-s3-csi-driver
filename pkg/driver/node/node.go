@@ -31,11 +31,11 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 const (
-	volumeCtxBucketName = "bucketName"
-	defaultKubeletPath  = "/var/lib/kubelet"
+	defaultKubeletPath = "/var/lib/kubelet"
 )
 
 var kubeletPath = getKubeletPath()
@@ -68,8 +68,8 @@ func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider 
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	volumeContext := req.GetVolumeContext()
-	if volumeContext[mounter.VolumeCtxAuthenticationSource] == mounter.AuthenticationSourcePod {
-		podID := volumeContext[mounter.VolumeCtxPodUID]
+	if volumeContext[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
+		podID := volumeContext[volumecontext.CSIPodUID]
 		volumeID := req.GetVolumeId()
 		if podID != "" && volumeID != "" {
 			err := ns.credentialProvider.CleanupToken(volumeID, podID)
@@ -96,7 +96,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	volumeContext := req.GetVolumeContext()
 
-	bucket, ok := volumeContext[volumeCtxBucketName]
+	bucket, ok := volumeContext[volumecontext.BucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
@@ -295,7 +295,7 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 // with sensitive fields removed.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
-	delete(safeVolumeContext, mounter.VolumeCtxServiceAccountTokens)
+	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
 
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,
