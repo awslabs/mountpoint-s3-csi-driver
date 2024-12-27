@@ -135,7 +135,7 @@ func (c *Provider) provideFromPod(ctx context.Context, volumeContext map[string]
 	tokensJson := volumeContext[volumecontext.CSIServiceAccountTokens]
 	if tokensJson == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
-		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens")
+		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
 
 	var tokens map[string]*serviceAccountToken

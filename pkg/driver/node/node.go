@@ -18,6 +18,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"strings"
@@ -56,6 +57,8 @@ var (
 		},
 	}
 )
+
+const stsConfigDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#configuring-the-sts-region"
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
@@ -267,6 +270,9 @@ func (ns *S3NodeServer) overrideRegionEnvFromSTSRegion(volumeContext map[string]
 	env = envprovider.Remove(env, envprovider.EnvRegion)
 	region, err := ns.regionProvider.SecurityTokenService(volumeContext, args)
 	if err != nil {
+		if errors.Is(err, regionprovider.ErrUnknownRegion) {
+			return env, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
+		}
 		return env, err
 	}
 	env = append(env, envprovider.Format(envprovider.EnvRegion, region))
