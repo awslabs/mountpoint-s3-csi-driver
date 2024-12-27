@@ -25,13 +25,15 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/regionprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
 
 const (
@@ -57,28 +59,18 @@ var (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID             string
-	Mounter            mounter.Mounter
-	credentialProvider *mounter.CredentialProvider
+	nodeID             string
+	mounter            mounter.Mounter
+	credentialProvider *credentialprovider.Provider
+	regionProvider     *regionprovider.Provider
+	kubernetesVersion  string
 }
 
-func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider *mounter.CredentialProvider) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider *credentialprovider.Provider, regionProvider *regionprovider.Provider, kubernetesVersion string) *S3NodeServer {
+	return &S3NodeServer{nodeID: nodeID, mounter: mounter, credentialProvider: credentialProvider, regionProvider: regionProvider, kubernetesVersion: kubernetesVersion}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	volumeCtx := req.GetVolumeContext()
-	if volumeCtx[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
-		podID := volumeCtx[volumecontext.CSIPodUID]
-		volumeID := req.GetVolumeId()
-		if podID != "" && volumeID != "" {
-			err := ns.credentialProvider.CleanupToken(volumeID, podID)
-			if err != nil {
-				klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
-			}
-		}
-	}
-
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -119,74 +111,46 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not supported")
 	}
 
-	mountpointArgs := []string{}
+	args := []string{}
 	if req.GetReadonly() || volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
-		mountpointArgs = append(mountpointArgs, "--read-only")
+		args = append(args, mountpoint.ArgReadOnly)
 	}
 
-	// get the mount(point) options (yaml list)
 	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
-		for i := range mountFlags {
-			// trim left and right spaces
-			// trim spaces in between from multiple spaces to just one i.e. uid   1001 would turn into uid 1001
-			// if there is a space between, replace it with an = sign
-			mountFlags[i] = strings.Replace(strings.Join(strings.Fields(strings.Trim(mountFlags[i], " ")), " "), " ", "=", -1)
-			// prepend -- if it's not already there
-			if !strings.HasPrefix(mountFlags[i], "-") {
-				mountFlags[i] = "--" + mountFlags[i]
-			}
-		}
-		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
+		args = append(args, mountFlags...)
 	}
 
-	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
+	mountpointArgs := mountpoint.ParseArgs(args)
+	env := envprovider.Provide()
+
+	mountpointArgs, env = ns.moveArgumentsToEnv(mountpointArgs, env)
+
+	credentials, err := ns.credentialProvider.Provide(ctx, volumeCtx)
 	if err != nil {
 		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
 		return nil, err
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+	mountpointArgs = ns.addUserAgentToArguments(mountpointArgs, credentials)
 
-	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
+	// We need to ensure we're using region for STS if Pod-level identity is used.
+	if credentials.Source() == credentialprovider.AuthenticationSourcePod {
+		env, err = ns.overrideRegionEnvFromSTSRegion(volumeCtx, mountpointArgs, env)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs.SortedList())
+
+	if err := ns.mounter.Mount(bucket, target, credentials, env, mountpointArgs); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}
 	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
 
 	return &csi.NodePublishVolumeResponse{}, nil
-}
-
-/**
- * Compile mounting options into a singular set
- */
-func compileMountOptions(currentOptions []string, newOptions []string) []string {
-	allMountOptions := sets.NewString()
-
-	for _, currentMountOptions := range currentOptions {
-		if len(currentMountOptions) > 0 {
-			allMountOptions.Insert(currentMountOptions)
-		}
-	}
-
-	for _, mountOption := range newOptions {
-		// disallow options that don't make sense in CSI
-		switch mountOption {
-		case "--foreground", "-f", "--help", "-h", "--version", "-v":
-			continue
-		}
-		allMountOptions.Insert(mountOption)
-	}
-
-	return allMountOptions.List()
-}
-
-func getKubeletPath() string {
-	kubeletPath := os.Getenv("KUBELET_PATH")
-	if kubeletPath == "" {
-		return defaultKubeletPath
-	}
-	return kubeletPath
 }
 
 func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -202,7 +166,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	mounted, err := ns.Mounter.IsMountPoint(target)
+	mounted, err := ns.mounter.IsMountPoint(target)
 	if err != nil && os.IsNotExist(err) {
 		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -218,24 +182,12 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	}
 
 	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = ns.Mounter.Unmount(target)
+	err = ns.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
 
-	targetPath, err := targetpath.Parse(target)
-	if err == nil {
-		if targetPath.VolumeID != volumeID {
-			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
-		} else {
-			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
-			if err != nil {
-				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
-			}
-		}
-	} else {
-		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
-	}
+	klog.V(4).Infof("NodeUnpublishVolume: unmounted %s", target)
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
@@ -268,7 +220,7 @@ func (ns *S3NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoReq
 	klog.V(4).Infof("NodeGetInfo: called with args %+v", req)
 
 	return &csi.NodeGetInfoResponse{
-		NodeId: ns.NodeID,
+		NodeId: ns.nodeID,
 	}, nil
 }
 
@@ -291,6 +243,36 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 	return foundAll
 }
 
+// moveArgumentsToEnv moves `--aws-max-attempts` from arguments to environment variables if provided.
+func (ns *S3NodeServer) moveArgumentsToEnv(args mountpoint.Args, env envprovider.Environment) (mountpoint.Args, envprovider.Environment) {
+	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
+		env = append(env, envprovider.Format(envprovider.EnvMaxAttempts, maxAttempts))
+	}
+
+	return args, env
+}
+
+// addUserAgentToArguments adds user-agent to Mountpoint arguments.
+func (ns *S3NodeServer) addUserAgentToArguments(args mountpoint.Args, credentials credentialprovider.Credentials) mountpoint.Args {
+	// Remove existing user-agent if provided to ensure we always use the correct user-agent
+	_, _ = args.Remove(mountpoint.ArgUserAgentPrefix)
+	userAgent := mounter.UserAgent(credentials.Source(), ns.kubernetesVersion)
+	args.Insert(envprovider.Format(mountpoint.ArgUserAgentPrefix, userAgent))
+
+	return args
+}
+
+// overrideRegionEnvFromSTSRegion overrides provided region with the region configured for STS.
+func (ns *S3NodeServer) overrideRegionEnvFromSTSRegion(volumeContext map[string]string, args mountpoint.Args, env envprovider.Environment) (envprovider.Environment, error) {
+	env = envprovider.Remove(env, envprovider.EnvRegion)
+	region, err := ns.regionProvider.SecurityTokenService(volumeContext, args)
+	if err != nil {
+		return env, err
+	}
+	env = append(env, envprovider.Format(envprovider.EnvRegion, region))
+	return env, nil
+}
+
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
 // with sensitive fields removed.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
@@ -306,4 +288,12 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		Readonly:          req.Readonly,
 		VolumeContext:     safeVolumeContext,
 	}
+}
+
+func getKubeletPath() string {
+	kubeletPath := os.Getenv("KUBELET_PATH")
+	if kubeletPath == "" {
+		return defaultKubeletPath
+	}
+	return kubeletPath
 }

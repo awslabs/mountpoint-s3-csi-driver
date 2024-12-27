@@ -1,9 +1,14 @@
 package mounter
 
+import (
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+)
+
 type FakeMounter struct{}
 
-func (m *FakeMounter) Mount(bucketName string, target string,
-	credentials *MountCredentials, options []string) error {
+func (m *FakeMounter) Mount(bucketName string, target string, credentials credentialprovider.Credentials, env envprovider.Environment, args mountpoint.Args) error {
 	return nil
 }
 

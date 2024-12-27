@@ -5,6 +5,9 @@ import (
 	"context"
 	"os"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 )
 
@@ -15,10 +18,12 @@ type ServiceRunner interface {
 
 // Mounter is an interface for mount operations
 type Mounter interface {
-	Mount(bucketName string, target string, credentials *MountCredentials, options []string) error
+	Mount(bucketName string, target string, credentials credentialprovider.Credentials, env envprovider.Environment, args mountpoint.Args) error
 	Unmount(target string) error
 	IsMountPoint(target string) (bool, error)
 }
+
+const MountS3PathEnv = "MOUNT_S3_PATH"
 
 func MountS3Path() string {
 	mountS3Path := os.Getenv(MountS3PathEnv)
