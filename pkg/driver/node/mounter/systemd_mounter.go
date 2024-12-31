@@ -195,7 +195,8 @@ func (m *SystemdMounter) Unmount(target string) error {
 // It returns credentials dir and any error.
 func (m *SystemdMounter) ensureCredentialsDirExists(target string) (string, error) {
 	credentialsBasepath := m.credentialsDir(target)
-	if err := os.Mkdir(credentialsBasepath, credentialprovider.CredentialDirPerm); !errors.Is(err, fs.ErrExist) {
+	err := os.Mkdir(credentialsBasepath, credentialprovider.CredentialDirPerm)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
 		klog.V(4).Infof("NodePublishVolume: Failed to create credentials directory for %s: %v", target, err)
 		return "", err
 	}
