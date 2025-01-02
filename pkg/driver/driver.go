@@ -19,25 +19,24 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
-	"io/fs"
 	"net"
 	"os"
-	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/regionprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 )
 
 const (
-	driverName          = "s3.csi.aws.com"
-	webIdentityTokenEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
+	driverName = "s3.csi.aws.com"
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
@@ -75,13 +74,14 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
-	systemd_mounter, err := mounter.NewSystemdMounter(mpVersion, kubernetesVersion)
+	systemdMounter, err := mounter.NewSystemdMounter(mpVersion)
 	if err != nil {
 		klog.Fatalln(err)
 	}
 
-	credentialProvider := mounter.NewCredentialProvider(clientset.CoreV1(), containerPluginDir, mounter.RegionFromIMDSOnce)
-	nodeServer := node.NewS3NodeServer(nodeID, systemd_mounter, credentialProvider)
+	credentialProvider := credentialprovider.New(clientset.CoreV1())
+	regionProvider := regionprovider.New(regionprovider.RegionFromIMDSOnce)
+	nodeServer := node.NewS3NodeServer(nodeID, systemdMounter, credentialProvider, regionProvider, kubernetesVersion)
 
 	return &Driver{
 		Endpoint:   endpoint,
@@ -91,14 +91,6 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 }
 
 func (d *Driver) Run() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tokenFile := os.Getenv(webIdentityTokenEnv)
-	if tokenFile != "" {
-		klog.Infof("Found AWS_WEB_IDENTITY_TOKEN_FILE, syncing token")
-		go tokenFileTender(ctx, tokenFile, "/csi/token")
-	}
-
 	scheme, addr, err := ParseEndpoint(d.Endpoint)
 	if err != nil {
 		return err
@@ -149,53 +141,6 @@ func (d *Driver) Run() error {
 func (d *Driver) Stop() {
 	klog.Infof("Stopping server")
 	d.Srv.Stop()
-}
-
-func tokenFileTender(ctx context.Context, sourcePath string, destPath string) {
-	for {
-		timer := time.After(10 * time.Second)
-		err := ReplaceFile(destPath, sourcePath, 0600)
-		if err != nil {
-			klog.Infof("Failed to sync AWS web token file: %v", err)
-		}
-		select {
-		case <-timer:
-			continue
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// replaceFile safely replaces a file with a new file by copying to a temporary location first
-// then renaming.
-func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
-	tmpDest := destPath + ".tmp"
-
-	sourceFile, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.OpenFile(tmpDest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	buf := make([]byte, 64*1024)
-	_, err = io.CopyBuffer(destFile, sourceFile, buf)
-	if err != nil {
-		return err
-	}
-
-	err = os.Rename(tmpDest, destPath)
-	if err != nil {
-		return fmt.Errorf("Failed to rename file %s: %w", destPath, err)
-	}
-
-	return nil
 }
 
 func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {

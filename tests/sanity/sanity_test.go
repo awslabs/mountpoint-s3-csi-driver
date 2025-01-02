@@ -29,7 +29,8 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/regionprovider"
 )
 
 const (
@@ -72,8 +73,10 @@ var _ = BeforeSuite(func() {
 		NodeID:   "fake_id",
 		NodeServer: node.NewS3NodeServer(
 			"fake_id",
-			&mounter.FakeMounter{},
-			mounter.NewCredentialProvider(nil, GinkgoT().TempDir(), mounter.RegionFromIMDSOnce),
+			nil,
+			credentialprovider.New(nil),
+			regionprovider.New(regionprovider.RegionFromIMDSOnce),
+			"v1.31.0",
 		),
 	}
 	go func() {
