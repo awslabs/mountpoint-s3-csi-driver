@@ -134,6 +134,7 @@ jobs:
       - name: Install tools
         run: |
           export ACTION=install_tools
+          export K8S_VERSION=${{ matrix.kubernetes-version }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Controller Tests
         run: |
