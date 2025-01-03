@@ -85,11 +85,17 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 	})
 
 	validateWriteToVolume := func(ctx context.Context) {
-		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"uid=1000", "gid=2000", "allow-other", "debug", "debug-crt"})
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", defaultNonRootUser),
+			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+			"allow-other",
+			"debug",
+			"debug-crt",
+		})
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		pod.Spec.SecurityContext.RunAsGroup = ptr.To(int64(2000))
+		pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)
@@ -105,11 +111,11 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		ginkgo.By("Checking read from a volume")
 		checkReadFromPath(f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking file group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 2000 1000'", fileInVol))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking dir group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 2000 1000'", volPath))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking pod identity")
-		e2evolume.VerifyExecInPodSucceed(f, pod, "id | grep 'uid=1000 gid=2000 groups=2000'")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
 	}
 	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
 		validateWriteToVolume(ctx)
@@ -124,7 +130,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		pod.Spec.SecurityContext.RunAsGroup = ptr.To(int64(2000))
+		pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)
