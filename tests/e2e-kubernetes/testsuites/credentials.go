@@ -137,8 +137,13 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		return vol
 	}
 
-	createPod := func(ctx context.Context, vol *storageframework.VolumeResource) *v1.Pod {
-		pod, err := e2epod.CreateClientPod(ctx, f.ClientSet, f.Namespace.Name, vol.Pvc)
+	createPod := func(ctx context.Context, vol *storageframework.VolumeResource, podModifiers ...func(*v1.Pod)) *v1.Pod {
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
+		for _, pm := range podModifiers {
+			pm(pod)
+		}
+
+		pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)
 		deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
@@ -154,6 +159,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
 		deferCleanup(vol.CleanupResource)
 		return createPod(ctx, vol)
+	}
+
+	createPodAllowsDeleteNonRoot := func(ctx context.Context) *v1.Pod {
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			"allow-delete",
+			"allow-other",
+			fmt.Sprintf("uid=%d", defaultNonRootUser),
+			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+		})
+		deferCleanup(vol.CleanupResource)
+		return createPod(ctx, vol, podModifierNonRoot)
 	}
 
 	const (
@@ -345,6 +361,11 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(pod)
 				})
+
+				It("should use ec2 instance profile's full access role as non-root", func(ctx context.Context) {
+					pod := createPodAllowsDeleteNonRoot(ctx)
+					expectFullAccess(pod)
+				})
 			})
 
 			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
@@ -363,6 +384,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should use service account's full access role", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(pod)
+				})
+
+				It("should use service account's full access role as non-root", func(ctx context.Context) {
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDeleteNonRoot(ctx)
 					expectFullAccess(pod)
 				})
 
@@ -385,6 +412,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectFullAccess(pod)
 				})
 
+				It("should use full access aws credentials as non-root", func(ctx context.Context) {
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDeleteNonRoot(ctx)
+					expectFullAccess(pod)
+				})
+
 				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3NoAccess)
 					expectFailToMount(ctx, "", nil)
@@ -392,7 +425,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			})
 		})
 
-		Describe("Pod level", func() {
+		Describe("Pod Level", func() {
 			enablePodLevelIdentity := func(ctx context.Context) context.Context {
 				return contextWithAuthenticationSource(ctx, "pod")
 			}
@@ -424,32 +457,49 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					return assignPolicyToServiceAccount(ctx, sa, policyARN)
 				}
 
-				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyARN string, allowDelete bool) (*v1.Pod, *v1.ServiceAccount) {
+				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyARN string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
 					By("Creating Pod with ServiceAccount")
 
 					mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
 					if allowDelete {
 						mountOptions = append(mountOptions, "allow-delete")
 					}
+					if asNonRoot {
+						mountOptions = append(mountOptions,
+							"allow-other",
+							fmt.Sprintf("uid=%d", defaultNonRootUser),
+							fmt.Sprintf("gid=%d", defaultNonRootGroup))
+					}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
 
 					sa := createServiceAccountWithPolicy(ctx, policyARN)
 
-					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
-					framework.ExpectNoError(err)
-					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+					var podModifiers []func(*v1.Pod)
+					podModifiers = append(podModifiers, func(pod *v1.Pod) {
+						pod.Spec.ServiceAccountName = sa.Name
+					})
+					if asNonRoot {
+						podModifiers = append(podModifiers, podModifierNonRoot)
+					}
+
+					pod := createPod(ctx, vol, podModifiers...)
 
 					return pod, sa
 				}
 
 				It("should use pod's service account's read-only role", func(ctx context.Context) {
-					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, false)
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, false, false)
 					expectReadOnly(pod)
 				})
 
 				It("should use pod's service account's full access role", func(ctx context.Context) {
-					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true)
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true, false)
+					expectFullAccess(pod)
+				})
+
+				It("should use pod's service account's full access role as non-root", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true, true)
 					expectFullAccess(pod)
 				})
 
@@ -502,14 +552,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should not use csi driver's service account tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 
-					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true)
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
 					expectReadOnly(pod)
 				})
 
 				It("should not use driver-level kubernetes secrets", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 
-					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true)
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
 					expectReadOnly(pod)
 				})
 
