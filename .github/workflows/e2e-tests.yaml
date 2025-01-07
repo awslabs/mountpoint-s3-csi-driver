@@ -108,8 +108,11 @@ jobs:
       CLUSTER_TYPE: "${{ matrix.cluster-type }}"
       ARCH: "${{ matrix.arch }}"
       AMI_FAMILY: "${{ matrix.family }}"
-      K8S_VERSION: "${{ matrix.kubernetes-version }}"
       TAG: "untested_${{ inputs.ref }}"
+      # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,
+      # and in order to get latest supported version by envtest we convert it to 1.28.
+      K8S_VERSION: "${{ matrix.kubernetes-version }}"
+      ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -129,16 +132,12 @@ jobs:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
       - name: Install tools
+        env:
+          ACTION: "install_tools"
         run: |
-          export ACTION=install_tools
-          export K8S_VERSION=${{ matrix.kubernetes-version }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Controller Tests
         run: |
-          # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,
-          # and in order to get latest supported version by envtest we convert it to 1.28.
-          export K8S_VERSION=${{ matrix.kubernetes-version }}
-          export ENVTEST_K8S_VERSION="${K8S_VERSION%.*}"
           make e2e-controller
       - name: Create cluster
         env:
