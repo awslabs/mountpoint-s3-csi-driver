@@ -13,6 +13,9 @@ const KnownPathMountSock = "mount.sock"
 // will propagate contents of this error file to the Kubernetes and to the operator to resolve any operator error.
 const KnownPathMountError = "mount.err"
 
+// KnownPathCredentials is the base directory for storing credential files.
+const KnownPathCredentials = "credentials"
+
 // CommunicationDirName is the name of `emptyDir` volume each Mountpoint Pod will create
 // for the communication between Mountpoint Pod and the CSI Driver Node Pod.
 // Each Pod will have a different view for the files inside this folder,
