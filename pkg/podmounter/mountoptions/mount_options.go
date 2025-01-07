@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
+	"os"
+	"path/filepath"
 	"syscall"
 
 	"k8s.io/klog/v2"
@@ -25,7 +28,11 @@ type Options struct {
 
 // Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.
 func Send(ctx context.Context, sockPath string, options Options) error {
-	warnAboutLongUnixSocketPath(sockPath)
+	sockPath, cleanSockPath, err := ensureSocketPathLengthIsUnderLimit(sockPath)
+	if err != nil {
+		return err
+	}
+	defer cleanSockPath()
 
 	message, err := json.Marshal(&options)
 	if err != nil {
@@ -61,7 +68,11 @@ var (
 
 // Recv receives passed mount options via `Send` function through given `sockPath`.
 func Recv(ctx context.Context, sockPath string) (Options, error) {
-	warnAboutLongUnixSocketPath(sockPath)
+	sockPath, cleanSockPath, err := ensureSocketPathLengthIsUnderLimit(sockPath)
+	if err != nil {
+		return Options{}, err
+	}
+	defer cleanSockPath()
 
 	l, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -135,12 +146,37 @@ func parseUnixRights(buf []byte) ([]int, error) {
 	return fds, nil
 }
 
-// warnAboutLongUnixSocketPath emits a warning if `path` is longer than 108 characters.
-// There is a limit on Unix domain socket path on some platforms and
-// Go returns `bind: invalid argument` in this case which is hard to debug.
+// ensureSocketPathLengthIsUnderLimit ensures `sockPath` is not longer than 108 characters,
+// which Go returns `invalid argument` errors if you try to do `net.Listen()` or `net.Dial()`.
 // See https://github.com/golang/go/issues/6895 for more details.
-func warnAboutLongUnixSocketPath(path string) {
-	if len(path) > 108 {
-		klog.Warningf("Length of Unix domain socket is larger than 108 characters and it might not work in some platforms, see https://github.com/golang/go/issues/6895. Fullpath: %q", path)
+//
+// If `sockPath` is longer than 108 characters, this function creates a shorter symlink to it in the temp dir,
+// and returns that symlink to use as `sockPath`.
+// It also returns a clean up function to clean up this temporary symlink at the end.
+func ensureSocketPathLengthIsUnderLimit(sockPath string) (string, func(), error) {
+	if len(sockPath) < 108 {
+		return sockPath, func() {}, nil
 	}
+
+	klog.Infof("Unix socket path %q is longer than 108 characters which known to be cause problems in some platforms. Creating a shorter symlink to it to use.", sockPath)
+
+	tempDir, err := os.MkdirTemp(os.TempDir(), "mountoptions")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create a temp dir for a shorter symlink to %s: %w", sockPath, err)
+	}
+	shortSockPath := filepath.Join(tempDir, filepath.Base(sockPath))
+
+	err = os.Symlink(sockPath, shortSockPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create a symlink from %s to %s: %w", sockPath, shortSockPath, err)
+	}
+
+	klog.Infof("Created %q as a symlink to %q and will be used to do Unix socket recv/send operations", shortSockPath, sockPath)
+
+	return shortSockPath, func() {
+		err := os.Remove(shortSockPath)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			klog.Infof("Failed to remove symlink %s: %v\n", shortSockPath, err)
+		}
+	}, nil
 }
