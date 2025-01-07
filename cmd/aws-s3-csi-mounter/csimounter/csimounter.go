@@ -52,20 +52,17 @@ func Run(options Options) (int, error) {
 		return 0, fmt.Errorf("passed file descriptor %d is invalid", mountOptions.Fd)
 	}
 
-	args := mountOptions.Args
+	mountpointArgs := mountpoint.ParsedArgs(mountOptions.Args)
 
 	// By default Mountpoint runs in a detached mode. Here we want to monitor it by relaying its output,
 	// and also we want to wait until it terminates. We're passing `--foreground` to achieve this.
-	const foreground, foregroundShort = "--foreground", "-f"
-	if !(slices.Contains(args, foreground) || slices.Contains(args, foregroundShort)) {
-		args = append(args, foreground)
-	}
+	mountpointArgs.Insert(mountpoint.ArgForeground)
 
-	args = append([]string{
+	args := append([]string{
 		mountOptions.BucketName,
 		// We pass FUSE fd using `ExtraFiles`, and each entry becomes as file descriptor 3+i.
 		"/dev/fd/3",
-	}, args...)
+	}, mountpointArgs.SortedList()...)
 
 	cmd := exec.Command(options.MountpointPath, args...)
 	cmd.ExtraFiles = []*os.File{fuseDev}
