@@ -1,0 +1,72 @@
+{{- if .Values.experimental.podMounter -}}
+
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: s3-csi-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-csi-controller
+      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: s3-csi-controller
+        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        {{- with .Values.controller.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      serviceAccountName: {{ .Values.controller.serviceAccount.name }}
+      priorityClassName: system-cluster-critical
+      {{- with .Values.controller.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      tolerations:
+        # TODO: Should we add some default tolerations for controller?
+        {{- with .Values.controller.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: s3-csi-controller
+          image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "/bin/aws-s3-csi-controller"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            {{- with .Values.controller.seLinuxOptions }}
+            seLinuxOptions:
+              user: {{ .user }}
+              type: {{ .type }}
+              role: {{ .role }}
+              level: {{ .level }}
+            {{- end }}
+          # TODO: Healthcheck for the controller.
+          {{- with .Values.controller.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: MOUNTPOINT_IMAGE
+              value: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+            - name: MOUNTPOINT_IMAGE_PULL_POLICY
+              value: {{ .Values.image.pullPolicy }}
+            - name: MOUNTPOINT_NAMESPACE
+              value: {{ .Values.mountpointPod.namespace }}
+
+{{- end -}}
