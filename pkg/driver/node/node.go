@@ -35,13 +35,10 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/regionprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
-const (
-	defaultKubeletPath = "/var/lib/kubelet"
-)
-
-var kubeletPath = getKubeletPath()
+var kubeletPath = util.KubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
@@ -294,12 +291,4 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		Readonly:          req.Readonly,
 		VolumeContext:     safeVolumeContext,
 	}
-}
-
-func getKubeletPath() string {
-	kubeletPath := os.Getenv("KUBELET_PATH")
-	if kubeletPath == "" {
-		return defaultKubeletPath
-	}
-	return kubeletPath
 }
