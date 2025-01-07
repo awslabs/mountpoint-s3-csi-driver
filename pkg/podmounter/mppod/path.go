@@ -16,12 +16,19 @@ const CommunicationDirName = "comm"
 
 // PathOnHost returns the full path on the host that refers to `path` inside Mountpoint Pod.
 // This function should be used in the CSI Driver Node Pod which uses `hostPath` volume to mount kubelet.
-func PathOnHost(podPathOnHost string, path string) string {
-	return filepath.Join(podPathOnHost, "/volumes/kubernetes.io~empty-dir/", CommunicationDirName, path)
+func PathOnHost(podPathOnHost string, path ...string) string {
+	return filepath.Join(append([]string{
+		podPathOnHost,
+		"/volumes/kubernetes.io~empty-dir/",
+		CommunicationDirName,
+	}, path...)...)
 }
 
 // PathInsideMountpointPod returns the full path that refers to `path` inside Mountpoint Pod.
 // This function should be used in the Mountpoint Pod.
-func PathInsideMountpointPod(path string) string {
-	return filepath.Join("/", CommunicationDirName, path)
+func PathInsideMountpointPod(elem ...string) string {
+	return filepath.Join(append([]string{
+		"/",
+		CommunicationDirName,
+	}, elem...)...)
 }
