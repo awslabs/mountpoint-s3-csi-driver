@@ -17,6 +17,9 @@ const KnownPathMountError = "mount.err"
 // Mountpoint Pod is no longer needed and can cleany exit.
 const KnownPathMountExit = "mount.exit"
 
+// KnownPathCredentials is the base directory for storing credential files.
+const KnownPathCredentials = "credentials"
+
 // CommunicationDirName is the name of `emptyDir` volume each Mountpoint Pod will create
 // for the communication between Mountpoint Pod and the CSI Driver Node Pod.
 // Each Pod will have a different view for the files inside this folder,
