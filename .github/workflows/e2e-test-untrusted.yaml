@@ -1,0 +1,17 @@
+name: "E2E Tests (Untrusted)"
+
+on:
+  pull_request_target:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E Tests
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      environment: "untrusted"
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit

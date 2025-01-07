@@ -10,16 +10,16 @@ on:
 # 1) private ARS source repository
 # 2) public repository
 env:
-  AWS_SRC_REGION : "us-east-1" # this is where our testing repo exists
-  AWS_DEST_REGION : "us-west-2" # this is where our prod repos exist
-  COMMIT_ID: ${{ github.sha }}
   GIT_TAG: ${{ github.ref_name }}
+  TAG_PASSED: "test_passed_${{ github.sha }}"
   IMAGE_NAME: "s3-csi-driver"
-  PUBLIC_REGISTRY: "public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver"
+  PUBLIC_REGISTRY: ${{ vars.PUBLIC_REGISTRY }}
+  ARS_REGISTRY: ${{ vars.ARS_REGISTRY }}
 jobs:
   build:
     # this is to prevent the job to run at forked projects
-    if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
+    if: ${{ ! github.repository.fork }}
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -32,40 +32,52 @@ jobs:
         uses: docker/setup-buildx-action@v1
       - name: Set up crane
         uses: imjasonh/setup-crane@v0.1
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-      - name: Configure AWS Credentials from Test acccount
-        uses: aws-actions/configure-aws-credentials@master
+
+      - name: Configure AWS Credentials from CI Trusted account
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_SRC_REGION }}
-      - name: Login to Amazon ECR test
-        id: login-ecr-test
+          role-to-assume: ${{ vars.CI_TRUSTED_IAM_ROLE }}
+          aws-region: ${{ vars.AWS_CI_TRUSTED_REGION }}
+      - name: Login to Amazon ECR (trusted)
+        id: login-ecr-trusted
         uses: aws-actions/amazon-ecr-login@v1
-      - name: Configure AWS Credentials from Prod account
-        uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
-          aws-region: ${{ env.AWS_DEST_REGION }}
+          mask-password: true
+
+      - name: Configure AWS Credentials from Prod account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
+          aws-region: ${{ vars.AWS_PROD_ECR_REGION }}
       - name: Login to Amazon ECR prod
         id: login-ecr-prod
         uses: aws-actions/amazon-ecr-login@v1
-      - name: Configure AWS Credentials from Prod account (for public repo)
-        uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: ${{ secrets.PROD_IAM_IMAGE_ROLE }}
+          mask-password: true
+
+      - name: Configure AWS Credentials from Prod account (for ECR public)
+        if: ${{ env.PUBLIC_REGISTRY != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
           aws-region: us-east-1
       - name: Login to Amazon ECR Public
+        if: ${{ env.PUBLIC_REGISTRY != '' }}
         id: login-ecr-public
         uses: aws-actions/amazon-ecr-login@v1
         with:
           registry-type: public
+          mask-password: true
+
       - name: Promote image
         env:
-          ARS_REGISTRY: ${{ secrets.ARS_REGISTRY }}
+          SOURCE_REGISTRY: ${{ steps.login-ecr-trusted.outputs.registry }}
         run: |
-          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${ARS_REGISTRY}:${{ env.GIT_TAG }}
-          crane copy ${{ steps.login-ecr-test.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_ID }} ${{ env.PUBLIC_REGISTRY }}:${{ env.GIT_TAG }}
+          crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${ARS_REGISTRY}:${GIT_TAG}
+          if [ -n "${PUBLIC_REGISTRY}" ]; then
+            crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${PUBLIC_REGISTRY}:${GIT_TAG}
+          fi
+
       - name: Create Release
         id: create-release
         uses: actions/create-release@v1
