@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"k8s.io/mount-utils"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -45,6 +46,9 @@ const (
 	// This is the plugin directory for CSI driver mounted in the container.
 	containerPluginDir = "/csi"
 )
+
+var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
+var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
 
 type Driver struct {
 	Endpoint string
@@ -74,14 +78,24 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
-	systemdMounter, err := mounter.NewSystemdMounter(mpVersion)
-	if err != nil {
-		klog.Fatalln(err)
+	var mounterImpl mounter.Mounter
+	if usePodMounter {
+		mounterImpl, err = mounter.NewPodMounter(clientset.CoreV1(), mountpointPodNamespace, mount.New(""), nil)
+		if err != nil {
+			klog.Fatalln(err)
+		}
+		klog.Infoln("Using pod mounter")
+	} else {
+		mounterImpl, err = mounter.NewSystemdMounter(mpVersion)
+		if err != nil {
+			klog.Fatalln(err)
+		}
+		klog.Infoln("Using systemd mounter")
 	}
 
 	credentialProvider := credentialprovider.New(clientset.CoreV1())
 	regionProvider := regionprovider.New(regionprovider.RegionFromIMDSOnce)
-	nodeServer := node.NewS3NodeServer(nodeID, systemdMounter, credentialProvider, regionProvider, kubernetesVersion)
+	nodeServer := node.NewS3NodeServer(nodeID, mounterImpl, credentialProvider, regionProvider, kubernetesVersion)
 
 	return &Driver{
 		Endpoint:   endpoint,
