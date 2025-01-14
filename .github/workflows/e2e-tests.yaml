@@ -10,7 +10,9 @@ on:
         required: true
         type: string
 
-concurrency: e2e-cluster
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+
 env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
