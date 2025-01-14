@@ -67,9 +67,9 @@ func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider 
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	volumeContext := req.GetVolumeContext()
-	if volumeContext[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
-		podID := volumeContext[volumecontext.CSIPodUID]
+	volumeCtx := req.GetVolumeContext()
+	if volumeCtx[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
+		podID := volumeCtx[volumecontext.CSIPodUID]
 		volumeID := req.GetVolumeId()
 		if podID != "" && volumeID != "" {
 			err := ns.credentialProvider.CleanupToken(volumeID, podID)
@@ -94,9 +94,9 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	volumeContext := req.GetVolumeContext()
+	volumeCtx := req.GetVolumeContext()
 
-	bucket, ok := volumeContext[volumecontext.BucketName]
+	bucket, ok := volumeCtx[volumecontext.BucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}

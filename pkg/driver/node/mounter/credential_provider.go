@@ -84,15 +84,15 @@ func (c *CredentialProvider) CleanupToken(volumeID string, podID string) error {
 
 // Provide provides mount credentials for given volume and volume context.
 // Depending on the configuration, it either returns driver-level or pod-level credentials.
-func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volumeContext map[string]string, mountpointArgs []string) (*MountCredentials, error) {
-	if volumeContext == nil {
+func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volumeCtx map[string]string, mountpointArgs []string) (*MountCredentials, error) {
+	if volumeCtx == nil {
 		return nil, status.Error(codes.InvalidArgument, "Missing volume context")
 	}
 
-	authenticationSource := volumeContext[volumecontext.AuthenticationSource]
+	authenticationSource := volumeCtx[volumecontext.AuthenticationSource]
 	switch authenticationSource {
 	case AuthenticationSourcePod:
-		return c.provideFromPod(ctx, volumeID, volumeContext, mountpointArgs)
+		return c.provideFromPod(ctx, volumeID, volumeCtx, mountpointArgs)
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		return c.provideFromDriver()
 	default:
@@ -119,10 +119,10 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	}, nil
 }
 
-func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeContext map[string]string, mountpointArgs []string) (*MountCredentials, error) {
+func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeCtx map[string]string, mountpointArgs []string) (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using pod identity")
 
-	tokensJson := volumeContext[volumecontext.CSIServiceAccountTokens]
+	tokensJson := volumeCtx[volumecontext.CSIServiceAccountTokens]
 	if tokensJson == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no service account tokens are received. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return nil, status.Error(codes.InvalidArgument, "Missing service account tokens")
@@ -139,12 +139,12 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudienceSTS)
 	}
 
-	awsRoleARN, err := c.findPodServiceAccountRole(ctx, volumeContext)
+	awsRoleARN, err := c.findPodServiceAccountRole(ctx, volumeCtx)
 	if err != nil {
 		return nil, err
 	}
 
-	region, err := c.stsRegion(volumeContext, mountpointArgs)
+	region, err := c.stsRegion(volumeCtx, mountpointArgs)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
 	}
@@ -154,7 +154,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		defaultRegion = region
 	}
 
-	podID := volumeContext[volumecontext.CSIPodUID]
+	podID := volumeCtx[volumecontext.CSIPodUID]
 	if podID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
@@ -167,8 +167,8 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 	hostPluginDir := hostPluginDirWithDefault()
 	hostTokenPath := path.Join(hostPluginDir, c.tokenFilename(podID, volumeID))
 
-	podNamespace := volumeContext[volumecontext.CSIPodNamespace]
-	podServiceAccount := volumeContext[volumecontext.CSIServiceAccountName]
+	podNamespace := volumeCtx[volumecontext.CSIPodNamespace]
+	podServiceAccount := volumeCtx[volumecontext.CSIServiceAccountName]
 	cacheKey := podNamespace + "/" + podServiceAccount
 
 	return &MountCredentials{
@@ -214,9 +214,9 @@ func (c *CredentialProvider) tokenFilename(podID string, volumeID string) string
 	return filename.String()
 }
 
-func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volumeContext map[string]string) (string, error) {
-	podNamespace := volumeContext[volumecontext.CSIPodNamespace]
-	podServiceAccount := volumeContext[volumecontext.CSIServiceAccountName]
+func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volumeCtx map[string]string) (string, error) {
+	podNamespace := volumeCtx[volumecontext.CSIPodNamespace]
+	podServiceAccount := volumeCtx[volumecontext.CSIServiceAccountName]
 	if podNamespace == "" || podServiceAccount == "" {
 		klog.Error("`authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
 		return "", status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
@@ -245,8 +245,8 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 //  4. Calling IMDS to detect region
 //
 // It returns an error if all of them fails.
-func (c *CredentialProvider) stsRegion(volumeContext map[string]string, mountpointArgs []string) (string, error) {
-	region := volumeContext[volumecontext.STSRegion]
+func (c *CredentialProvider) stsRegion(volumeCtx map[string]string, mountpointArgs []string) (string, error) {
+	region := volumeCtx[volumecontext.STSRegion]
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from volume context", region)
 		return region, nil
