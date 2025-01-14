@@ -19,6 +19,7 @@ jobs:
           echo "Approved!"
   e2e:
     name: E2E Tests
+    if: ${{ github.event.pull_request.head.repo.id != github.event.pull_request.base.repo.id }}
     uses: ./.github/workflows/e2e-tests.yaml
     needs: approval
     with:
