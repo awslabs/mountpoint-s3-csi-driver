@@ -2,7 +2,7 @@ name: "E2E Tests (Trusted)"
 
 on:
   push:
-    branches: [ "main", "feature/**", "release-**", "workflow/**" ]
+    branches: [ "main", "release-**", "workflow/**" ]
   merge_group:
     types: [ "checks_requested" ]
   pull_request:
