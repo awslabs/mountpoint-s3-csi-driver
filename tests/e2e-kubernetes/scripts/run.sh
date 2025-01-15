@@ -56,39 +56,12 @@ KOPS_VERSION=1.28.5
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
 
-# "AMI_ID" is only used on kops (eksctl directly uses "AMI_FAMILY").
-declare -A AMI_IDS
-AMI_IDS["AmazonLinux2-x86"]="/aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2"
-AMI_IDS["AmazonLinux2-arm"]="/aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-arm64-gp2"
-AMI_IDS["AmazonLinux2023-x86"]="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-AMI_IDS["AmazonLinux2023-arm"]="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-AMI_IDS["Bottlerocket-x86"]="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION_MAJOR_MINOR}/x86_64/latest/image_id"
-AMI_IDS["Bottlerocket-arm"]="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION_MAJOR_MINOR}/arm64/latest/image_id"
-AMI_IDS["Ubuntu2004-x86"]="/aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
-AMI_IDS["Ubuntu2004-arm"]="/aws/service/canonical/ubuntu/server/20.04/stable/current/arm64/hvm/ebs-gp2/ami-id"
-
-AMI_ID_DEFAULT=$(aws ssm get-parameters --names "${AMI_IDS["${AMI_FAMILY}-${ARCH}"]}" --region ${REGION} --query 'Parameters[0].Value' --output text)
-AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
-if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
-    echo "Using AMI $AMI_ID for $AMI_FAMILY"
-fi
-
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 else
   INSTANCE_TYPE_DEFAULT=m7g.medium
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-fi
-
-if [[ "${ARCH}" == "x86" ]]; then
-  INSTANCE_TYPE_DEFAULT=c5.large
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-state-store
-else
-  INSTANCE_TYPE_DEFAULT=m7g.medium
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
-  KOPS_STATE_FILE_DEFAULT=s3://mountpoint-s3-csi-driver-kops-arm-state-store
 fi
 
 
