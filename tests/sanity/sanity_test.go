@@ -28,6 +28,8 @@ import (
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 )
 
 const (
@@ -68,11 +70,11 @@ var _ = BeforeSuite(func() {
 	s3Driver = &driver.Driver{
 		Endpoint: endpoint,
 		NodeID:   "fake_id",
-		NodeServer: &driver.S3NodeServer{
-			NodeID:          "fake_id",
-			BaseCredentials: &driver.MountCredentials{},
-			Mounter:         &driver.FakeMounter{},
-		},
+		NodeServer: node.NewS3NodeServer(
+			"fake_id",
+			&mounter.FakeMounter{},
+			mounter.NewCredentialProvider(nil, GinkgoT().TempDir(), mounter.RegionFromIMDSOnce),
+		),
 	}
 	go func() {
 		Expect(s3Driver.Run()).NotTo(HaveOccurred())

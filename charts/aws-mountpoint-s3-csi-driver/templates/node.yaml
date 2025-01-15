@@ -49,14 +49,16 @@ spec:
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- with .Values.node.seLinuxOptions }}
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
               type: {{ .type }}
               role: {{ .role }}
               level: {{ .level }}
-          {{- end }}
+            {{- end }}
           imagePullPolicy: IfNotPresent
           command:
             - "/bin/install-mp"
@@ -69,18 +71,19 @@ spec:
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          {{- with .Values.node.seLinuxOptions }}
           securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
               type: {{ .type }}
               role: {{ .role }}
               level: {{ .level }}
-          {{- end }}
-          imagePullPolicy: IfNotPresent
+            {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --logtostderr
             - --v={{ .Values.node.logLevel }}
           env:
             - name: CSI_ENDPOINT
@@ -90,6 +93,8 @@ spec:
             # mount-s3 runs in systemd context, so this is relative to the host
             - name: MOUNT_S3_PATH
               value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
+            - name: KUBELET_PATH
+              value: {{ .Values.node.kubeletPath }}
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -109,18 +114,27 @@ spec:
                   name: {{ .name }}
                   key: {{ .accessKey }}
                   optional: true
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .sessionToken }}
+                  optional: true
             {{- end }}
           volumeMounts:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletPath }}
+              # Currently we spawn Mountpoint instances on the host using systemd,
+              # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
+              # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
+              # without needing to mount "/proc/mounts" from host.
+              mountPropagation: HostToContainer
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev
               mountPath: /host/dev
-            - name: proc-mounts
-              mountPath: /host/proc/mounts
           ports:
             - name: healthz
               containerPort: 9808
@@ -140,6 +154,9 @@ spec:
         - name: node-driver-registrar
           image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -173,6 +190,9 @@ spec:
         - name: liveness-probe
           image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
           volumeMounts:
@@ -191,10 +211,6 @@ spec:
           hostPath:
             path: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}
             type: DirectoryOrCreate
-        - name: proc-mounts
-          hostPath:
-            path: {{ default "/proc/mounts" .Values.node.procMountPath }}
-            type: File
         - name: systemd-bus
           hostPath:
             path: /run/systemd/private

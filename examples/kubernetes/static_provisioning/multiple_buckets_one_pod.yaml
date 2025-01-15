@@ -7,6 +7,10 @@ spec:
     storage: 1200Gi # ignored, required
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc # Name of your PVC
   mountOptions:
     - allow-delete
     - region us-west-2
@@ -19,15 +23,15 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: s3-claim
+  name: s3-pvc
 spec:
   accessModes:
-    - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
-  storageClassName: "" # required for static provisioning
+    - ReadWriteMany # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
   resources:
     requests:
-      storage: 1200Gi # ignored, required
-  volumeName: s3-pv
+      storage: 1200Gi # Ignored, required
+  volumeName: s3-pv # Name of your PV
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -38,6 +42,10 @@ spec:
     storage: 1200Gi # ignored, required
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc-2 # Name of your PVC
   mountOptions:
     - allow-delete
     - region us-west-2
@@ -50,7 +58,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: s3-claim-2
+  name: s3-pvc-2
 spec:
   accessModes:
     - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
@@ -58,7 +66,7 @@ spec:
   resources:
     requests:
       storage: 1200Gi # ignored, required
-  volumeName: s3-pv-2
+  volumeName: s3-pv-2 # Name of your PV
 ---
 apiVersion: v1
 kind: Pod
@@ -78,7 +86,7 @@ spec:
   volumes:
     - name: persistent-storage
       persistentVolumeClaim:
-        claimName: s3-claim
+        claimName: s3-pvc
     - name: persistent-storage-2
       persistentVolumeClaim:
-        claimName: s3-claim-2
+        claimName: s3-pvc-2

@@ -1,80 +1,97 @@
 name: E2E Tests
 
 on:
-  push:
-    branches: ["main", "release-**"]
-  pull_request:
-    branches: ["main"]
-    paths:
-      - "tests/**"
-      - "pkg/**"
-      - "cmd/**"
-      - "charts/**"
-      - ".github/workflows/**"
-      - "Dockerfile"
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
 
-# This workflow runs e2e tests and relies on existance of EKS cluster with a `s3-csi-driver-sa` service account
-# already deployed to it, which provides the driver with access to s3.
-#
-# Since we have a single cluster for e2e tests, we ensure that no more than one instance of this workflow is
-# running by `concurrency: e2e-cluster` option.
-#
-# Succesfull workflows triggered by push to main will upload tested image to the private repository "PROMOTED_IMAGE_NAME":
-# - uploaded images will be tagged with main branch commit number
-# - uploaded images will be later promoted to public repository by "release" workflow
-concurrency: e2e-cluster
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+
 env:
-  AWS_REGION: "us-east-1"
-  COMMIT_ID: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
-  TMP_IMAGE_NAME: "s3-csi-driver-tmp"
-  PROMOTED_IMAGE_NAME: "s3-csi-driver"
-  BENCHMARK_RESULTS_BUCKET: "s3://mountpoint-s3-csi-driver-benchmark"
-  BENCHMARK_RESULTS_REGION: "us-east-1"
+  IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  KOPS_STATE_FILE: "s3://${{ vars.KOPS_STATE_FILE }}"
+  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
+  TAG_UNTESTED: "untested_${{ inputs.ref }}"
+  TAG_PASSED: "test_passed_${{ inputs.ref }}"
 jobs:
   build:
-    # this is to prevent the job to run at forked projects
-    if: github.repository == 'awslabs/mountpoint-s3-csi-driver'
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version-file: "go.mod"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@master
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
       - name: Build, tag, and push docker image to Amazon ECR Private Repository
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_NAME: ${{ env.TMP_IMAGE_NAME }}
+          PLATFORM: "linux/amd64,linux/arm64"
+          TAG: "${{ env.TAG_UNTESTED }}"
         run: |
-          export PLATFORM=linux/amd64,linux/arm64
-          export TAG=${{ env.COMMIT_ID }}
-          make -j `nproc` all-push
+          make -j `nproc` all-push-skip-if-present
   test:
     needs: build
     strategy:
+      # Failing fast causes some resources created during the test to leak,
+      # so we disable it to ensure all resources created during test are properly cleaned up.
+      fail-fast: false
       matrix:
         cluster-type: ["eksctl", "kops"]
         arch: ["x86", "arm"]
         family:
           ["AmazonLinux2", "AmazonLinux2023", "Bottlerocket", "Ubuntu2004"]
+        kubernetes-version: ["1.28.13", "1.29.8", "1.30.4", "1.31.0"]
+        include:
+          # Ubuntu2004 supported for EKS <= 1.29 and Ubuntu2204 supported for EKS >= 1.29.
+          # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "Ubuntu2004"
+            kubernetes-version: "1.28.13"
+          - cluster-type: "eksctl"
+            arch: "arm"
+            family: "Ubuntu2004"
+            kubernetes-version: "1.29.8"
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "Ubuntu2204"
+            kubernetes-version: "1.30.4"
+          - cluster-type: "eksctl"
+            arch: "arm"
+            family: "Ubuntu2204"
+            kubernetes-version: "1.31.0"
+          # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
+          # field rather than trying to exclude all other variants.
+          - cluster-type: "kops"
+            arch: "arm"
+            family: "AmazonLinux2023"
+            selinux-mode: "enforcing"
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
@@ -89,23 +106,40 @@ jobs:
           # So, we're only running SELinux tests with kops.
           - cluster-type: "eksctl"
             family: "AmazonLinux2023"
-        include:
-          # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
-          # field rather than trying to exclude all other variants.
+          # Our tests are failing on clusters created with kops 1.29+.
+          # Until we fix that issue, we use kops 1.28 which only supports k8s versions up to 1.28.
+          # So, we only run our tests in k8s versions 1.29 and 1.30 on eksctl.
           - cluster-type: "kops"
-            arch: "arm"
-            family: "AmazonLinux2023"
-            selinux-mode: "enforcing"
+            kubernetes-version: "1.29.8"
+          - cluster-type: "kops"
+            kubernetes-version: "1.30.4"
+          - cluster-type: "kops"
+            kubernetes-version: "1.31.0"
     # TODO: This is temporary, we wanted to run our tests on SELinux enforced hosts even before we support it.
     #       Our tests will be passing on SELinux enforced hosts as well once we support it and we will remove this configuration.
     continue-on-error: ${{ matrix.selinux-mode == 'enforcing' }}
+
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    env:
+      AWS_REGION: "${{ vars.AWS_REGION }}"
+      CLUSTER_TYPE: "${{ matrix.cluster-type }}"
+      ARCH: "${{ matrix.arch }}"
+      AMI_FAMILY: "${{ matrix.family }}"
+      TAG: "untested_${{ inputs.ref }}"
+      # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,
+      # and in order to get latest supported version by envtest we convert it to 1.28.
+      K8S_VERSION: "${{ matrix.kubernetes-version }}"
+      ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
@@ -114,75 +148,50 @@ jobs:
         with:
           python-version: "3.10"
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
       - name: Install tools
+        env:
+          ACTION: "install_tools"
         run: |
-          export ACTION=install_tools
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Create cluster
-        if: matrix.cluster-type == 'kops'
+      - name: Run Controller Tests
         run: |
-          export ACTION=create_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
-          export SELINUX_MODE=${{ matrix.selinux-mode }}
+          make e2e-controller
+      - name: Create cluster
+        env:
+          ACTION: "create_cluster"
+        run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Update kubeconfig
+        env:
+          ACTION: "update_kubeconfig"
         run: |
-          export ACTION=update_kubeconfig
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Install the driver
+        env:
+          ACTION: "install_driver"
         run: |
-          export ACTION=install_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export IMAGE_NAME=${{ env.TMP_IMAGE_NAME }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Pre e2e cleanup
-        if: matrix.cluster-type == 'eksctl'
-        run: |
-          export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
+        env:
+          ACTION: "run_tests"
         run: |
-          export ACTION=run_tests
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run Performance Tests
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
+        env:
+          ACTION: "run_perf"
         run: |
-          export ACTION=run_perf
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export TAG=${{ env.COMMIT_ID }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Download previous benchmark results
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
-          aws s3 cp --region ${{ env.BENCHMARK_RESULTS_REGION }} ${{ env.BENCHMARK_RESULTS_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
+          aws s3 cp --region ${{ vars.BENCHMARK_RESULTS_REGION }} ${{ vars.BENCHMARK_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
       - name: Update benchmark result file
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         uses: benchmark-action/github-action-benchmark@v1
@@ -197,56 +206,45 @@ jobs:
         if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
         run: |
           tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
-          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} s3://mountpoint-s3-csi-driver-benchmark --recursive
+          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} ${{ env.BENCHMARK_BUCKET }} --recursive
       - name: Post e2e cleanup
         if: always()
+        env:
+          ACTION: "e2e_cleanup"
         run: |
-          export ACTION=e2e_cleanup
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
         if: always()
+        env:
+          ACTION: "uninstall_driver"
         run: |
-          export ACTION=uninstall_driver
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete cluster
-        if: always() && matrix.cluster-type == 'kops'
+        if: always()
+        env:
+          ACTION: "delete_cluster"
         run: |
-          export ACTION=delete_cluster
-          export AWS_REGION=${{ env.AWS_REGION }}
-          export CLUSTER_TYPE=${{ matrix.cluster-type }}
-          export ARCH=${{ matrix.arch }}
-          export AMI_FAMILY=${{ matrix.family }}
           tests/e2e-kubernetes/scripts/run.sh
-  promote:
-    if: startsWith(github.ref_name, 'release')
+  post_test:
     needs: test
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
     steps:
-      - name: Set up crane
-        uses: imjasonh/setup-crane@v0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.TEST_IAM_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Promote image for release branch
+      - name: Mark tests as passed
         env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: "${{ steps.login-ecr.outputs.registry }}/${{ env.IMAGE_NAME }}"
         run: |
-          export TMP_IMAGE_NAME=${REGISTRY}/${{ env.TMP_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          export NEW_IMAGE_NAME=${REGISTRY}/${{ env.PROMOTED_IMAGE_NAME }}:${{ env.COMMIT_ID }}
-          crane copy ${TMP_IMAGE_NAME} ${NEW_IMAGE_NAME}
+          docker buildx imagetools create --tag ${REPOSITORY}:${TAG_PASSED} ${REPOSITORY}:${TAG_UNTESTED}

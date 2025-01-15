@@ -4,7 +4,9 @@ import (
 	"flag"
 	"testing"
 
+	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
 	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	f "k8s.io/kubernetes/test/e2e/framework"
@@ -23,7 +25,12 @@ func init() {
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
+	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
 	flag.Parse()
+
+	s3client.DefaultRegion = BucketRegion
+	custom_testsuites.DefaultRegion = BucketRegion
+	custom_testsuites.IMDSAvailable = IMDSAvailable
 }
 
 func TestE2E(t *testing.T) {
@@ -51,6 +58,8 @@ var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitReadWriteOncePodTestSuite,
 	custom_testsuites.InitS3CSIMultiVolumeTestSuite,
 	custom_testsuites.InitS3MountOptionsTestSuite,
+	custom_testsuites.InitS3CSICredentialsTestSuite,
+	custom_testsuites.InitS3CSICacheTestSuite,
 }
 
 // This executes testSuites for csi volumes.
@@ -59,7 +68,10 @@ var _ = utils.SIGDescribe("CSI Volumes", func() {
 		CSITestSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
 	}
 	curDriver := initS3Driver()
-	ginkgo.Context(framework.GetDriverNameWithFeatureTags(curDriver), func() {
+
+	args := framework.GetDriverNameWithFeatureTags(curDriver)
+	args = append(args, func() {
 		framework.DefineTestSuites(curDriver, CSITestSuites)
 	})
+	f.Context(args...)
 })

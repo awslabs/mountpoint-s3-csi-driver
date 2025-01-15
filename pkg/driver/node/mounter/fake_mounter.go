@@ -1,4 +1,4 @@
-package driver
+package mounter
 
 type FakeMounter struct{}
 

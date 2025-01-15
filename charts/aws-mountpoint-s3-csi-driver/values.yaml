@@ -3,15 +3,17 @@
 # Declare variables to be passed into your templates.
 
 image:
+  # Our regional ECR repositories are labelled `eks/aws-s3-csi-driver`.
+  # See https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html for the per-region registry list.
+  # Example: `602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/aws-s3-csi-driver` for us-east-1.
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1.7.0"
+  tag: "v1.11.0"
 
 node:
   kubeletPath: /var/lib/kubelet
   mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
-  procMountPath: /proc/mounts
   logLevel: 4
   seLinuxOptions:
     user: system_u
@@ -24,7 +26,7 @@ node:
     name: s3-csi-driver-sa
     # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
     # annotations:
-      # "eks.amazonaws.com/role-arn": ""
+    # "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
   resources:
     requests:
@@ -42,9 +44,12 @@ node:
                 operator: NotIn
                 values:
                   - fargate
+                  - hybrid
+  podInfoOnMountCompat:
+    enable: false
 sidecars:
   nodeDriverRegistrar:
-    image: 
+    image:
       repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
       tag: v2.10.0-eks-1-29-7
       pullPolicy: IfNotPresent
@@ -60,7 +65,7 @@ sidecars:
         mountPath: /registration
     resources: {}
   livenessProbe:
-    image: 
+    image:
       repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
       tag: v2.12.0-eks-1-29-7
       pullPolicy: IfNotPresent
@@ -78,3 +83,4 @@ awsAccessSecret:
   name: aws-secret
   keyId: key_id
   accessKey: access_key
+  sessionToken: session_token

@@ -19,6 +19,7 @@ package driver
 import (
 	"context"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -26,7 +27,7 @@ import (
 func (d *Driver) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	resp := &csi.GetPluginInfoResponse{
 		Name:          driverName,
-		VendorVersion: driverVersion,
+		VendorVersion: version.GetVersion().DriverVersion,
 	}
 
 	return resp, nil

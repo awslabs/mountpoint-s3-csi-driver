@@ -14,14 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package driver
+package node
 
 import (
 	"context"
+	"maps"
 	"os"
-	"path"
 	"strings"
-	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -29,31 +28,57 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 const (
-	hostPluginDirEnv = "HOST_PLUGIN_DIR"
-	fstype           = "unused"
-	bucketName       = "bucketName"
+	defaultKubeletPath = "/var/lib/kubelet"
 )
+
+var kubeletPath = getKubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
 )
 
+var (
+	volumeCaps = []csi.VolumeCapability_AccessMode{
+		{
+			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+		},
+		{
+			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		},
+	}
+)
+
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID          string
-	BaseCredentials *MountCredentials
-	Mounter         Mounter
+	NodeID             string
+	Mounter            mounter.Mounter
+	credentialProvider *mounter.CredentialProvider
 }
 
-type Token struct {
-	Token               string    `json:"token"`
-	ExpirationTimestamp time.Time `json:"expirationTimestamp"`
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider *mounter.CredentialProvider) *S3NodeServer {
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	volumeCtx := req.GetVolumeContext()
+	if volumeCtx[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
+		podID := volumeCtx[volumecontext.CSIPodUID]
+		volumeID := req.GetVolumeId()
+		if podID != "" && volumeID != "" {
+			err := ns.credentialProvider.CleanupToken(volumeID, podID)
+			if err != nil {
+				klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
+			}
+		}
+	}
+
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -62,14 +87,16 @@ func (ns *S3NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	klog.V(4).Infof("NodePublishVolume: req: %+v", req)
+	klog.V(4).Infof("NodePublishVolume: new request: %+v", logSafeNodePublishVolumeRequest(req))
 
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	bucket, ok := req.GetVolumeContext()[bucketName]
+	volumeCtx := req.GetVolumeContext()
+
+	bucket, ok := volumeCtx[volumecontext.BucketName]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
@@ -77,6 +104,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
+	}
+
+	if !strings.HasPrefix(target, kubeletPath) {
+		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -109,22 +140,14 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		mountpointArgs = compileMountOptions(mountpointArgs, mountFlags)
 	}
 
+	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
+	if err != nil {
+		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
+		return nil, err
+	}
+
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
-	hostPluginDir := os.Getenv(hostPluginDirEnv)
-	if hostPluginDir == "" {
-		// set the default in case the env variable isn't found
-		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
-	}
-	hostTokenPath := path.Join(hostPluginDir, "token")
-	credentials := &MountCredentials{
-		AccessKeyID:     os.Getenv(keyIdEnv),
-		SecretAccessKey: os.Getenv(accessKeyEnv),
-		Region:          os.Getenv(regionEnv),
-		DefaultRegion:   os.Getenv(defaultRegionEnv),
-		WebTokenPath:    hostTokenPath,
-		StsEndpoints:    os.Getenv(stsEndpointsEnv),
-		AwsRoleArn:      os.Getenv(roleArnEnv),
-	}
+
 	if err := ns.Mounter.Mount(bucket, target, credentials, mountpointArgs); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
@@ -158,6 +181,14 @@ func compileMountOptions(currentOptions []string, newOptions []string) []string 
 	return allMountOptions.List()
 }
 
+func getKubeletPath() string {
+	kubeletPath := os.Getenv("KUBELET_PATH")
+	if kubeletPath == "" {
+		return defaultKubeletPath
+	}
+	return kubeletPath
+}
+
 func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("NodeUnpublishVolume: called with args %+v", req)
 
@@ -165,6 +196,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
+
 	target := req.GetTargetPath()
 	if len(target) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
@@ -189,6 +221,20 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	err = ns.Mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+	}
+
+	targetPath, err := targetpath.Parse(target)
+	if err == nil {
+		if targetPath.VolumeID != volumeID {
+			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
+		} else {
+			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
+			if err != nil {
+				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
+			}
+		}
+	} else {
+		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -243,4 +289,21 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 		}
 	}
 	return foundAll
+}
+
+// logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
+// with sensitive fields removed.
+func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
+	safeVolumeContext := maps.Clone(req.VolumeContext)
+	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
+
+	return &csi.NodePublishVolumeRequest{
+		VolumeId:          req.VolumeId,
+		PublishContext:    req.PublishContext,
+		StagingTargetPath: req.StagingTargetPath,
+		TargetPath:        req.TargetPath,
+		VolumeCapability:  req.VolumeCapability,
+		Readonly:          req.Readonly,
+		VolumeContext:     safeVolumeContext,
+	}
 }

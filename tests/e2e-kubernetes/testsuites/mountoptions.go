@@ -30,7 +30,7 @@ import (
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -89,7 +89,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		pod.Spec.SecurityContext.RunAsGroup = pointer.Int64(2000)
+		pod.Spec.SecurityContext.RunAsGroup = ptr.To(int64(2000))
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)
@@ -124,7 +124,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		l.resources = append(l.resources, resource)
 		ginkgo.By("Creating pod with a volume")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		pod.Spec.SecurityContext.RunAsGroup = pointer.Int64(2000)
+		pod.Spec.SecurityContext.RunAsGroup = ptr.To(int64(2000))
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)

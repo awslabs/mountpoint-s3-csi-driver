@@ -17,6 +17,7 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 - Bucket region (if bucket and cluster are in different regions): `PersistentVolume -> csi -> mountOptions`
 - [Mountpoint configurations](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) can be added in the `mountOptions` of the Persistent Volume spec.
 
+See [Static Provisioning](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#static-provisioning) configuration page for more details.
 
 ## Deploy
 ```

@@ -14,24 +14,26 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=1.7.0
+VERSION=1.11.0
 
 PKG=github.com/awslabs/aws-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-LDFLAGS?="-X ${PKG}/pkg/driver.driverVersion=${VERSION} -X ${PKG}/pkg/driver.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/driver.buildDate=${BUILD_DATE}"
+LDFLAGS?="-X ${PKG}/pkg/driver/version.driverVersion=${VERSION} -X ${PKG}/pkg/driver/version.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/driver/version.buildDate=${BUILD_DATE}"
 
 GO111MODULE=on
 GOPROXY=direct
 GOPATH=$(shell go env GOPATH)
 GOOS=$(shell go env GOOS)
-GOBIN=$(shell pwd)/bin
+GOBIN=$(GOPATH)/bin
 
 REGISTRY?=""
 IMAGE_NAME?=""
 IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
+
+DOCKERFILE?="Dockerfile"
 
 OS?=linux
 ARCH?=amd64
@@ -50,6 +52,9 @@ E2E_REGION?=us-east-1
 E2E_COMMIT_ID?=local
 E2E_KUBECONFIG?=""
 
+# Kubernetes version to use in envtest for controller tests.
+ENVTEST_K8S_VERSION ?= 1.30.x
+
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
 
@@ -64,9 +69,14 @@ all: all-image-docker
 all-push: create-manifest-and-images
 	docker manifest push --purge $(IMAGE):$(TAG)
 
+# Builds images only if not present with the tag
+.PHONY: all-push-skip-if-present
+all-push-skip-if-present:
+	docker manifest inspect $(IMAGE):$(TAG) > /dev/null || $(MAKE) all-push
+
 .PHONY: build_image
 build_image:
-	DOCKER_BUILDKIT=1 docker buildx build -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
+	DOCKER_BUILDKIT=1 docker buildx build -f ${DOCKERFILE} -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
 
 .PHONY: push-manifest
 push-manifest: create-manifest
@@ -95,6 +105,7 @@ sub-image-%:
 image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION):
 	DOCKER_BUILDKIT=1 docker buildx build \
+		-f ${DOCKERFILE} \
 		--platform=$(OS)/$(ARCH) \
 		--progress=plain \
 		--target=$(OS)-$(OSVERSION) \
@@ -126,20 +137,29 @@ install-go-test-coverage:
 
 .PHONY: test
 test:
-	go test -v -race ./pkg/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./pkg/...
+	go test -v -race ./{cmd,pkg}/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./{cmd,pkg}/...
+	# skipping controller test cases because we don't implement controller for static provisioning,
+	# this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
+	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
+
+.PHONY: cover
+cover:
 	${GOBIN}/go-test-coverage --config=./.testcoverage.yml
 	go tool cover -html=cover.out -o=cover.html
-	# skipping controller test cases because we don't implement controller for static provisioning, this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
-	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
 
 .PHONY: fmt
 fmt:
 	go fmt ./...
 
+# Run controller tests with envtest.
+.PHONY: e2e-controller
+e2e-controller: envtest
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
+
 .PHONY: e2e
-e2e:
+e2e: e2e-controller
 	pushd tests/e2e-kubernetes; \
-	KUBECONFIG=${E2E_KUBECONFIG} go test -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
+	KUBECONFIG=${E2E_KUBECONFIG} go test -timeout 30m -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
 	EXIT_CODE=$$?; \
 	popd; \
 	exit $$EXIT_CODE
@@ -151,3 +171,34 @@ check_style:
 .PHONY: clean
 clean:
 	rm -rf bin/ && docker system prune
+
+## Binaries used in tests.
+
+TESTBIN ?= $(shell pwd)/tests/bin
+$(TESTBIN):
+	mkdir -p $(TESTBIN)
+
+ENVTEST ?= $(TESTBIN)/setup-envtest
+ENVTEST_VERSION ?= release-0.19
+
+.PHONY: envtest
+envtest: $(ENVTEST)
+$(ENVTEST): $(TESTBIN)
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# Copied from https://github.com/kubernetes-sigs/kubebuilder/blob/c32f9714456f7e5e7cc6c790bb87c7e5956e710b/pkg/plugins/golang/v4/scaffolds/internal/templates/makefile.go#L275-L289.
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(TESTBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef
