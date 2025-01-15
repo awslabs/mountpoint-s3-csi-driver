@@ -115,6 +115,9 @@ jobs:
             kubernetes-version: "1.30.4"
           - cluster-type: "kops"
             kubernetes-version: "1.31.0"
+    # TODO: This is temporary, we wanted to run our tests on SELinux enforced hosts even before we support it.
+    #       Our tests will be passing on SELinux enforced hosts as well once we support it and we will remove this configuration.
+    continue-on-error: ${{ matrix.selinux-mode == 'enforcing' }}
 
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
