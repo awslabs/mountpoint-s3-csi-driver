@@ -3,6 +3,9 @@
 
 ### Notable changes
 * Add `HostToContainer` mount propagation, replacing the previous method of reading mount points via `/host/proc/mounts`. ([#321](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/321))
+* Support Mountpoint [version 1.14.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.14.0)
+  * Fix an issue where an interrupt during readdir syscall leads to an error. ([mountpoint-s3#965](https://github.com/awslabs/mountpoint-s3/pull/965))
+  * Fix an issue where the source bucket of a shared cache block was not correctly validated. ([mountpoint-s3#1208](https://github.com/awslabs/mountpoint-s3/pull/1208))
 
 # v1.11.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.11.0/README.md)
