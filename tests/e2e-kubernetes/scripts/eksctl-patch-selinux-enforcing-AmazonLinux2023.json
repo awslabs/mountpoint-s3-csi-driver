@@ -1,0 +1,12 @@
+[
+    {
+      "op": "add",
+      "path": "/managedNodeGroups/0/preBootstrapCommands",
+      "value": [
+        "dnf install -y container-selinux",
+        "setenforce 1",
+        "sed -i \"s/SELINUX=permissive/SELINUX=enforcing/\" /etc/selinux/config",
+        "reboot"
+      ]
+    }
+  ]

@@ -25,6 +25,7 @@ function eksctl_create_cluster() {
   NODE_TYPE=${10}
   AMI_FAMILY=${11}
   K8S_VERSION=${12}
+  EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
 
   eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
 
@@ -42,7 +43,18 @@ function eksctl_create_cluster() {
   CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
   ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_FILE)" -o yaml > $CLUSTER_FILE_TMP
   mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+
+  if [ -n "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" ]; then
+    ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_SELINUX_ENFORCING_FILE)" -o yaml > $CLUSTER_FILE_TMP
+    mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+  fi
+
   ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
+
+  # EKS cluster with AmazonLinux2 requires a manual reboot to enforce SELinux
+  if [ -n "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" ] && [ "$AMI_FAMILY" == "AmazonLinux2" ]; then
+    reboot_nodes "$KUBECTL_BIN" "$REGION"
+  fi
 
   if [ -n "$CI_ROLE_ARN" ]; then
     ${BIN} create iamidentitymapping --cluster ${CLUSTER_NAME} --region=${REGION} \
@@ -50,6 +62,24 @@ function eksctl_create_cluster() {
       --no-duplicate-arns
   fi
 }
+
+
+function reboot_nodes() {
+  KUBECTL_BIN=${1}
+  REGION=${2}
+  # Fetch and split node names into an array
+  NODE_NAMES=($(${KUBECTL_BIN} get nodes -o jsonpath='{.items[*].metadata.name}'))
+  for NODE in "${NODE_NAMES[@]}"; do
+    echo "Rebooting node: ${NODE}"
+    INSTANCE_ID=$(${KUBECTL_BIN} get node ${NODE} -o jsonpath='{.spec.providerID}' | awk -F '/' '{print $NF}')
+    if [ -n "$INSTANCE_ID" ]; then
+      aws ec2 reboot-instances --instance-ids ${INSTANCE_ID} --region ${REGION}
+    else
+      echo "Failed to fetch instance ID for node: ${NODE}"
+    fi
+  done
+}
+
 
 function eksctl_delete_cluster() {
   BIN=${1}
