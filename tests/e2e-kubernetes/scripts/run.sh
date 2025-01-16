@@ -148,7 +148,7 @@ function create_cluster() {
       "$INSTANCE_TYPE" \
       "$AMI_FAMILY" \
       "$K8S_VERSION_EKSCTL"\
-      "EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
+      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
   fi
 }
 
