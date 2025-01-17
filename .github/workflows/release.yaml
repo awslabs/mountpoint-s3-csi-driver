@@ -41,19 +41,15 @@ jobs:
       - name: Login to Amazon ECR (trusted)
         id: login-ecr-trusted
         uses: aws-actions/amazon-ecr-login@v1
-        with:
-          mask-password: true
 
       - name: Configure AWS Credentials from Prod account
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
           aws-region: ${{ vars.AWS_PROD_ECR_REGION }}
-      - name: Login to Amazon ECR prod
+      - name: Login to Amazon ECR (prod)
         id: login-ecr-prod
         uses: aws-actions/amazon-ecr-login@v1
-        with:
-          mask-password: true
 
       - name: Configure AWS Credentials from Prod account (for ECR public)
         if: ${{ env.PUBLIC_REGISTRY != '' }}
@@ -61,13 +57,12 @@ jobs:
         with:
           role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
           aws-region: us-east-1
-      - name: Login to Amazon ECR Public
+      - name: Login to Amazon ECR (public)
         if: ${{ env.PUBLIC_REGISTRY != '' }}
         id: login-ecr-public
         uses: aws-actions/amazon-ecr-login@v1
         with:
           registry-type: public
-          mask-password: true
 
       - name: Promote image
         env:
