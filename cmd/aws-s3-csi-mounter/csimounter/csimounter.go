@@ -82,7 +82,7 @@ func Run(options Options) (int, error) {
 	if err != nil {
 		// If Mountpoint fails, write it to `mountErrorPath` to let `PodMounter` running in the same node know.
 		if writeErr := os.WriteFile(mountErrorPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
-			klog.Infof("Failed to write error logs to %s: %v\n", mountErrorPath, err)
+			klog.Infof("Failed to write mount error logs to %s: %v\n", mountErrorPath, err)
 		}
 		return 0, err
 	}
