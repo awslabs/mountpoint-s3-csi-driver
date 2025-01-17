@@ -1,0 +1,17 @@
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: "Matrix"
+        value: ${{ jobs.build_matrix.outputs.matrix }}
+jobs:
+  build_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.parse_yaml.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse matrix.yaml file
+        id: parse_yaml
+        run: |
+            echo "matrix=$(yq -P -o=json '.matrix' '.github/matrix.yaml' | jq -c)" >> $GITHUB_OUTPUT
