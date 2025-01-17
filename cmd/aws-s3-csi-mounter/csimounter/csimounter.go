@@ -1,7 +1,10 @@
 package csimounter
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"slices"
@@ -9,7 +12,12 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
+
+// mountErrorPath is the path to write error logs if Mountpoint fails to mount.
+var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
+var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
 
 // A CmdRunner is responsible for running given `cmd` until completion and returning its exit code and its error (if any).
 // This is mainly exposed for mocking in tests, `DefaultCmdRunner` is always used in non-test environments.
@@ -62,12 +70,22 @@ func Run(options Options) (int, error) {
 	cmd := exec.Command(options.MountpointPath, args...)
 	cmd.ExtraFiles = []*os.File{fuseDev}
 	cmd.Env = options.MountOptions.Env
+
+	var stderrBuf bytes.Buffer
+
 	// Connect Mountpoint's stdout/stderr to this commands stdout/stderr,
 	// so Mountpoint logs can be viewable with `kubectl logs`.
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
-	klog.Info("Starting Mountpoint process")
+	exitCode, err := options.CmdRunner(cmd)
+	if err != nil {
+		// If Mountpoint fails, write it to `mountErrorPath` to let `PodMounter` running in the same node know.
+		if writeErr := os.WriteFile(mountErrorPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
+			klog.Infof("Failed to write mount error logs to %s: %v\n", mountErrorPath, err)
+		}
+		return 0, err
+	}
 
-	return options.CmdRunner(cmd)
+	return exitCode, nil
 }
