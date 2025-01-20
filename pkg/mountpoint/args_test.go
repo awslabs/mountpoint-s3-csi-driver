@@ -148,25 +148,56 @@ func TestParsingMountpointArgs(t *testing.T) {
 	}
 }
 
-func TestInsertingNewArgsToMountpointArgs(t *testing.T) {
+func TestInsertingArgsToMountpointArgs(t *testing.T) {
 	testCases := []struct {
 		name         string
 		existingArgs []string
-		newArg       string
+		key          string
+		value        string
 		want         []string
 	}{
 		{
-			name: "new arg",
+			name: "new option",
 			existingArgs: []string{
 				"allow-delete",
 				"region us-west-2",
 				"aws-max-attempts 5",
 			},
-			newArg: mountpoint.ArgReadOnly,
+			key: mountpoint.ArgReadOnly,
 			want: []string{
 				"--allow-delete",
 				"--aws-max-attempts=5",
 				"--read-only",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "existing option",
+			existingArgs: []string{
+				"allow-delete",
+				"read-only",
+				"region us-west-2",
+				"aws-max-attempts 5",
+			},
+			key: mountpoint.ArgReadOnly,
+			want: []string{
+				"--allow-delete",
+				"--aws-max-attempts=5",
+				"--read-only",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "new arg",
+			existingArgs: []string{
+				"allow-delete",
+				"aws-max-attempts 5",
+			},
+			key:   mountpoint.ArgRegion,
+			value: "us-west-2",
+			want: []string{
+				"--allow-delete",
+				"--aws-max-attempts=5",
 				"--region=us-west-2",
 			},
 		},
@@ -178,19 +209,20 @@ func TestInsertingNewArgsToMountpointArgs(t *testing.T) {
 				"region us-west-2",
 				"aws-max-attempts 5",
 			},
-			newArg: mountpoint.ArgReadOnly,
+			key:   mountpoint.ArgRegion,
+			value: "us-east-1",
 			want: []string{
 				"--allow-delete",
 				"--aws-max-attempts=5",
 				"--read-only",
-				"--region=us-west-2",
+				"--region=us-east-1",
 			},
 		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			args := mountpoint.ParseArgs(testCase.existingArgs)
-			args.Insert(testCase.newArg)
+			args.Set(testCase.key, testCase.value)
 			assert.Equals(t, testCase.want, args.SortedList())
 		})
 	}
@@ -296,13 +328,13 @@ func TestRemovingAnArgumentFromMountpointArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "existing argument with equal",
+			name: "existing argument without key prefix",
 			args: []string{
 				"cache /tmp/s3-cache",
 				"region=us-west-2",
 				"aws-max-attempts=5",
 			},
-			argToRemove: mountpoint.ArgAWSMaxAttempts,
+			argToRemove: "aws-max-attempts",
 			want:        "5",
 			exists:      true,
 			argsAfter: []string{
@@ -356,7 +388,7 @@ func TestCreatingMountpointArgsFromAlreadyParsedArgs(t *testing.T) {
 		"--cache /tmp/s3-cache",
 		"read-only",
 	})
-	args.Insert("--user-agent-prefix=s3-csi-driver/1.11.0 credential-source#pod k8s/v1.30.6-eks-7f9249a")
+	args.Set("--user-agent-prefix", "s3-csi-driver/1.11.0 credential-source#pod k8s/v1.30.6-eks-7f9249a")
 
 	want := []string{
 		"--allow-other",
@@ -364,9 +396,8 @@ func TestCreatingMountpointArgsFromAlreadyParsedArgs(t *testing.T) {
 		"--read-only",
 		"--user-agent-prefix=s3-csi-driver/1.11.0 credential-source#pod k8s/v1.30.6-eks-7f9249a",
 	}
-
 	assert.Equals(t, want, args.SortedList())
 
-	parsedArgs := mountpoint.ParsedArgs(args.SortedList())
+	parsedArgs := mountpoint.ParseArgs(args.SortedList())
 	assert.Equals(t, want, parsedArgs.SortedList())
 }

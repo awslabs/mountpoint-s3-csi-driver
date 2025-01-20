@@ -180,8 +180,7 @@ func moveArgumentsToEnv(args mountpoint.Args, env []string) (mountpoint.Args, []
 // https://github.com/awslabs/mountpoint-s3/pull/548
 func addUserAgentToArguments(args mountpoint.Args, userAgent string) mountpoint.Args {
 	// Remove existing user-agent if provided to ensure we always use the correct user-agent
-	_, _ = args.Remove(mountpoint.ArgUserAgentPrefix)
-	args.Insert(fmt.Sprintf("%s=%s", mountpoint.ArgUserAgentPrefix, userAgent))
+	args.Set(mountpoint.ArgUserAgentPrefix, userAgent)
 	return args
 }
 
