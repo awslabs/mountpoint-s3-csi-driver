@@ -179,7 +179,6 @@ func moveArgumentsToEnv(args mountpoint.Args, env []string) (mountpoint.Args, []
 // method to add the user agent prefix to the Mountpoint arguments.
 // https://github.com/awslabs/mountpoint-s3/pull/548
 func addUserAgentToArguments(args mountpoint.Args, userAgent string) mountpoint.Args {
-	// Remove existing user-agent if provided to ensure we always use the correct user-agent
 	args.Set(mountpoint.ArgUserAgentPrefix, userAgent)
 	return args
 }
