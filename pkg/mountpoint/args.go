@@ -28,14 +28,14 @@ type ArgValue = string
 // A value to use in arguments without any value, i.e., an option.
 const ArgNoValue = ""
 
-// An Arg represents an argument to be passed to Mountpoint.
-type Arg struct {
+// An arg represents an argument to be passed to Mountpoint.
+type arg struct {
 	key   ArgKey
 	value ArgValue
 }
 
 // String returns string representation of the argument to pass Mountpoint.
-func (a *Arg) String() string {
+func (a *arg) String() string {
 	if a.value == ArgNoValue {
 		return a.key
 	}
@@ -44,17 +44,17 @@ func (a *Arg) String() string {
 
 // An Args represents arguments to be passed to Mountpoint during mount.
 type Args struct {
-	args sets.Set[Arg]
+	args sets.Set[arg]
 }
 
 // ParseArgs parses given list of unnormalized and returns a normalized [Args].
 func ParseArgs(passedArgs []string) Args {
-	args := sets.New[Arg]()
+	args := sets.New[arg]()
 
-	for _, arg := range passedArgs {
+	for _, a := range passedArgs {
 		var key, value string
 
-		parts := strings.SplitN(strings.Trim(arg, " "), "=", 2)
+		parts := strings.SplitN(strings.Trim(a, " "), "=", 2)
 		if len(parts) == 2 {
 			// Ex: `--key=value` or `key=value`
 			key, value = parts[0], parts[1]
@@ -81,7 +81,7 @@ func ParseArgs(passedArgs []string) Args {
 			continue
 		}
 
-		args.Insert(Arg{key, value})
+		args.Insert(arg{key, value})
 	}
 
 	return Args{args}
@@ -91,7 +91,7 @@ func ParseArgs(passedArgs []string) Args {
 func (a *Args) Set(key ArgKey, value ArgValue) {
 	key = normalizeKey(key)
 	a.Remove(key)
-	a.args.Insert(Arg{key, value})
+	a.args.Insert(arg{key, value})
 }
 
 // Value extracts value of given key, it returns extracted value and whether the key was found.
@@ -126,14 +126,14 @@ func (a *Args) SortedList() []string {
 }
 
 // find tries to find given key from [Args], and returns whole entry, and whether the key was found.
-func (a *Args) find(key ArgKey) (Arg, bool) {
+func (a *Args) find(key ArgKey) (arg, bool) {
 	key = normalizeKey(key)
 	for _, arg := range a.args.UnsortedList() {
 		if key == arg.key {
 			return arg, true
 		}
 	}
-	return Arg{}, false
+	return arg{}, false
 }
 
 // normalizeKey normalized given key to have a "--" prefix.
