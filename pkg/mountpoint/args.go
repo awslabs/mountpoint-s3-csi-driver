@@ -56,17 +56,18 @@ func ParseArgs(passedArgs []string) Args {
 
 		parts := strings.SplitN(strings.Trim(arg, " "), "=", 2)
 		if len(parts) == 2 {
-			// Ex: --key=value, key=value
+			// Ex: `--key=value` or `key=value`
 			key, value = parts[0], parts[1]
 		} else {
-			// Ex: --key value, key value
-			// Ex: --key, key
+			// Ex: `--key value` or `key value`
+			// Ex: `--key` or `key`
 			parts = strings.SplitN(strings.Trim(parts[0], " "), " ", 2)
 			if len(parts) == 1 {
-				// Ex: --key, key
+				// Ex: `--key` or `key`
 				key = parts[0]
+				value = ArgNoValue
 			} else {
-				// Ex: --key value, key value
+				// Ex: `--key value` or `key value`
 				key, value = parts[0], strings.Trim(parts[1], " ")
 			}
 		}
