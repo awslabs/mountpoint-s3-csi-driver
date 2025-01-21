@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=1.11.0
+VERSION=1.12.0
 
 PKG=github.com/awslabs/aws-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
