@@ -132,13 +132,13 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	args := mountpoint.ParseArgs(mountpointArgs)
 
-	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, mountpointArgs)
+	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, args)
 	if err != nil {
 		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
 		return nil, err
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, mountpointArgs)
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
 	if err := ns.Mounter.Mount(bucket, target, credentials, args); err != nil {
 		os.Remove(target)

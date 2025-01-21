@@ -22,6 +22,7 @@ import (
 	k8sstrings "k8s.io/utils/strings"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
 
 const hostPluginDirEnv = "HOST_PLUGIN_DIR"
@@ -84,7 +85,7 @@ func (c *CredentialProvider) CleanupToken(volumeID string, podID string) error {
 
 // Provide provides mount credentials for given volume and volume context.
 // Depending on the configuration, it either returns driver-level or pod-level credentials.
-func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volumeCtx map[string]string, mountpointArgs []string) (*MountCredentials, error) {
+func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volumeCtx map[string]string, args mountpoint.Args) (*MountCredentials, error) {
 	if volumeCtx == nil {
 		return nil, status.Error(codes.InvalidArgument, "Missing volume context")
 	}
@@ -92,7 +93,7 @@ func (c *CredentialProvider) Provide(ctx context.Context, volumeID string, volum
 	authenticationSource := volumeCtx[volumecontext.AuthenticationSource]
 	switch authenticationSource {
 	case AuthenticationSourcePod:
-		return c.provideFromPod(ctx, volumeID, volumeCtx, mountpointArgs)
+		return c.provideFromPod(ctx, volumeID, volumeCtx, args)
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		return c.provideFromDriver()
 	default:
@@ -119,7 +120,7 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 	}, nil
 }
 
-func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeCtx map[string]string, mountpointArgs []string) (*MountCredentials, error) {
+func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string, volumeCtx map[string]string, args mountpoint.Args) (*MountCredentials, error) {
 	klog.V(4).Infof("NodePublishVolume: Using pod identity")
 
 	tokensJson := volumeCtx[volumecontext.CSIServiceAccountTokens]
@@ -144,7 +145,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		return nil, err
 	}
 
-	region, err := c.stsRegion(volumeCtx, mountpointArgs)
+	region, err := c.stsRegion(volumeCtx, args)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
 	}
@@ -245,14 +246,14 @@ func (c *CredentialProvider) findPodServiceAccountRole(ctx context.Context, volu
 //  4. Calling IMDS to detect region
 //
 // It returns an error if all of them fails.
-func (c *CredentialProvider) stsRegion(volumeCtx map[string]string, mountpointArgs []string) (string, error) {
+func (c *CredentialProvider) stsRegion(volumeCtx map[string]string, args mountpoint.Args) (string, error) {
 	region := volumeCtx[volumecontext.STSRegion]
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from volume context", region)
 		return region, nil
 	}
 
-	if region, ok := ExtractMountpointArgument(mountpointArgs, mountpointArgRegion); ok {
+	if region, ok := args.Value(mountpoint.ArgRegion); ok {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from S3 bucket region", region)
 		return region, nil
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
@@ -199,22 +198,4 @@ func (m *SystemdMounter) Unmount(target string) error {
 		klog.V(5).Infof("umount output: %s", output)
 	}
 	return nil
-}
-
-const (
-	mountpointArgRegion = "region"
-	mountpointArgCache  = "cache"
-)
-
-// ExtractMountpointArgument extracts value of a given argument from `mountpointArgs`.
-func ExtractMountpointArgument(mountpointArgs []string, argument string) (string, bool) {
-	// `mountpointArgs` normalized to `--arg=val` in `S3NodeServer.NodePublishVolume`.
-	prefix := fmt.Sprintf("--%s=", argument)
-	for _, arg := range mountpointArgs {
-		if strings.HasPrefix(arg, prefix) {
-			val := strings.SplitN(arg, "=", 2)[1]
-			return val, true
-		}
-	}
-	return "", false
 }

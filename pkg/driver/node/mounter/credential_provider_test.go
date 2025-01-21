@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,7 +43,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 	} {
 
 		provider := mounter.NewCredentialProvider(nil, "", mounter.RegionFromIMDSOnce)
-		credentials, err := provider.Provide(context.Background(), test.volumeID, test.volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), test.volumeID, test.volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, err)
 
 		assertEquals(t, credentials.AccessKeyID, "test-access-key")
@@ -58,7 +59,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 
 func TestProvidingDriverLevelCredentialsWithEmptyEnv(t *testing.T) {
 	provider := mounter.NewCredentialProvider(nil, "", mounter.RegionFromIMDSOnce)
-	credentials, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{"authenticationSource": "driver"}, nil)
+	credentials, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{"authenticationSource": "driver"}, mountpoint.ParseArgs(nil))
 	assertEquals(t, nil, err)
 
 	assertEquals(t, credentials.AccessKeyID, "")
@@ -93,7 +94,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				Token: "test-service-account-token",
 			},
 		}),
-	}, nil)
+	}, mountpoint.ParseArgs(nil))
 	assertEquals(t, nil, err)
 
 	// Should disable env variable provider
@@ -216,7 +217,7 @@ func TestProvidingPodLevelCredentialsWithMissingInformation(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			credentials, err := provider.Provide(context.Background(), test.volumeID, test.volumeContext, nil)
+			credentials, err := provider.Provide(context.Background(), test.volumeID, test.volumeContext, mountpoint.ParseArgs(nil))
 			assertEquals(t, nil, credentials)
 			if err == nil {
 				t.Error("it should fail with missing information")
@@ -252,7 +253,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 			return "", errors.New("unknown region")
 		})
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, credentials)
 		if err == nil {
 			t.Error("it should fail if there is not any region information")
@@ -268,7 +269,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 			return "us-east-1", nil
 		})
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "us-east-1")
 		assertEquals(t, credentials.DefaultRegion, "us-east-1")
@@ -286,7 +287,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		t.Setenv("AWS_REGION", "eu-west-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "eu-west-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-west-1")
@@ -304,7 +305,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		t.Setenv("AWS_DEFAULT_REGION", "eu-west-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "eu-west-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-west-1")
@@ -323,7 +324,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 		t.Setenv("AWS_REGION", "eu-west-1")
 		t.Setenv("AWS_DEFAULT_REGION", "eu-north-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, nil)
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs(nil))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "eu-west-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-north-1")
@@ -341,7 +342,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		t.Setenv("AWS_REGION", "eu-west-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, []string{"--region=us-west-1"})
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs([]string{"--region=us-west-1"}))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "us-west-1")
 		assertEquals(t, credentials.DefaultRegion, "us-west-1")
@@ -359,7 +360,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		t.Setenv("AWS_REGION", "eu-west-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, []string{"--read-only"})
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs([]string{"--read-only"}))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "eu-west-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-west-1")
@@ -378,7 +379,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 		t.Setenv("AWS_REGION", "eu-west-1")
 		t.Setenv("AWS_DEFAULT_REGION", "eu-north-1")
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, []string{"--region=us-west-1"})
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs([]string{"--region=us-west-1"}))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "us-west-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-north-1")
@@ -398,7 +399,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		volumeContext["stsRegion"] = "ap-south-1"
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, []string{"--region=us-west-1"})
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs([]string{"--region=us-west-1"}))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "ap-south-1")
 		assertEquals(t, credentials.DefaultRegion, "ap-south-1")
@@ -419,7 +420,7 @@ func TestProvidingPodLevelCredentialsRegionPopulation(t *testing.T) {
 
 		volumeContext["stsRegion"] = "ap-south-1"
 
-		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, []string{"--region=us-west-1"})
+		credentials, err := provider.Provide(context.Background(), volumeID, volumeContext, mountpoint.ParseArgs([]string{"--region=us-west-1"}))
 		assertEquals(t, nil, err)
 		assertEquals(t, credentials.Region, "ap-south-1")
 		assertEquals(t, credentials.DefaultRegion, "eu-north-1")
@@ -457,7 +458,7 @@ func TestProvidingPodLevelCredentialsForDifferentPodsWithDifferentRoles(t *testi
 				Token: "test-service-account-token-1",
 			},
 		}),
-	}, nil)
+	}, mountpoint.ParseArgs(nil))
 	assertEquals(t, nil, err)
 
 	credentialsPodTwo, err := provider.Provide(context.Background(), "test-vol-id", map[string]string{
@@ -470,7 +471,7 @@ func TestProvidingPodLevelCredentialsForDifferentPodsWithDifferentRoles(t *testi
 				Token: "test-service-account-token-2",
 			},
 		}),
-	}, nil)
+	}, mountpoint.ParseArgs(nil))
 	assertEquals(t, nil, err)
 
 	// PodOne
@@ -526,7 +527,7 @@ func TestProvidingPodLevelCredentialsWithSlashInVolumeID(t *testing.T) {
 				Token: "test-service-account-token",
 			},
 		}),
-	}, nil)
+	}, mountpoint.ParseArgs(nil))
 	assertEquals(t, nil, err)
 
 	assertEquals(t, credentials.AccessKeyID, "")
