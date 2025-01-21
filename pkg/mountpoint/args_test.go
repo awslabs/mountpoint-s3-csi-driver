@@ -81,6 +81,19 @@ func TestParsingMountpointArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "with spaces before and after",
+			input: []string{
+				"--allow-other  ",
+				"  --uid    1000",
+				"  --gid  2000  ",
+			},
+			want: []string{
+				"--allow-other",
+				"--gid=2000",
+				"--uid=1000",
+			},
+		},
+		{
 			name: "with single dash prefix",
 			input: []string{
 				"-d",
