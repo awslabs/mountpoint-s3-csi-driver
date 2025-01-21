@@ -149,7 +149,7 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		env = credentials.Env(awsProfile)
 	}
 	args, env = moveArgumentsToEnv(args, env)
-	args = addUserAgentToArguments(args, UserAgent(authenticationSource, m.kubernetesVersion))
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
@@ -174,13 +174,6 @@ func moveArgumentsToEnv(args mountpoint.Args, env []string) (mountpoint.Args, []
 		env = append(env, fmt.Sprintf("%s=%s", awsMaxAttemptsEnv, maxAttempts))
 	}
 	return args, env
-}
-
-// method to add the user agent prefix to the Mountpoint arguments.
-// https://github.com/awslabs/mountpoint-s3/pull/548
-func addUserAgentToArguments(args mountpoint.Args, userAgent string) mountpoint.Args {
-	args.Set(mountpoint.ArgUserAgentPrefix, userAgent)
-	return args
 }
 
 func (m *SystemdMounter) Unmount(target string) error {
