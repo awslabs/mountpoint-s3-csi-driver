@@ -1,4 +1,5 @@
-# Unreleased
+# v1.12.0
+
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/README.md)
 
 ### Notable changes
