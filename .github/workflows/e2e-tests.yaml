@@ -85,6 +85,17 @@ jobs:
             arch: "arm"
             family: "Ubuntu2204"
             kubernetes-version: "1.31.0"
+          # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
+          # field rather than trying to exclude all other variants.
+          - cluster-type: "kops"
+            arch: "arm"
+            family: "AmazonLinux2023"
+            kubernetes-version: "1.28.13"
+            selinux-mode: "enforcing"
+          - cluster-type: "eksctl"
+            arch: "x86"
+            family: "AmazonLinux2023"
+            selinux-mode: "enforcing"
         exclude:
           - cluster-type: "kops"
             family: "Bottlerocket"
@@ -100,6 +111,10 @@ jobs:
             kubernetes-version: "1.30.4"
           - cluster-type: "kops"
             kubernetes-version: "1.31.0"
+    # TODO: This is temporary, we wanted to run our tests on SELinux enforced hosts even before we support it.
+    #       Our tests will be passing on SELinux enforced hosts as well once we support it and we will remove this configuration.
+    continue-on-error: ${{ matrix.selinux-mode == 'enforcing' }}
+
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
@@ -115,6 +130,7 @@ jobs:
       # and in order to get latest supported version by envtest we convert it to 1.28.
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
       ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
+      SELINUX_MODE: ${{ matrix.selinux-mode }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

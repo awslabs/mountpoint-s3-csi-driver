@@ -27,6 +27,7 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
+SELINUX_MODE=${SELINUX_MODE:-}
 
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
@@ -54,6 +55,7 @@ KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 KOPS_VERSION=1.28.5
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
+
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
@@ -61,17 +63,27 @@ else
   INSTANCE_TYPE_DEFAULT=m7g.medium
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 fi
+
+
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
 AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
+KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE:-${BASE_DIR}/kops-patch-node-selinux-enforcing.yaml}
+if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
+    KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=""
+fi
 KOPS_STATE_FILE=${KOPS_STATE_FILE:-"s3://mountpoint-s3-csi-driver-kops-state-store"}
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.191.0}
+EKSCTL_VERSION=${EKSCTL_VERSION:-0.201.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
+EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
+if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
+    EKSCTL_PATCH_SELINUX_ENFORCING_FILE=""
+fi
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
 mkdir -p ${TEST_DIR}
@@ -120,7 +132,8 @@ function create_cluster() {
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
       "$KOPS_STATE_FILE" \
-      "$SSH_KEY"
+      "$SSH_KEY" \
+      "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
@@ -134,7 +147,8 @@ function create_cluster() {
       "$CI_ROLE_ARN" \
       "$INSTANCE_TYPE" \
       "$AMI_FAMILY" \
-      "$K8S_VERSION_EKSCTL"
+      "$K8S_VERSION_EKSCTL"\
+      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
   fi
 }
 

@@ -25,6 +25,7 @@ function eksctl_create_cluster() {
   NODE_TYPE=${10}
   AMI_FAMILY=${11}
   K8S_VERSION=${12}
+  EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
 
   eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
 
@@ -42,6 +43,12 @@ function eksctl_create_cluster() {
   CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
   ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_FILE)" -o yaml > $CLUSTER_FILE_TMP
   mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+
+  if [ -n "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" ]; then
+    ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_SELINUX_ENFORCING_FILE)" -o yaml > $CLUSTER_FILE_TMP
+    mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+  fi
+
   ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
 
   if [ -n "$CI_ROLE_ARN" ]; then
