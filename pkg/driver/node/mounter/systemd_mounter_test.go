@@ -13,6 +13,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
@@ -156,7 +157,7 @@ func TestS3MounterMount(t *testing.T) {
 				testCase.before(t, env)
 			}
 			err := env.mounter.Mount(testCase.bucketName, testCase.targetPath,
-				testCase.credentials, testCase.options)
+				testCase.credentials, mountpoint.ParseArgs(testCase.options))
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)
@@ -274,41 +275,6 @@ func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
 			if !reflect.DeepEqual(actual, test.expected) {
 				t.Errorf("Expected %v, but got %v", test.expected, actual)
 			}
-		})
-	}
-}
-
-func TestExtractMountpointArgument(t *testing.T) {
-	for name, test := range map[string]struct {
-		input           []string
-		argument        string
-		expectedToFound bool
-		expectedValue   string
-	}{
-		"Extract Existing Argument": {
-			input: []string{
-				"--region=us-east-1",
-			},
-			argument:        "region",
-			expectedToFound: true,
-			expectedValue:   "us-east-1",
-		},
-		"Extract Non Existing Argument": {
-			input: []string{
-				"--bucket=test",
-			},
-			argument:        "region",
-			expectedToFound: false,
-		},
-		"Extract Non Existing Argument With Empty Input": {
-			argument:        "region",
-			expectedToFound: false,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			val, found := mounter.ExtractMountpointArgument(test.input, test.argument)
-			assertEquals(t, test.expectedToFound, found)
-			assertEquals(t, test.expectedValue, val)
 		})
 	}
 }

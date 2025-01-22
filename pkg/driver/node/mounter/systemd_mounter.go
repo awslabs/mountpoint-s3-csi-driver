@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
@@ -79,7 +79,7 @@ func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *SystemdMounter) Mount(bucketName string, target string, credentials *MountCredentials, options []string) error {
+func (m *SystemdMounter) Mount(bucketName string, target string, credentials *MountCredentials, args mountpoint.Args) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -147,14 +147,14 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 
 		env = credentials.Env(awsProfile)
 	}
-	options, env = moveOptionToEnvironmentVariables(awsMaxAttemptsOption, awsMaxAttemptsEnv, options, env)
-	options = addUserAgentToOptions(options, UserAgent(authenticationSource, m.kubernetesVersion))
+	args, env = moveArgumentsToEnv(args, env)
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, m.kubernetesVersion))
 
 	output, err := m.Runner.StartService(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-" + m.MpVersion + "-" + uuid.New().String() + ".service",
 		Description: "Mountpoint for Amazon S3 CSI driver FUSE daemon",
 		ExecPath:    m.MountS3Path,
-		Args:        append(options, bucketName, target),
+		Args:        append(args.SortedList(), bucketName, target),
 		Env:         env,
 	})
 
@@ -168,36 +168,11 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 	return nil
 }
 
-// Moves a parameter optionName from the options list to MP's environment variable list. We need this as options are
-// passed to the driver in a single field, but MP sometimes only supports config from environment variables.
-// Returns an updated options and environment.
-func moveOptionToEnvironmentVariables(optionName string, envName string, options []string, env []string) ([]string, []string) {
-	optionIdx := -1
-	for i, o := range options {
-		if strings.HasPrefix(o, optionName) {
-			optionIdx = i
-			break
-		}
+func moveArgumentsToEnv(args mountpoint.Args, env []string) (mountpoint.Args, []string) {
+	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
+		env = append(env, fmt.Sprintf("%s=%s", awsMaxAttemptsEnv, maxAttempts))
 	}
-	if optionIdx != -1 {
-		// We can do replace here as we've just verified it has the right prefix
-		env = append(env, strings.Replace(options[optionIdx], optionName, envName, 1))
-		options = append(options[:optionIdx], options[optionIdx+1:]...)
-	}
-	return options, env
-}
-
-// method to add the user agent prefix to the Mountpoint headers
-// https://github.com/awslabs/mountpoint-s3/pull/548
-func addUserAgentToOptions(options []string, userAgent string) []string {
-	// first remove it from the options in case it's in there
-	for i := len(options) - 1; i >= 0; i-- {
-		if strings.Contains(options[i], userAgentPrefix) {
-			options = append(options[:i], options[i+1:]...)
-		}
-	}
-	// add the hard coded S3 CSI driver user agent string
-	return append(options, userAgentPrefix+"="+userAgent)
+	return args, env
 }
 
 func (m *SystemdMounter) Unmount(target string) error {
@@ -223,22 +198,4 @@ func (m *SystemdMounter) Unmount(target string) error {
 		klog.V(5).Infof("umount output: %s", output)
 	}
 	return nil
-}
-
-const (
-	mountpointArgRegion = "region"
-	mountpointArgCache  = "cache"
-)
-
-// ExtractMountpointArgument extracts value of a given argument from `mountpointArgs`.
-func ExtractMountpointArgument(mountpointArgs []string, argument string) (string, bool) {
-	// `mountpointArgs` normalized to `--arg=val` in `S3NodeServer.NodePublishVolume`.
-	prefix := fmt.Sprintf("--%s=", argument)
-	for _, arg := range mountpointArgs {
-		if strings.HasPrefix(arg, prefix) {
-			val := strings.SplitN(arg, "=", 2)[1]
-			return val, true
-		}
-	}
-	return "", false
 }

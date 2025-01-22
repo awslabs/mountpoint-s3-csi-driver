@@ -1,9 +1,11 @@
 package mounter
 
+import "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+
 type FakeMounter struct{}
 
 func (m *FakeMounter) Mount(bucketName string, target string,
-	credentials *MountCredentials, options []string) error {
+	credentials *MountCredentials, args mountpoint.Args) error {
 	return nil
 }
 

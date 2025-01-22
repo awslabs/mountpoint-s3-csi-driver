@@ -20,7 +20,6 @@ const (
 	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
 	defaultMountS3Path          = "/usr/bin/mount-s3"
 	userAgentPrefix             = "--user-agent-prefix"
-	awsMaxAttemptsOption        = "--aws-max-attempts"
 )
 
 type MountCredentials struct {
