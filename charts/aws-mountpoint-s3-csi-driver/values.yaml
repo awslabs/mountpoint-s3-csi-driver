@@ -34,13 +34,10 @@ node:
       memory: 40Mi
     limits:
       memory: 256Mi
+  # Tolerates all taints and overrides defaultTolerations
   tolerateAllTaints: false
-  tolerations:
-    - key: CriticalAddonsOnly
-      operator: Exists
-    - operator: Exists
-      effect: NoExecute
-      tolerationSeconds: 300
+  defaultTolerations: true
+  tolerations: []
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
