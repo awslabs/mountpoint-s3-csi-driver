@@ -24,7 +24,11 @@ import (
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
+	"k8s.io/utils/ptr"
 )
+
+const defaultNonRootUser = int64(e2epod.DefaultNonRootUser)
+const defaultNonRootGroup = int64(2000)
 
 type jsonMap = map[string]interface{}
 
@@ -146,7 +150,11 @@ func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
 }
 
 func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
-	framework.Logf("Creating Pod %s in %s (SA: %s)", pod.Name, namespace, pod.Spec.ServiceAccountName)
+	serviceAccount := pod.Spec.ServiceAccountName
+	if serviceAccount == "" {
+		serviceAccount = "default"
+	}
+	framework.Logf("Creating Pod %s in %s (SA: %s)", pod.Name, namespace, serviceAccount)
 	pod, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %w", err)
@@ -168,6 +176,24 @@ func createPodWithServiceAccount(ctx context.Context, client clientset.Interface
 	pod := e2epod.MakePod(namespace, nil, pvclaims, admissionapi.LevelBaseline, "")
 	pod.Spec.ServiceAccountName = serviceAccountName
 	return createPod(ctx, client, namespace, pod)
+}
+
+func podModifierNonRoot(pod *v1.Pod) {
+	if pod.Spec.SecurityContext == nil {
+		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
+	}
+	pod.Spec.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
+	pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
+
+	for _, container := range pod.Spec.Containers {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &v1.SecurityContext{}
+		}
+		container.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
+		container.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+		container.SecurityContext.RunAsNonRoot = ptr.To(true)
+	}
 }
 
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
