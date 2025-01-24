@@ -26,6 +26,7 @@ var mountpointVersion = flag.String("mountpoint-version", os.Getenv("MOUNTPOINT_
 var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAGE"), "Image of Mountpoint to use in spawned Mountpoint Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
+var csiDriverVersion = flag.String("csi-driver-version", os.Getenv("CSI_DRIVER_VERSION"), "Version of Mountpoint CSI Driver.")
 
 func main() {
 	flag.Parse()
@@ -48,6 +49,7 @@ func main() {
 			Image:           *mountpointImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
+		CSIDriverVersion: *csiDriverVersion,
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")

@@ -10,9 +10,10 @@ import (
 
 // Labels populated on spawned Mountpoint Pods.
 const (
-	LabelVersion    = "s3.csi.aws.com/mountpoint-version"
-	LabelPodUID     = "s3.csi.aws.com/pod-uid"
-	LabelVolumeName = "s3.csi.aws.com/volume-name"
+	LabelVersion          = "s3.csi.aws.com/mountpoint-version"
+	LabelPodUID           = "s3.csi.aws.com/pod-uid"
+	LabelVolumeName       = "s3.csi.aws.com/volume-name"
+	LabelCSIDriverVersion = "s3.csi.aws.com/csi-driver-version"
 )
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
@@ -24,9 +25,10 @@ type ContainerConfig struct {
 
 // A Config represents configuration for spawned Mountpoint Pods.
 type Config struct {
-	Namespace string
-	Version   string
-	Container ContainerConfig
+	Namespace        string
+	Version          string
+	Container        ContainerConfig
+	CSIDriverVersion string
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -52,9 +54,10 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 			Name:      name,
 			Namespace: c.config.Namespace,
 			Labels: map[string]string{
-				LabelVersion:    c.config.Version,
-				LabelPodUID:     string(pod.UID),
-				LabelVolumeName: pvc.Spec.VolumeName,
+				LabelVersion:          c.config.Version,
+				LabelPodUID:           string(pod.UID),
+				LabelVolumeName:       pvc.Spec.VolumeName,
+				LabelCSIDriverVersion: c.config.CSIDriverVersion,
 			},
 		},
 		Spec: corev1.PodSpec{
