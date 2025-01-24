@@ -12,4 +12,6 @@ spec:
   tokenRequests:
     - audience: "sts.amazonaws.com"
       expirationSeconds: 3600
+    - audience: "amazonaws.com"
+      expirationSeconds: 3600
   requiresRepublish: true
