@@ -70,7 +70,7 @@ KOPS_STATE_FILE=${KOPS_STATE_FILE:-"s3://mountpoint-s3-csi-driver-kops-state-sto
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.191.0}
+EKSCTL_VERSION=${EKSCTL_VERSION:-0.202.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
