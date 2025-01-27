@@ -14,7 +14,7 @@ import (
 func TestCreatingMountpointPods(t *testing.T) {
 	// Mountpoint Pod values
 	namespace := "mount-s3"
-	version := "1.10.0"
+	mountpointVersion := "1.10.0"
 	image := "mp-image:latest"
 	imagePullPolicy := corev1.PullAlways
 	command := "/bin/aws-s3-csi-mounter"
@@ -24,14 +24,17 @@ func TestCreatingMountpointPods(t *testing.T) {
 	testPodUID := "test-pod-uid"
 	testVolName := "test-vol"
 
+	csiDriverVersion := "1.12.0"
+
 	creator := mppod.NewCreator(mppod.Config{
-		Namespace: namespace,
-		Version:   version,
+		Namespace:         namespace,
+		MountpointVersion: mountpointVersion,
 		Container: mppod.ContainerConfig{
 			Image:           image,
 			ImagePullPolicy: imagePullPolicy,
 			Command:         command,
 		},
+		CSIDriverVersion: csiDriverVersion,
 	})
 
 	mpPod := creator.Create(&corev1.Pod{
@@ -51,9 +54,10 @@ func TestCreatingMountpointPods(t *testing.T) {
 	assert.Equals(t, "mp-8ef7856a0c7f1d5706bd6af93fdc4bc90b33cf2ceb6769b4afd62586", mpPod.Name)
 	assert.Equals(t, namespace, mpPod.Namespace)
 	assert.Equals(t, map[string]string{
-		mppod.LabelVersion:    version,
-		mppod.LabelPodUID:     testPodUID,
-		mppod.LabelVolumeName: testVolName,
+		mppod.LabelMountpointVersion: mountpointVersion,
+		mppod.LabelPodUID:            testPodUID,
+		mppod.LabelVolumeName:        testVolName,
+		mppod.LabelCSIDriverVersion:  csiDriverVersion,
 	}, mpPod.Labels)
 
 	assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)

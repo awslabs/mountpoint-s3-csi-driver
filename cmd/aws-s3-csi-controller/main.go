@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
@@ -41,13 +42,14 @@ func main() {
 	}
 
 	err = csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
-		Namespace: *mountpointNamespace,
-		Version:   *mountpointVersion,
+		Namespace:         *mountpointNamespace,
+		MountpointVersion: *mountpointVersion,
 		Container: mppod.ContainerConfig{
 			Command:         *mountpointContainerCommand,
 			Image:           *mountpointImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
+		CSIDriverVersion: version.GetVersion().DriverVersion,
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")
