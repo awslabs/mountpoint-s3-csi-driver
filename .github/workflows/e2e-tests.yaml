@@ -26,7 +26,7 @@ jobs:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu22-04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
@@ -65,7 +65,7 @@ jobs:
       # so we disable it to ensure all resources created during test are properly cleaned up.
       fail-fast: false
       matrix: ${{ fromJson(needs.build_matrix.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu22-04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
