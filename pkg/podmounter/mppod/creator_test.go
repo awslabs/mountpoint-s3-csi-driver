@@ -27,8 +27,8 @@ func TestCreatingMountpointPods(t *testing.T) {
 	csiDriverVersion := "1.12.0"
 
 	creator := mppod.NewCreator(mppod.Config{
-		Namespace: namespace,
-		Version:   mountpointVersion,
+		Namespace:         namespace,
+		MountpointVersion: mountpointVersion,
 		Container: mppod.ContainerConfig{
 			Image:           image,
 			ImagePullPolicy: imagePullPolicy,
@@ -54,10 +54,10 @@ func TestCreatingMountpointPods(t *testing.T) {
 	assert.Equals(t, "mp-8ef7856a0c7f1d5706bd6af93fdc4bc90b33cf2ceb6769b4afd62586", mpPod.Name)
 	assert.Equals(t, namespace, mpPod.Namespace)
 	assert.Equals(t, map[string]string{
-		mppod.LabelVersion:          mountpointVersion,
-		mppod.LabelPodUID:           testPodUID,
-		mppod.LabelVolumeName:       testVolName,
-		mppod.LabelCSIDriverVersion: csiDriverVersion,
+		mppod.LabelMountpointVersion: mountpointVersion,
+		mppod.LabelPodUID:            testPodUID,
+		mppod.LabelVolumeName:        testVolName,
+		mppod.LabelCSIDriverVersion:  csiDriverVersion,
 	}, mpPod.Labels)
 
 	assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)

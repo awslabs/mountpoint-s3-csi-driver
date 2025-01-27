@@ -42,8 +42,8 @@ func main() {
 	}
 
 	err = csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
-		Namespace: *mountpointNamespace,
-		Version:   *mountpointVersion,
+		Namespace:         *mountpointNamespace,
+		MountpointVersion: *mountpointVersion,
 		Container: mppod.ContainerConfig{
 			Command:         *mountpointContainerCommand,
 			Image:           *mountpointImage,

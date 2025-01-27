@@ -686,7 +686,7 @@ func waitAndVerifyMountpointPodFor(pod *testPod, vol *testVolume) {
 
 // verifyMountpointPodFor verifies given `mountpointPod` for given `pod` and `vol`.
 func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPod) {
-	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVersion, mountpointVersion))
+	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelMountpointVersion, mountpointVersion))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelPodUID, string(pod.UID)))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVolumeName, vol.pvc.Spec.VolumeName))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelCSIDriverVersion, version.GetVersion().DriverVersion))

@@ -78,8 +78,8 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
-		Namespace: mountpointNamespace,
-		Version:   mountpointVersion,
+		Namespace:         mountpointNamespace,
+		MountpointVersion: mountpointVersion,
 		Container: mppod.ContainerConfig{
 			Command:         mountpointContainerCommand,
 			Image:           mountpointImage,
