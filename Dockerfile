@@ -12,9 +12,6 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-ARG VERSION
-ENV CSI_DRIVER_VERSION=${VERSION}
-
 ARG MOUNTPOINT_VERSION=1.14.0
 
 # Download the mountpoint tarball and produce an installable directory

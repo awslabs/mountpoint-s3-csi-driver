@@ -11,6 +11,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
@@ -688,6 +689,7 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVersion, mountpointVersion))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelPodUID, string(pod.UID)))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVolumeName, vol.pvc.Spec.VolumeName))
+	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelCSIDriverVersion, version.GetVersion().DriverVersion))
 
 	Expect(mountpointPod.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
 

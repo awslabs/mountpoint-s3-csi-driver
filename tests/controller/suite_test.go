@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
@@ -84,6 +85,7 @@ var _ = BeforeSuite(func() {
 			Image:           mountpointImage,
 			ImagePullPolicy: mountpointImagePullPolicy,
 		},
+		CSIDriverVersion: version.GetVersion().DriverVersion,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

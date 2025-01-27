@@ -76,7 +76,7 @@ all-push-skip-if-present:
 
 .PHONY: build_image
 build_image:
-	DOCKER_BUILDKIT=1 docker buildx build -f ${DOCKERFILE} -t=${IMAGE}:${TAG} --platform=${PLATFORM} --build-arg VERSION=$(VERSION) .
+	DOCKER_BUILDKIT=1 docker buildx build -f ${DOCKERFILE} -t=${IMAGE}:${TAG} --platform=${PLATFORM} .
 
 .PHONY: push-manifest
 push-manifest: create-manifest
