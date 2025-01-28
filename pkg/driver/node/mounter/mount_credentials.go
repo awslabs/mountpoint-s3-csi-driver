@@ -1,25 +1,8 @@
 package mounter
 
-import "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
-
-const (
-	awsProfileEnv               = "AWS_PROFILE"
-	awsConfigFileEnv            = "AWS_CONFIG_FILE"
-	awsSharedCredentialsFileEnv = "AWS_SHARED_CREDENTIALS_FILE"
-	keyIdEnv                    = "AWS_ACCESS_KEY_ID"
-	accessKeyEnv                = "AWS_SECRET_ACCESS_KEY"
-	sessionTokenEnv             = "AWS_SESSION_TOKEN"
-	disableIMDSProviderEnv      = "AWS_EC2_METADATA_DISABLED"
-	regionEnv                   = "AWS_REGION"
-	defaultRegionEnv            = "AWS_DEFAULT_REGION"
-	stsEndpointsEnv             = "AWS_STS_REGIONAL_ENDPOINTS"
-	roleArnEnv                  = "AWS_ROLE_ARN"
-	webIdentityTokenEnv         = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	MountS3PathEnv              = "MOUNT_S3_PATH"
-	awsMaxAttemptsEnv           = "AWS_MAX_ATTEMPTS"
-	MountpointCacheKey          = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
-	defaultMountS3Path          = "/usr/bin/mount-s3"
-	userAgentPrefix             = "--user-agent-prefix"
+import (
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
 type MountCredentials struct {
@@ -52,48 +35,48 @@ type MountCredentials struct {
 }
 
 // Get environment variables to pass to mount-s3 for authentication.
-func (mc *MountCredentials) Env(awsProfile awsprofile.AWSProfile) []string {
-	env := []string{}
+func (mc *MountCredentials) Env(awsProfile awsprofile.AWSProfile) envprovider.Environment {
+	env := envprovider.Environment{}
 
 	// For profile provider from long-term credentials
 	if awsProfile.Name != "" {
-		env = append(env, awsProfileEnv+"="+awsProfile.Name)
-		env = append(env, awsConfigFileEnv+"="+awsProfile.ConfigPath)
-		env = append(env, awsSharedCredentialsFileEnv+"="+awsProfile.CredentialsPath)
+		env.Set(envprovider.EnvProfile, awsProfile.Name)
+		env.Set(envprovider.EnvConfigFile, awsProfile.ConfigPath)
+		env.Set(envprovider.EnvSharedCredentialsFile, awsProfile.CredentialsPath)
 	} else {
 		// For profile provider
 		if mc.ConfigFilePath != "" {
-			env = append(env, awsConfigFileEnv+"="+mc.ConfigFilePath)
+			env.Set(envprovider.EnvConfigFile, mc.ConfigFilePath)
 		}
 		if mc.SharedCredentialsFilePath != "" {
-			env = append(env, awsSharedCredentialsFileEnv+"="+mc.SharedCredentialsFilePath)
+			env.Set(envprovider.EnvSharedCredentialsFile, mc.SharedCredentialsFilePath)
 		}
 	}
 
 	// For STS Web Identity provider
 	if mc.WebTokenPath != "" {
-		env = append(env, webIdentityTokenEnv+"="+mc.WebTokenPath)
-		env = append(env, roleArnEnv+"="+mc.AwsRoleArn)
+		env.Set(envprovider.EnvWebIdentityTokenFile, mc.WebTokenPath)
+		env.Set(envprovider.EnvRoleARN, mc.AwsRoleArn)
 	}
 
 	// For disabling IMDS provider
 	if mc.DisableIMDSProvider {
-		env = append(env, disableIMDSProviderEnv+"=true")
+		env.Set(envprovider.EnvEC2MetadataDisabled, "true")
 	}
 
 	// Generic variables
 	if mc.Region != "" {
-		env = append(env, regionEnv+"="+mc.Region)
+		env.Set(envprovider.EnvRegion, mc.Region)
 	}
 	if mc.DefaultRegion != "" {
-		env = append(env, defaultRegionEnv+"="+mc.DefaultRegion)
+		env.Set(envprovider.EnvDefaultRegion, mc.DefaultRegion)
 	}
 	if mc.StsEndpoints != "" {
-		env = append(env, stsEndpointsEnv+"="+mc.StsEndpoints)
+		env.Set(envprovider.EnvSTSRegionalEndpoints, mc.StsEndpoints)
 	}
 
 	if mc.MountpointCacheKey != "" {
-		env = append(env, MountpointCacheKey+"="+mc.MountpointCacheKey)
+		env.Set(envprovider.EnvMountpointCacheKey, mc.MountpointCacheKey)
 	}
 
 	return env

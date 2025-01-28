@@ -21,6 +21,7 @@ import (
 	"k8s.io/klog/v2"
 	k8sstrings "k8s.io/utils/strings"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
@@ -109,14 +110,14 @@ func (c *CredentialProvider) provideFromDriver() (*MountCredentials, error) {
 
 	return &MountCredentials{
 		AuthenticationSource: AuthenticationSourceDriver,
-		AccessKeyID:          os.Getenv(keyIdEnv),
-		SecretAccessKey:      os.Getenv(accessKeyEnv),
-		SessionToken:         os.Getenv(sessionTokenEnv),
-		Region:               os.Getenv(regionEnv),
-		DefaultRegion:        os.Getenv(defaultRegionEnv),
+		AccessKeyID:          os.Getenv(envprovider.EnvAccessKeyID),
+		SecretAccessKey:      os.Getenv(envprovider.EnvSecretAccessKey),
+		SessionToken:         os.Getenv(envprovider.EnvSessionToken),
+		Region:               os.Getenv(envprovider.EnvRegion),
+		DefaultRegion:        os.Getenv(envprovider.EnvDefaultRegion),
 		WebTokenPath:         hostTokenPath,
-		StsEndpoints:         os.Getenv(stsEndpointsEnv),
-		AwsRoleArn:           os.Getenv(roleArnEnv),
+		StsEndpoints:         os.Getenv(envprovider.EnvSTSRegionalEndpoints),
+		AwsRoleArn:           os.Getenv(envprovider.EnvRoleARN),
 	}, nil
 }
 
@@ -150,7 +151,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
 	}
 
-	defaultRegion := os.Getenv(defaultRegionEnv)
+	defaultRegion := os.Getenv(envprovider.EnvDefaultRegion)
 	if defaultRegion == "" {
 		defaultRegion = region
 	}
@@ -177,7 +178,7 @@ func (c *CredentialProvider) provideFromPod(ctx context.Context, volumeID string
 
 		Region:        region,
 		DefaultRegion: defaultRegion,
-		StsEndpoints:  os.Getenv(stsEndpointsEnv),
+		StsEndpoints:  os.Getenv(envprovider.EnvSTSRegionalEndpoints),
 		WebTokenPath:  hostTokenPath,
 		AwsRoleArn:    awsRoleARN,
 
@@ -258,13 +259,13 @@ func (c *CredentialProvider) stsRegion(volumeCtx map[string]string, args mountpo
 		return region, nil
 	}
 
-	region = os.Getenv(regionEnv)
+	region = os.Getenv(envprovider.EnvRegion)
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from `AWS_REGION` env variable", region)
 		return region, nil
 	}
 
-	region = os.Getenv(defaultRegionEnv)
+	region = os.Getenv(envprovider.EnvDefaultRegion)
 	if region != "" {
 		klog.V(5).Infof("NodePublishVolume: Pod-level: Detected STS region %s from `AWS_DEFAULT_REGION` env variable", region)
 		return region, nil
