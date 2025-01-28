@@ -68,6 +68,16 @@ func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
 				"AWS_STS_REGIONAL_ENDPOINTS=regional",
 			},
 		},
+		{
+			name: "additional env variables shouldn't be passed",
+			env: map[string]string{
+				"AWS_REGION":       "us-west-1",
+				"AWS_MAX_ATTEMPTS": "10",
+			},
+			want: []string{
+				"AWS_REGION=us-west-1",
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
