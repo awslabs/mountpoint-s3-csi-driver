@@ -30,7 +30,7 @@ spec:
       tolerations:
         {{- if .Values.node.tolerateAllTaints }}
         - operator: Exists
-        {{- else }}
+        {{- else if .Values.node.defaultTolerations }}
         - key: CriticalAddonsOnly
           operator: Exists
         - operator: Exists

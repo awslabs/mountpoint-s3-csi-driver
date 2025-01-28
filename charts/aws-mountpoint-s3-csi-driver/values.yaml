@@ -34,7 +34,10 @@ node:
       memory: 40Mi
     limits:
       memory: 256Mi
+  # Tolerates all taints and overrides defaultTolerations
   tolerateAllTaints: false
+  defaultTolerations: true
+  tolerations: []
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
