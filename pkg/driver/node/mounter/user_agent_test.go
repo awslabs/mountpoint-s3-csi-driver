@@ -18,6 +18,8 @@ package mounter
 
 import (
 	"testing"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
 func TestUserAgent(t *testing.T) {
@@ -39,12 +41,12 @@ func TestUserAgent(t *testing.T) {
 		},
 		"driver authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
-			authenticationSource: AuthenticationSourceDriver,
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
 			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0",
 		},
 		"pod authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
-			authenticationSource: AuthenticationSourcePod,
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
 		},
 	}

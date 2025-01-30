@@ -5,16 +5,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
 )
@@ -50,51 +49,47 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 func TestS3MounterMount(t *testing.T) {
 	testBucketName := "test-bucket"
 	testTargetPath := filepath.Join(t.TempDir(), "mount")
-	testCredentials := &mounter.MountCredentials{
-		AccessKeyID:     "test-access-key",
-		SecretAccessKey: "test-secret-key",
-		Region:          "test-region",
-		DefaultRegion:   "test-region",
-		WebTokenPath:    "test-web-token-path",
-		StsEndpoints:    "test-sts-endpoint",
-		AwsRoleArn:      "test-aws-role",
+	testProvideCtx := credentialprovider.ProvideContext{
+		PodID:     "test-pod",
+		VolumeID:  "test-volume",
+		WritePath: t.TempDir(),
 	}
 
 	testCases := []struct {
 		name        string
 		bucketName  string
 		targetPath  string
-		credentials *mounter.MountCredentials
+		provideCtx  credentialprovider.ProvideContext
 		options     []string
 		expectedErr bool
 		before      func(*testing.T, *mounterTestEnv)
 	}{
 		{
-			name:        "success: mounts with empty options",
-			bucketName:  testBucketName,
-			targetPath:  testTargetPath,
-			credentials: testCredentials,
-			options:     []string{},
+			name:       "success: mounts with empty options",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: testProvideCtx,
+			options:    []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
 		},
 		{
-			name:        "success: mounts with nil credentials",
-			bucketName:  testBucketName,
-			targetPath:  testTargetPath,
-			credentials: nil,
-			options:     []string{},
+			name:       "success: mounts with nil credentials",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			},
 		},
 		{
-			name:        "success: replaces user agent prefix",
-			bucketName:  testBucketName,
-			targetPath:  testTargetPath,
-			credentials: nil,
-			options:     []string{"--user-agent-prefix=mycustomuseragent"},
+			name:       "success: replaces user agent prefix",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--user-agent-prefix=mycustomuseragent"},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, a := range config.Args {
@@ -107,11 +102,11 @@ func TestS3MounterMount(t *testing.T) {
 			},
 		},
 		{
-			name:        "success: aws max attempts",
-			bucketName:  testBucketName,
-			targetPath:  testTargetPath,
-			credentials: nil,
-			options:     []string{"--aws-max-attempts=10"},
+			name:       "success: aws max attempts",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--aws-max-attempts=10"},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					for _, e := range config.Env {
@@ -128,7 +123,7 @@ func TestS3MounterMount(t *testing.T) {
 			name:        "failure: fails on mount failure",
 			bucketName:  testBucketName,
 			targetPath:  testTargetPath,
-			credentials: nil,
+			provideCtx:  credentialprovider.ProvideContext{},
 			options:     []string{},
 			expectedErr: true,
 			before: func(t *testing.T, env *mounterTestEnv) {
@@ -138,14 +133,14 @@ func TestS3MounterMount(t *testing.T) {
 		{
 			name:        "failure: won't mount empty bucket name",
 			targetPath:  testTargetPath,
-			credentials: testCredentials,
+			provideCtx:  testProvideCtx,
 			options:     []string{},
 			expectedErr: true,
 		},
 		{
 			name:        "failure: won't mount empty target",
 			bucketName:  testBucketName,
-			credentials: testCredentials,
+			provideCtx:  testProvideCtx,
 			options:     []string{},
 			expectedErr: true,
 		},
@@ -156,124 +151,11 @@ func TestS3MounterMount(t *testing.T) {
 			if testCase.before != nil {
 				testCase.before(t, env)
 			}
-			err := env.mounter.Mount(testCase.bucketName, testCase.targetPath,
-				testCase.credentials, mountpoint.ParseArgs(testCase.options))
+			err := env.mounter.Mount(env.ctx, testCase.bucketName, testCase.targetPath,
+				testCase.provideCtx, mountpoint.ParseArgs(testCase.options))
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestProvidingEnvVariablesForMountpointProcess(t *testing.T) {
-	tests := map[string]struct {
-		profile     awsprofile.AWSProfile
-		credentials *mounter.MountCredentials
-		expected    []string
-	}{
-		"Profile Provider for long-term credentials": {
-			profile: awsprofile.AWSProfile{
-				Name:            "profile",
-				ConfigPath:      "~/.aws/s3-csi-config",
-				CredentialsPath: "~/.aws/s3-csi-credentials",
-			},
-			credentials: &mounter.MountCredentials{},
-			expected: []string{
-				"AWS_PROFILE=profile",
-				"AWS_CONFIG_FILE=~/.aws/s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/s3-csi-credentials",
-			},
-		},
-		"Profile Provider": {
-			credentials: &mounter.MountCredentials{
-				ConfigFilePath:            "~/.aws/config",
-				SharedCredentialsFilePath: "~/.aws/credentials",
-			},
-			expected: []string{
-				"AWS_CONFIG_FILE=~/.aws/config",
-				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials",
-			},
-		},
-		"Disabling IMDS Provider": {
-			credentials: &mounter.MountCredentials{
-				DisableIMDSProvider: true,
-			},
-			expected: []string{
-				"AWS_EC2_METADATA_DISABLED=true",
-			},
-		},
-		"STS Web Identity Provider": {
-			credentials: &mounter.MountCredentials{
-				WebTokenPath: "/path/to/web/token",
-				AwsRoleArn:   "arn:aws:iam::123456789012:role/Role",
-			},
-			expected: []string{
-				"AWS_WEB_IDENTITY_TOKEN_FILE=/path/to/web/token",
-				"AWS_ROLE_ARN=arn:aws:iam::123456789012:role/Role",
-			},
-		},
-		"Region and Default Region": {
-			credentials: &mounter.MountCredentials{
-				Region:        "us-west-2",
-				DefaultRegion: "us-east-1",
-			},
-			expected: []string{
-				"AWS_REGION=us-west-2",
-				"AWS_DEFAULT_REGION=us-east-1",
-			},
-		},
-		"STS Endpoints": {
-			credentials: &mounter.MountCredentials{
-				StsEndpoints: "regional",
-			},
-			expected: []string{
-				"AWS_STS_REGIONAL_ENDPOINTS=regional",
-			},
-		},
-		"Mountpoint Cache Key": {
-			credentials: &mounter.MountCredentials{
-				MountpointCacheKey: "test_cache_key",
-			},
-			expected: []string{
-				"UNSTABLE_MOUNTPOINT_CACHE_KEY=test_cache_key",
-			},
-		},
-		"All Combined": {
-			credentials: &mounter.MountCredentials{
-				WebTokenPath:              "/path/to/web/token",
-				AwsRoleArn:                "arn:aws:iam::123456789012:role/Role",
-				Region:                    "us-west-2",
-				DefaultRegion:             "us-east-1",
-				StsEndpoints:              "legacy",
-				ConfigFilePath:            "~/.aws/config",
-				SharedCredentialsFilePath: "~/.aws/credentials",
-				DisableIMDSProvider:       true,
-				MountpointCacheKey:        "test/cache/key",
-			},
-			expected: []string{
-				"AWS_WEB_IDENTITY_TOKEN_FILE=/path/to/web/token",
-				"AWS_ROLE_ARN=arn:aws:iam::123456789012:role/Role",
-				"AWS_REGION=us-west-2",
-				"AWS_DEFAULT_REGION=us-east-1",
-				"AWS_STS_REGIONAL_ENDPOINTS=legacy",
-				"AWS_EC2_METADATA_DISABLED=true",
-				"AWS_CONFIG_FILE=~/.aws/config",
-				"AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials",
-				"UNSTABLE_MOUNTPOINT_CACHE_KEY=test/cache/key",
-			},
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			actual := test.credentials.Env(test.profile).List()
-
-			slices.Sort(test.expected)
-			slices.Sort(actual)
-
-			if !reflect.DeepEqual(actual, test.expected) {
-				t.Errorf("Expected %v, but got %v", test.expected, actual)
 			}
 		})
 	}
@@ -357,8 +239,8 @@ func TestIsMountPoint(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(test.procMountsContent)}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
-			assertEquals(t, test.isMountPoint, isMountPoint)
-			assertEquals(t, test.expectErr, err != nil)
+			assert.Equals(t, test.isMountPoint, isMountPoint)
+			assert.Equals(t, test.expectErr, err != nil)
 		})
 	}
 }

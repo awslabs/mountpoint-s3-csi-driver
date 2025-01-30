@@ -219,3 +219,50 @@ func TestEnvironmentList(t *testing.T) {
 		})
 	}
 }
+
+func TestMergingEnvironments(t *testing.T) {
+	testCases := []struct {
+		name  string
+		env   envprovider.Environment
+		other envprovider.Environment
+		want  envprovider.Environment
+	}{
+		{
+			name:  "merge into empty environment",
+			env:   envprovider.Environment{},
+			other: envprovider.Environment{"AWS_REGION": "us-west-1"},
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1"},
+		},
+		{
+			name:  "merge empty environment",
+			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
+			other: envprovider.Environment{},
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1"},
+		},
+		{
+			name:  "merge with different keys",
+			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
+			other: envprovider.Environment{"AWS_DEFAULT_REGION": "us-east-1"},
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+		},
+		{
+			name:  "merge with overlapping keys",
+			env:   envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_PROFILE": "default"},
+			other: envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_DEFAULT_REGION": "us-east-2"},
+			want:  envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_PROFILE": "default", "AWS_DEFAULT_REGION": "us-east-2"},
+		},
+		{
+			name:  "merge with empty values",
+			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
+			other: envprovider.Environment{"AWS_REGION": "", "AWS_DEFAULT_REGION": "us-east-1"},
+			want:  envprovider.Environment{"AWS_REGION": "", "AWS_DEFAULT_REGION": "us-east-1"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testCase.env.Merge(testCase.other)
+			assert.Equals(t, testCase.want, testCase.env)
+		})
+	}
+}

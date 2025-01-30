@@ -8,7 +8,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	mounter "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	credentialprovider "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mountpoint "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
@@ -106,29 +106,29 @@ func (mr *MockMounterMockRecorder) IsMountPoint(target interface{}) *gomock.Call
 }
 
 // Mount mocks base method.
-func (m *MockMounter) Mount(bucketName, target string, credentials *mounter.MountCredentials, args mountpoint.Args) error {
+func (m *MockMounter) Mount(ctx context.Context, bucketName, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Mount", bucketName, target, credentials, args)
+	ret := m.ctrl.Call(m, "Mount", ctx, bucketName, target, credentialCtx, args)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Mount indicates an expected call of Mount.
-func (mr *MockMounterMockRecorder) Mount(bucketName, target, credentials, args interface{}) *gomock.Call {
+func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx, args interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), bucketName, target, credentials, args)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), ctx, bucketName, target, credentialCtx, args)
 }
 
 // Unmount mocks base method.
-func (m *MockMounter) Unmount(target string) error {
+func (m *MockMounter) Unmount(target string, credentialCtx credentialprovider.CleanupContext) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Unmount", target)
+	ret := m.ctrl.Call(m, "Unmount", target, credentialCtx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Unmount indicates an expected call of Unmount.
-func (mr *MockMounterMockRecorder) Unmount(target interface{}) *gomock.Call {
+func (mr *MockMounterMockRecorder) Unmount(target, credentialCtx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unmount", reflect.TypeOf((*MockMounter)(nil).Unmount), target)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unmount", reflect.TypeOf((*MockMounter)(nil).Unmount), target, credentialCtx)
 }
