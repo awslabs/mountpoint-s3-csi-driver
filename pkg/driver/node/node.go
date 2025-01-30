@@ -25,10 +25,10 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
@@ -55,28 +55,15 @@ var (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID             string
-	Mounter            mounter.Mounter
-	credentialProvider *mounter.CredentialProvider
+	NodeID  string
+	Mounter mounter.Mounter
 }
 
-func NewS3NodeServer(nodeID string, mounter mounter.Mounter, credentialProvider *mounter.CredentialProvider) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, credentialProvider: credentialProvider}
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter) *S3NodeServer {
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	volumeCtx := req.GetVolumeContext()
-	if volumeCtx[volumecontext.AuthenticationSource] == mounter.AuthenticationSourcePod {
-		podID := volumeCtx[volumecontext.CSIPodUID]
-		volumeID := req.GetVolumeId()
-		if podID != "" && volumeID != "" {
-			err := ns.credentialProvider.CleanupToken(volumeID, podID)
-			if err != nil {
-				klog.V(4).Infof("NodeStageVolume: Failed to cleanup token for pod/volume %s/%s: %v", podID, volumeID, err)
-			}
-		}
-	}
-
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -128,46 +115,17 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	args := mountpoint.ParseArgs(mountpointArgs)
-
-	credentials, err := ns.credentialProvider.Provide(ctx, req.VolumeId, req.VolumeContext, args)
-	if err != nil {
-		klog.Errorf("NodePublishVolume: failed to provide credentials: %v", err)
-		return nil, err
-	}
-
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
-	if err := ns.Mounter.Mount(bucket, target, credentials, args); err != nil {
+	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
+
+	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}
 	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
 
 	return &csi.NodePublishVolumeResponse{}, nil
-}
-
-/**
- * Compile mounting options into a singular set
- */
-func compileMountOptions(currentOptions []string, newOptions []string) []string {
-	allMountOptions := sets.NewString()
-
-	for _, currentMountOptions := range currentOptions {
-		if len(currentMountOptions) > 0 {
-			allMountOptions.Insert(currentMountOptions)
-		}
-	}
-
-	for _, mountOption := range newOptions {
-		// disallow options that don't make sense in CSI
-		switch mountOption {
-		case "--foreground", "-f", "--help", "-h", "--version", "-v":
-			continue
-		}
-		allMountOptions.Insert(mountOption)
-	}
-
-	return allMountOptions.List()
 }
 
 func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -198,24 +156,12 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
+	credentialCtx := credentialCleanupContextFromUnpublishRequest(req)
+
 	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = ns.Mounter.Unmount(target)
+	err = ns.Mounter.Unmount(target, credentialCtx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
-	}
-
-	targetPath, err := targetpath.Parse(target)
-	if err == nil {
-		if targetPath.VolumeID != volumeID {
-			klog.V(4).Infof("NodeUnpublishVolume: Volume ID from parsed target path differs from Volume ID passed: %s (parsed) != %s (passed)", targetPath.VolumeID, volumeID)
-		} else {
-			err := ns.credentialProvider.CleanupToken(targetPath.VolumeID, targetPath.PodID)
-			if err != nil {
-				klog.V(4).Infof("NodeUnpublishVolume: Failed to cleanup token for pod/volume %s/%s: %v", targetPath.PodID, volumeID, err)
-			}
-		}
-	} else {
-		klog.V(4).Infof("NodeUnpublishVolume: Failed to parse target path %s: %v", target, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -270,6 +216,45 @@ func (ns *S3NodeServer) isValidVolumeCapabilities(volCaps []*csi.VolumeCapabilit
 		}
 	}
 	return foundAll
+}
+
+func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeRequest, args mountpoint.Args) credentialprovider.ProvideContext {
+	volumeCtx := req.GetVolumeContext()
+
+	podID := volumeCtx[volumecontext.CSIPodUID]
+	if podID == "" {
+		podID, _ = podIDFromTargetPath(req.GetTargetPath())
+	}
+
+	bucketRegion, _ := args.Value(mountpoint.ArgRegion)
+
+	return credentialprovider.ProvideContext{
+		PodID:                podID,
+		VolumeID:             req.GetVolumeId(),
+		AuthenticationSource: volumeCtx[volumecontext.AuthenticationSource],
+		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],
+		ServiceAccountTokens: volumeCtx[volumecontext.CSIServiceAccountTokens],
+		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
+		StsRegion:            volumeCtx[volumecontext.STSRegion],
+		BucketRegion:         bucketRegion,
+	}
+}
+
+func credentialCleanupContextFromUnpublishRequest(req *csi.NodeUnpublishVolumeRequest) credentialprovider.CleanupContext {
+	podID, _ := podIDFromTargetPath(req.GetTargetPath())
+	return credentialprovider.CleanupContext{
+		VolumeID: req.GetVolumeId(),
+		PodID:    podID,
+	}
+}
+
+func podIDFromTargetPath(target string) (string, bool) {
+	targetPath, err := targetpath.Parse(target)
+	if err != nil {
+		klog.V(4).Infof("Failed to parse target path %s: %v", target, err)
+		return "", false
+	}
+	return targetPath.PodID, true
 }
 
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
