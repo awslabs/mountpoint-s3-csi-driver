@@ -2,22 +2,18 @@ package node_test
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"testing"
 
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/golang/mock/gomock"
+	"golang.org/x/net/context"
+
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/golang/mock/gomock"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/google/uuid"
-	"golang.org/x/net/context"
 )
 
 type nodeServerTestEnv struct {
@@ -28,14 +24,8 @@ type nodeServerTestEnv struct {
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
-	defer mockCtl.Finish()
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	credentialProvider := mounter.NewCredentialProvider(nil, t.TempDir(), mounter.RegionFromIMDSOnce)
-	server := node.NewS3NodeServer(
-		"test-nodeID",
-		mockMounter,
-		credentialProvider,
-	)
+	server := node.NewS3NodeServer("test-nodeID", mockMounter)
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,
@@ -73,7 +63,14 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext:    map[string]string{"bucketName": bucketName},
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Any())
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Any())
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -101,7 +98,14 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeContext: map[string]string{"bucketName": bucketName},
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})))
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})))
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -132,7 +136,14 @@ func TestNodePublishVolume(t *testing.T) {
 					Readonly:      true,
 				}
 
-				nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(), gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--test=123"})))
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--test=123"})))
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)
@@ -164,7 +175,12 @@ func TestNodePublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().Mount(
-					gomock.Eq(bucketName), gomock.Eq(targetPath), gomock.Any(),
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--test=123"}))).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -219,7 +235,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
-				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(nil)
+				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath), gomock.Any())
 				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume failed: %v", err)
@@ -258,7 +274,12 @@ func TestNodeUnpublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
-				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath)).Return(errors.New(""))
+				nodeTestEnv.mockMounter.EXPECT().Unmount(
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.CleanupContext{
+						VolumeID: volumeId,
+					}),
+				).Return(errors.New(""))
 				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err == nil {
 					t.Fatalf("NodePublishVolume must fail")
@@ -292,31 +313,6 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
 	}
-
-	t.Run("Cleaning Service Account Token", func(t *testing.T) {
-		containerPluginDir := t.TempDir()
-		credentialProvider := mounter.NewCredentialProvider(nil, containerPluginDir, mounter.RegionFromIMDSOnce)
-		nodeServer := node.NewS3NodeServer("test-node-id", &dummyMounter{}, credentialProvider)
-
-		podID := uuid.New().String()
-		volID := "test-vol-id"
-
-		serviceAccountTokenPath := filepath.Join(containerPluginDir, fmt.Sprintf("%s-%s.token", podID, volID))
-		_, err := os.Create(serviceAccountTokenPath)
-		assert.Equals(t, nil, err)
-
-		targetPath := fmt.Sprintf("/var/lib/kubelet/pods/%s/volumes/kubernetes.io~csi/%s/mount", podID, volID)
-
-		_, err = nodeServer.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
-			VolumeId:   volID,
-			TargetPath: targetPath,
-		})
-		assert.Equals(t, nil, err)
-
-		_, err = os.Stat(serviceAccountTokenPath)
-		assert.Equals(t, cmpopts.AnyError, err)
-		assert.Equals(t, true, errors.Is(err, fs.ErrNotExist))
-	})
 }
 
 func TestNodeGetCapabilities(t *testing.T) {
@@ -339,15 +335,16 @@ func TestNodeGetCapabilities(t *testing.T) {
 
 var _ mounter.Mounter = &dummyMounter{}
 
-type dummyMounter struct {
+type dummyMounter struct{}
+
+func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
+	return nil
 }
 
-func (d *dummyMounter) Mount(bucketName string, target string, credentials *mounter.MountCredentials, args mountpoint.Args) error {
+func (d *dummyMounter) Unmount(target string, ctx credentialprovider.CleanupContext) error {
 	return nil
 }
-func (d *dummyMounter) Unmount(target string) error {
-	return nil
-}
+
 func (d *dummyMounter) IsMountPoint(target string) (bool, error) {
 	return true, nil
 }
