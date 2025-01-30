@@ -83,6 +83,14 @@ func (env Environment) Set(key Key, value Value) {
 	env[key] = value
 }
 
+// Merge adds all key-value pairs from the given environment to the current environment.
+// If a key exists in both environments, the value from the given environment takes precedence.
+func (env Environment) Merge(other Environment) {
+	for key, value := range other {
+		env[key] = value
+	}
+}
+
 // format formats given key and value to be used as an environment variable.
 func format(key Key, value Value) string {
 	return fmt.Sprintf("%s=%s", key, value)
