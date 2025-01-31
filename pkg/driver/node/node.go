@@ -33,13 +33,10 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
-const (
-	defaultKubeletPath = "/var/lib/kubelet"
-)
-
-var kubeletPath = getKubeletPath()
+var kubeletPath = util.KubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
@@ -171,14 +168,6 @@ func compileMountOptions(currentOptions []string, newOptions []string) []string 
 	}
 
 	return allMountOptions.List()
-}
-
-func getKubeletPath() string {
-	kubeletPath := os.Getenv("KUBELET_PATH")
-	if kubeletPath == "" {
-		return defaultKubeletPath
-	}
-	return kubeletPath
 }
 
 func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
