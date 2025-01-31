@@ -1,16 +1,14 @@
 package csimounter_test
 
 import (
-	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -19,10 +17,10 @@ func TestRunningMountpoint(t *testing.T) {
 	mountpointPath := filepath.Join(t.TempDir(), "mount-s3")
 
 	t.Run("Passes bucket name and FUSE device as mount point", func(t *testing.T) {
-		dev := openDevNull(t)
+		dev := mountertest.OpenDevNull(t)
 
 		runner := func(c *exec.Cmd) (int, error) {
-			assertSameFile(t, dev, c.ExtraFiles[0])
+			mountertest.AssertSameFile(t, dev, c.ExtraFiles[0])
 			assert.Equals(t, mountpointPath, c.Path)
 			assert.Equals(t, []string{mountpointPath, "test-bucket", "/dev/fd/3"}, c.Args[:3])
 			return 0, nil
@@ -50,7 +48,7 @@ func TestRunningMountpoint(t *testing.T) {
 		exitCode, err := csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
 			MountOptions: mountoptions.Options{
-				Fd:         int(openDevNull(t).Fd()),
+				Fd:         int(mountertest.OpenDevNull(t).Fd()),
 				BucketName: "test-bucket",
 			},
 			CmdRunner: runner,
@@ -70,7 +68,7 @@ func TestRunningMountpoint(t *testing.T) {
 		exitCode, err := csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
 			MountOptions: mountoptions.Options{
-				Fd:  int(openDevNull(t).Fd()),
+				Fd:  int(mountertest.OpenDevNull(t).Fd()),
 				Env: env,
 			},
 			CmdRunner: runner,
@@ -92,7 +90,7 @@ func TestRunningMountpoint(t *testing.T) {
 		exitCode, err := csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
 			MountOptions: mountoptions.Options{
-				Fd:         int(openDevNull(t).Fd()),
+				Fd:         int(mountertest.OpenDevNull(t).Fd()),
 				BucketName: "test-bucket",
 			},
 			CmdRunner: runner,
@@ -103,7 +101,7 @@ func TestRunningMountpoint(t *testing.T) {
 		exitCode, err = csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
 			MountOptions: mountoptions.Options{
-				Fd:         int(openDevNull(t).Fd()),
+				Fd:         int(mountertest.OpenDevNull(t).Fd()),
 				BucketName: "test-bucket",
 				Args:       []string{"--foreground"},
 			},
@@ -123,29 +121,4 @@ func TestRunningMountpoint(t *testing.T) {
 		})
 		assert.Equals(t, cmpopts.AnyError, err)
 	})
-}
-
-func openDevNull(t *testing.T) *os.File {
-	file, err := os.Open(os.DevNull)
-	assert.NoError(t, err)
-	t.Cleanup(func() {
-		err = file.Close()
-		if err != nil {
-			log.Printf("Failed to close file handle: %v\n", err)
-		}
-	})
-	return file
-}
-
-func assertSameFile(t *testing.T, want *os.File, got *os.File) {
-	var wantStat = &syscall.Stat_t{}
-	err := syscall.Fstat(int(want.Fd()), wantStat)
-	assert.NoError(t, err)
-
-	var gotStat = &syscall.Stat_t{}
-	err = syscall.Fstat(int(got.Fd()), gotStat)
-	assert.NoError(t, err)
-
-	assert.Equals(t, wantStat.Dev, gotStat.Dev)
-	assert.Equals(t, wantStat.Ino, gotStat.Ino)
 }
