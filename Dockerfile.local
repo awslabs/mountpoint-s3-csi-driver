@@ -28,7 +28,7 @@ RUN dnf upgrade -y && \
     pkg-config && \
     dnf clean all
 
-# Install rust
+# Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -45,7 +45,7 @@ RUN cd mountpoint-s3 && \
 # Build CSI Driver
 #
 
-# Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
+# Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
 FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.22-bullseye as builder
 ARG TARGETARCH
 
@@ -54,17 +54,24 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
     TARGETARCH=${TARGETARCH} make bin
 
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base:latest AS linux-amazon
+#
+# Build the final image
+#
+
+# `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
+# We need to make sure to use same Amazon Linux version here and while building Mountpoint to not have glibc compatibility issues.
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al23 AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
 
-# MP Installer
+# Copy Mountpoint binary
 COPY --from=mp_builder /mountpoint-s3/target/release/mount-s3 /mountpoint-s3/bin/mount-s3
+# TODO: These won't be necessary once with containerization.
 COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
 COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
 
-# Install driver
+# Copy CSI Driver binaries
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
 

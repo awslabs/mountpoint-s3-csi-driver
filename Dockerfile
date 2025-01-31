@@ -49,19 +49,22 @@ ARG TARGETARCH
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
-TARGETARCH=${TARGETARCH} make bin
+    TARGETARCH=${TARGETARCH} make bin
 
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base:latest AS linux-amazon
+# `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
+# We need to make sure to use same Amazon Linux version here and while producing Mountpoint to not have glibc compatibility issues.
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
 
-# MP Installer
+# Copy Mountpoint binary
 COPY --from=mp_builder /mountpoint-s3 /mountpoint-s3
+# TODO: These won't be necessary once with containerization.
 COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
 COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
 
-# Install driver
+# Copy CSI Driver binaries
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
 
