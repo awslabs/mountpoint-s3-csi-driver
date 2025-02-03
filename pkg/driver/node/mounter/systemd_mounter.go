@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/awsprofile"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 )
 
 // https://github.com/awslabs/mountpoint-s3/blob/9ed8b6243f4511e2013b2f4303a9197c3ddd4071/mountpoint-s3/src/cli.rs#L421
@@ -26,9 +26,10 @@ type SystemdMounter struct {
 	MpVersion         string
 	MountS3Path       string
 	kubernetesVersion string
+	credProvider      *credentialprovider.Provider
 }
 
-func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
+func NewSystemdMounter(credProvider *credentialprovider.Provider, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
 	ctx := context.Background()
 	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
@@ -41,6 +42,7 @@ func NewSystemdMounter(mpVersion string, kubernetesVersion string) (*SystemdMoun
 		MpVersion:         mpVersion,
 		MountS3Path:       MountS3Path(),
 		kubernetesVersion: kubernetesVersion,
+		credProvider:      credProvider,
 	}, nil
 }
 
@@ -80,7 +82,7 @@ func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *SystemdMounter) Mount(bucketName string, target string, credentials *MountCredentials, args mountpoint.Args) error {
+func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -89,6 +91,8 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 	}
 	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
+
+	credentialCtx.SetWriteAndEnvPath(m.credentialWriteAndEnvPath())
 
 	cleanupDir := false
 
@@ -112,7 +116,11 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		// Corrupted mount, try unmounting
 		if mount.IsCorruptedMnt(statErr) {
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
-			if mntErr := m.Unmount(target); mntErr != nil {
+			if mntErr := m.Unmount(target, credentialprovider.CleanupContext{
+				WritePath: credentialCtx.WritePath,
+				PodID:     credentialCtx.PodID,
+				VolumeID:  credentialCtx.VolumeID,
+			}); mntErr != nil {
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, statErr, mntErr)
 			}
 		}
@@ -123,31 +131,19 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, statErr, err)
 	}
 
+	credEnv, authenticationSource, err := m.credProvider.Provide(ctx, credentialCtx)
+	if err != nil {
+		klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, err)
+		return err
+	}
+
 	if isMountPoint {
 		klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
 		return nil
 	}
 
 	env := envprovider.Default()
-	var authenticationSource AuthenticationSource
-	if credentials != nil {
-		var awsProfile awsprofile.AWSProfile
-		if credentials.AccessKeyID != "" && credentials.SecretAccessKey != "" {
-			// Kubernetes creates target path in the form of "/var/lib/kubelet/pods/<pod-uuid>/volumes/kubernetes.io~csi/<volume-id>/mount".
-			// So the directory of the target path is unique for this mount, and we can use it to write credentials and config files.
-			// These files will be cleaned up in `Unmount`.
-			basepath := filepath.Dir(target)
-			awsProfile, err = awsprofile.CreateAWSProfile(basepath, credentials.AccessKeyID, credentials.SecretAccessKey, credentials.SessionToken)
-			if err != nil {
-				klog.V(4).Infof("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
-				return fmt.Errorf("Mount: Failed to create AWS Profile in %s: %v", basepath, err)
-			}
-		}
-
-		authenticationSource = credentials.AuthenticationSource
-
-		env = credentials.Env(awsProfile)
-	}
+	env.Merge(credEnv)
 
 	// Move `--aws-max-attempts` to env if provided
 	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
@@ -174,15 +170,11 @@ func (m *SystemdMounter) Mount(bucketName string, target string, credentials *Mo
 	return nil
 }
 
-func (m *SystemdMounter) Unmount(target string) error {
+func (m *SystemdMounter) Unmount(target string, credentialCtx credentialprovider.CleanupContext) error {
 	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
 
-	basepath := filepath.Dir(target)
-	err := awsprofile.CleanupAWSProfile(basepath)
-	if err != nil {
-		klog.V(4).Infof("Unmount: Failed to clean up AWS Profile in %s: %v", basepath, err)
-	}
+	credentialCtx.WritePath, _ = m.credentialWriteAndEnvPath()
 
 	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{
 		Name:        "mount-s3-umount-" + uuid.New().String() + ".service",
@@ -196,5 +188,27 @@ func (m *SystemdMounter) Unmount(target string) error {
 	if output != "" {
 		klog.V(5).Infof("umount output: %s", output)
 	}
+
+	err = m.credProvider.Cleanup(credentialCtx)
+	if err != nil {
+		klog.V(4).Infof("Unmount: Failed to clean up credentials for %s: %v", target, err)
+	}
+
 	return nil
+}
+
+func (m *SystemdMounter) credentialWriteAndEnvPath() (writePath string, envPath string) {
+	// This is the plugin directory for CSI driver mounted in the container.
+	writePath = "/csi"
+	// This is the plugin directory for CSI driver in the host.
+	envPath = hostPluginDirWithDefault()
+	return writePath, envPath
+}
+
+func hostPluginDirWithDefault() string {
+	hostPluginDir := os.Getenv("HOST_PLUGIN_DIR")
+	if hostPluginDir == "" {
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+	}
+	return hostPluginDir
 }
