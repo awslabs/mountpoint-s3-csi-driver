@@ -73,8 +73,8 @@ func (s *Settings) prefixedPath(filename string) string {
 
 // Create creates an AWS Profile with credentials and config files from given credentials.
 // Created credentials and config files can be clean up with [Cleanup].
-func Create(settings Settings, credentias Credentials) (Profile, error) {
-	if !credentias.isValid() {
+func Create(settings Settings, credentials Credentials) (Profile, error) {
+	if !credentials.isValid() {
 		return Profile{}, ErrInvalidCredentials
 	}
 
@@ -89,7 +89,7 @@ func Create(settings Settings, credentias Credentials) (Profile, error) {
 
 	credentialsFilename := settings.prefixed(awsProfileCredentialsFilenameSuffix)
 	credentialsPath := settings.path(credentialsFilename)
-	err = writeAWSProfileFile(credentialsPath, credentialsFileContents(name, credentias), settings.FilePerm)
+	err = writeAWSProfileFile(credentialsPath, credentialsFileContents(name, credentials), settings.FilePerm)
 	if err != nil {
 		return Profile{}, fmt.Errorf("aws-profile: Failed to create credentials file %s: %v", credentialsPath, err)
 	}
