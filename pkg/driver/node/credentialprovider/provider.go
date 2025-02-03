@@ -80,12 +80,6 @@ type CleanupContext struct {
 
 // New creates a new [Provider] with given client.
 func New(client k8sv1.CoreV1Interface, regionFromIMDS func() (string, error)) *Provider {
-	// `regionFromIMDS` is a `sync.OnceValues` and it only makes request to IMDS once,
-	// this call is basically here to pre-warm the cache of IMDS call.
-	go func() {
-		_, _ = regionFromIMDS()
-	}()
-
 	return &Provider{client, regionFromIMDS}
 }
 

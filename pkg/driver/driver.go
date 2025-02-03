@@ -69,6 +69,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
 
+	// `credentialprovider.RegionFromIMDSOnce` is a `sync.OnceValues` and it only makes request to IMDS once,
+	// this call is basically here to pre-warm the cache of IMDS call.
+	go func() {
+		_, _ = credentialprovider.RegionFromIMDSOnce()
+	}()
+
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 	systemdMounter, err := mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
 	if err != nil {
