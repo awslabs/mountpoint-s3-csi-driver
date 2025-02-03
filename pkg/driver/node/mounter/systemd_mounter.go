@@ -131,14 +131,13 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, statErr, err)
 	}
 
-	env := envprovider.Default()
-
 	credEnv, authenticationSource, err := m.credProvider.Provide(ctx, credentialCtx)
 	if err != nil {
 		klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, err)
 		return err
 	}
 
+	env := envprovider.Default()
 	env.Merge(credEnv)
 
 	if isMountPoint {
