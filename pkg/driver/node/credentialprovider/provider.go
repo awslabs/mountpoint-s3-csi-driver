@@ -70,6 +70,12 @@ type ProvideContext struct {
 	BucketRegion string
 }
 
+// SetWriteAndEnvPath sets `WritePath` and `EnvPath` for `ctx`.
+func (ctx *ProvideContext) SetWriteAndEnvPath(writePath, envPath string) {
+	ctx.WritePath = writePath
+	ctx.EnvPath = envPath
+}
+
 // A CleanupContext contains parameters needed to clean up credentials after volume unmount.
 type CleanupContext struct {
 	// WritePath is basepath where credentials previously written into.

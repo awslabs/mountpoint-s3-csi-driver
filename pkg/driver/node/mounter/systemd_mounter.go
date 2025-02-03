@@ -92,7 +92,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
 	defer cancel()
 
-	credentialCtx.WritePath, credentialCtx.EnvPath = m.credentialWriteAndEnvPath()
+	credentialCtx.SetWriteAndEnvPath(m.credentialWriteAndEnvPath())
 
 	cleanupDir := false
 
