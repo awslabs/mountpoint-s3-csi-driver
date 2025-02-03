@@ -77,7 +77,7 @@ func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envp
 	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
 	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm)
 	if err != nil {
-		return nil, fmt.Errorf("fcredentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
+		return nil, fmt.Errorf("credentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
 	}
 
 	return envprovider.Environment{
