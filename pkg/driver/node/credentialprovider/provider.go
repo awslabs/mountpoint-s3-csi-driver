@@ -23,7 +23,7 @@ const CredentialFilePerm = fs.FileMode(0600)
 // It's only readable, listable (execute bit), and writeable by the owner.
 const CredentialDirPerm = fs.FileMode(0700)
 
-// An AuthenticationSource represents the source where the credentials was obtained.
+// An AuthenticationSource represents the source (i.e., driver-level or pod-level) where the credentials was obtained.
 type AuthenticationSource = string
 
 const (
@@ -47,7 +47,7 @@ type Provider struct {
 // and writes credentials with these filenames in [WritePath], and returns environment variables to pass Mountpoint
 // with these filenames in [EnvPath].
 // This is due to fact that Mountpoint and the CSI Driver Node Pod - caller of this method - runs with different
-// filesystems, and to communicate with each other, the CSI Driver Node Pod uses `hostPath` volume to gain
+// views of the filesystems, and to communicate with each other, the CSI Driver Node Pod uses `hostPath` volume to gain
 // access some path visible from both the CSI Driver Node Pod and Mountpoint, and setups files in that volume
 // using [WritePath] and returns paths to these files in [EnvPath], so Mountpoint can correctly read these files.
 type ProvideContext struct {
