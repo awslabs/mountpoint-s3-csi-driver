@@ -137,13 +137,13 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		return err
 	}
 
-	env := envprovider.Default()
-	env.Merge(credEnv)
-
 	if isMountPoint {
 		klog.V(4).Infof("NodePublishVolume: Target path %q is already mounted", target)
 		return nil
 	}
+
+	env := envprovider.Default()
+	env.Merge(credEnv)
 
 	// Move `--aws-max-attempts` to env if provided
 	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
