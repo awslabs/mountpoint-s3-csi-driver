@@ -13,6 +13,10 @@ const KnownPathMountSock = "mount.sock"
 // will propagate contents of this error file to the Kubernetes and to the operator to resolve any operator error.
 const KnownPathMountError = "mount.err"
 
+// KnownPathMountExit is the path of mount exit file that's created by CSI Driver Node Pod that indicates
+// Mountpoint Pod is no longer needed and can cleany exit.
+const KnownPathMountExit = "mount.exit"
+
 // CommunicationDirName is the name of `emptyDir` volume each Mountpoint Pod will create
 // for the communication between Mountpoint Pod and the CSI Driver Node Pod.
 // Each Pod will have a different view for the files inside this folder,

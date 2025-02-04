@@ -1,6 +1,7 @@
 package csimounter_test
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -120,5 +121,35 @@ func TestRunningMountpoint(t *testing.T) {
 			},
 		})
 		assert.Equals(t, cmpopts.AnyError, err)
+	})
+
+	t.Run("Exists with zero code if `mount.exit` file exist", func(t *testing.T) {
+		basepath := t.TempDir()
+		mountExitPath := filepath.Join(basepath, "mount.exit")
+
+		dev := mountertest.OpenDevNull(t)
+		runner := func(c *exec.Cmd) (int, error) {
+			mountertest.AssertSameFile(t, dev, c.ExtraFiles[0])
+			assert.Equals(t, mountpointPath, c.Path)
+			assert.Equals(t, []string{mountpointPath, "test-bucket", "/dev/fd/3"}, c.Args[:3])
+			return 1, nil
+		}
+
+		// Create `mount.exit` file
+		_, err := os.OpenFile(mountExitPath, os.O_RDONLY|os.O_CREATE, 0666)
+		assert.NoError(t, err)
+
+		exitCode, err := csimounter.Run(csimounter.Options{
+			MountpointPath: mountpointPath,
+			MountExitPath:  mountExitPath,
+			MountOptions: mountoptions.Options{
+				Fd:         int(dev.Fd()),
+				BucketName: "test-bucket",
+			},
+			CmdRunner: runner,
+		})
+		assert.NoError(t, err)
+		// Should be `0` even though Mountpoint exited with a different exit code
+		assert.Equals(t, 0, exitCode)
 	})
 }
