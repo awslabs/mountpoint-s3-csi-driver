@@ -12,11 +12,8 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-// mountErrorPath is the path to write error logs if Mountpoint fails to mount.
-var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
 
 // successExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate a clean exit,
@@ -40,6 +37,7 @@ func DefaultCmdRunner(cmd *exec.Cmd) (int, error) {
 type Options struct {
 	MountpointPath string
 	MountExitPath  string
+	MountErrPath   string
 	MountOptions   mountoptions.Options
 	CmdRunner      CmdRunner
 }
@@ -82,11 +80,11 @@ func Run(options Options) (int, error) {
 
 	exitCode, err := options.CmdRunner(cmd)
 	if err != nil {
-		// If Mountpoint fails, write it to `mountErrorPath` to let `PodMounter` running in the same node know.
-		if writeErr := os.WriteFile(mountErrorPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
-			klog.Infof("Failed to write mount error logs to %s: %v\n", mountErrorPath, err)
+		// If Mountpoint fails, write it to `options.MountErrPath` to let `PodMounter` running in the same node know.
+		if writeErr := os.WriteFile(options.MountErrPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
+			klog.Infof("Failed to write mount error logs to %s: %v\n", options.MountErrPath, err)
 		}
-		return 0, err
+		return exitCode, err
 	}
 
 	if checkIfFileExists(options.MountExitPath) {

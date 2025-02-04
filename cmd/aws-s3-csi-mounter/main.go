@@ -25,6 +25,7 @@ var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_B
 
 var mountSockPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
 var mountExitPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountExit)
+var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 
 const mountpointBin = "mount-s3"
 
@@ -38,6 +39,7 @@ func main() {
 	exitCode, err := csimounter.Run(csimounter.Options{
 		MountpointPath: mountpointBinFullPath,
 		MountExitPath:  mountExitPath,
+		MountErrPath:   mountErrorPath,
 		MountOptions:   mountOptions,
 	})
 	if err != nil {
