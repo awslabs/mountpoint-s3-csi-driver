@@ -21,10 +21,10 @@ func TestMountOptions(t *testing.T) {
 	// to make the socket paths shorter. Here we add test cases for both short and long Unix socket paths.
 	// See https://github.com/golang/go/issues/6895 for more details.
 
-	basePath := t.TempDir()
-	testutil.Chdir(t, basePath)
-
 	t.Run("Short Path", func(t *testing.T) {
+		basePath := t.TempDir()
+		testutil.Chdir(t, basePath)
+
 		mountSock := filepath.Join(basePath, "m")
 		if len(mountSock) >= 108 {
 			t.Fatalf("test Unix socket path %q must be shorter than 108 characters", mountSock)
@@ -33,8 +33,11 @@ func TestMountOptions(t *testing.T) {
 	})
 
 	t.Run("Long Path", func(t *testing.T) {
-		sockBasepath := filepath.Join(basePath, "long"+strings.Repeat("g", 50))
-		assert.NoError(t, os.Mkdir(sockBasepath, 0700))
+		basePath := filepath.Join(t.TempDir(), "long"+strings.Repeat("g", 108))
+		sockBasepath := filepath.Join(basePath, "mount")
+		assert.NoError(t, os.MkdirAll(sockBasepath, 0700))
+
+		testutil.Chdir(t, basePath)
 
 		mountSock := filepath.Join(sockBasepath, "mount.sock")
 		if len(mountSock) <= 108 {
