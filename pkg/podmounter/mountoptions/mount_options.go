@@ -172,6 +172,7 @@ func tryToMakeSockPathRelative(path string) string {
 	if err != nil {
 		// Failed to make it relative to the current working directory,
 		// just emit a warning if needed and return unmodified path.
+		klog.Warningf("Length of Unix domain socket %q is larger than 108 characters, failed to make it relative to the current working directory to shorten it: %v\n", path, err)
 		warnAboutLongUnixSocketPath(path)
 		return path
 	}
