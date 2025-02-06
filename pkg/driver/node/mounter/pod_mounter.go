@@ -283,7 +283,11 @@ func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeID 
 
 // waitForMount waits until Mountpoint is successfully mounted at `target`.
 // It returns an error if Mountpoint fails to mount.
-func (pm *PodMounter) waitForMount(ctx context.Context, target, podName, podMountErrorPath string) error {
+func (pm *PodMounter) waitForMount(parentCtx context.Context, target, podName, podMountErrorPath string) error {
+	ctx, cancel := context.WithCancel(parentCtx)
+	// Cancel at the end to ensure we cancel polling from goroutines.
+	defer cancel()
+
 	mountResultCh := make(chan error)
 
 	klog.V(4).Infof("Waiting until Mountpoint Pod %s mounts on %s", podName, target)
