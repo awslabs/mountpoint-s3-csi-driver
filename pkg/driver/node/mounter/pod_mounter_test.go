@@ -283,7 +283,7 @@ func TestPodMounter(t *testing.T) {
 		})
 	})
 
-	t.Run("Checking if its mount point", func(t *testing.T) {
+	t.Run("Checking if target is a mount point", func(t *testing.T) {
 		testCtx := setup(t)
 
 		ok, _ := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
