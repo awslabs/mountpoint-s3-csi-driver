@@ -18,7 +18,10 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 		return 0, fmt.Errorf("failed to open /dev/fuse: %w", err)
 	}
 
-	closeFd := false
+	// This will set false on a success condition and will stay true
+	// in all error conditions to ensure we don't leave the file descriptor open in case we can't do
+	// the mount operation.
+	closeFd := true
 	defer func() {
 		if closeFd {
 			pm.closeFUSEDevFD(fd)
@@ -28,7 +31,6 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	var stat syscall.Stat_t
 	err = syscall.Stat(target, &stat)
 	if err != nil {
-		closeFd = true
 		return 0, fmt.Errorf("failed to stat mount point %s: %w", target, err)
 	}
 
@@ -54,9 +56,10 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	klog.V(4).Infof("Mounting %s with options %s", target, optionsJoined)
 	err = syscall.Mount(mountpointDeviceName, target, "fuse", flags, optionsJoined)
 	if err != nil {
-		closeFd = true
 		return 0, fmt.Errorf("failed to mount %s: %w", target, err)
 	}
 
+	// We successfully performed the mount operation, ensure to not close the FUSE file descriptor.
+	closeFd = false
 	return fd, nil
 }
