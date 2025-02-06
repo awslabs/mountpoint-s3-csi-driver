@@ -30,6 +30,7 @@ import (
 )
 
 const mountpointPodNamespace = "mount-s3"
+const dummyIMDSRegion = "us-west-2"
 const testK8sVersion = "v1.28.0"
 
 type testCtx struct {
@@ -103,7 +104,7 @@ func setup(t *testing.T) *testCtx {
 	}
 
 	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
-		return "us-west-2", nil
+		return dummyIMDSRegion, nil
 	})
 
 	podMounter, err := mounter.NewPodMounter(client.CoreV1(), credProvider, mountpointPodNamespace, mount, mountSyscall, testK8sVersion)
