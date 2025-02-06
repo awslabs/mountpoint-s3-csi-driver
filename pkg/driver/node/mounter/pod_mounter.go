@@ -153,7 +153,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	defer func() {
 		if unmount {
 			if err := pm.unmountTarget(target); err != nil {
-				klog.V(4).Infof("Failed to unmount mounted target %s: %s\n", target, err)
+				klog.V(4).ErrorS(err, "Failed to unmount mounted target %s\n", target)
 			} else {
 				klog.V(4).Infof("Target %s unmounted successfully\n", target)
 			}
