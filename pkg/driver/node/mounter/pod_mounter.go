@@ -139,10 +139,10 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	klog.V(4).Infof("Mounting %s for %s", target, pod.Name)
 
-	fd, err := pm.mountSyscallWithDefault(target, args)
+	fuseDeviceFD, err := pm.mountSyscallWithDefault(target, args)
 	if err != nil {
-		if fd > 0 {
-			pm.closeFd(fd)
+		if fuseDeviceFD > 0 {
+			pm.closeFd(fuseDeviceFD)
 		}
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
@@ -163,7 +163,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// This function can either fail or successfully send mount options to Mountpoint Pod - in which
 	// Mountpoint Pod will get its own fd referencing the same underlying file description.
 	// In both case we need to close the fd in this process.
-	defer pm.closeFd(fd)
+	defer pm.closeFd(fuseDeviceFD)
 
 	// Remove old mount error file if exists
 	_ = os.Remove(podMountErrorPath)
@@ -171,7 +171,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	klog.V(4).Infof("Sending mount options to Mountpoint Pod %s on %s", pod.Name, podMountSockPath)
 
 	err = mountoptions.Send(ctx, podMountSockPath, mountoptions.Options{
-		Fd:         fd,
+		Fd:         fuseDeviceFD,
 		BucketName: bucketName,
 		Args:       args.SortedList(),
 		Env:        env.List(),
