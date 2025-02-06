@@ -158,6 +158,8 @@ func TestPodMounter(t *testing.T) {
 
 			gotFile := os.NewFile(uintptr(got.Fd), "fd")
 			mountertest.AssertSameFile(t, devNull, gotFile)
+			// Reset fd as they might be different in different ends.
+			// To verify underlying objects are the same, we need to compare "dev" and "ino" from "fstat" syscall, which we do with `AssertSameFile`.
 			got.Fd = 0
 
 			assert.Equals(t, mountoptions.Options{
