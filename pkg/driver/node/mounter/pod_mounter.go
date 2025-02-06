@@ -147,9 +147,9 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
 
-	// This will set to true in all error conditions to ensure we don't leave
-	// `target` mounted if Mountpoint is not started to serve requests for it.
-	unmount := false
+	// This will set to false in the success condition. This is set to `true` by default to
+	// ensure we don't leave `target` mounted if Mountpoint is not started to serve requests for it.
+	unmount := true
 	defer func() {
 		if unmount {
 			if err := pm.unmountTarget(target); err != nil {
@@ -177,17 +177,17 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		Env:        env.List(),
 	})
 	if err != nil {
-		unmount = true
 		klog.V(4).Infof("Failed to send mount option to Mountpoint Pod %s for %s: %s\n", pod.Name, target, err)
 		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w", pod.Name, target, err)
 	}
 
 	err = pm.waitForMount(ctx, target, pod.Name, podMountErrorPath)
 	if err != nil {
-		unmount = true
 		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w", pod.Name, target, err)
 	}
 
+	// Mountpoint successfully started, so don't unmount the filesystem
+	unmount = false
 	return nil
 }
 
