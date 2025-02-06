@@ -142,7 +142,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	fuseDeviceFD, err := pm.mountSyscallWithDefault(target, args)
 	if err != nil {
 		if fuseDeviceFD > 0 {
-			pm.closeFd(fuseDeviceFD)
+			pm.closeFUSEDevFD(fuseDeviceFD)
 		}
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
@@ -163,7 +163,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// This function can either fail or successfully send mount options to Mountpoint Pod - in which
 	// Mountpoint Pod will get its own fd referencing the same underlying file description.
 	// In both case we need to close the fd in this process.
-	defer pm.closeFd(fuseDeviceFD)
+	defer pm.closeFUSEDevFD(fuseDeviceFD)
 
 	// Remove old mount error file if exists
 	_ = os.Remove(podMountErrorPath)
@@ -324,8 +324,8 @@ func (pm *PodMounter) waitForMount(ctx context.Context, target, podName, podMoun
 	return err
 }
 
-// closeFd closes given FUSE file descriptor.
-func (pm *PodMounter) closeFd(fd int) {
+// closeFUSEDevFD closes given FUSE file descriptor.
+func (pm *PodMounter) closeFUSEDevFD(fd int) {
 	err := syscall.Close(fd)
 	if err != nil {
 		klog.V(4).Infof("Mount: Failed to close /dev/fuse file descriptor %d: %v\n", fd, err)

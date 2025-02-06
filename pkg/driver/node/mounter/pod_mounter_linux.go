@@ -21,7 +21,7 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	closeFd := false
 	defer func() {
 		if closeFd {
-			pm.closeFd(fd)
+			pm.closeFUSEDevFD(fd)
 		}
 	}()
 
