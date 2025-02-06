@@ -247,15 +247,15 @@ func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeID 
 
 	klog.V(4).Infof("Waiting for Mountpoint Pod %s to running", podName)
 
-	w, err := pm.client.Pods(pm.mountpointPodNamespace).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{Name: podName}))
+	watcher, err := pm.client.Pods(pm.mountpointPodNamespace).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{Name: podName}))
 	if err != nil {
 		return nil, "", err
 	}
-	defer w.Stop()
+	defer watcher.Stop()
 
 	var foundPod *corev1.Pod
 
-	for event := range w.ResultChan() {
+	for event := range watcher.ResultChan() {
 		if event.Type != watch.Added &&
 			event.Type != watch.Modified {
 			continue
