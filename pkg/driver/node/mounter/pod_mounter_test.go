@@ -373,6 +373,8 @@ func (mp *mountpointPod) run() {
 	assert.NoError(mp.testCtx.t, err)
 }
 
+// receiveMountOptions will receive mount options sent to the Mountpoint Pod.
+// This operation will block in place, and ideally should be called from a separate goroutine.
 func (mp *mountpointPod) receiveMountOptions(ctx context.Context) mountoptions.Options {
 	mp.testCtx.t.Helper()
 	mountSock := mppod.PathOnHost(mp.podPath, mppod.KnownPathMountSock)
