@@ -77,7 +77,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	err := pm.checkTargetPath(target)
 	if err != nil {
-		return fmt.Errorf("Failed to check target path %q: %w", target, err)
+		return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
 	}
 
 	isMountPoint, err := pm.IsMountPoint(target)
