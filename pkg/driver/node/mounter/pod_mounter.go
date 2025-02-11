@@ -82,14 +82,14 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	isMountPoint, err := pm.IsMountPoint(target)
 	if err != nil {
-		return fmt.Errorf("Could not check if %q is a mount point: %w", target, err)
+		return fmt.Errorf("Could not check if %q is already a mount point: %w", target, err)
 	}
 
 	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
 	// but we should still update the credentials for it by calling `credProvider.Provide`.
 	pod, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeID)
 	if err != nil {
-		return fmt.Errorf("Failed to wait for Mountpoint Pod for %q: %w", target, err)
+		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
 
 	// TODO: After this point we know Mountpoint Pod's name, we should add some debugging tips to our error messages returned, like:
@@ -177,7 +177,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		Env:        env.List(),
 	})
 	if err != nil {
-		klog.V(4).Infof("Failed to send mount option to Mountpoint Pod %s for %s: %s\n", pod.Name, target, err)
+		klog.V(4).Infof("Failed to send mount option to Mountpoint Pod %s for %s: %v\n", pod.Name, target, err)
 		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w", pod.Name, target, err)
 	}
 
