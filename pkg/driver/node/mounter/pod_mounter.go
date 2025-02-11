@@ -356,7 +356,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 		klog.V(4).Infof("Target path %q is a corrupted mount. Trying to unmount", target)
 		if unmountErr := pm.unmountTarget(target); unmountErr != nil {
 			klog.V(4).Infof("Failed to unmount target path %q: %v, original failure of stat: %v", target, unmountErr, err)
-			return fmt.Errorf("Unable to unmount the target %q: %w", target, unmountErr)
+			return fmt.Errorf("Failed to unmount target path %q: %w, original failure of stat: %v", target, unmountErr, err)
 		}
 
 		return nil
