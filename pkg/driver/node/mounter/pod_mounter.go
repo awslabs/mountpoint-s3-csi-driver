@@ -144,9 +144,6 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	fuseDeviceFD, err := pm.mountSyscallWithDefault(target, args)
 	if err != nil {
-		if fuseDeviceFD > 0 {
-			pm.closeFUSEDevFD(fuseDeviceFD)
-		}
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
 
