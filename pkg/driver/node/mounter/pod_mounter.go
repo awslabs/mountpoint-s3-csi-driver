@@ -276,7 +276,7 @@ func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeID 
 		return nil, "", errors.New("Failed to get Mountpoint Pod")
 	}
 
-	klog.V(4).Infof("Mountpoint Pod %s is running with id %s", podName, foundPod.UID)
+	klog.V(4).Infof("Mountpoint Pod %s/%s is running with id %s", foundPod.Namespace, podName, foundPod.UID)
 
 	return foundPod, pm.podPath(foundPod), nil
 }
