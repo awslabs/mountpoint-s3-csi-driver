@@ -75,7 +75,7 @@ func NewPodMounter(client k8sv1.CoreV1Interface, credProvider *credentialprovide
 func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
 	podID, volumeID := credentialCtx.PodID, credentialCtx.VolumeID
 
-	err := pm.checkTargetPath(target)
+	err := pm.verifyOrSetupMountTarget(target)
 	if err != nil {
 		return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
 	}
@@ -336,10 +336,10 @@ func (pm *PodMounter) closeFUSEDevFD(fd int) {
 	}
 }
 
-// checkTargetPath checks target path for existence and corrupted mount error.
+// verifyOrSetupMountTarget checks target path for existence and corrupted mount error.
 // If the target dir does not exists it tries to create it.
 // If the target dir is corrupted (decided with `mount.IsCorruptedMnt`) it tries to unmount it to have a clean mount.
-func (pm *PodMounter) checkTargetPath(target string) error {
+func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 	_, err := os.Stat(target)
 	if err == nil {
 		return nil
