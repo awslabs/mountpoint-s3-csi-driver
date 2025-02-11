@@ -29,6 +29,9 @@ import (
 const mountpointPodReadinessTimeout = 10 * time.Second
 const mountpointPodReadinessCheckInterval = 100 * time.Millisecond
 
+// targetDirPerm is the permission to use while creating target directory if its not exists.
+const targetDirPerm = fs.FileMode(0755)
+
 // mountSyscall is the function that performs `mount` operation for given `target` with given Mountpoint `args`.
 // It returns mounted FUSE file descriptor as a result.
 // This is mainly exposed for testing, in production platform-native function (`mountSyscallDefault`) will be used.
@@ -347,7 +350,7 @@ func (pm *PodMounter) checkTargetPath(target string) error {
 
 	if errors.Is(err, fs.ErrNotExist) {
 		klog.V(5).Infof("Target path does not exists %s, trying to create", target)
-		if err := os.MkdirAll(target, 0755); err != nil {
+		if err := os.MkdirAll(target, targetDirPerm); err != nil {
 			return fmt.Errorf("Failed to create target directory: %w", err)
 		}
 
