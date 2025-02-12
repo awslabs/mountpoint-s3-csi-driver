@@ -159,7 +159,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	credentialCtx := credentialCleanupContextFromUnpublishRequest(req)
 
 	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = ns.Mounter.Unmount(target, credentialCtx)
+	err = ns.Mounter.Unmount(ctx, target, credentialCtx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}

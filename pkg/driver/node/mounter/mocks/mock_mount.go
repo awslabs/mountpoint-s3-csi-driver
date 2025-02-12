@@ -120,15 +120,15 @@ func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx,
 }
 
 // Unmount mocks base method.
-func (m *MockMounter) Unmount(target string, credentialCtx credentialprovider.CleanupContext) error {
+func (m *MockMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Unmount", target, credentialCtx)
+	ret := m.ctrl.Call(m, "Unmount", ctx, target, credentialCtx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Unmount indicates an expected call of Unmount.
-func (mr *MockMounterMockRecorder) Unmount(target, credentialCtx interface{}) *gomock.Call {
+func (mr *MockMounterMockRecorder) Unmount(ctx, target, credentialCtx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unmount", reflect.TypeOf((*MockMounter)(nil).Unmount), target, credentialCtx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unmount", reflect.TypeOf((*MockMounter)(nil).Unmount), ctx, target, credentialCtx)
 }

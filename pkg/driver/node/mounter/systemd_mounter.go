@@ -17,7 +17,6 @@ import (
 )
 
 type SystemdMounter struct {
-	Ctx               context.Context
 	Runner            ServiceRunner
 	Mounter           mount.Interface
 	MpVersion         string
@@ -27,13 +26,11 @@ type SystemdMounter struct {
 }
 
 func NewSystemdMounter(credProvider *credentialprovider.Provider, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
-	ctx := context.Background()
 	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
 	return &SystemdMounter{
-		Ctx:               ctx,
 		Runner:            runner,
 		Mounter:           mount.New(""),
 		MpVersion:         mpVersion,
@@ -65,7 +62,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	if target == "" {
 		return fmt.Errorf("target is empty")
 	}
-	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	credentialCtx.SetWriteAndEnvPath(m.credentialWriteAndEnvPath())
@@ -92,7 +89,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		// Corrupted mount, try unmounting
 		if mount.IsCorruptedMnt(statErr) {
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
-			if mntErr := m.Unmount(target, credentialprovider.CleanupContext{
+			if mntErr := m.Unmount(ctx, target, credentialprovider.CleanupContext{
 				WritePath: credentialCtx.WritePath,
 				PodID:     credentialCtx.PodID,
 				VolumeID:  credentialCtx.VolumeID,
@@ -146,8 +143,8 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	return nil
 }
 
-func (m *SystemdMounter) Unmount(target string, credentialCtx credentialprovider.CleanupContext) error {
-	timeoutCtx, cancel := context.WithTimeout(m.Ctx, 30*time.Second)
+func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	credentialCtx.WritePath, _ = m.credentialWriteAndEnvPath()
