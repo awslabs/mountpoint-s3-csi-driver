@@ -20,6 +20,7 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
@@ -73,9 +74,14 @@ func NewPodMounter(client k8sv1.CoreV1Interface, credProvider *credentialprovide
 //
 // If Mountpoint is already mounted at `target`, it will return early at step 2 to ensure credentials are up-to-date.
 func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
-	podID, volumeID := credentialCtx.PodID, credentialCtx.VolumeID
+	volumeName, err := pm.volumeNameFromTargetPath(target)
+	if err != nil {
+		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
+	}
 
-	err := pm.verifyOrSetupMountTarget(target)
+	podID := credentialCtx.PodID
+
+	err = pm.verifyOrSetupMountTarget(target)
 	if err != nil {
 		return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
 	}
@@ -87,7 +93,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
 	// but we should still update the credentials for it by calling `credProvider.Provide`.
-	pod, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeID)
+	pod, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
 	if err != nil {
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
@@ -193,11 +199,16 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 // Unmount unmounts the mount point at `target` and cleans all credentials.
 func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
-	podID, volumeID := credentialCtx.PodID, credentialCtx.VolumeID
+	volumeName, err := pm.volumeNameFromTargetPath(target)
+	if err != nil {
+		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
+	}
+
+	podID := credentialCtx.PodID
 
 	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
 	// but we should still unmount it and clean the credentials.
-	_, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeID)
+	_, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
 	if err != nil {
 		return fmt.Errorf("Failed to wait for Mountpoint Pod for %q: %w", target, err)
 	}
@@ -231,10 +242,10 @@ func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
 	return isMountPoint(pm.mount, target)
 }
 
-// waitForMountpointPod waints until Mountpoint Pod for given `podID` and `volumeID` is in `Running` state.
+// waitForMountpointPod waints until Mountpoint Pod for given `podID` and `volumeName` is in `Running` state.
 // It returns found Mountpoint Pod and it's base directory.
-func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeID string) (*corev1.Pod, string, error) {
-	podName := mppod.MountpointPodNameFor(podID, volumeID)
+func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeName string) (*corev1.Pod, string, error) {
+	podName := mppod.MountpointPodNameFor(podID, volumeName)
 
 	// Pod already exists and in `Running` state
 	// TODO: Should we do caching here?
@@ -400,4 +411,13 @@ func (pm *PodMounter) mountSyscallWithDefault(target string, args mountpoint.Arg
 // unmountTarget calls `unmount` syscall on `target`.
 func (pm *PodMounter) unmountTarget(target string) error {
 	return pm.mount.Unmount(target)
+}
+
+// volumeNameFromTargetPath tries to extract PersistentVolume's name from `target` path.
+func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
+	tp, err := targetpath.Parse(target)
+	if err != nil {
+		return "", err
+	}
+	return tp.VolumeID, nil
 }
