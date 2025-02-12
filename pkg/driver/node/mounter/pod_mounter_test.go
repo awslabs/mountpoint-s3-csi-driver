@@ -48,6 +48,7 @@ type testCtx struct {
 	targetPath  string
 	podUID      string
 	volumeID    string
+	pvName      string
 }
 
 func setup(t *testing.T) *testCtx {
@@ -64,9 +65,10 @@ func setup(t *testing.T) *testCtx {
 	bucketName := "test-bucket"
 	podUID := uuid.New().String()
 	volumeID := "s3-csi-driver-volume"
+	pvName := "s3-csi-driver-pv"
 	targetPath := filepath.Join(
 		kubeletPath,
-		fmt.Sprintf("pods/%s/volumes/kubernetes.io~csi/%s/mount", podUID, volumeID),
+		fmt.Sprintf("pods/%s/volumes/kubernetes.io~csi/%s/mount", podUID, pvName),
 	)
 
 	// Same behaviour as Kubernetes, see https://github.com/kubernetes/kubernetes/blob/8f8c94a04d00e59d286fe4387197bc62c6a4f374/pkg/volume/csi/csi_mounter.go#L211-L215
@@ -92,6 +94,7 @@ func setup(t *testing.T) *testCtx {
 		targetPath:  targetPath,
 		podUID:      podUID,
 		volumeID:    volumeID,
+		pvName:      pvName,
 	}
 
 	mountSyscall := func(target string, args mountpoint.Args) (fd int, err error) {
@@ -351,7 +354,7 @@ func createMountpointPod(testCtx *testCtx) *mountpointPod {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:  types.UID(uuid.New().String()),
-			Name: mppod.MountpointPodNameFor(testCtx.podUID, testCtx.volumeID),
+			Name: mppod.MountpointPodNameFor(testCtx.podUID, testCtx.pvName),
 		},
 	}
 	pod, err := testCtx.client.CoreV1().Pods(mountpointPodNamespace).Create(context.TODO(), pod, metav1.CreateOptions{})
