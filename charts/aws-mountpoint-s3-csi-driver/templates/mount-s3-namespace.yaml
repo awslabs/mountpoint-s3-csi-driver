@@ -1,0 +1,15 @@
+{{- if .Values.experimental.podMounter -}}
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.mountpointPod.namespace }}
+  labels:
+    name: {{ .Values.mountpointPod.namespace }}
+    # TODO: Check if we can enable some pod security standards?
+    # pod-security.kubernetes.io/enforce: restricted
+    # pod-security.kubernetes.io/enforce-version: v1.30
+    # pod-security.kubernetes.io/warn: restricted
+    # pod-security.kubernetes.io/warn-version: latest
+
+{{- end -}}

@@ -50,6 +50,7 @@ node:
                   - hybrid
   podInfoOnMountCompat:
     enable: false
+
 sidecars:
   nodeDriverRegistrar:
     image:
@@ -77,6 +78,15 @@ sidecars:
         name: plugin-dir
     resources: {}
 
+controller:
+  serviceAccount:
+    # Specifies whether a service account should be created
+    create: true
+    name: s3-csi-driver-controller-sa
+
+mountpointPod:
+  namespace: mount-s3
+
 nameOverride: ""
 fullnameOverride: ""
 
@@ -87,3 +97,6 @@ awsAccessSecret:
   keyId: key_id
   accessKey: access_key
   sessionToken: session_token
+
+experimental:
+  podMounter: false

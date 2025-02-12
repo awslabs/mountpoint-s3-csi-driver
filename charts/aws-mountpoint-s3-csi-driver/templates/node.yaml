@@ -1,4 +1,3 @@
-# Source: aws-mountpoint-s3-csi-driver/templates/node.yaml
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -46,6 +45,9 @@ spec:
         - name: {{ . }}
       {{- end }}
       {{- end }}
+
+      {{ if not .Values.experimental.podMounter -}}
+      # This `install-mountpoint` is only needed with `SystemdMounter` and not with `PodMounter`.
       initContainers:
         - name: install-mountpoint
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
@@ -68,12 +70,18 @@ spec:
           volumeMounts:
             - name: mp-install
               mountPath: /target
+      {{- end }}
+
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           securityContext:
+            {{ if .Values.experimental.podMounter -}}
+            privileged: true
+            {{- else -}}
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            {{- end }}
             {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
@@ -101,6 +109,12 @@ spec:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
               value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
+            {{- if .Values.experimental.podMounter }}
+            - name: MOUNTER_KIND
+              value: pod
+            - name: MOUNTPOINT_NAMESPACE
+              value: {{ .Values.mountpointPod.namespace }}
+            {{- end -}}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -124,11 +138,15 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletPath }}
+              {{ if .Values.experimental.podMounter -}}
+              mountPropagation: Bidirectional
+              {{- else -}}
               # Currently we spawn Mountpoint instances on the host using systemd,
               # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
               # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
               # without needing to mount "/proc/mounts" from host.
               mountPropagation: HostToContainer
+              {{- end }}
             - name: plugin-dir
               mountPath: /csi
             - name: systemd-bus
