@@ -37,7 +37,6 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 		mockCtl:    mockCtl,
 		mockRunner: mockRunner,
 		mounter: &mounter.SystemdMounter{
-			Ctx:         ctx,
 			Runner:      mockRunner,
 			Mounter:     mount.NewFakeMounter(nil),
 			MpVersion:   mountpointVersion,

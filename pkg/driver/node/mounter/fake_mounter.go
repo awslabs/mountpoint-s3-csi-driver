@@ -14,7 +14,7 @@ func (m *FakeMounter) Mount(ctx context.Context, bucketName string, target strin
 	return nil
 }
 
-func (m *FakeMounter) Unmount(target string, credentialCtx credentialprovider.CleanupContext) error {
+func (m *FakeMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
 	return nil
 }
 

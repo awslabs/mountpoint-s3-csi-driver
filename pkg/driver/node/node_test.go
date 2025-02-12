@@ -235,7 +235,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 				}
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
-				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(targetPath), gomock.Any())
+				nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Eq(ctx), gomock.Eq(targetPath), gomock.Any())
 				_, err := nodeTestEnv.server.NodeUnpublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume failed: %v", err)
@@ -275,6 +275,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 
 				nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Eq(targetPath)).Return(true, nil)
 				nodeTestEnv.mockMounter.EXPECT().Unmount(
+					gomock.Eq(ctx),
 					gomock.Eq(targetPath),
 					gomock.Eq(credentialprovider.CleanupContext{
 						VolumeID: volumeId,
@@ -341,7 +342,7 @@ func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target stri
 	return nil
 }
 
-func (d *dummyMounter) Unmount(target string, ctx credentialprovider.CleanupContext) error {
+func (d *dummyMounter) Unmount(ctx context.Context, target string, cleanupCtx credentialprovider.CleanupContext) error {
 	return nil
 }
 
