@@ -12,12 +12,13 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-// mountErrorPath is the path to write error logs if Mountpoint fails to mount.
-var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
+
+// successExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate a clean exit,
+// so Kubernetes doesn't have to restart it and transition the Pod into `Succeeded` state.
+const successExitCode = 0
 
 // A CmdRunner is responsible for running given `cmd` until completion and returning its exit code and its error (if any).
 // This is mainly exposed for mocking in tests, `DefaultCmdRunner` is always used in non-test environments.
@@ -35,6 +36,8 @@ func DefaultCmdRunner(cmd *exec.Cmd) (int, error) {
 // An Options represents options to use while mounting Mountpoint.
 type Options struct {
 	MountpointPath string
+	MountExitPath  string
+	MountErrPath   string
 	MountOptions   mountoptions.Options
 	CmdRunner      CmdRunner
 }
@@ -77,12 +80,24 @@ func Run(options Options) (int, error) {
 
 	exitCode, err := options.CmdRunner(cmd)
 	if err != nil {
-		// If Mountpoint fails, write it to `mountErrorPath` to let `PodMounter` running in the same node know.
-		if writeErr := os.WriteFile(mountErrorPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
-			klog.Infof("Failed to write mount error logs to %s: %v\n", mountErrorPath, err)
+		// If Mountpoint fails, write it to `options.MountErrPath` to let `PodMounter` running in the same node know.
+		if writeErr := os.WriteFile(options.MountErrPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
+			klog.Errorf("Failed to write mount error logs to %s: %v\n", options.MountErrPath, err)
 		}
-		return 0, err
+		return exitCode, err
+	}
+
+	if checkIfFileExists(options.MountExitPath) {
+		// If `mount.exit` is exists, that means the CSI Driver Node Pod unmounted the filesystem
+		// and we should cleanly exit regardless of Mountpoint's exit-code.
+		return successExitCode, nil
 	}
 
 	return exitCode, nil
+}
+
+// checkIfFileExists checks whether given `path` exists.
+func checkIfFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

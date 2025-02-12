@@ -24,6 +24,8 @@ var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minut
 var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
 
 var mountSockPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
+var mountExitPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountExit)
+var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 
 const mountpointBin = "mount-s3"
 
@@ -36,6 +38,8 @@ func main() {
 
 	exitCode, err := csimounter.Run(csimounter.Options{
 		MountpointPath: mountpointBinFullPath,
+		MountExitPath:  mountExitPath,
+		MountErrPath:   mountErrorPath,
 		MountOptions:   mountOptions,
 	})
 	if err != nil {

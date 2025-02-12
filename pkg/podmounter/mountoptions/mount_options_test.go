@@ -4,16 +4,50 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func TestSendingAndReceivingMountOptions(t *testing.T) {
+func TestMountOptions(t *testing.T) {
+	// Go returns `invalid argument` errors if you try to do `net.Listen()` or `net.Dial()` with a Unix socket
+	// path thats longer than 108 characters by default. We're trying to use relative paths if that's the case
+	// to make the socket paths shorter. Here we add test cases for both short and long Unix socket paths.
+	// See https://github.com/golang/go/issues/6895 for more details.
+
+	t.Run("Short Path", func(t *testing.T) {
+		basePath := t.TempDir()
+		testutil.Chdir(t, basePath)
+
+		mountSock := filepath.Join(basePath, "m")
+		if len(mountSock) >= 108 {
+			t.Fatalf("test Unix socket path %q must be shorter than 108 characters", mountSock)
+		}
+		testRoundtrip(t, mountSock)
+	})
+
+	t.Run("Long Path", func(t *testing.T) {
+		basePath := filepath.Join(t.TempDir(), "long"+strings.Repeat("g", 108))
+		sockBasepath := filepath.Join(basePath, "mount")
+		assert.NoError(t, os.MkdirAll(sockBasepath, 0700))
+
+		testutil.Chdir(t, basePath)
+
+		mountSock := filepath.Join(sockBasepath, "mount.sock")
+		if len(mountSock) <= 108 {
+			t.Fatalf("test Unix socket path %q must be longer than 108 characters", mountSock)
+		}
+		testRoundtrip(t, mountSock)
+	})
+}
+
+func testRoundtrip(t *testing.T, mountSock string) {
 	file, err := os.Open(os.DevNull)
 	assert.NoError(t, err)
 	defer file.Close()
@@ -21,8 +55,6 @@ func TestSendingAndReceivingMountOptions(t *testing.T) {
 	var wantStat = &syscall.Stat_t{}
 	err = syscall.Fstat(int(file.Fd()), wantStat)
 	assert.NoError(t, err)
-
-	mountSock := filepath.Join(t.TempDir(), "m")
 
 	c := make(chan mountoptions.Options)
 	go func() {

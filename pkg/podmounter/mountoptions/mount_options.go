@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"syscall"
 
 	"k8s.io/klog/v2"
@@ -25,7 +27,7 @@ type Options struct {
 
 // Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.
 func Send(ctx context.Context, sockPath string, options Options) error {
-	warnAboutLongUnixSocketPath(sockPath)
+	sockPath = tryToMakeSockPathRelative(sockPath)
 
 	message, err := json.Marshal(&options)
 	if err != nil {
@@ -70,7 +72,7 @@ var (
 
 // Recv receives passed mount options via `Send` function through given `sockPath`.
 func Recv(ctx context.Context, sockPath string) (Options, error) {
-	warnAboutLongUnixSocketPath(sockPath)
+	sockPath = tryToMakeSockPathRelative(sockPath)
 
 	var lc net.ListenConfig
 	l, err := lc.Listen(ctx, "unix", sockPath)
@@ -154,12 +156,60 @@ func parseUnixRights(buf []byte) ([]int, error) {
 	return fds, nil
 }
 
+// tryToMakeSockPathRelative tries to make `path` relative to the current working directory
+// if its longer than 108 characters. This is because Go returns `invalid argument` errors
+// if you try to do `net.Listen()` or `net.Dial()`, see https://github.com/golang/go/issues/6895 for more details.
+//
+// If the `path` is still longer than 108 characters after making it relative, this function emits a warning log.
+// If the `path` is not relative, this function just returns unmodified `path` and emits a warning log if needed.
+func tryToMakeSockPathRelative(path string) string {
+	if len(path) < 108 {
+		// Nothing to do, its already shorter than 108 characters
+		return path
+	}
+
+	shortPath, err := relative(path)
+	if err != nil {
+		// Failed to make it relative to the current working directory,
+		// just emit a warning if needed and return unmodified path.
+		klog.Warningf("Length of Unix domain socket %q is larger than 108 characters, failed to make it relative to the current working directory to shorten it: %v\n", path, err)
+		warnAboutLongUnixSocketPath(path)
+		return path
+	}
+
+	// Successfully turned `path` into a relative path,
+	// just return relative path and emit a warning if its still longer than 108 characters.
+	warnAboutLongUnixSocketPath(shortPath)
+	return shortPath
+}
+
 // warnAboutLongUnixSocketPath emits a warning if `path` is longer than 108 characters.
-// There is a limit on Unix domain socket path on some platforms and
-// Go returns `bind: invalid argument` in this case which is hard to debug.
-// See https://github.com/golang/go/issues/6895 for more details.
 func warnAboutLongUnixSocketPath(path string) {
 	if len(path) > 108 {
 		klog.Warningf("Length of Unix domain socket is larger than 108 characters and it might not work in some platforms, see https://github.com/golang/go/issues/6895. Fullpath: %q", path)
 	}
+}
+
+// relative tries to make `p` relative to the current working directory.
+// Copied from https://github.com/moby/vpnkit/blob/604ab7f0d2c999693ab4aa920bdda05f350f497e/go/pkg/vpnkit/transport/unix_unix.go#L66-L86
+func relative(p string) (string, error) {
+	// Assume the parent directory exists already but the child (the socket)
+	// hasn't been created.
+	path2, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	dir2, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(dir2, path2)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rel, filepath.Base(p)), nil
 }
