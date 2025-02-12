@@ -17,6 +17,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile/awsprofiletest"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -40,7 +41,7 @@ const testPodNamespace = "test-ns"
 const testIMDSRegion = "us-east-1"
 
 func dummyRegionProvider() (string, error) {
-	return "us-east-1", nil
+	return testIMDSRegion, nil
 }
 
 const testEnvPath = "/test-env"
@@ -234,6 +235,8 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 }
 
 func TestProvidingPodLevelCredentials(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	t.Run("correct values", func(t *testing.T) {
 		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
 			"eks.amazonaws.com/role-arn": testRoleARN,
@@ -378,6 +381,8 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 }
 
 func TestDetectingRegionToUseForPodLevelCredentials(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
 		"eks.amazonaws.com/role-arn": testRoleARN,
 	}))
@@ -562,6 +567,8 @@ func TestDetectingRegionToUseForPodLevelCredentials(t *testing.T) {
 }
 
 func TestProvidingPodLevelCredentialsForDifferentPods(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	clientset := fake.NewSimpleClientset(
 		serviceAccount("test-sa-1", testPodNamespace, map[string]string{
 			"eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/Test1",
@@ -632,6 +639,8 @@ func TestProvidingPodLevelCredentialsForDifferentPods(t *testing.T) {
 }
 
 func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
 		"eks.amazonaws.com/role-arn": testRoleARN,
 	}))
@@ -698,6 +707,8 @@ func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	t.Run("cleanup driver level", func(t *testing.T) {
 		// Provide/create long-term credentials first
 		setEnvForLongTermCredentials(t)
