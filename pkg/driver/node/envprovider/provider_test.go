@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -44,6 +45,8 @@ func TestGettingRegion(t *testing.T) {
 }
 
 func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
 	testCases := []struct {
 		name string
 		env  map[string]string
