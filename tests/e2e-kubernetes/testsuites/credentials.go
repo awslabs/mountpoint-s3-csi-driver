@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
@@ -33,9 +34,9 @@ import (
 )
 
 const (
-	iamPolicyS3FullAccess     = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-	iamPolicyS3ReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
-	iamPolicyS3NoAccess       = "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess" // `AmazonEC2ReadOnlyAccess` gives no S3 access
+	iamPolicyS3FullAccess     = "AmazonS3FullAccess"
+	iamPolicyS3ReadOnlyAccess = "AmazonS3ReadOnlyAccess"
+	iamPolicyS3NoAccess       = "AmazonEC2ReadOnlyAccess" // `AmazonEC2ReadOnlyAccess` gives no S3 access
 )
 
 const (
@@ -294,13 +295,13 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			var afterAllCleanup []func(context.Context) error
 
 			By("Pre-creating IAM roles for common policies")
-			for _, policyARN := range []string{
+			for _, policyName := range []string{
 				iamPolicyS3FullAccess,
 				iamPolicyS3ReadOnlyAccess,
 				iamPolicyS3NoAccess,
 			} {
-				role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyARN)
-				policyRoleMapping[policyARN] = role
+				role, removeRole := createRole(ctx, f, assumeRolePolicyDocument(ctx), policyName)
+				policyRoleMapping[policyName] = role
 				afterAllCleanup = append(afterAllCleanup, removeRole)
 			}
 
@@ -317,11 +318,11 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			cleanClusterWideResources(ctx)
 		})
 
-		updateCSIDriversServiceAccountRole := func(ctx context.Context, policyARN string) {
+		updateCSIDriversServiceAccountRole := func(ctx context.Context, policyName string) {
 			By("Updating CSI Driver's Service Account Role")
 			sa := csiDriverServiceAccount(ctx, f)
 
-			role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
+			role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
 			deferCleanup(removeRole)
 
 			sa, restoreServiceAccountRole := overrideServiceAccountRole(ctx, f, sa, *role.Arn)
@@ -333,12 +334,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			killCSIDriverPods(ctx, f)
 		}
 
-		updateDriverLevelKubernetesSecret := func(ctx context.Context, policyARN string) {
+		updateDriverLevelKubernetesSecret := func(ctx context.Context, policyName string) {
 			By("Updating Kubernetes Secret with temporary credentials")
 
-			role, ok := policyRoleMapping[policyARN]
+			role, ok := policyRoleMapping[policyName]
 			if !ok {
-				framework.Failf("Missing role mapping for policy %s", policyARN)
+				framework.Failf("Missing role mapping for policy %s", policyName)
 			}
 			assumeRoleOutput := assumeRole(ctx, f, *role.Arn)
 
@@ -441,8 +442,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					}
 				})
 
-				assignPolicyToServiceAccount := func(ctx context.Context, sa *v1.ServiceAccount, policyARN string) *v1.ServiceAccount {
-					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyARN)
+				assignPolicyToServiceAccount := func(ctx context.Context, sa *v1.ServiceAccount, policyName string) *v1.ServiceAccount {
+					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
 					deferCleanup(removeRole)
 
 					sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
@@ -450,14 +451,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					return sa
 				}
 
-				createServiceAccountWithPolicy := func(ctx context.Context, policyARN string) *v1.ServiceAccount {
+				createServiceAccountWithPolicy := func(ctx context.Context, policyName string) *v1.ServiceAccount {
 					sa, removeSA := createServiceAccount(ctx, f)
 					deferCleanup(removeSA)
 
-					return assignPolicyToServiceAccount(ctx, sa, policyARN)
+					return assignPolicyToServiceAccount(ctx, sa, policyName)
 				}
 
-				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyARN string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
+				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyName string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
 					By("Creating Pod with ServiceAccount")
 
 					mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
@@ -473,7 +474,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
 
-					sa := createServiceAccountWithPolicy(ctx, policyARN)
+					sa := createServiceAccountWithPolicy(ctx, policyName)
 
 					var podModifiers []func(*v1.Pod)
 					podModifiers = append(podModifiers, func(pod *v1.Pod) {
@@ -653,7 +654,9 @@ func assumeRolePolicyDocument(ctx context.Context) string {
 }
 
 func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider string, sa *v1.ServiceAccount) string {
-	awsAccount := stsCallerIdentity(ctx).Account
+	identity := stsCallerIdentity(ctx)
+	awsAccount := identity.Account
+	partition := getARNPartition(*identity.Arn)
 
 	buf, err := json.Marshal(&jsonMap{
 		"Version": "2012-10-17",
@@ -661,7 +664,7 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 			{
 				"Effect": "Allow",
 				"Principal": jsonMap{
-					"Federated": fmt.Sprintf("arn:aws:iam::%s:oidc-provider/%s", *awsAccount, oidcProvider),
+					"Federated": fmt.Sprintf("arn:%s:iam::%s:oidc-provider/%s", partition, *awsAccount, oidcProvider),
 				},
 				"Action": "sts:AssumeRoleWithWebIdentity",
 				"Condition": jsonMap{
@@ -678,8 +681,15 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	return string(buf)
 }
 
-func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDocument string, policyARNs ...string) (*iamtypes.Role, func(context.Context) error) {
+func getARNPartition(arn string) string {
+	parsedArn, err := awsarn.Parse(arn)
+	framework.ExpectNoError(err)
+	return parsedArn.Partition
+}
+
+func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDocument string, policyNames ...string) (*iamtypes.Role, func(context.Context) error) {
 	framework.Logf("Creating IAM role")
+	identity := stsCallerIdentity(ctx)
 
 	client := iam.NewFromConfig(awsConfig(ctx))
 
@@ -698,20 +708,22 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		return err
 	}
 
-	for _, p := range policyARNs {
+	for _, policyName := range policyNames {
+		policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 		_, err := client.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
 			RoleName:  ptr.To(roleName),
-			PolicyArn: ptr.To(p),
+			PolicyArn: ptr.To(policyArn),
 		})
 		framework.ExpectNoError(err)
 	}
 
 	return role.Role, func(ctx context.Context) error {
 		var errs []error
-		for _, p := range policyARNs {
+		for _, policyName := range policyNames {
+			policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 			_, err := client.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
 				RoleName:  ptr.To(roleName),
-				PolicyArn: ptr.To(p),
+				PolicyArn: ptr.To(policyArn),
 			})
 			errs = append(errs, err)
 		}

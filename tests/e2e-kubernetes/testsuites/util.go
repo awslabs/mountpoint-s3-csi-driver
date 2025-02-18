@@ -266,7 +266,7 @@ func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.Serv
 }
 
 func awsConfig(ctx context.Context) aws.Config {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(DefaultRegion))
 	framework.ExpectNoError(err)
 	return cfg
 }
