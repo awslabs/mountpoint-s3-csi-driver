@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"k8s.io/mount-utils"
 )
 
 const (
@@ -40,6 +41,9 @@ const (
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 )
+
+var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
+var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
 
 type Driver struct {
 	Endpoint string
@@ -76,12 +80,23 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}()
 
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
-	systemdMounter, err := mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
-	if err != nil {
-		klog.Fatalln(err)
+
+	var mounterImpl mounter.Mounter
+	if usePodMounter {
+		mounterImpl, err = mounter.NewPodMounter(clientset.CoreV1(), credProvider, mountpointPodNamespace, mount.New(""), nil, kubernetesVersion)
+		if err != nil {
+			klog.Fatalln(err)
+		}
+		klog.Infoln("Using pod mounter")
+	} else {
+		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
+		if err != nil {
+			klog.Fatalln(err)
+		}
+		klog.Infoln("Using systemd mounter")
 	}
 
-	nodeServer := node.NewS3NodeServer(nodeID, systemdMounter)
+	nodeServer := node.NewS3NodeServer(nodeID, mounterImpl)
 
 	return &Driver{
 		Endpoint:   endpoint,
