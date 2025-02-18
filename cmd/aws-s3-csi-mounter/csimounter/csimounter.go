@@ -61,6 +61,13 @@ func Run(options Options) (int, error) {
 	// and also we want to wait until it terminates. We're passing `--foreground` to achieve this.
 	mountpointArgs.Set(mountpoint.ArgForeground, mountpoint.ArgNoValue)
 
+	// TODO: This is a temporary workaround to create a cache folder if caching is enabled,
+	// ideally we should create a volume (`emptyDir` by default) in the Mountpoint Pod and use that.
+	mountpointArgs, err := createCacheDir(mountpointArgs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create cache dir: %w", err)
+	}
+
 	args := append([]string{
 		mountOptions.BucketName,
 		// We pass FUSE fd using `ExtraFiles`, and each entry becomes as file descriptor 3+i.
@@ -100,4 +107,22 @@ func Run(options Options) (int, error) {
 func checkIfFileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// createCacheDir creates a temporary directory to use as a cache directory if caching is enabled in given `args`.
+// It will replace the value of `--cache` with the created random directory.
+func createCacheDir(args mountpoint.Args) (mountpoint.Args, error) {
+	_, ok := args.Remove(mountpoint.ArgCache)
+	if !ok {
+		// Caching is not enabled
+		return args, nil
+	}
+
+	// Caching is enabled, so create a temporary directory and pass it to `args`
+	cacheDir, err := os.MkdirTemp(os.TempDir(), "mountpoint-s3-cache")
+	if err != nil {
+		return args, fmt.Errorf("failed to create cache directory: %w", err)
+	}
+	args.Set(mountpoint.ArgCache, cacheDir)
+	return args, nil
 }
