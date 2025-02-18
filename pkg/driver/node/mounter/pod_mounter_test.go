@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -110,7 +111,15 @@ func setup(t *testing.T) *testCtx {
 		return dummyIMDSRegion, nil
 	})
 
-	podMounter, err := mounter.NewPodMounter(client.CoreV1(), credProvider, mountpointPodNamespace, mount, mountSyscall, testK8sVersion)
+	podWatcher := watcher.New(client, mountpointPodNamespace, 10*time.Second)
+	stopCh := make(chan struct{})
+	t.Cleanup(func() {
+		close(stopCh)
+	})
+	err = podWatcher.Start(stopCh)
+	assert.NoError(t, err)
+
+	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mount, mountSyscall, testK8sVersion)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
