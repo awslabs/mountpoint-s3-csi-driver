@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -40,6 +42,8 @@ const (
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
+
+	podWatcherResyncPeriod = time.Minute
 )
 
 var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
@@ -51,6 +55,8 @@ type Driver struct {
 	NodeID   string
 
 	NodeServer *node.S3NodeServer
+
+	stopCh chan struct{}
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error) {
@@ -81,9 +87,17 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 
+	stopCh := make(chan struct{})
+
 	var mounterImpl mounter.Mounter
 	if usePodMounter {
-		mounterImpl, err = mounter.NewPodMounter(clientset.CoreV1(), credProvider, mountpointPodNamespace, mount.New(""), nil, kubernetesVersion)
+		podWatcher := watcher.New(clientset, mountpointPodNamespace, podWatcherResyncPeriod)
+		err = podWatcher.Start(stopCh)
+		if err != nil {
+			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
+		}
+
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, credProvider, mount.New(""), nil, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)
 		}
@@ -102,6 +116,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
 		NodeServer: nodeServer,
+		stopCh:     stopCh,
 	}, nil
 }
 
@@ -155,6 +170,10 @@ func (d *Driver) Run() error {
 
 func (d *Driver) Stop() {
 	klog.Infof("Stopping server")
+	if d.stopCh != nil {
+		close(d.stopCh)
+		d.stopCh = nil
+	}
 	d.Srv.Stop()
 }
 
