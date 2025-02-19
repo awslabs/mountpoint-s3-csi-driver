@@ -11,10 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
-	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -24,6 +21,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
@@ -40,25 +38,23 @@ type mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
 
 // A PodMounter is a [Mounter] that mounts Mountpoint on pre-created Kubernetes Pod running in the same node.
 type PodMounter struct {
-	client                 k8sv1.CoreV1Interface
-	mountpointPodNamespace string
-	mount                  mount.Interface
-	kubeletPath            string
-	mountSyscall           mountSyscall
-	kubernetesVersion      string
-	credProvider           *credentialprovider.Provider
+	podWatcher        *watcher.Watcher
+	mount             mount.Interface
+	kubeletPath       string
+	mountSyscall      mountSyscall
+	kubernetesVersion string
+	credProvider      *credentialprovider.Provider
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(client k8sv1.CoreV1Interface, credProvider *credentialprovider.Provider, mountpointPodNamespace string, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
+func NewPodMounter(podWatcher *watcher.Watcher, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
 	return &PodMounter{
-		client:                 client,
-		mountpointPodNamespace: mountpointPodNamespace,
-		mount:                  mount,
-		kubeletPath:            util.KubeletPath(),
-		mountSyscall:           mountSyscall,
-		kubernetesVersion:      kubernetesVersion,
-		credProvider:           credProvider,
+		podWatcher:        podWatcher,
+		credProvider:      credProvider,
+		mount:             mount,
+		kubeletPath:       util.KubeletPath(),
+		mountSyscall:      mountSyscall,
+		kubernetesVersion: kubernetesVersion,
 	}, nil
 }
 
@@ -95,6 +91,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// but we should still update the credentials for it by calling `credProvider.Provide`.
 	pod, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
 	if err != nil {
+		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
 
@@ -137,14 +134,6 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
 	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)
-
-	klog.V(4).Infof("Waiting for Mountpoint Pod %s to be ready to accept connections on %s", pod.Name, podMountSockPath)
-
-	// Wait until Mountpoint Pod is ready to accept connections
-	err = util.WaitForUnixSocket(mountpointPodReadinessTimeout, mountpointPodReadinessCheckInterval, podMountSockPath)
-	if err != nil {
-		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready in given timeout for %q: %w", target, err)
-	}
 
 	klog.V(4).Infof("Mounting %s for %s", target, pod.Name)
 
@@ -210,6 +199,7 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 	// but we should still unmount it and clean the credentials.
 	_, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
 	if err != nil {
+		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
 		return fmt.Errorf("Failed to wait for Mountpoint Pod for %q: %w", target, err)
 	}
 
@@ -247,49 +237,14 @@ func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
 func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podID, volumeName string) (*corev1.Pod, string, error) {
 	podName := mppod.MountpointPodNameFor(podID, volumeName)
 
-	// Pod already exists and in `Running` state
-	// TODO: Should we do caching here?
-	pod, err := pm.client.Pods(pm.mountpointPodNamespace).Get(ctx, podName, metav1.GetOptions{})
-	if err == nil && pod.Status.Phase == corev1.PodRunning {
-		return pod, pm.podPath(pod), nil
-	}
-
-	// Pod does not exists or not `Running` yet, watch for the Pod until it's `Running`.
-
-	klog.V(4).Infof("Waiting for Mountpoint Pod %s to running", podName)
-
-	watcher, err := pm.client.Pods(pm.mountpointPodNamespace).Watch(ctx, metav1.SingleObject(metav1.ObjectMeta{Name: podName}))
+	pod, err := pm.podWatcher.Wait(ctx, podName)
 	if err != nil {
 		return nil, "", err
 	}
-	defer watcher.Stop()
 
-	var foundPod *corev1.Pod
+	klog.V(4).Infof("Mountpoint Pod %s/%s is running with id %s", pod.Namespace, podName, pod.UID)
 
-	for event := range watcher.ResultChan() {
-		if event.Type != watch.Added &&
-			event.Type != watch.Modified {
-			continue
-		}
-
-		pod, ok := event.Object.(*corev1.Pod)
-		if !ok {
-			continue
-		}
-
-		if pod.Status.Phase == corev1.PodRunning {
-			foundPod = pod
-			break
-		}
-	}
-
-	if foundPod == nil {
-		return nil, "", errors.New("Failed to get Mountpoint Pod")
-	}
-
-	klog.V(4).Infof("Mountpoint Pod %s/%s is running with id %s", foundPod.Namespace, podName, foundPod.UID)
-
-	return foundPod, pm.podPath(foundPod), nil
+	return pod, pm.podPath(pod), nil
 }
 
 // waitForMount waits until Mountpoint is successfully mounted at `target`.

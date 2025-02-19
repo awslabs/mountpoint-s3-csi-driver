@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -62,9 +61,6 @@ func testRoundtrip(t *testing.T, mountSock string) {
 		assert.NoError(t, err)
 		c <- mountOptions
 	}()
-
-	err = util.WaitForUnixSocket(defaultTimeout, 500*time.Millisecond, mountSock)
-	assert.NoError(t, err)
 
 	want := mountoptions.Options{
 		Fd:         int(file.Fd()),

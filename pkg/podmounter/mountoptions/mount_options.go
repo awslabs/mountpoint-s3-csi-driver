@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
@@ -34,14 +36,11 @@ func Send(ctx context.Context, sockPath string, options Options) error {
 		return fmt.Errorf("failed to marshal message to send %s: %w", sockPath, err)
 	}
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", sockPath)
+	unixConn, err := dialWithRetry(ctx, sockPath)
 	if err != nil {
 		return fmt.Errorf("failed to dial to unix socket %s: %w", sockPath, err)
 	}
-	defer conn.Close()
-
-	unixConn := conn.(*net.UnixConn)
+	defer unixConn.Close()
 
 	// `unixConn.WriteMsgUnix` does not respect `ctx`'s deadline, we need to call `unixConn.SetDeadline` to ensure `unixConn.WriteMsgUnix` has a deadline.
 	if deadline, ok := ctx.Deadline(); ok {
@@ -62,6 +61,39 @@ func Send(ctx context.Context, sockPath string, options Options) error {
 	}
 
 	return nil
+}
+
+// unixSocketDialRetryInterval is the interval between retries on retryable errors in [dialWithRetry].
+const unixSocketDialRetryInterval = 5 * time.Millisecond
+
+// dialWithRetry tries to connect to Unix socket `sockPath` with retries until `ctx` is cancelled or hits the deadline.
+// It retries on two errors:
+//   - [syscall.ENOENT] returned when the Unix socket does not exists,
+//     which might be the case until Mountpoint Pod calls [Recv].
+//   - [syscall.ECONNREFUSED] returned when the Unix socket exists, but no one accepts the connection yet,
+//     which might be the case between the calls [net.Listen] and [net.Listener.Accept] in [Recv].
+func dialWithRetry(ctx context.Context, sockPath string) (*net.UnixConn, error) {
+	var d net.Dialer
+	var unixConn *net.UnixConn
+
+	err := wait.PollUntilContextCancel(ctx, unixSocketDialRetryInterval, true, func(ctx context.Context) (bool, error) {
+		conn, err := d.DialContext(ctx, "unix", sockPath)
+		if err == nil {
+			// no error, stop retrying and return the Unix connection.
+			unixConn = conn.(*net.UnixConn)
+			return true, nil
+		}
+
+		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
+			// retryable error
+			return false, nil
+		}
+
+		// non-retryable error, just propagate it and stop retrying.
+		return false, err
+	})
+
+	return unixConn, err
 }
 
 var (
