@@ -39,7 +39,10 @@ import (
 var kubeletPath = util.KubeletPath()
 
 var (
-	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
+	systemdNodeCaps    = []csi.NodeServiceCapability_RPC_Type{}
+	podMounterNodeCaps = []csi.NodeServiceCapability_RPC_Type{
+		csi.NodeServiceCapability_RPC_VOLUME_MOUNT_GROUP,
+	}
 )
 
 var (
@@ -115,6 +118,18 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	args := mountpoint.ParseArgs(mountpointArgs)
+
+	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
+		if volumeMountGroup := capMount.GetVolumeMountGroup(); capMount.GetVolumeMountGroup() != "" {
+			// We need to add the following flags to support fsGroup
+			// If these flags were already set by customer in PV mountOptions then we won't override them
+			args.SetIfAbsent(mountpoint.ArgGid, volumeMountGroup)
+			args.SetIfAbsent(mountpoint.ArgAllowOther, "")
+			args.SetIfAbsent(mountpoint.ArgDirMode, "770")
+			args.SetIfAbsent(mountpoint.ArgFileMode, "660")
+		}
+	}
+
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
@@ -178,6 +193,12 @@ func (ns *S3NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpan
 func (ns *S3NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	klog.V(4).Infof("NodeGetCapabilities: called with args %+v", req)
 	var caps []*csi.NodeServiceCapability
+	var nodeCaps []csi.NodeServiceCapability_RPC_Type
+	if util.UsePodMounter() {
+		nodeCaps = podMounterNodeCaps
+	} else {
+		nodeCaps = systemdNodeCaps
+	}
 	for _, cap := range nodeCaps {
 		c := &csi.NodeServiceCapability{
 			Type: &csi.NodeServiceCapability_Rpc{

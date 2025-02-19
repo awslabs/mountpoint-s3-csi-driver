@@ -26,6 +26,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -42,7 +43,6 @@ const (
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 )
 
-var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
 var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
 
 type Driver struct {
@@ -82,7 +82,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 
 	var mounterImpl mounter.Mounter
-	if usePodMounter {
+	if util.UsePodMounter() {
 		mounterImpl, err = mounter.NewPodMounter(clientset.CoreV1(), credProvider, mountpointPodNamespace, mount.New(""), nil, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)

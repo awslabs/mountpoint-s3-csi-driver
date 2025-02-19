@@ -14,6 +14,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 type nodeServerTestEnv struct {
@@ -215,6 +216,139 @@ func TestNodePublishVolume(t *testing.T) {
 	}
 }
 
+func TestNodePublishVolumeForPodMounter(t *testing.T) {
+	t.Setenv("MOUNTER_KIND", "pod")
+	var (
+		volumeId   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/target/path"
+	)
+	testCases := []struct {
+		name     string
+		testFunc func(t *testing.T)
+	}{
+		{
+			name: "success: sets gid, allow-other, dir-mode, file-mode flags if fsGroup is provided",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags:       []string{},
+								VolumeMountGroup: "123",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"}))).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: doesn't set extra flags if fsGroup is empty string",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags:       []string{},
+								VolumeMountGroup: "",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{}))).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: uses gid, allow-other, dir-mode, file-mode from mountOptions if fsGroup is set and these flags are provided in mountOptions",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				mountFlags := []string{"--gid 456", "--allow-other", "--dir-mode=555", "--file-mode=444"}
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags:       mountFlags,
+								VolumeMountGroup: "123",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs(mountFlags))).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.testFunc)
+	}
+}
+
 func TestNodeUnpublishVolume(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
@@ -316,7 +450,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilities(t *testing.T) {
+func TestNodeGetCapabilitiesForSystemd(t *testing.T) {
 	nodeTestEnv := initNodeServerTestEnv(t)
 	ctx := context.Background()
 	req := &csi.NodeGetCapabilitiesRequest{}
@@ -330,6 +464,30 @@ func TestNodeGetCapabilities(t *testing.T) {
 	if len(capabilities) != 0 {
 		t.Fatalf("NodeGetCapabilities failed: capabilities not empty")
 	}
+
+	nodeTestEnv.mockCtl.Finish()
+}
+
+func TestNodeGetCapabilitiesForPodMounter(t *testing.T) {
+	t.Setenv("MOUNTER_KIND", "pod")
+	nodeTestEnv := initNodeServerTestEnv(t)
+	ctx := context.Background()
+	req := &csi.NodeGetCapabilitiesRequest{}
+
+	resp, err := nodeTestEnv.server.NodeGetCapabilities(ctx, req)
+	if err != nil {
+		t.Fatalf("NodeGetCapabilities failed: %v", err)
+	}
+
+	assert.Equals(t, []*csi.NodeServiceCapability{
+		{
+			Type: &csi.NodeServiceCapability_Rpc{
+				Rpc: &csi.NodeServiceCapability_RPC{
+					Type: csi.NodeServiceCapability_RPC_VOLUME_MOUNT_GROUP,
+				},
+			},
+		},
+	}, resp.GetCapabilities())
 
 	nodeTestEnv.mockCtl.Finish()
 }
