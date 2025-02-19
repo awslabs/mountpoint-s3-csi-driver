@@ -74,6 +74,8 @@ EKSCTL_VERSION=${EKSCTL_VERSION:-0.202.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
+MOUNTER_KIND=${MOUNTER_KIND:-systemd}
+
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
 export PATH="$PATH:${BIN_DIR}"
@@ -194,7 +196,8 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "$HELM_RELEASE_NAME" \
     "${REGISTRY}/${IMAGE_NAME}" \
     "${TAG}" \
-    "${KUBECONFIG}"
+    "${KUBECONFIG}" \
+    "${MOUNTER_KIND}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
