@@ -84,8 +84,7 @@ func dialWithRetry(ctx context.Context, sockPath string) (*net.UnixConn, error) 
 			return true, nil
 		}
 
-		if errors.Is(err, syscall.ENOENT) ||
-			errors.Is(err, syscall.ECONNREFUSED) {
+		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
 			// retryable error
 			return false, nil
 		}
