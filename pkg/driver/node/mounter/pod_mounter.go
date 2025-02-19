@@ -138,14 +138,6 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
 	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)
 
-	klog.V(4).Infof("Waiting for Mountpoint Pod %s to be ready to accept connections on %s", pod.Name, podMountSockPath)
-
-	// Wait until Mountpoint Pod is ready to accept connections
-	err = util.WaitForUnixSocket(mountpointPodReadinessTimeout, mountpointPodReadinessCheckInterval, podMountSockPath)
-	if err != nil {
-		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready in given timeout for %q: %w", target, err)
-	}
-
 	klog.V(4).Infof("Mounting %s for %s", target, pod.Name)
 
 	fuseDeviceFD, err := pm.mountSyscallWithDefault(target, args)
