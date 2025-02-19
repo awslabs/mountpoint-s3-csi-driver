@@ -43,7 +43,7 @@ const (
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
 
-	podWatcherResyncPeriod = 15 * time.Second
+	podWatcherResyncPeriod = time.Minute
 )
 
 var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
