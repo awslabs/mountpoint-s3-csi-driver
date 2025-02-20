@@ -124,7 +124,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 			// We need to add the following flags to support fsGroup
 			// If these flags were already set by customer in PV mountOptions then we won't override them
 			args.SetIfAbsent(mountpoint.ArgGid, volumeMountGroup)
-			args.SetIfAbsent(mountpoint.ArgAllowOther, "")
+			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
 			args.SetIfAbsent(mountpoint.ArgDirMode, "770")
 			args.SetIfAbsent(mountpoint.ArgFileMode, "660")
 		}

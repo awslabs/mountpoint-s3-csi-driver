@@ -100,7 +100,7 @@ func (a *Args) Set(key ArgKey, value ArgValue) {
 // SetIfAbsent sets value of given key only if that key does not exist.
 func (a *Args) SetIfAbsent(key ArgKey, value ArgValue) {
 	if !a.Has(key) {
-		a.args.Insert(arg{key, value})
+		a.Set(key, value)
 	}
 }
 
