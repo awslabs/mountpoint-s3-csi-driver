@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -285,6 +286,46 @@ func TestPodMounter(t *testing.T) {
 			}, mountpoint.ParseArgs(nil))
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
+			}
+
+			ok, err := testCtx.mount.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			if ok {
+				t.Errorf("it should unmount the target path if Mountpoint fails to start")
+			}
+		})
+
+		t.Run("Adds a help message to see Mountpoint logs if Mountpoint Pod fails to start", func(t *testing.T) {
+			testCtx := setup(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				// Does not do real mounting
+				return int(mountertest.OpenDevNull(t).Fd()), nil
+			}
+
+			mpPod := createMountpointPod(testCtx)
+
+			go func() {
+				mpPod.run()
+				mpPod.receiveMountOptions(testCtx.ctx)
+
+				// Emulate that Mountpoint failed to mount
+				mountErrorPath := mppod.PathOnHost(mpPod.podPath, mppod.KnownPathMountError)
+				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0777)
+				assert.NoError(t, err)
+			}()
+
+			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+				VolumeID: testCtx.volumeID,
+				PodID:    testCtx.podUID,
+			}, mountpoint.ParseArgs(nil))
+			if err == nil {
+				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
+			}
+
+			mpLogsCmd := fmt.Sprintf("kubectl logs -n %s %s", mountpointPodNamespace, mpPod.pod.Name)
+			if !strings.Contains(err.Error(), mpLogsCmd) {
+				t.Errorf("Expected error message to contain a help message to get Mountpoint logs %s, but got: %s", mpLogsCmd, err.Error())
 			}
 
 			ok, err := testCtx.mount.IsMountPoint(testCtx.targetPath)
