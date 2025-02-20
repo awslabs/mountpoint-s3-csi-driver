@@ -117,12 +117,14 @@ jobs:
           ACTION: "update_kubeconfig"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Install the driver
+
+      # Test SystemdMounter
+      - name: Install the driver (SystemdMounter)
         env:
           ACTION: "install_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Run E2E Tests
+      - name: Run E2E Tests (SystemdMounter)
         env:
           ACTION: "run_tests"
         run: |
@@ -153,18 +155,45 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
           aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} ${{ env.BENCHMARK_BUCKET }} --recursive
-      - name: Post e2e cleanup
+      - name: Post e2e cleanup (SystemdMounter)
         if: always()
         env:
           ACTION: "e2e_cleanup"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Uninstall the driver
+      - name: Uninstall the driver (SystemdMounter)
         if: always()
         env:
           ACTION: "uninstall_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
+
+      # Test PodMounter
+      - name: Install the driver (PodMounter)
+        env:
+          ACTION: "install_driver"
+          MOUNTER_KIND: "pod"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Run E2E Tests (PodMounter)
+        env:
+          ACTION: "run_tests"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Post e2e cleanup (PodMounter)
+        if: always()
+        env:
+          ACTION: "e2e_cleanup"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Uninstall the driver (PodMounter)
+        if: always()
+        env:
+          ACTION: "uninstall_driver"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+
+      # Everything is tested, delete the cluster
       - name: Delete cluster
         if: always()
         env:
