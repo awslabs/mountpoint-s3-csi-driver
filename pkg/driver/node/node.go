@@ -56,6 +56,11 @@ var (
 	}
 )
 
+const (
+	filePerm770 = "770" // User: full access, Group: full access, Others: none
+	filePerm660 = "660" // User: read/write, Group: read/write, Others: none
+)
+
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
 	NodeID  string
@@ -120,13 +125,13 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	args := mountpoint.ParseArgs(mountpointArgs)
 
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
-		if volumeMountGroup := capMount.GetVolumeMountGroup(); capMount.GetVolumeMountGroup() != "" {
+		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {
 			// We need to add the following flags to support fsGroup
 			// If these flags were already set by customer in PV mountOptions then we won't override them
 			args.SetIfAbsent(mountpoint.ArgGid, volumeMountGroup)
 			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
-			args.SetIfAbsent(mountpoint.ArgDirMode, "770")
-			args.SetIfAbsent(mountpoint.ArgFileMode, "660")
+			args.SetIfAbsent(mountpoint.ArgDirMode, filePerm770)
+			args.SetIfAbsent(mountpoint.ArgFileMode, filePerm660)
 		}
 	}
 
