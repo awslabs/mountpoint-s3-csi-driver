@@ -105,6 +105,8 @@ function install_tools() {
   eksctl_install \
     "${BIN_DIR}" \
     "${EKSCTL_VERSION}"
+
+  go install github.com/onsi/ginkgo/v2/ginkgo
 }
 
 function create_cluster() {
