@@ -17,6 +17,9 @@ const (
 	ArgCache           = "--cache"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
+	ArgGid             = "--gid"
+	ArgDirMode         = "--dir-mode"
+	ArgFileMode        = "--file-mode"
 )
 
 // An ArgKey represents the key of an argument.
@@ -92,6 +95,13 @@ func (a *Args) Set(key ArgKey, value ArgValue) {
 	key = normalizeKey(key)
 	a.Remove(key)
 	a.args.Insert(arg{key, value})
+}
+
+// SetIfAbsent sets value of given key only if that key does not exist.
+func (a *Args) SetIfAbsent(key ArgKey, value ArgValue) {
+	if !a.Has(key) {
+		a.Set(key, value)
+	}
 }
 
 // Value extracts value of given key, it returns extracted value and whether the key was found.

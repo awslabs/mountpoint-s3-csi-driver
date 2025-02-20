@@ -39,7 +39,10 @@ import (
 var kubeletPath = util.KubeletPath()
 
 var (
-	nodeCaps = []csi.NodeServiceCapability_RPC_Type{}
+	systemdNodeCaps    = []csi.NodeServiceCapability_RPC_Type{}
+	podMounterNodeCaps = []csi.NodeServiceCapability_RPC_Type{
+		csi.NodeServiceCapability_RPC_VOLUME_MOUNT_GROUP,
+	}
 )
 
 var (
@@ -51,6 +54,11 @@ var (
 			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
 		},
 	}
+)
+
+const (
+	filePerm770 = "770" // User: full access, Group: full access, Others: none
+	filePerm660 = "660" // User: read/write, Group: read/write, Others: none
 )
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
@@ -115,6 +123,18 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	args := mountpoint.ParseArgs(mountpointArgs)
+
+	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
+		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {
+			// We need to add the following flags to support fsGroup
+			// If these flags were already set by customer in PV mountOptions then we won't override them
+			args.SetIfAbsent(mountpoint.ArgGid, volumeMountGroup)
+			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
+			args.SetIfAbsent(mountpoint.ArgDirMode, filePerm770)
+			args.SetIfAbsent(mountpoint.ArgFileMode, filePerm660)
+		}
+	}
+
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
@@ -178,6 +198,12 @@ func (ns *S3NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpan
 func (ns *S3NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	klog.V(4).Infof("NodeGetCapabilities: called with args %+v", req)
 	var caps []*csi.NodeServiceCapability
+	var nodeCaps []csi.NodeServiceCapability_RPC_Type
+	if util.UsePodMounter() {
+		nodeCaps = podMounterNodeCaps
+	} else {
+		nodeCaps = systemdNodeCaps
+	}
 	for _, cap := range nodeCaps {
 		c := &csi.NodeServiceCapability{
 			Type: &csi.NodeServiceCapability_Rpc{

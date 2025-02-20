@@ -28,6 +28,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -46,7 +47,6 @@ const (
 	podWatcherResyncPeriod = time.Minute
 )
 
-var usePodMounter = os.Getenv("MOUNTER_KIND") == "pod"
 var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
 
 type Driver struct {
@@ -90,7 +90,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var mounterImpl mounter.Mounter
-	if usePodMounter {
+	if util.UsePodMounter() {
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, podWatcherResyncPeriod)
 		err = podWatcher.Start(stopCh)
 		if err != nil {

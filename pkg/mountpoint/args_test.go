@@ -241,6 +241,86 @@ func TestInsertingArgsToMountpointArgs(t *testing.T) {
 	}
 }
 
+func TestInsertingArgsToMountpointArgsIfAbsent(t *testing.T) {
+	testCases := []struct {
+		name         string
+		existingArgs []string
+		key          string
+		value        string
+		want         []string
+	}{
+		{
+			name: "new option",
+			existingArgs: []string{
+				"allow-delete",
+				"region us-west-2",
+				"aws-max-attempts 5",
+			},
+			key: mountpoint.ArgAllowOther,
+			want: []string{
+				"--allow-delete",
+				"--allow-other",
+				"--aws-max-attempts=5",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "existing option",
+			existingArgs: []string{
+				"allow-delete",
+				"allow-other",
+				"region us-west-2",
+				"aws-max-attempts 5",
+			},
+			key: mountpoint.ArgAllowOther,
+			want: []string{
+				"--allow-delete",
+				"--allow-other",
+				"--aws-max-attempts=5",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "new arg",
+			existingArgs: []string{
+				"allow-delete",
+				"aws-max-attempts 5",
+			},
+			key:   mountpoint.ArgGid,
+			value: "555",
+			want: []string{
+				"--allow-delete",
+				"--aws-max-attempts=5",
+				"--gid=555",
+			},
+		},
+		{
+			name: "existing arg",
+			existingArgs: []string{
+				"allow-delete",
+				"read-only",
+				"gid 111",
+				"aws-max-attempts 5",
+			},
+			key:   mountpoint.ArgGid,
+			value: "555",
+			want: []string{
+				"--allow-delete",
+				"--aws-max-attempts=5",
+				"--gid=111",
+				"--read-only",
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			args := mountpoint.ParseArgs(testCase.existingArgs)
+			args.SetIfAbsent(testCase.key, testCase.value)
+			assert.Equals(t, testCase.want, args.SortedList())
+		})
+	}
+}
+
 func TestExtractingAnArgumentsValueFromMountpointArgs(t *testing.T) {
 	testCases := []struct {
 		name         string
