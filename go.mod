@@ -1,6 +1,6 @@
 module github.com/awslabs/aws-s3-csi-driver
 
-go 1.22.7
+go 1.24
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.5

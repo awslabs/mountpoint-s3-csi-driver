@@ -26,7 +26,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -61,7 +60,7 @@ func setup(t *testing.T) *testCtx {
 
 	// Chdir to `kubeletPath` so `mountoptions.{Recv, Send}` can use relative paths to Unix sockets
 	// to overcome `bind: invalid argument`.
-	testutil.Chdir(t, kubeletPath)
+	t.Chdir(kubeletPath)
 
 	bucketName := "test-bucket"
 	podUID := uuid.New().String()
