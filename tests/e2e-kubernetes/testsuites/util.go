@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/google/uuid"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -100,28 +101,37 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	pDriver, _ := config.Driver.(storageframework.PreprovisionedPVTestDriver)
 	r.Volume = pDriver.CreateVolume(ctx, config, storageframework.PreprovisionedPV)
 	pvSource, volumeNodeAffinity := pDriver.GetPersistentVolumeSource(false, "", r.Volume)
+
+	pvName := "s3-e2e-pv-" + uuid.New().String()
+	pvcName := "s3-e2e-pvc-" + uuid.New().String()
+
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", config.Driver.GetDriverInfo().Name),
+			Name: pvName,
 		},
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: *pvSource,
-			StorageClassName:       f.Namespace.Name,
+			StorageClassName:       "", // for static provisioning
 			NodeAffinity:           volumeNodeAffinity,
 			MountOptions:           mountOptions, // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
 			AccessModes:            []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
 			Capacity: v1.ResourceList{
 				v1.ResourceStorage: resource.MustParse("1200Gi"),
 			},
+			ClaimRef: &v1.ObjectReference{
+				Name:      pvcName,
+				Namespace: f.Namespace.Name,
+			},
 		},
 	}
 	pvc := &v1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "pvc-",
-			Namespace:    f.Namespace.Name,
+			Name:      pvcName,
+			Namespace: f.Namespace.Name,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
-			StorageClassName: &f.Namespace.Name,
+			StorageClassName: ptr.To(""), // for static provisioning
+			VolumeName:       pvName,
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
 			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{
@@ -133,11 +143,12 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 
 	framework.Logf("Creating PVC and PV")
 	var err error
-	r.Pvc, err = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Create(ctx, pvc, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "PVC, PVC creation failed")
 
 	r.Pv, err = f.ClientSet.CoreV1().PersistentVolumes().Create(ctx, pv, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "PVC, PV creation failed")
+
+	r.Pvc, err = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Create(ctx, pvc, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "PVC, PVC creation failed")
 
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
 	framework.ExpectNoError(err, "PVC, PV failed to bind")
