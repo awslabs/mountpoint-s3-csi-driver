@@ -1,6 +1,6 @@
 module github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes
 
-go 1.21
+go 1.24
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.3

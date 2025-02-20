@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -22,7 +21,7 @@ func TestMountOptions(t *testing.T) {
 
 	t.Run("Short Path", func(t *testing.T) {
 		basePath := t.TempDir()
-		testutil.Chdir(t, basePath)
+		t.Chdir(basePath)
 
 		mountSock := filepath.Join(basePath, "m")
 		if len(mountSock) >= 108 {
@@ -36,7 +35,7 @@ func TestMountOptions(t *testing.T) {
 		sockBasepath := filepath.Join(basePath, "mount")
 		assert.NoError(t, os.MkdirAll(sockBasepath, 0700))
 
-		testutil.Chdir(t, basePath)
+		t.Chdir(basePath)
 
 		mountSock := filepath.Join(sockBasepath, "mount.sock")
 		if len(mountSock) <= 108 {
