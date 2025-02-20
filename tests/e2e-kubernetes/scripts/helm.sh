@@ -36,6 +36,14 @@ function helm_install_driver() {
   REPOSITORY=${4}
   TAG=${5}
   KUBECONFIG=${6}
+  MOUNTER_KIND=${7}
+
+  if [ "$MOUNTER_KIND" = "pod" ]; then
+    USE_POD_MOUNTER=true
+  else
+    USE_POD_MOUNTER=false
+  fi
+
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
@@ -48,6 +56,7 @@ function helm_install_driver() {
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
     --set node.podInfoOnMountCompat.enable=true \
+    --set experimental.podMounter=${USE_POD_MOUNTER} \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
