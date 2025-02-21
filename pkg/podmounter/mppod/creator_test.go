@@ -84,6 +84,9 @@ func TestCreatingMountpointPods(t *testing.T) {
 			},
 		},
 	}, mpPod.Spec.Affinity)
+	assert.Equals(t, []corev1.Toleration{
+		{Operator: corev1.TolerationOpExists},
+	}, mpPod.Spec.Tolerations)
 
 	assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 	assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
