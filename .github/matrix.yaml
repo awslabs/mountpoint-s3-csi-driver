@@ -36,6 +36,7 @@ matrix:
     - cluster-type: "eksctl"
       arch: "x86"
       family: "AmazonLinux2023"
+      kubernetes-version: "1.32.1"
       selinux-mode: "enforcing"
   exclude:
     - cluster-type: "kops"
