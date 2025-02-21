@@ -120,12 +120,15 @@ jobs:
           tests/e2e-kubernetes/scripts/run.sh
 
       # Test SystemdMounter
+      # SystemdMounter tests are skipped if SELinux is enabled as SystemdMounter won't work with SELinux.
       - name: Install the driver (SystemdMounter)
+        if: matrix.selinux-mode != 'enforcing'
         env:
           ACTION: "install_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests (SystemdMounter)
+        if: matrix.selinux-mode != 'enforcing'
         env:
           ACTION: "run_tests"
         run: |
@@ -157,13 +160,13 @@ jobs:
           tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
           aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} ${{ env.BENCHMARK_BUCKET }} --recursive
       - name: Post e2e cleanup (SystemdMounter)
-        if: always()
+        if: matrix.selinux-mode != 'enforcing' && always()
         env:
           ACTION: "e2e_cleanup"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver (SystemdMounter)
-        if: always()
+        if: matrix.selinux-mode != 'enforcing' && always()
         env:
           ACTION: "uninstall_driver"
         run: |
