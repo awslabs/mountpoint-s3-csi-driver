@@ -86,7 +86,7 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 			}},
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
-					// This is to making sure Mountpoint Pod gets scheduled into same node as the Pod
+					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
 						NodeSelectorTerms: []corev1.NodeSelectorTerm{
 							{
@@ -99,6 +99,16 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 						},
 					},
 				},
+			},
+			Tolerations: []corev1.Toleration{
+				// Tolerate all taints.
+				// - "NoScheduled" – If the Workload Pod gets scheduled to a node, Mountpoint Pod should also get
+				//   scheduled into the same node to provide the volume.
+				// - "NoExecute" – If the Workload Pod tolerates a "NoExecute" taint, Mountpoint Pod should also
+				//   tolerate it to keep running and provide volume for the Workload Pod.
+				//   If the Workload Pod would get descheduled and then the corresponding Mountpoint Pod
+				//   would also get descheduled naturally due to CSI volume lifecycle.
+				{Operator: corev1.TolerationOpExists},
 			},
 			Volumes: []corev1.Volume{
 				// This emptyDir volume is used for communication between Mountpoint Pod and the CSI Driver Node Pod

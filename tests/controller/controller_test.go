@@ -702,6 +702,11 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 			}},
 		},
 	}))
+	Expect(mountpointPod.Spec.Tolerations).To(Equal([]corev1.Toleration{
+		{
+			Operator: corev1.TolerationOpExists,
+		},
+	}))
 
 	Expect(mountpointPod.Spec.Containers[0].Image).To(Equal(mountpointImage))
 	Expect(mountpointPod.Spec.Containers[0].ImagePullPolicy).To(Equal(mountpointImagePullPolicy))
