@@ -121,7 +121,6 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 				nodeSelector["kubernetes.io/hostname"] = nodeName
 			}
 			pod := e2epod.MakePod(f.Namespace.Name, nodeSelector, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
-			pod.Spec.Containers[0].Image = "ubuntu:22.04"
 			var err error
 			pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 			framework.ExpectNoError(err)

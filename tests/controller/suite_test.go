@@ -27,7 +27,7 @@ const s3CSIDriver = "s3.csi.aws.com"
 const ebsCSIDriver = "ebs.csi.aws.com"
 
 const defaultNamespace = "default"
-const defaultContainerImage = "busybox:latest"
+const defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl"
 
 // Configuration values passed for `mppod.Config` while creating a controller to use in tests.
 const mountpointNamespace = "mount-s3"
