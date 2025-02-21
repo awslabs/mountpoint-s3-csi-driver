@@ -131,7 +131,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	})
 
 	createVolume := func(ctx context.Context) *storageframework.VolumeResource {
-		vol := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		deferCleanup(vol.CleanupResource)
 
 		return vol

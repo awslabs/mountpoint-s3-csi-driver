@@ -142,8 +142,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	//   \      /
 	//   [volume1]
 	ginkgo.It("should concurrently access the single volume from pods on the same node", func(ctx context.Context) {
-		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
-		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		testTwoPodsSameVolume(ctx, resource.Pvc, true)
 	})
@@ -154,8 +153,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	//         \      /
 	//         [volume1]
 	ginkgo.It("should concurrently access the single volume from pods on different node", func(ctx context.Context) {
-		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
-		resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		testTwoPodsSameVolume(ctx, resource.Pvc, false)
 	})
@@ -172,8 +170,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		numVols := 2
 
 		for i := 0; i < numVols; i++ {
-			testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
-			resource := storageframework.CreateVolumeResource(ctx, driver, l.config, pattern, testVolumeSizeRange)
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 			pvcs = append(pvcs, resource.Pvc)
 		}

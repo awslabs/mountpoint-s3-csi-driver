@@ -58,7 +58,7 @@ if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 else
-  INSTANCE_TYPE_DEFAULT=m7g.medium
+  INSTANCE_TYPE_DEFAULT=m7g.large
   AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 fi
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
@@ -105,6 +105,8 @@ function install_tools() {
   eksctl_install \
     "${BIN_DIR}" \
     "${EKSCTL_VERSION}"
+
+  go install github.com/onsi/ginkgo/v2/ginkgo
 }
 
 function create_cluster() {
@@ -201,7 +203,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv -timeout 30m --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

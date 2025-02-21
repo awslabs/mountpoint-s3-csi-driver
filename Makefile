@@ -162,7 +162,7 @@ e2e-controller: envtest
 .PHONY: e2e
 e2e: e2e-controller
 	pushd tests/e2e-kubernetes; \
-	KUBECONFIG=${E2E_KUBECONFIG} go test -timeout 30m -ginkgo.vv --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
+	KUBECONFIG=${E2E_KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${E2E_REGION} --commit-id=${E2E_COMMIT_ID}; \
 	EXIT_CODE=$$?; \
 	popd; \
 	exit $$EXIT_CODE
