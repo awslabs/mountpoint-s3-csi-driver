@@ -95,16 +95,10 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
 
-	// TODO: After this point we know Mountpoint Pod's name, we should add some debugging tips to our error messages returned, like:
-	// """
-	// Failed to mount on "..." because "..."`
-	// You can see logs for Mountpoint Pod by running:
-	// `kubectl logs -n mount-s3 "mp-..." --previous`
-	// """
-
 	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
 	if err != nil {
-		return fmt.Errorf("Failed to create credentials directory for %q: %W", target, err)
+		klog.Errorf("Failed to create credentials directory for %q: %v", target, err)
+		return fmt.Errorf("Failed to create credentials directory for %q: %w", target, err)
 	}
 
 	credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
@@ -113,8 +107,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// there is an existing mount point at `target`.
 	credEnv, authenticationSource, err := pm.credProvider.Provide(ctx, credentialCtx)
 	if err != nil {
-		klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, err)
-		return fmt.Errorf("Failed to provide credentials for %q: %w", target, err)
+		klog.Errorf("Failed to provide credentials for %s: %v\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	if isMountPoint {
@@ -139,6 +133,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	fuseDeviceFD, err := pm.mountSyscallWithDefault(target, args)
 	if err != nil {
+		klog.Errorf("Failed to mount %s: %v", target, err)
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
 
@@ -172,13 +167,14 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		Env:        env.List(),
 	})
 	if err != nil {
-		klog.V(4).Infof("Failed to send mount option to Mountpoint Pod %s for %s: %v\n", pod.Name, target, err)
-		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w", pod.Name, target, err)
+		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", pod.Name, target, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", pod.Name, target, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	err = pm.waitForMount(ctx, target, pod.Name, podMountErrorPath)
 	if err != nil {
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w", pod.Name, target, err)
+		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", pod.Name, target, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", pod.Name, target, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	// Mountpoint successfully started, so don't unmount the filesystem
@@ -197,7 +193,7 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 
 	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
 	// but we should still unmount it and clean the credentials.
-	_, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
+	pod, podPath, err := pm.waitForMountpointPod(ctx, podID, volumeName)
 	if err != nil {
 		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
 		return fmt.Errorf("Failed to wait for Mountpoint Pod for %q: %w", target, err)
@@ -209,18 +205,20 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 	podMountExitPath := mppod.PathOnHost(podPath, mppod.KnownPathMountExit)
 	_, err = os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, credentialprovider.CredentialFilePerm)
 	if err != nil {
-		return fmt.Errorf("Failed to send a exit message to Mountpoint Pod for %q: %w", target, err)
+		klog.Errorf("Failed to send a exit message to Mountpoint Pod for %q: %s\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to send a exit message to Mountpoint Pod for %q: %w\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	err = pm.unmountTarget(target)
 	if err != nil {
+		klog.Errorf("Failed to unmount %q: %v", target, err)
 		return fmt.Errorf("Failed to unmount %q: %w", target, err)
 	}
 
 	err = pm.credProvider.Cleanup(credentialCtx)
 	if err != nil {
-		klog.V(4).Infof("Unmount: Failed to clean up credentials for %s: %v", target, err)
-		return fmt.Errorf("Failed to clean up credentials for %q: %w", target, err)
+		klog.Errorf("Failed to clean up credentials for %s: %v\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to clean up credentials for %q: %w\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	return nil
@@ -375,4 +373,8 @@ func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
 		return "", err
 	}
 	return tp.VolumeID, nil
+}
+
+func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) string {
+	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
 }
