@@ -17,6 +17,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile/awsprofiletest"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -24,6 +25,8 @@ import (
 const testAccessKeyID = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
+
+const testCredentialFilePerm = util.FileMode600
 
 const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
 const testWebIdentityToken = "test-web-identity-token"
@@ -61,6 +64,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 
 			writePath := t.TempDir()
 			provideCtx := credentialprovider.ProvideContext{
+				CredentialFilePerm:   testCredentialFilePerm,
 				AuthenticationSource: authSource,
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
@@ -76,7 +80,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				"AWS_CONFIG_FILE":             "/test-env/" + testProfilePrefix + "s3-csi-config",
 				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testProfilePrefix + "s3-csi-credentials",
 			}, env)
-			assertLongTermCredentials(t, writePath)
+			assertLongTermCredentials(t, provideCtx)
 		}
 	})
 
@@ -86,6 +90,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 
 			writePath := t.TempDir()
 			provideCtx := credentialprovider.ProvideContext{
+				CredentialFilePerm:   testCredentialFilePerm,
 				AuthenticationSource: authSource,
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
@@ -133,6 +138,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 
 			writePath := t.TempDir()
 			provideCtx := credentialprovider.ProvideContext{
+				CredentialFilePerm:   testCredentialFilePerm,
 				AuthenticationSource: authSource,
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
@@ -150,7 +156,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				"AWS_ROLE_ARN":                testRoleARN,
 				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
 			}, env)
-			assertLongTermCredentials(t, writePath)
+			assertLongTermCredentials(t, provideCtx)
 			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
 		}
 	})
@@ -205,7 +211,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 
 		// Only set token file without role ARN
 		tokenPath := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
+		assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), testCredentialFilePerm))
 		t.Setenv("AWS_ROLE_ARN", "")
 		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
 
@@ -245,6 +251,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
+			CredentialFilePerm:   testCredentialFilePerm,
 			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
@@ -580,6 +587,7 @@ func TestProvidingPodLevelCredentialsForDifferentPods(t *testing.T) {
 	provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
 
 	baseProvideCtx := credentialprovider.ProvideContext{
+		CredentialFilePerm:   testCredentialFilePerm,
 		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 		WritePath:            t.TempDir(),
 		EnvPath:              testEnvPath,
@@ -647,6 +655,7 @@ func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
 	provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
 
 	baseProvideCtx := credentialprovider.ProvideContext{
+		CredentialFilePerm:   testCredentialFilePerm,
 		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 		WritePath:            t.TempDir(),
 		EnvPath:              testEnvPath,
@@ -716,6 +725,7 @@ func TestCleanup(t *testing.T) {
 		provider := credentialprovider.New(nil, dummyRegionProvider)
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
+			CredentialFilePerm:   testCredentialFilePerm,
 			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
@@ -731,7 +741,7 @@ func TestCleanup(t *testing.T) {
 			"AWS_CONFIG_FILE":             "/test-env/" + testProfilePrefix + "s3-csi-config",
 			"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testProfilePrefix + "s3-csi-credentials",
 		}, env)
-		assertLongTermCredentials(t, writePath)
+		assertLongTermCredentials(t, provideCtx)
 
 		// Perform cleanup
 		err = provider.Cleanup(credentialprovider.CleanupContext{
@@ -764,6 +774,7 @@ func TestCleanup(t *testing.T) {
 
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
+			CredentialFilePerm:   testCredentialFilePerm,
 			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
@@ -823,14 +834,15 @@ func setEnvForLongTermCredentials(t *testing.T) {
 	t.Setenv("AWS_SESSION_TOKEN", testSessionToken)
 }
 
-func assertLongTermCredentials(t *testing.T, basepath string) {
+func assertLongTermCredentials(t *testing.T, ctx credentialprovider.ProvideContext) {
 	t.Helper()
 
 	awsprofiletest.AssertCredentialsFromAWSProfile(
 		t,
 		testProfilePrefix+"s3-csi",
-		filepath.Join(basepath, testProfilePrefix+"s3-csi-config"),
-		filepath.Join(basepath, testProfilePrefix+"s3-csi-credentials"),
+		ctx.CredentialFilePerm,
+		filepath.Join(ctx.WritePath, testProfilePrefix+"s3-csi-config"),
+		filepath.Join(ctx.WritePath, testProfilePrefix+"s3-csi-credentials"),
 		testAccessKeyID,
 		testSecretAccessKey,
 		testSessionToken,
@@ -841,7 +853,7 @@ func setEnvForStsWebIdentityCredentials(t *testing.T) {
 	t.Helper()
 
 	tokenPath := filepath.Join(t.TempDir(), "token")
-	assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
+	assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), testCredentialFilePerm))
 
 	t.Setenv("AWS_ROLE_ARN", testRoleARN)
 	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)

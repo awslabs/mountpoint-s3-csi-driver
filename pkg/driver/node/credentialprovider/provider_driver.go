@@ -75,7 +75,7 @@ func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
 	driverServiceAccountTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
 	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
-	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm)
+	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, provideCtx.CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
 	}
@@ -94,7 +94,7 @@ func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID
 	awsProfile, err := awsprofile.Create(awsprofile.Settings{
 		Basepath: provideCtx.WritePath,
 		Prefix:   prefix,
-		FilePerm: CredentialFilePerm,
+		FilePerm: provideCtx.CredentialFilePerm,
 	}, awsprofile.Credentials{
 		AccessKeyID:     accessKeyID,
 		SecretAccessKey: secretAccessKey,
