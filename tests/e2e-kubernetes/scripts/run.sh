@@ -27,6 +27,7 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
+SELINUX_MODE=${SELINUX_MODE:-}
 
 # kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
@@ -67,11 +68,21 @@ CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
 KOPS_STATE_FILE=${KOPS_STATE_FILE:-"s3://mountpoint-s3-csi-driver-kops-state-store"}
+KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE:-${BASE_DIR}/kops-patch-node-selinux-enforcing.yaml}
+if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
+    KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=""
+fi
+
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
 EKSCTL_VERSION=${EKSCTL_VERSION:-0.202.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
+EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
+if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
+    EKSCTL_PATCH_SELINUX_ENFORCING_FILE=""
+fi
+
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
 MOUNTER_KIND=${MOUNTER_KIND:-systemd}
@@ -124,7 +135,8 @@ function create_cluster() {
       "$KOPS_PATCH_FILE" \
       "$KOPS_PATCH_NODE_FILE" \
       "$KOPS_STATE_FILE" \
-      "$SSH_KEY"
+      "$SSH_KEY" \
+      "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
@@ -138,7 +150,8 @@ function create_cluster() {
       "$CI_ROLE_ARN" \
       "$INSTANCE_TYPE" \
       "$AMI_FAMILY" \
-      "$K8S_VERSION_EKSCTL"
+      "$K8S_VERSION_EKSCTL" \
+      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
   fi
 }
 

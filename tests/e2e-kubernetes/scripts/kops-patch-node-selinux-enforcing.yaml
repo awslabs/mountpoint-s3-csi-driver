@@ -1,0 +1,8 @@
+spec:
+  additionalUserData:
+    - name: selinux-settings.txt
+      type: text/cloud-config
+      content: |
+        #cloud-config
+        selinux:
+            mode: enforcing

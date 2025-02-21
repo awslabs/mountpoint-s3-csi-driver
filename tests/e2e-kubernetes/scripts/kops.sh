@@ -33,6 +33,7 @@ function kops_create_cluster() {
   KOPS_PATCH_NODE_FILE=${11}
   KOPS_STATE_FILE=${12}
   SSH_KEY=${13}
+  KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${14}
 
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
     kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE"
@@ -57,6 +58,10 @@ function kops_create_cluster() {
 
   kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_FILE" "Cluster" ""
   kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_NODE_FILE" "InstanceGroup" "Node"
+
+  if [ -n "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE" ]; then
+    kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE" "InstanceGroup" "Node"
+  fi
 
   ${BIN} create --state "${KOPS_STATE_FILE}" -f "${CLUSTER_FILE}"
   ${BIN} update cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --yes
