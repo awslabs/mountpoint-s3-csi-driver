@@ -26,6 +26,18 @@ matrix:
       arch: "arm"
       family: "Ubuntu2204"
       kubernetes-version: "1.32.1"
+    # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
+    # field rather than trying to exclude all other variants.
+    - cluster-type: "kops"
+      arch: "arm"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.28.13"
+      selinux-mode: "enforcing"
+    - cluster-type: "eksctl"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.32.1"
+      selinux-mode: "enforcing"
   exclude:
     - cluster-type: "kops"
       family: "Bottlerocket"
