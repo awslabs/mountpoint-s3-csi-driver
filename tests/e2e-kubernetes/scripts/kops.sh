@@ -36,12 +36,12 @@ function is_cluster_too_old() {
 }
 
 function compute_cluster_spec_hash() {
-  NODE_TYPE=${1}
+  INSTANCE_TYPE=${1}
   ZONES=${2}
   AMI_ID=${3}
   KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${4}
 
-  echo -n "${NODE_TYPE}-${ZONES}-${AMI_ID}-${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+  echo -n "${INSTANCE_TYPE}-${ZONES}-${AMI_ID}-${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
@@ -72,7 +72,7 @@ function kops_create_cluster() {
   SSH_KEY=${13}
   KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${14}
 
-  CLUSTER_SPEC_HASH=$(compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${AMI_ID}" "${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(compute_cluster_spec_hash "${INSTANCE_TYPE}" "${ZONES}" "${AMI_ID}" "${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}")
 
   # Check if cluster exists and matches our specs
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
