@@ -50,7 +50,7 @@ function cluster_matches_specs() {
   BIN=${2}
   KOPS_STATE_FILE=${3}
   DESIRED_HASH=${4}
-  CURRENT_HASH=$(${BIN} get cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" -o json | jq -r '.metadata.annotations.ClusterSpecHash // empty')
+  CURRENT_HASH=$(${BIN} get cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" -o json | jq -r '.spec.cloudLabels.ClusterSpecHash // empty')
 
   [ "${DESIRED_HASH}" = "${CURRENT_HASH}" ]
   return $?
@@ -99,6 +99,7 @@ function kops_create_cluster() {
     --kubernetes-version="${K8S_VERSION}" \
     --dry-run \
     --cloud aws \
+    --cloud-labels="ClusterSpecHash=${CLUSTER_SPEC_HASH} \
     -o yaml \
     ${ARGS[@]+"${ARGS[@]}"} \
     "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
@@ -109,10 +110,6 @@ function kops_create_cluster() {
   if [ -n "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE" ]; then
     kops_patch_cluster_file "$CLUSTER_FILE" "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE" "InstanceGroup" "Node"
   fi
-
-  # Add cluster spec hash annotation
-  kubectl patch -f "${CLUSTER_FILE}" --local -p "{\"metadata\":{\"annotations\":{\"ClusterSpecHash\":\"${CLUSTER_SPEC_HASH}\"}}}" --type merge -o yaml > "${CLUSTER_FILE}.tmp"
-  mv "${CLUSTER_FILE}.tmp" "${CLUSTER_FILE}"
 
   ${BIN} create --state "${KOPS_STATE_FILE}" -f "${CLUSTER_FILE}"
   ${BIN} update cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --yes
