@@ -99,7 +99,7 @@ function kops_create_cluster() {
     --kubernetes-version="${K8S_VERSION}" \
     --dry-run \
     --cloud aws \
-    --cloud-labels="ClusterSpecHash=${CLUSTER_SPEC_HASH} \
+    --cloud-labels="ClusterSpecHash=${CLUSTER_SPEC_HASH}" \
     -o yaml \
     ${ARGS[@]+"${ARGS[@]}"} \
     "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
