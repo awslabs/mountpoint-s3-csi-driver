@@ -68,5 +68,7 @@ spec:
               value: {{ .Values.image.pullPolicy }}
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
+            - name: MOUNTPOINT_PRIORITY_CLASS_NAME
+              value: {{ .Values.mountpointPod.priorityClassName }}
 
 {{- end -}}

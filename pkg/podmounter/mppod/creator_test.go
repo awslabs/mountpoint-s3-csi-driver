@@ -18,6 +18,7 @@ func TestCreatingMountpointPods(t *testing.T) {
 	image := "mp-image:latest"
 	imagePullPolicy := corev1.PullAlways
 	command := "/bin/aws-s3-csi-mounter"
+	priorityClassName := "mount-s3-critical"
 
 	// Test Pod values
 	testNode := "test-node"
@@ -29,6 +30,7 @@ func TestCreatingMountpointPods(t *testing.T) {
 	creator := mppod.NewCreator(mppod.Config{
 		Namespace:         namespace,
 		MountpointVersion: mountpointVersion,
+		PriorityClassName: priorityClassName,
 		Container: mppod.ContainerConfig{
 			Image:           image,
 			ImagePullPolicy: imagePullPolicy,
@@ -60,6 +62,7 @@ func TestCreatingMountpointPods(t *testing.T) {
 		mppod.LabelCSIDriverVersion:  csiDriverVersion,
 	}, mpPod.Labels)
 
+	assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
 	assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
 	assert.Equals(t, []corev1.Volume{
 		{

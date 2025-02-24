@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/scheme"
@@ -32,6 +33,7 @@ const defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl
 // Configuration values passed for `mppod.Config` while creating a controller to use in tests.
 const mountpointNamespace = "mount-s3"
 const mountpointVersion = "1.10.0"
+const mountpointPriorityClassName = "mount-s3-critical"
 const mountpointContainerCommand = "/bin/aws-s3-csi-mounter"
 const mountpointImage = "mp-image:latest"
 const mountpointImagePullPolicy = corev1.PullNever
@@ -80,6 +82,7 @@ var _ = BeforeSuite(func() {
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
 		Namespace:         mountpointNamespace,
 		MountpointVersion: mountpointVersion,
+		PriorityClassName: mountpointPriorityClassName,
 		Container: mppod.ContainerConfig{
 			Command:         mountpointContainerCommand,
 			Image:           mountpointImage,
@@ -96,6 +99,7 @@ var _ = BeforeSuite(func() {
 	}()
 
 	createMountpointNamespace()
+	createMountpointPriorityClass()
 })
 
 var _ = AfterSuite(func() {
@@ -111,4 +115,15 @@ func createMountpointNamespace() {
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mountpointNamespace}}
 	Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
 	waitForObject(namespace)
+}
+
+// createMountpointPriorityClass creates priority class for Mountpoint Pods.
+func createMountpointPriorityClass() {
+	By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", mountpointPriorityClassName))
+	priorityClass := &schedulingv1.PriorityClass{
+		ObjectMeta: metav1.ObjectMeta{Name: mountpointPriorityClassName},
+		Value:      1000000,
+	}
+	Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
+	waitForObject(priorityClass)
 }
