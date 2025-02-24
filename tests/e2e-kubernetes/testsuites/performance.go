@@ -40,6 +40,7 @@ const (
 	FioCfgHostDir = "fio/"
 	OutputPath    = "csi-test-artifacts/output.json"
 	FioCfgPodFile = "/c.fio"
+	ubuntuImage   = "public.ecr.aws/docker/library/ubuntu:22.04"
 )
 
 type s3CSIPerformanceTestSuite struct {
@@ -121,6 +122,7 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 				nodeSelector["kubernetes.io/hostname"] = nodeName
 			}
 			pod := e2epod.MakePod(f.Namespace.Name, nodeSelector, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod.Spec.Containers[0].Image = ubuntuImage
 			var err error
 			pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 			framework.ExpectNoError(err)
