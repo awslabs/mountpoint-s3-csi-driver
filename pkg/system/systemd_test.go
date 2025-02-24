@@ -69,11 +69,11 @@ func TestSystemdConnection(t *testing.T) {
 				}
 				mockObject.EXPECT().Go(gomock.Eq("org.freedesktop.systemd1.Manager.ListUnits"),
 					gomock.Any(), gomock.Any()).Do(
-					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...interface{}) {
+					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...any) {
 						go func() {
 							ch <- &dbus.Call{
 								Err:  nil,
-								Body: []interface{}{testUnits},
+								Body: []any{testUnits},
 							}
 						}()
 					})
@@ -95,11 +95,11 @@ func TestSystemdConnection(t *testing.T) {
 				unitName := "test-unit-1.service"
 				mockObject.EXPECT().Go(gomock.Eq("org.freedesktop.systemd1.Manager.StopUnit"),
 					gomock.Any(), gomock.Any(), gomock.Eq(unitName), gomock.Eq("fail")).Do(
-					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...interface{}) {
+					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...any) {
 						go func() {
 							ch <- &dbus.Call{
 								Err:  nil,
-								Body: []interface{}{unitName},
+								Body: []any{unitName},
 							}
 						}()
 					})
@@ -114,7 +114,7 @@ func TestSystemdConnection(t *testing.T) {
 			testFunc: func(t *testing.T) {
 				mockObject.EXPECT().Go(gomock.Eq("org.freedesktop.systemd1.Manager.ListUnits"),
 					gomock.Any(), gomock.Any()).Do(
-					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...interface{}) {
+					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...any) {
 						go func() {
 							ch <- &dbus.Call{
 								Err: errors.New("ListUnits test error"),
@@ -133,10 +133,10 @@ func TestSystemdConnection(t *testing.T) {
 			testFunc: func(t *testing.T) {
 				mockObject.EXPECT().Go(gomock.Eq("org.freedesktop.systemd1.Manager.ListUnits"),
 					gomock.Any(), gomock.Any()).Do(
-					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...interface{}) {
+					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...any) {
 						go func() {
 							ch <- &dbus.Call{
-								Body: []interface{}{1, 2, 3},
+								Body: []any{1, 2, 3},
 							}
 						}()
 					})
@@ -158,10 +158,10 @@ func TestSystemdConnection(t *testing.T) {
 				}
 				mockObject.EXPECT().Go(gomock.Eq("org.freedesktop.systemd1.Manager.ListUnits"),
 					gomock.Any(), gomock.Any()).Do(
-					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...interface{}) {
+					func(method string, flags dbus.Flags, ch chan *dbus.Call, args ...any) {
 						go func() {
 							ch <- &dbus.Call{
-								Body: []interface{}{testUnits},
+								Body: []any{testUnits},
 							}
 						}()
 					})
@@ -240,38 +240,38 @@ func TestSystemdSupervisorWatchers(t *testing.T) {
 		go func() {
 			ch <- &dbus.Signal{
 				Name: system.UnitNewMethod,
-				Body: []interface{}{serviceName, dbus.ObjectPath(servicePath)},
+				Body: []any{serviceName, dbus.ObjectPath(servicePath)},
 			}
 			ch <- &dbus.Signal{
 				Name: system.UnitNewMethod,
-				Body: []interface{}{}, // Missing body
+				Body: []any{}, // Missing body
 			}
 			ch <- &dbus.Signal{
 				Name: system.UnitNewMethod,
-				Body: []interface{}{5, dbus.ObjectPath(servicePath)}, // Bad unit name type
+				Body: []any{5, dbus.ObjectPath(servicePath)}, // Bad unit name type
 			}
 			ch <- &dbus.Signal{
 				Name: system.UnitNewMethod,
-				Body: []interface{}{serviceName, 7}, // Bad path type
+				Body: []any{serviceName, 7}, // Bad path type
 			}
 			ch <- &dbus.Signal{
 				Name: system.PropertiesChangedMethod,
 				Path: dbus.ObjectPath("badpath"), // Bad path
-				Body: []interface{}{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
+				Body: []any{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
 			}
 			ch <- &dbus.Signal{
 				Name: system.PropertiesChangedMethod,
 				// Missing path
-				Body: []interface{}{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
+				Body: []any{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
 			}
 			ch <- &dbus.Signal{
 				Name: system.PropertiesChangedMethod,
-				Body: []interface{}{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
+				Body: []any{"", map[string]dbus.Variant{"ActiveState": dbus.MakeVariant("active")}},
 			}
 			ch <- &dbus.Signal{
 				Name: system.PropertiesChangedMethod,
 				Path: dbus.ObjectPath(servicePath),
-				Body: []interface{}{"", map[string]dbus.Variant{
+				Body: []any{"", map[string]dbus.Variant{
 					"ActiveState":    dbus.MakeVariant("active"),
 					"ExecMainCode":   dbus.MakeVariant(int32(1)),
 					"ExecMainStatus": dbus.MakeVariant(int32(2)),
@@ -279,7 +279,7 @@ func TestSystemdSupervisorWatchers(t *testing.T) {
 			}
 			ch <- &dbus.Signal{
 				Name: system.UnitRemovedMethod,
-				Body: []interface{}{serviceName, dbus.ObjectPath(servicePath)},
+				Body: []any{serviceName, dbus.ObjectPath(servicePath)},
 			}
 		}()
 	})

@@ -90,7 +90,7 @@ func TestGettingPodsConcurrently(t *testing.T) {
 	mpPodWatcher := createAndStartWatcher(t, client)
 
 	foundPods := make(chan *corev1.Pod)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
 			pod, err := mpPodWatcher.Wait(context.Background(), testMountpointPodName)
 			assert.NoError(t, err)
@@ -101,7 +101,7 @@ func TestGettingPodsConcurrently(t *testing.T) {
 	mpPod := createMountpointPod(t, client, testMountpointPodName)
 	mpPod.run()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		foundPod := <-foundPods
 		assert.Equals(t, mpPod.pod, foundPod)
 	}

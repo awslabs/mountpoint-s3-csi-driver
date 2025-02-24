@@ -3,6 +3,7 @@ package envprovider
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 )
@@ -86,9 +87,7 @@ func (env Environment) Set(key Key, value Value) {
 // Merge adds all key-value pairs from the given environment to the current environment.
 // If a key exists in both environments, the value from the given environment takes precedence.
 func (env Environment) Merge(other Environment) {
-	for key, value := range other {
-		env[key] = value
-	}
+	maps.Copy(env, other)
 }
 
 // format formats given key and value to be used as an environment variable.

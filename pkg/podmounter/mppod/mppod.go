@@ -13,5 +13,5 @@ import (
 // ideally multiple implementation of this function shouldn't co-exists in the same cluster
 // unless there is a clean install of the CSI Driver.
 func MountpointPodNameFor(podUID string, volumeName string) string {
-	return fmt.Sprintf("mp-%x", sha256.Sum224([]byte(fmt.Sprintf("%s%s", podUID, volumeName))))
+	return fmt.Sprintf("mp-%x", sha256.Sum224(fmt.Appendf(nil, "%s%s", podUID, volumeName)))
 }
