@@ -160,12 +160,14 @@ function delete_cluster() {
     kops_delete_cluster \
       "${KOPS_BIN}" \
       "${CLUSTER_NAME}" \
-      "${KOPS_STATE_FILE}"
+      "${KOPS_STATE_FILE}" \
+      "${FORCE:-}"
   elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
-      "$REGION"
+      "$REGION" \
+      "${FORCE:-}"
   fi
 }
 

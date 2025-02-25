@@ -68,5 +68,6 @@ jobs:
       - name: Delete cluster
         env:
           ACTION: "delete_cluster"
+          FORCE: "true"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
