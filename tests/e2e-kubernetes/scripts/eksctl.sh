@@ -15,7 +15,7 @@ function eksctl_install() {
   fi
 }
 
-function is_cluster_too_old() {
+function eksctl_is_cluster_too_old() {
   CLUSTER_NAME=${1}
   REGION=${2}
 
@@ -27,7 +27,7 @@ function is_cluster_too_old() {
   return $?
 }
 
-function compute_cluster_spec_hash() {
+function eksctl_compute_cluster_spec_hash() {
   NODE_TYPE=${1}
   ZONES=${2}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${3}
@@ -36,7 +36,7 @@ function compute_cluster_spec_hash() {
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
-function cluster_matches_specs() {
+function eksctl_cluster_matches_specs() {
   CLUSTER_NAME=${1}
   REGION=${2}
   DESIRED_HASH=${3}
@@ -61,12 +61,12 @@ function eksctl_create_cluster() {
   K8S_VERSION=${12}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
 
-  CLUSTER_SPEC_HASH=$(compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
 
   # Check if cluster exists and matches our specs
   if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
-    if ! is_cluster_too_old "${CLUSTER_NAME}" "${REGION}" && \
-       cluster_matches_specs "${CLUSTER_NAME}" "${REGION}" "${CLUSTER_SPEC_HASH}"; then
+    if ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}" && \
+       eksctl_cluster_matches_specs "${CLUSTER_NAME}" "${REGION}" "${CLUSTER_SPEC_HASH}"; then
       echo "Reusing existing cluster ${CLUSTER_NAME} as it matches specifications and it is not too old"
       return 0
     fi
@@ -115,7 +115,7 @@ function eksctl_delete_cluster() {
   fi
 
   # Skip deletion if cluster is not too old, so we can re-use it
-  if ! is_cluster_too_old "${CLUSTER_NAME}" "${REGION}"; then
+  if ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}"; then
     echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
     return 0
   fi

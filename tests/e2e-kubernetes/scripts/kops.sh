@@ -22,7 +22,7 @@ function kops_install() {
   chmod +x "${INSTALL_PATH}"/kops
 }
 
-function is_cluster_too_old() {
+function kops_is_cluster_too_old() {
   CLUSTER_NAME=${1}
   BIN=${2}
   KOPS_STATE_FILE=${3}
@@ -35,7 +35,7 @@ function is_cluster_too_old() {
   return $?
 }
 
-function compute_cluster_spec_hash() {
+function kops_compute_cluster_spec_hash() {
   INSTANCE_TYPE=${1}
   ZONES=${2}
   AMI_ID=${3}
@@ -45,7 +45,7 @@ function compute_cluster_spec_hash() {
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
-function cluster_matches_specs() {
+function kops_cluster_matches_specs() {
   CLUSTER_NAME=${1}
   BIN=${2}
   KOPS_STATE_FILE=${3}
@@ -72,12 +72,12 @@ function kops_create_cluster() {
   SSH_KEY=${13}
   KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${14}
 
-  CLUSTER_SPEC_HASH=$(compute_cluster_spec_hash "${INSTANCE_TYPE}" "${ZONES}" "${AMI_ID}" "${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(kops_compute_cluster_spec_hash "${INSTANCE_TYPE}" "${ZONES}" "${AMI_ID}" "${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}")
 
   # Check if cluster exists and matches our specs
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
-    if ! is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" && \
-       cluster_matches_specs "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" "${CLUSTER_SPEC_HASH}"; then
+    if ! kops_is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" && \
+       kops_cluster_matches_specs "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" "${CLUSTER_SPEC_HASH}"; then
       echo "Reusing existing cluster ${CLUSTER_NAME} as it matches specifications and it is not too old"
       return 0
     fi
@@ -141,7 +141,7 @@ function kops_delete_cluster() {
   fi
 
   # Skip deletion if cluster is not too old, so we can re-use it
-  if ! is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
+  if ! kops_is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
     echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
     return 0
   fi
