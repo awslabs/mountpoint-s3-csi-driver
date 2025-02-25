@@ -2,6 +2,9 @@
 
 set -euox pipefail
 
+# If the cluster is not older than this, it will be re-used.
+MAX_CLUSTER_AGE_SECONDS=$((3 * 24 * 60 * 60)) # 3 days
+
 OS_ARCH=$(go env GOOS)-amd64
 
 function kops_install() {
@@ -17,6 +20,40 @@ function kops_install() {
   KOPS_DOWNLOAD_URL=https://github.com/kubernetes/kops/releases/download/v${KOPS_VERSION}/kops-${OS_ARCH}
   curl -L -X GET "${KOPS_DOWNLOAD_URL}" -o "${INSTALL_PATH}"/kops
   chmod +x "${INSTALL_PATH}"/kops
+}
+
+function is_cluster_too_old() {
+  CLUSTER_NAME=${1}
+  BIN=${2}
+  KOPS_STATE_FILE=${3}
+
+  CREATED_TIME=$(${BIN} get cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" -o json | jq -r '.metadata.creationTimestamp')
+  CURRENT_TIME=$(date +%s)
+  CLUSTER_TIME=$(date -d "${CREATED_TIME}" +%s)
+
+  [ $((CURRENT_TIME - CLUSTER_TIME)) -gt ${MAX_CLUSTER_AGE_SECONDS} ]
+  return $?
+}
+
+function compute_cluster_spec_hash() {
+  INSTANCE_TYPE=${1}
+  ZONES=${2}
+  AMI_ID=${3}
+  KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${4}
+
+  echo -n "${INSTANCE_TYPE}-${ZONES}-${AMI_ID}-${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+}
+
+# Checks whether existing cluster matches with expected specs to decide whether to re-use it.
+function cluster_matches_specs() {
+  CLUSTER_NAME=${1}
+  BIN=${2}
+  KOPS_STATE_FILE=${3}
+  DESIRED_HASH=${4}
+  CURRENT_HASH=$(${BIN} get cluster --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" -o json | jq -r '.spec.cloudLabels.ClusterSpecHash // empty')
+
+  [ "${DESIRED_HASH}" = "${CURRENT_HASH}" ]
+  return $?
 }
 
 function kops_create_cluster() {
@@ -35,7 +72,17 @@ function kops_create_cluster() {
   SSH_KEY=${13}
   KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${14}
 
+  CLUSTER_SPEC_HASH=$(compute_cluster_spec_hash "${INSTANCE_TYPE}" "${ZONES}" "${AMI_ID}" "${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE}")
+
+  # Check if cluster exists and matches our specs
   if kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
+    if ! is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" && \
+       cluster_matches_specs "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}" "${CLUSTER_SPEC_HASH}"; then
+      echo "Reusing existing cluster ${CLUSTER_NAME} as it matches specifications and it is not too old"
+      return 0
+    fi
+
+    echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
     kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE"
   fi
 
@@ -52,6 +99,7 @@ function kops_create_cluster() {
     --kubernetes-version="${K8S_VERSION}" \
     --dry-run \
     --cloud aws \
+    --cloud-labels="ClusterSpecHash=${CLUSTER_SPEC_HASH}" \
     -o yaml \
     ${ARGS[@]+"${ARGS[@]}"} \
     "${CLUSTER_NAME}" > "${CLUSTER_FILE}"
@@ -87,6 +135,17 @@ function kops_delete_cluster() {
   BIN=${1}
   CLUSTER_NAME=${2}
   KOPS_STATE_FILE=${3}
+
+  if ! kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
+    return 0
+  fi
+
+  # Skip deletion if cluster is not too old, so we can re-use it
+  if ! is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
+    echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
+    return 0
+  fi
+
   echo "Deleting cluster ${CLUSTER_NAME}"
   ${BIN} delete cluster --name "${CLUSTER_NAME}" --state "${KOPS_STATE_FILE}" --yes
 }
