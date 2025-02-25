@@ -7,6 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 // Labels populated on spawned Mountpoint Pods.
@@ -52,7 +54,7 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 	node := pod.Spec.NodeName
 	name := MountpointPodNameFor(string(pod.UID), pv.Name)
 
-	return &corev1.Pod{
+	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: c.config.Namespace,
@@ -130,4 +132,28 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 			},
 		},
 	}
+
+	volumeAttributes := extractVolumeAttributes(pv)
+
+	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
+		mpPod.Spec.ServiceAccountName = saName
+	}
+
+	return mpPod
+}
+
+// extractVolumeAttributes extracts volume attributes from given `pv`.
+// It always returns a non-nil map, and it's safe to use even though `pv` doesn't contain any volume attributes.
+func extractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
+	csiSpec := pv.Spec.CSI
+	if csiSpec == nil {
+		return map[string]string{}
+	}
+
+	volumeAttributes := csiSpec.VolumeAttributes
+	if volumeAttributes == nil {
+		return map[string]string{}
+	}
+
+	return volumeAttributes
 }
