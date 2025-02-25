@@ -72,7 +72,7 @@ function eksctl_create_cluster() {
     fi
 
     echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
-    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
+    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "true"
   fi
 
   # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
@@ -109,13 +109,14 @@ function eksctl_delete_cluster() {
   BIN=${1}
   CLUSTER_NAME=${2}
   REGION=${3}
+  FORCE=${4:-false}
 
   if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
     return 0
   fi
 
-  # Skip deletion if cluster is not too old, so we can re-use it
-  if ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}"; then
+  # Skip deletion if cluster is not too old and force flag is not set
+  if [ "${FORCE}" != "true" ] && ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}"; then
     echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
     return 0
   fi

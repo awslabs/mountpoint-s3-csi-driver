@@ -83,7 +83,7 @@ function kops_create_cluster() {
     fi
 
     echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
-    kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE"
+    kops_delete_cluster "$BIN" "$CLUSTER_NAME" "$KOPS_STATE_FILE" "true"
   fi
 
   ARGS=()
@@ -135,13 +135,14 @@ function kops_delete_cluster() {
   BIN=${1}
   CLUSTER_NAME=${2}
   KOPS_STATE_FILE=${3}
+  FORCE=${4:-false}
 
   if ! kops_cluster_exists "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
     return 0
   fi
 
-  # Skip deletion if cluster is not too old, so we can re-use it
-  if ! kops_is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
+  # Skip deletion if cluster is not too old and force flag is not set
+  if [ "${FORCE}" != "true" ] && ! kops_is_cluster_too_old "${CLUSTER_NAME}" "${BIN}" "${KOPS_STATE_FILE}"; then
     echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
     return 0
   fi
