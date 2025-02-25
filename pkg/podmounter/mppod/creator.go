@@ -44,13 +44,13 @@ func NewCreator(config Config) *Creator {
 	return &Creator{config: config}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pvc`.
+// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pv`.
 //
 // It automatically assigns Mountpoint Pod to `pod`'s node.
-// The name of the Mountpoint Pod is consistently generated from `pod` and `pvc` using `MountpointPodNameFor` function.
-func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *corev1.Pod {
+// The name of the Mountpoint Pod is consistently generated from `pod` and `pv` using `MountpointPodNameFor` function.
+func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.Pod {
 	node := pod.Spec.NodeName
-	name := MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName)
+	name := MountpointPodNameFor(string(pod.UID), pv.Name)
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -59,7 +59,7 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
 				LabelPodUID:            string(pod.UID),
-				LabelVolumeName:        pvc.Spec.VolumeName,
+				LabelVolumeName:        pv.Name,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 		},
