@@ -13,6 +13,7 @@ func TestFileGroupIDReturnsProcessGid(t *testing.T) {
 		t.Fatalf("Failed to create temp file for unit test: %v", err)
 	}
 	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
 
 	gid, err := FileGroupID(tmpFile.Name())
 
