@@ -113,7 +113,7 @@ image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 		-t=$(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) \
 		--build-arg=GOPROXY=$(GOPROXY) \
 		--build-arg=VERSION=$(VERSION) \
-		`./scripts/provenance.sh` \
+		--provenance=false \
 		.
 	touch $@
 
