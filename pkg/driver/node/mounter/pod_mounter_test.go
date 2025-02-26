@@ -243,7 +243,7 @@ func TestPodMounter(t *testing.T) {
 			credDirInfo, err := os.Stat(mppod.PathOnHost(mpPod.podPath, mppod.KnownPathCredentials))
 			assert.NoError(t, err)
 			assert.Equals(t, true, credDirInfo.IsDir())
-			assert.Equals(t, util.FileMode700, credDirInfo.Mode().Perm())
+			assert.Equals(t, util.FileModeUserFull, credDirInfo.Mode().Perm())
 		})
 
 		t.Run("Creates credential directory with group access if parent is owned by non-0 gid", func(t *testing.T) {
@@ -275,7 +275,7 @@ func TestPodMounter(t *testing.T) {
 			credDirInfo, err := os.Stat(mppod.PathOnHost(mpPod.podPath, mppod.KnownPathCredentials))
 			assert.NoError(t, err)
 			assert.Equals(t, true, credDirInfo.IsDir())
-			assert.Equals(t, util.FileMode750, credDirInfo.Mode().Perm())
+			assert.Equals(t, util.FileModeUserFullGroupRead, credDirInfo.Mode().Perm())
 		})
 
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {

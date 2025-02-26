@@ -26,7 +26,7 @@ const testAccessKeyID = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
 
-const testCredentialFilePerm = util.FileMode600
+const testCredentialFilePerm = util.FileModeUserReadWrite
 
 const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
 const testWebIdentityToken = "test-web-identity-token"

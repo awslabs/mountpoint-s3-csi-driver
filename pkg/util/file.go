@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	FileMode600 = fs.FileMode(0600) // User: read/write, Group: none, Others: none
-	FileMode640 = fs.FileMode(0640) // User: read/write, Group: read-only, Others: none
-	FileMode700 = fs.FileMode(0700) // User: full access, Group: none, Others: none
-	FileMode750 = fs.FileMode(0750) // User: full access, Group: read/execute only, Others: none
+	FileModeUserReadWrite      = fs.FileMode(0600) // User: read/write, Group: none, Others: none
+	FileModeUserGroupReadWrite = fs.FileMode(0640) // User: read/write, Group: read-only, Others: none
+	FileModeUserFull           = fs.FileMode(0700) // User: full access, Group: none, Others: none
+	FileModeUserFullGroupRead  = fs.FileMode(0750) // User: full access, Group: read/execute only, Others: none
 )
 
 // ReplaceFile safely replaces a file with a new file by copying to a temporary location first

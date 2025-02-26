@@ -16,7 +16,7 @@ import (
 const testAccessKeyId = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
-const testFilePerm = util.FileMode600
+const testFilePerm = util.FileModeUserReadWrite
 
 func TestCreatingAWSProfile(t *testing.T) {
 	defaultSettings := awsprofile.Settings{
