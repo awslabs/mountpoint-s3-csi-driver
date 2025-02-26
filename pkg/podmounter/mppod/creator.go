@@ -27,6 +27,7 @@ type ContainerConfig struct {
 type Config struct {
 	Namespace         string
 	MountpointVersion string
+	PriorityClassName string
 	Container         ContainerConfig
 	CSIDriverVersion  string
 }
@@ -84,6 +85,7 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 					},
 				},
 			}},
+			PriorityClassName: c.config.PriorityClassName,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
 					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod

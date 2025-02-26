@@ -86,6 +86,7 @@ controller:
 
 mountpointPod:
   namespace: mount-s3
+  priorityClassName: mount-s3-critical
 
 nameOverride: ""
 fullnameOverride: ""

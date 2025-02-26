@@ -2,6 +2,9 @@
 
 set -euox pipefail
 
+# If the cluster is not older than this, it will be re-used.
+MAX_CLUSTER_AGE_SECONDS=$((3 * 24 * 60 * 60)) # 3 days
+
 function eksctl_install() {
   INSTALL_PATH=${1}
   EKSCTL_VERSION=${2}
@@ -10,6 +13,37 @@ function eksctl_install() {
     curl --silent --location "${EKSCTL_DOWNLOAD_URL}" | tar xz -C "${INSTALL_PATH}"
     chmod +x "${INSTALL_PATH}"/eksctl
   fi
+}
+
+function eksctl_is_cluster_too_old() {
+  CLUSTER_NAME=${1}
+  REGION=${2}
+
+  CREATED_TIME=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${REGION}" --query 'cluster.createdAt' --output text)
+  CURRENT_TIME=$(date +%s)
+  CLUSTER_TIME=$(date -d "${CREATED_TIME}" +%s)
+
+  [ $((CURRENT_TIME - CLUSTER_TIME)) -gt ${MAX_CLUSTER_AGE_SECONDS} ]
+  return $?
+}
+
+function eksctl_compute_cluster_spec_hash() {
+  NODE_TYPE=${1}
+  ZONES=${2}
+  EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${3}
+
+  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+}
+
+# Checks whether existing cluster matches with expected specs to decide whether to re-use it.
+function eksctl_cluster_matches_specs() {
+  CLUSTER_NAME=${1}
+  REGION=${2}
+  DESIRED_HASH=${3}
+  CURRENT_HASH=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${REGION}" --query 'cluster.tags.ClusterSpecHash' --output text)
+
+  [ "${DESIRED_HASH}" = "${CURRENT_HASH}" ]
+  return $?
 }
 
 function eksctl_create_cluster() {
@@ -27,7 +61,19 @@ function eksctl_create_cluster() {
   K8S_VERSION=${12}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
 
-  eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION"
+  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
+
+  # Check if cluster exists and matches our specs
+  if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
+    if ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}" && \
+       eksctl_cluster_matches_specs "${CLUSTER_NAME}" "${REGION}" "${CLUSTER_SPEC_HASH}"; then
+      echo "Reusing existing cluster ${CLUSTER_NAME} as it matches specifications and it is not too old"
+      return 0
+    fi
+
+    echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
+    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "true"
+  fi
 
   # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
   ${BIN} create cluster \
@@ -38,6 +84,7 @@ function eksctl_create_cluster() {
     --with-oidc \
     --zones $ZONES \
     --version $K8S_VERSION \
+    --tags ClusterSpecHash=${CLUSTER_SPEC_HASH} \
     --dry-run > $CLUSTER_FILE
 
   CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
@@ -62,9 +109,19 @@ function eksctl_delete_cluster() {
   BIN=${1}
   CLUSTER_NAME=${2}
   REGION=${3}
-  if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
-    ${BIN} delete cluster "${CLUSTER_NAME}"
+  FORCE=${4:-false}
+
+  if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
+    return 0
   fi
+
+  # Skip deletion if cluster is not too old and force flag is not set
+  if [ "${FORCE}" != "true" ] && ! eksctl_is_cluster_too_old "${CLUSTER_NAME}" "${REGION}"; then
+    echo "Skipping deletion of cluster ${CLUSTER_NAME} to re-use it"
+    return 0
+  fi
+
+  ${BIN} delete cluster "${CLUSTER_NAME}"
   STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
   aws cloudformation delete-stack --region ${REGION} --stack-name ${STACK_NAME}
 
