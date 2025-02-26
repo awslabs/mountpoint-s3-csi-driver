@@ -1,6 +1,8 @@
 package util
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"testing"
 
@@ -19,4 +21,9 @@ func TestFileGroupIDReturnsProcessGid(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equals(t, uint32(os.Getgid()), gid)
+}
+
+func TestFileGroupIDReturnsErrorIfFileNonExistent(t *testing.T) {
+	_, err := FileGroupID("/nonexistent/file/path")
+	assert.Equals(t, true, errors.Is(err, fs.ErrNotExist))
 }
