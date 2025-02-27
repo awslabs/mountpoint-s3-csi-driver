@@ -287,13 +287,13 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 		})
 
-		Describe("Express", func() {
+		Describe("Express", Serial, func() {
 			testCache(cacheTestConfig{
 				useExpressCache: true,
 			})
 		})
 
-		Describe("Multi-Level", func() {
+		Describe("Multi-Level", Serial, func() {
 			testCache(cacheTestConfig{
 				useLocalCache:   true,
 				useExpressCache: true,
