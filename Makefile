@@ -66,8 +66,7 @@ all: all-image-docker
 
 # Builds all images and pushes them
 .PHONY: all-push
-all-push: create-manifest-and-images
-	docker manifest push --purge $(IMAGE):$(TAG)
+all-push: create-and-push-manifest-and-images
 
 # Builds images only if not present with the tag
 .PHONY: all-push-skip-if-present
@@ -82,12 +81,12 @@ build_image:
 push-manifest: create-manifest
 	docker manifest push --purge $(IMAGE):$(TAG)
 
-.PHONY: create-manifest-and-images
-create-manifest-and-images: all-image-registry
+.PHONY: create-and-push-manifest-and-images
+create-and-push-manifest-and-images: all-image-registry
 # sed expression:
 # LHS: match 0 or more not space characters
 # RHS: replace with $(IMAGE):$(TAG)-& where & is what was matched on LHS
-	docker manifest create --amend $(IMAGE):$(TAG) $(shell echo $(ALL_OS_ARCH_OSVERSION) | sed -e "s~[^ ]*~$(IMAGE):$(TAG)\-&~g")
+	docker buildx imagetools create -t $(IMAGE):$(TAG) $(shell echo $(ALL_OS_ARCH_OSVERSION) | sed -e "s~[^ ]*~$(IMAGE):$(TAG)\-&~g")
 
 # Only linux for OUTPUT_TYPE=docker because windows image cannot be exported
 # "Currently, multi-platform images cannot be exported with the docker export type. The most common usecase for multi-platform images is to directly push to a registry (see registry)."
@@ -113,7 +112,7 @@ image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 		-t=$(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) \
 		--build-arg=GOPROXY=$(GOPROXY) \
 		--build-arg=VERSION=$(VERSION) \
-		`./scripts/provenance.sh` \
+		--provenance=true \
 		.
 	touch $@
 
