@@ -14,6 +14,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 type SystemdMounter struct {
@@ -65,6 +66,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	credentialCtx.SetCredentialPerm(util.FileModeUserFull, util.FileModeUserReadWrite)
 	credentialCtx.SetWriteAndEnvPath(m.credentialWriteAndEnvPath())
 
 	cleanupDir := false

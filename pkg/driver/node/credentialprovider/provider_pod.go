@@ -75,7 +75,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 	tokenName := podLevelServiceAccountTokenName(podID, volumeID)
 
-	err = renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
+	err = renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), provideCtx.CredentialFilePerm)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to write service account token: %v", err)
 	}

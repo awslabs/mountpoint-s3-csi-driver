@@ -36,24 +36,28 @@ const targetDirPerm = fs.FileMode(0755)
 // This is mainly exposed for testing, in production platform-native function (`mountSyscallDefault`) will be used.
 type mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
 
+type fileGroupID func(path string) (gid uint32, err error)
+
 // A PodMounter is a [Mounter] that mounts Mountpoint on pre-created Kubernetes Pod running in the same node.
 type PodMounter struct {
 	podWatcher        *watcher.Watcher
 	mount             mount.Interface
 	kubeletPath       string
 	mountSyscall      mountSyscall
+	fileGroupID       fileGroupID
 	kubernetesVersion string
 	credProvider      *credentialprovider.Provider
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
+func NewPodMounter(podWatcher *watcher.Watcher, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, fileGroupID fileGroupID, kubernetesVersion string) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
 		credProvider:      credProvider,
 		mount:             mount,
 		kubeletPath:       util.KubeletPath(),
 		mountSyscall:      mountSyscall,
+		fileGroupID:       fileGroupID,
 		kubernetesVersion: kubernetesVersion,
 	}, nil
 }
@@ -95,7 +99,13 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
 
-	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
+	dirPerm, filePerm, err := pm.determineCredentialPerm(podPath)
+	if err != nil {
+		return err
+	}
+	credentialCtx.SetCredentialPerm(dirPerm, filePerm)
+
+	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath, credentialCtx)
 	if err != nil {
 		klog.Errorf("Failed to create credentials directory for %q: %v", target, err)
 		return fmt.Errorf("Failed to create credentials directory for %q: %w", target, err)
@@ -201,9 +211,14 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 
 	credentialCtx.WritePath = pm.credentialsDir(podPath)
 
+	_, filePerm, err := pm.determineCredentialPerm(podPath)
+	if err != nil {
+		return err
+	}
+
 	// Write `mount.exit` file to indicate Mountpoint Pod to cleanly exit.
 	podMountExitPath := mppod.PathOnHost(podPath, mppod.KnownPathMountExit)
-	_, err = os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, credentialprovider.CredentialFilePerm)
+	_, err = os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, filePerm)
 	if err != nil {
 		klog.Errorf("Failed to send a exit message to Mountpoint Pod for %q: %s\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
 		return fmt.Errorf("Failed to send a exit message to Mountpoint Pod for %q: %w\n%s", target, err, pm.helpMessageForGettingMountpointLogs(pod))
@@ -329,11 +344,27 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 	return err
 }
 
+// determineCredentialPerm determines the appropriate file and directory permissions based on gid of `podPath`.
+func (pm *PodMounter) determineCredentialPerm(podPath string) (dirPerm, filePerm fs.FileMode, err error) {
+	// In case fsGroup from security context was applied for our Pod volume, we need to add
+	// group read access to credentials as Mountpoint Pod might not be run under root user
+	gid, err := pm.fileGroupIDWithDefault(mppod.PathOnHost(podPath))
+	if err != nil {
+		klog.V(4).Infof("Failed to retrieve group ID for path %s: %v", mppod.PathOnHost(podPath), err)
+		return 0, 0, err
+	}
+	if gid != 0 {
+		return util.FileModeUserFullGroupRead, util.FileModeUserGroupReadWrite, nil
+	} else {
+		return util.FileModeUserFull, util.FileModeUserReadWrite, nil
+	}
+}
+
 // ensureCredentialsDirExists ensures credentials dir for `podPath` is exists.
 // It returns credentials dir and any error.
-func (pm *PodMounter) ensureCredentialsDirExists(podPath string) (string, error) {
+func (pm *PodMounter) ensureCredentialsDirExists(podPath string, credentialCtx credentialprovider.ProvideContext) (string, error) {
 	credentialsBasepath := pm.credentialsDir(podPath)
-	err := os.Mkdir(credentialsBasepath, credentialprovider.CredentialDirPerm)
+	err := os.Mkdir(credentialsBasepath, credentialCtx.CredentialDirPerm)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
 		klog.V(4).Infof("Failed to create credentials directory for pod %s: %v", podPath, err)
 		return "", err
@@ -359,6 +390,14 @@ func (pm *PodMounter) mountSyscallWithDefault(target string, args mountpoint.Arg
 	}
 
 	return pm.mountSyscallDefault(target, args)
+}
+
+func (pm *PodMounter) fileGroupIDWithDefault(path string) (gid uint32, err error) {
+	if pm.fileGroupID != nil {
+		return pm.fileGroupID(path)
+	}
+
+	return util.FileGroupID(path)
 }
 
 // unmountTarget calls `unmount` syscall on `target`.
