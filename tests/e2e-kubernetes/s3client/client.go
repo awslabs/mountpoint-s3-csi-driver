@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -47,6 +49,12 @@ func New() *Client {
 func NewWithRegion(region string) *Client {
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
+		config.WithRetryer(func() aws.Retryer {
+			return retry.NewStandard(func(opts *retry.StandardOptions) {
+				opts.MaxAttempts = 5
+				opts.MaxBackoff = 2 * time.Minute
+			})
+		}),
 	)
 	framework.ExpectNoError(err)
 	return &Client{region: region, client: s3.NewFromConfig(cfg)}
