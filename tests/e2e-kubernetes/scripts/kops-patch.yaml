@@ -1,4 +1,9 @@
 spec:
+  externalPolicies:
+    node:
+    - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+    master:
+    - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
   additionalPolicies:
     node: |
       [
