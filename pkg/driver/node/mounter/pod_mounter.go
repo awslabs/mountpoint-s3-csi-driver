@@ -319,7 +319,7 @@ func (pm *PodMounter) closeFUSEDevFD(fd int) {
 // If the target dir does not exists it tries to create it.
 // If the target dir is corrupted (decided with `mount.IsCorruptedMnt`) it tries to unmount it to have a clean mount.
 func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
-	_, err := os.Stat(target)
+	err := verifyMountPointStatx(target)
 	if err == nil {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
@@ -62,4 +63,17 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	// We successfully performed the mount operation, ensure to not close the FUSE file descriptor.
 	closeFd = false
 	return fd, nil
+}
+
+func verifyMountPointStatx(path string) error {
+	var stat unix.Statx_t
+	if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_FORCE_SYNC, 0, &stat); err != nil {
+		if err == unix.ENOSYS {
+			// statx() syscall is not supported, retry with regular os.Stat
+			_, err = os.Stat(path)
+		}
+		return err
+	}
+
+	return nil
 }

@@ -71,11 +71,11 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 
 	cleanupDir := false
 
-	// check if the target path exists
-	_, statErr := os.Stat(target)
-	if statErr != nil {
+	// check if the target path exists and is a directory
+	mountpointErr := verifyMountPointStatx(target)
+	if mountpointErr != nil {
 		// does not exist, create the directory
-		if os.IsNotExist(statErr) {
+		if os.IsNotExist(mountpointErr) {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("Failed to create target directory: %w", err)
 			}
@@ -89,21 +89,21 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 			}()
 		}
 		// Corrupted mount, try unmounting
-		if mount.IsCorruptedMnt(statErr) {
+		if mount.IsCorruptedMnt(mountpointErr) {
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
 			if mntErr := m.Unmount(ctx, target, credentialprovider.CleanupContext{
 				WritePath: credentialCtx.WritePath,
 				PodID:     credentialCtx.PodID,
 				VolumeID:  credentialCtx.VolumeID,
 			}); mntErr != nil {
-				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, statErr, mntErr)
+				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, mountpointErr, mntErr)
 			}
 		}
 	}
 
 	isMountPoint, err := m.IsMountPoint(target)
 	if err != nil {
-		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, statErr, err)
+		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, mountpointErr, err)
 	}
 
 	credEnv, authenticationSource, err := m.credProvider.Provide(ctx, credentialCtx)
