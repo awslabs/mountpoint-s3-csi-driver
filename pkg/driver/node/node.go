@@ -135,7 +135,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		}
 	}
 
-	if !args.Has(mountpoint.ArgAllowOther) {
+	if util.UsePodMounter() && !args.Has(mountpoint.ArgAllowOther) {
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
