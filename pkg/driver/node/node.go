@@ -135,6 +135,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		}
 	}
 
+	if !args.Has(mountpoint.ArgAllowOther) {
+		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
+	}
+
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
