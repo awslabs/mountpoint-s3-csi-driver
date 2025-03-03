@@ -77,6 +77,8 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
+					RunAsUser:    ptr.To(int64(1001)),
+					RunAsNonRoot: ptr.To(true),
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{
