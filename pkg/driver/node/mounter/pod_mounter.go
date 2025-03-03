@@ -356,7 +356,7 @@ func (pm *PodMounter) determineCredentialPerm(podPath string) (dirPerm, filePerm
 	if gid != 0 {
 		return util.FileModeUserFullGroupRead, util.FileModeUserGroupReadWrite, nil
 	} else {
-		return util.FileModeUserFull, util.FileModeUserReadWrite, nil
+		return util.FileModeUserFullGroupRead, util.FileModeUserGroupReadWrite, nil
 	}
 }
 

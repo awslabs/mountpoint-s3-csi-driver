@@ -6,6 +6,6 @@ metadata:
   name: {{ .Values.mountpointPod.namespace }}
   labels:
     name: {{ .Values.mountpointPod.namespace }}
-    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce: baseline
 
 {{- end -}}

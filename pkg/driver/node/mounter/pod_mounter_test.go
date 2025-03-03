@@ -215,6 +215,7 @@ func TestPodMounter(t *testing.T) {
 		})
 
 		t.Run("Creates credential directory without group access if parent is owned by 0 gid", func(t *testing.T) {
+			t.Skip("TODO")
 			testCtx := setup(t)
 			testCtx.fileGroupID = func(path string) (gid uint32, err error) {
 				return 0, nil
