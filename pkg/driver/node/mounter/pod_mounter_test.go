@@ -295,7 +295,7 @@ func TestPodMounter(t *testing.T) {
 				mpPod.receiveMountOptions(testCtx.ctx)
 			}()
 
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 					VolumeID: testCtx.volumeID,
 					PodID:    testCtx.podUID,
