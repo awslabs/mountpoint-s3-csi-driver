@@ -79,6 +79,9 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 					},
 					RunAsUser:    ptr.To(int64(1001)),
 					RunAsNonRoot: ptr.To(true),
+					SeccompProfile: &corev1.SeccompProfile{
+						Type: corev1.SeccompProfileTypeRuntimeDefault,
+					},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{
