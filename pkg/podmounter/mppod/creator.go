@@ -30,6 +30,7 @@ type Config struct {
 	PriorityClassName string
 	Container         ContainerConfig
 	CSIDriverVersion  string
+	IsOpenShift       bool
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -49,6 +50,13 @@ func NewCreator(config Config) *Creator {
 func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *corev1.Pod {
 	node := pod.Spec.NodeName
 	name := MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName)
+
+	runAsUser := ptr.To(int64(1000))
+	if c.config.IsOpenShift {
+		// OpenShift clusters automatically assign uid from predefined namespace range
+		// https://www.redhat.com/en/blog/a-guide-to-openshift-and-uids
+		runAsUser = nil
+	}
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -77,7 +85,7 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
-					RunAsUser:    ptr.To(int64(1001)),
+					RunAsUser:    runAsUser,
 					RunAsNonRoot: ptr.To(true),
 					SeccompProfile: &corev1.SeccompProfile{
 						Type: corev1.SeccompProfileTypeRuntimeDefault,

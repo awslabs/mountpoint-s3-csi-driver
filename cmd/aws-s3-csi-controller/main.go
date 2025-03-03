@@ -11,6 +11,8 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -20,6 +22,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/go-logr/logr"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -35,6 +38,7 @@ func main() {
 	logf.SetLogger(zap.New())
 
 	log := logf.Log.WithName(csicontroller.Name)
+	client := config.GetConfigOrDie()
 
 	mgr, err := manager.New(config.GetConfigOrDie(), manager.Options{})
 	if err != nil {
@@ -52,6 +56,7 @@ func main() {
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
+		IsOpenShift:      isOpenShift(client, log),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")
@@ -62,4 +67,28 @@ func main() {
 		log.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+}
+
+// isOpenShift checks if the cluster is an OpenShift cluster by detecting the "config.openshift.io" API group.
+func isOpenShift(client *rest.Config, log logr.Logger) bool {
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(client)
+	if err != nil {
+		log.Error(err, "Failed to create DiscoveryClient")
+		return false
+	}
+
+	// Get API groups
+	apiGroups, err := discoveryClient.ServerGroups()
+	if err != nil {
+		log.Error(err, "Failed to get API groups")
+		return false
+	}
+
+	for _, group := range apiGroups.Groups {
+		if group.Name == "config.openshift.io" {
+			return true
+		}
+	}
+
+	return false
 }
