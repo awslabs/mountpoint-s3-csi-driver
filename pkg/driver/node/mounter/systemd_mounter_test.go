@@ -16,6 +16,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
+	"slices"
 )
 
 type mounterTestEnv struct {
@@ -108,10 +109,8 @@ func TestS3MounterMount(t *testing.T) {
 			options:    []string{"--aws-max-attempts=10"},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
-					for _, e := range config.Env {
-						if e == "AWS_MAX_ATTEMPTS=10" {
-							return "success", nil
-						}
+					if slices.Contains(config.Env, "AWS_MAX_ATTEMPTS=10") {
+						return "success", nil
 					}
 					t.Fatal("Bad env")
 					return "", nil

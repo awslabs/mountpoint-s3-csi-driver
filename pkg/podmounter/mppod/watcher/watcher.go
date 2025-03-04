@@ -57,7 +57,7 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 	var podFound atomic.Bool
 	podChan := make(chan *corev1.Pod, 1)
 	handle, err := w.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			pod := obj.(*corev1.Pod)
 			if pod.Name == name {
 				podFound.Store(true)
@@ -66,7 +66,7 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 				}
 			}
 		},
-		UpdateFunc: func(old, new interface{}) {
+		UpdateFunc: func(old, new any) {
 			pod := new.(*corev1.Pod)
 			if pod.Name == name {
 				podFound.Store(true)
