@@ -27,7 +27,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -44,7 +43,6 @@ type testCtx struct {
 	client       *fake.Clientset
 	mount        *mount.FakeMounter
 	mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
-	fileGroupID  func(path string) (gid uint32, err error)
 
 	bucketName  string
 	kubeletPath string
@@ -109,13 +107,6 @@ func setup(t *testing.T) *testCtx {
 		return int(mountertest.OpenDevNull(t).Fd()), nil
 	}
 
-	fileGroupID := func(path string) (gid uint32, err error) {
-		if testCtx.fileGroupID != nil {
-			return testCtx.fileGroupID(path)
-		}
-		return util.FileGroupID(path)
-	}
-
 	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 		return dummyIMDSRegion, nil
 	})
@@ -128,7 +119,7 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mount, mountSyscall, fileGroupID, testK8sVersion)
+	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mount, mountSyscall, testK8sVersion)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
@@ -212,71 +203,6 @@ func TestPodMounter(t *testing.T) {
 				PodID:    testCtx.podUID,
 			}, mountpoint.ParseArgs(nil))
 			assert.NoError(t, err)
-		})
-
-		t.Run("Creates credential directory without group access if parent is owned by 0 gid", func(t *testing.T) {
-			t.Skip("TODO")
-			testCtx := setup(t)
-			testCtx.fileGroupID = func(path string) (gid uint32, err error) {
-				return 0, nil
-			}
-
-			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
-			mountRes := make(chan error)
-			go func() {
-				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
-					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-					VolumeID:             testCtx.volumeID,
-					PodID:                testCtx.podUID,
-				}, args)
-				if err != nil {
-					log.Println("Mount failed", err)
-				}
-				mountRes <- err
-			}()
-
-			mpPod := createMountpointPod(testCtx)
-			mpPod.run()
-			mpPod.receiveMountOptions(testCtx.ctx)
-			err := <-mountRes
-
-			assert.NoError(t, err)
-			credDirInfo, err := os.Stat(mppod.PathOnHost(mpPod.podPath, mppod.KnownPathCredentials))
-			assert.NoError(t, err)
-			assert.Equals(t, true, credDirInfo.IsDir())
-			assert.Equals(t, util.FileModeUserFull, credDirInfo.Mode().Perm())
-		})
-
-		t.Run("Creates credential directory with group access if parent is owned by non-0 gid", func(t *testing.T) {
-			testCtx := setup(t)
-			testCtx.fileGroupID = func(path string) (gid uint32, err error) {
-				return 123, nil
-			}
-
-			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
-			mountRes := make(chan error)
-			go func() {
-				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
-					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-					VolumeID:             testCtx.volumeID,
-					PodID:                testCtx.podUID,
-				}, args)
-				if err != nil {
-					log.Println("Mount failed", err)
-				}
-				mountRes <- err
-			}()
-
-			mpPod := createMountpointPod(testCtx)
-			mpPod.run()
-			mpPod.receiveMountOptions(testCtx.ctx)
-			err := <-mountRes
-
-			assert.NoError(t, err)
-			credDirInfo, err := os.Stat(mppod.PathOnHost(mpPod.podPath, mppod.KnownPathCredentials))
-			assert.NoError(t, err)
-			assert.Equals(t, true, credDirInfo.IsDir())
-			assert.Equals(t, util.FileModeUserFullGroupRead, credDirInfo.Mode().Perm())
 		})
 
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {

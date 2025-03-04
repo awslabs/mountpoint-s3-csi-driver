@@ -3,7 +3,6 @@ package awsprofiletest
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -12,22 +11,13 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func AssertCredentialsFromAWSProfile(t *testing.T, profileName string, filePerm os.FileMode, configFile, credentialsFile, accessKeyID, secretAccessKey, sessionToken string) {
+func AssertCredentialsFromAWSProfile(t *testing.T, profileName, configFile, credentialsFile, accessKeyID, secretAccessKey, sessionToken string) {
 	t.Helper()
-
-	assertCredentialFilePermissions(t, configFile, filePerm)
-	assertCredentialFilePermissions(t, credentialsFile, filePerm)
 
 	credentials := parseAWSProfile(t, profileName, configFile, credentialsFile)
 	assert.Equals(t, accessKeyID, credentials.AccessKeyID)
 	assert.Equals(t, secretAccessKey, credentials.SecretAccessKey)
 	assert.Equals(t, sessionToken, credentials.SessionToken)
-}
-
-func assertCredentialFilePermissions(t *testing.T, file string, filePerm os.FileMode) {
-	fileInfo, err := os.Stat(file)
-	assert.NoError(t, err)
-	assert.Equals(t, filePerm, fileInfo.Mode().Perm())
 }
 
 func parseAWSProfile(t *testing.T, profileName, configFile, credentialsFile string) aws.Credentials {
