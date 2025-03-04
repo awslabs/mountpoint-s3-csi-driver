@@ -205,6 +205,35 @@ func TestPodMounter(t *testing.T) {
 			assert.NoError(t, err)
 		})
 
+		t.Run("Creates credential directory with group access if parent is owned by non-0 gid", func(t *testing.T) {
+			testCtx := setup(t)
+
+			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+			mpPod.receiveMountOptions(testCtx.ctx)
+			err := <-mountRes
+
+			assert.NoError(t, err)
+			credDirInfo, err := os.Stat(mppod.PathOnHost(mpPod.podPath, mppod.KnownPathCredentials))
+			assert.NoError(t, err)
+			assert.Equals(t, true, credDirInfo.IsDir())
+			assert.Equals(t, credentialprovider.CredentialDirPerm, credDirInfo.Mode().Perm())
+		})
+
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {
 			testCtx := setup(t)
 

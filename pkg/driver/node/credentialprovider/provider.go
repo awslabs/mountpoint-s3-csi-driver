@@ -16,12 +16,14 @@ import (
 )
 
 // CredentialFilePerm is the default permissions to be used for credential files.
-// It's only readable and writeable by the owner.
-const CredentialFilePerm = fs.FileMode(0600)
+// It's only readable and writeable by the owner and group.
+// Group access is needed as Mountpoint Pod is run as non-root user
+const CredentialFilePerm = fs.FileMode(0640)
 
 // CredentialDirPerm is the default permissions to be used for credential directories.
-// It's only readable, listable (execute bit), and writeable by the owner.
-const CredentialDirPerm = fs.FileMode(0700)
+// It's only readable, listable (execute bit), and writeable by the owner and group.
+// Group access is needed as Mountpoint Pod is run as non-root user
+const CredentialDirPerm = fs.FileMode(0750)
 
 // An AuthenticationSource represents the source (i.e., driver-level or pod-level) where the credentials was obtained.
 type AuthenticationSource = string
