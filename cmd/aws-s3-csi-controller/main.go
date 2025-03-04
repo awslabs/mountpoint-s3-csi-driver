@@ -41,7 +41,7 @@ func main() {
 	log := logf.Log.WithName(csicontroller.Name)
 	client := config.GetConfigOrDie()
 
-	mgr, err := manager.New(config.GetConfigOrDie(), manager.Options{})
+	mgr, err := manager.New(client, manager.Options{})
 	if err != nil {
 		log.Error(err, "Failed to create a new manager")
 		os.Exit(1)

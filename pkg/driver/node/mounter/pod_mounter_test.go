@@ -205,7 +205,7 @@ func TestPodMounter(t *testing.T) {
 			assert.NoError(t, err)
 		})
 
-		t.Run("Creates credential directory with group access if parent is owned by non-0 gid", func(t *testing.T) {
+		t.Run("Creates credential directory with group access", func(t *testing.T) {
 			testCtx := setup(t)
 
 			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})

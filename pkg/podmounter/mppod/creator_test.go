@@ -9,6 +9,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -25,7 +26,7 @@ const (
 	csiDriverVersion  = "1.12.0"
 )
 
-func createTestConfig(isOpenShift bool) mppod.Config {
+func createTestConfig(clusterVariant util.ClusterVariant) mppod.Config {
 	return mppod.Config{
 		Namespace:         namespace,
 		MountpointVersion: mountpointVersion,
@@ -36,12 +37,12 @@ func createTestConfig(isOpenShift bool) mppod.Config {
 			Command:         command,
 		},
 		CSIDriverVersion: csiDriverVersion,
-		IsOpenShift:      isOpenShift,
+		ClusterVariant:   clusterVariant,
 	}
 }
 
-func createAndVerifyPod(t *testing.T, isOpenShift bool, expectedRunAsUser *int64) {
-	creator := mppod.NewCreator(createTestConfig(isOpenShift))
+func createAndVerifyPod(t *testing.T, clusterVariant util.ClusterVariant, expectedRunAsUser *int64) {
+	creator := mppod.NewCreator(createTestConfig(clusterVariant))
 
 	mpPod := creator.Create(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -116,9 +117,9 @@ func createAndVerifyPod(t *testing.T, isOpenShift bool, expectedRunAsUser *int64
 }
 
 func TestCreatingMountpointPods(t *testing.T) {
-	createAndVerifyPod(t, false, ptr.To(int64(1000)))
+	createAndVerifyPod(t, util.DefaultKubernetes, ptr.To(int64(1000)))
 }
 
 func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
-	createAndVerifyPod(t, true, (*int64)(nil))
+	createAndVerifyPod(t, util.OpenShift, (*int64)(nil))
 }
