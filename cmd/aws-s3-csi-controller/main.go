@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/go-logr/logr"
 )
 
@@ -56,7 +57,7 @@ func main() {
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
-		IsOpenShift:      isOpenShift(client, log),
+		ClusterVariant:   getClusterVariant(client, log),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")
@@ -69,26 +70,29 @@ func main() {
 	}
 }
 
-// isOpenShift checks if the cluster is an OpenShift cluster by detecting the "config.openshift.io" API group.
-func isOpenShift(client *rest.Config, log logr.Logger) bool {
+// getClusterVariant determines Kubernetes variant by checking API groups.
+func getClusterVariant(client *rest.Config, log logr.Logger) util.ClusterVariant {
+	defaultVariant := util.DefaultKubernetes
+
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(client)
 	if err != nil {
-		log.Error(err, "Failed to create DiscoveryClient")
-		return false
+		log.Error(err, "Failed to create DiscoveryClient to determine cluster variant. Assuming this is Default Kubernetes variant")
+		return defaultVariant
 	}
 
 	// Get API groups
 	apiGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
-		log.Error(err, "Failed to get API groups")
-		return false
+		log.Error(err, "Failed to get API groups to determine cluster variant. Assuming this is Default Kubernetes variant")
+		return defaultVariant
 	}
 
+	// Check if the cluster is an OpenShift cluster by detecting the "config.openshift.io" API group
 	for _, group := range apiGroups.Groups {
 		if group.Name == "config.openshift.io" {
-			return true
+			return util.OpenShift
 		}
 	}
 
-	return false
+	return defaultVariant
 }
