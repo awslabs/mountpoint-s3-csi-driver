@@ -136,6 +136,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	if util.UsePodMounter() && !args.Has(mountpoint.ArgAllowOther) {
+		// If customer container is running as root we need to add --allow-root as Mountpoint Pod is not run as root
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
