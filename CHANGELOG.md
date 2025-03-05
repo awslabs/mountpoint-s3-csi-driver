@@ -1,3 +1,14 @@
+# v1.13.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.13.0/README.md)
+
+### Notable changes
+* Add a more robust check for corrupted mounts ([#401](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/401))
+* Support Mountpoint [version 1.15.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.15.0)
+  * __Breaking change:__ CLI flags `--sse` and `--sse-kms-key-id` are now applied to object uploads to the xz cache. ([mountpoint-s3#1257](https://github.com/awslabs/mountpoint-s3/pull/1257))
+  * Add a new command-line argument `--negative-metadata-ttl` to independently set the time-to-live (TTL) for cached negative entries. ([mountpoint-s3#1246](https://github.com/awslabs/mountpoint-s3/pull/1246))
+  * Add support for appending to objects originally uploaded with a CRC64-NVME checksum. ([mountpoint-s3#1235](https://github.com/awslabs/mountpoint-s3/pull/1235))
+
 # v1.12.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/README.md)
