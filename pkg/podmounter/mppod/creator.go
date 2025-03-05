@@ -3,7 +3,7 @@ package mppod
 import (
 	"path/filepath"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -31,7 +31,7 @@ type Config struct {
 	PriorityClassName string
 	Container         ContainerConfig
 	CSIDriverVersion  string
-	ClusterVariant    util.ClusterVariant
+	ClusterVariant    cluster.Variant
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.

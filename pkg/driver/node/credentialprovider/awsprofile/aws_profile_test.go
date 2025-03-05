@@ -32,7 +32,7 @@ func TestCreatingAWSProfile(t *testing.T) {
 		}
 		profile, err := awsprofile.Create(defaultSettings, creds)
 		assert.NoError(t, err)
-		assertCredentialsFromAWSProfile(t, defaultSettings.Basepath, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
+		assertCredentialsFromAWSProfile(t, defaultSettings, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 	})
 
 	t.Run("create config and credentials files with empty session token", func(t *testing.T) {
@@ -42,7 +42,7 @@ func TestCreatingAWSProfile(t *testing.T) {
 		}
 		profile, err := awsprofile.Create(defaultSettings, creds)
 		assert.NoError(t, err)
-		assertCredentialsFromAWSProfile(t, defaultSettings.Basepath, profile, testAccessKeyId, testSecretAccessKey, "")
+		assertCredentialsFromAWSProfile(t, defaultSettings, profile, testAccessKeyId, testSecretAccessKey, "")
 	})
 
 	t.Run("ensure config and credentials files are created with correct permissions", func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestCreatingAWSProfile(t *testing.T) {
 		}
 		profile, err := awsprofile.Create(defaultSettings, creds)
 		assert.NoError(t, err)
-		assertCredentialsFromAWSProfile(t, defaultSettings.Basepath, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
+		assertCredentialsFromAWSProfile(t, defaultSettings, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 
 		configStat, err := os.Stat(filepath.Join(defaultSettings.Basepath, profile.ConfigFilename))
 		assert.NoError(t, err)
@@ -111,7 +111,7 @@ func TestCleaningUpAWSProfile(t *testing.T) {
 
 		profile, err := awsprofile.Create(settings, creds)
 		assert.NoError(t, err)
-		assertCredentialsFromAWSProfile(t, settings.Basepath, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
+		assertCredentialsFromAWSProfile(t, settings, profile, testAccessKeyId, testSecretAccessKey, testSessionToken)
 
 		err = awsprofile.Cleanup(settings)
 		assert.NoError(t, err)
@@ -129,12 +129,13 @@ func TestCleaningUpAWSProfile(t *testing.T) {
 	})
 }
 
-func assertCredentialsFromAWSProfile(t *testing.T, basepath string, profile awsprofile.Profile, accessKeyID string, secretAccessKey string, sessionToken string) {
+func assertCredentialsFromAWSProfile(t *testing.T, settings awsprofile.Settings, profile awsprofile.Profile, accessKeyID string, secretAccessKey string, sessionToken string) {
 	awsprofiletest.AssertCredentialsFromAWSProfile(
 		t,
 		profile.Name,
-		filepath.Join(basepath, profile.ConfigFilename),
-		filepath.Join(basepath, profile.CredentialsFilename),
+		settings.FilePerm,
+		filepath.Join(settings.Basepath, profile.ConfigFilename),
+		filepath.Join(settings.Basepath, profile.CredentialsFilename),
 		accessKeyID,
 		secretAccessKey,
 		sessionToken,

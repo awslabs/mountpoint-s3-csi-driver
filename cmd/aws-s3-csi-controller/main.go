@@ -11,8 +11,6 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -20,10 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
-	"github.com/go-logr/logr"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -57,7 +54,7 @@ func main() {
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
-		ClusterVariant:   getClusterVariant(client, log),
+		ClusterVariant:   cluster.DetectVariant(client, log),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")
@@ -68,31 +65,4 @@ func main() {
 		log.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
-}
-
-// getClusterVariant determines Kubernetes variant by checking API groups.
-func getClusterVariant(client *rest.Config, log logr.Logger) util.ClusterVariant {
-	defaultVariant := util.DefaultKubernetes
-
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(client)
-	if err != nil {
-		log.Error(err, "Failed to create DiscoveryClient to determine cluster variant. Assuming this is Default Kubernetes variant")
-		return defaultVariant
-	}
-
-	// Get API groups
-	apiGroups, err := discoveryClient.ServerGroups()
-	if err != nil {
-		log.Error(err, "Failed to get API groups to determine cluster variant. Assuming this is Default Kubernetes variant")
-		return defaultVariant
-	}
-
-	// Check if the cluster is an OpenShift cluster by detecting the "config.openshift.io" API group
-	for _, group := range apiGroups.Groups {
-		if group.Name == "config.openshift.io" {
-			return util.OpenShift
-		}
-	}
-
-	return defaultVariant
 }

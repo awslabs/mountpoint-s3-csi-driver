@@ -829,6 +829,7 @@ func assertLongTermCredentials(t *testing.T, basepath string) {
 	awsprofiletest.AssertCredentialsFromAWSProfile(
 		t,
 		testProfilePrefix+"s3-csi",
+		credentialprovider.CredentialFilePerm,
 		filepath.Join(basepath, testProfilePrefix+"s3-csi-config"),
 		filepath.Join(basepath, testProfilePrefix+"s3-csi-credentials"),
 		testAccessKeyID,
