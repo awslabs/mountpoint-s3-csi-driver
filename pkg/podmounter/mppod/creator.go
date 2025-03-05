@@ -7,6 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 // Labels populated on spawned Mountpoint Pods.
@@ -44,22 +46,22 @@ func NewCreator(config Config) *Creator {
 	return &Creator{config: config}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pvc`.
+// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pv`.
 //
 // It automatically assigns Mountpoint Pod to `pod`'s node.
-// The name of the Mountpoint Pod is consistently generated from `pod` and `pvc` using `MountpointPodNameFor` function.
-func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *corev1.Pod {
+// The name of the Mountpoint Pod is consistently generated from `pod` and `pv` using `MountpointPodNameFor` function.
+func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.Pod {
 	node := pod.Spec.NodeName
-	name := MountpointPodNameFor(string(pod.UID), pvc.Spec.VolumeName)
+	name := MountpointPodNameFor(string(pod.UID), pv.Name)
 
-	return &corev1.Pod{
+	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: c.config.Namespace,
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
 				LabelPodUID:            string(pod.UID),
-				LabelVolumeName:        pvc.Spec.VolumeName,
+				LabelVolumeName:        pv.Name,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 		},
@@ -130,4 +132,28 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 			},
 		},
 	}
+
+	volumeAttributes := extractVolumeAttributes(pv)
+
+	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
+		mpPod.Spec.ServiceAccountName = saName
+	}
+
+	return mpPod
+}
+
+// extractVolumeAttributes extracts volume attributes from given `pv`.
+// It always returns a non-nil map, and it's safe to use even though `pv` doesn't contain any volume attributes.
+func extractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
+	csiSpec := pv.Spec.CSI
+	if csiSpec == nil {
+		return map[string]string{}
+	}
+
+	volumeAttributes := csiSpec.VolumeAttributes
+	if volumeAttributes == nil {
+		return map[string]string{}
+	}
+
+	return volumeAttributes
 }

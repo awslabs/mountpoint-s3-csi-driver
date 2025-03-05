@@ -6,6 +6,8 @@ const (
 	AuthenticationSource = "authenticationSource"
 	STSRegion            = "stsRegion"
 
+	MountpointPodServiceAccountName = "mountpointPodServiceAccountName"
+
 	CSIServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
 	CSIServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
 	CSIPodNamespace         = "csi.storage.k8s.io/pod.namespace"

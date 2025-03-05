@@ -465,6 +465,33 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
 	})
+
+	Context("Mountpoint Pod Customization", func() {
+		It("should use configured service account name in PV", func() {
+			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name:      "mount-s3-sa",
+				Namespace: mountpointNamespace,
+			}}
+			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+			waitForObject(sa)
+
+			vol := createVolume(withVolumeAttributes(map[string]string{
+				"mountpointPodServiceAccountName": sa.Name,
+			}))
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule("test-node")
+
+			mountpointPod := waitForMountpointPodFor(pod, vol)
+			verifyMountpointPodFor(pod, vol, mountpointPod)
+
+			Expect(mountpointPod.Spec.ServiceAccountName).To(Equal(sa.Name))
+
+			mountpointPod.succeed()
+			waitForObjectToDisappear(mountpointPod.Pod)
+		})
+	})
 })
 
 //-- Utilities for tests.
@@ -585,6 +612,13 @@ type volumeModifier func(*testVolume)
 func withCSIDriver(name string) volumeModifier {
 	return func(v *testVolume) {
 		v.pv.Spec.PersistentVolumeSource.CSI.Driver = name
+	}
+}
+
+// withVolumeAttributes returns a `volumeModifier` that updates volume to have given volume attributes.
+func withVolumeAttributes(volAttributes map[string]string) volumeModifier {
+	return func(v *testVolume) {
+		v.pv.Spec.PersistentVolumeSource.CSI.VolumeAttributes = volAttributes
 	}
 }
 
