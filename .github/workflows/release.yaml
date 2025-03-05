@@ -6,15 +6,6 @@ on:
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
 
-# This workflow copies image from testing private repository to:
-# 1) private ARS source repository
-# 2) public repository
-env:
-  GIT_TAG: ${{ github.ref_name }}
-  TAG_PASSED: "test_passed_${{ github.sha }}"
-  IMAGE_NAME: "s3-csi-driver"
-  PUBLIC_REGISTRY: ${{ vars.PUBLIC_REGISTRY }}
-  ARS_REGISTRY: ${{ vars.ARS_REGISTRY }}
 jobs:
   build:
     # this is to prevent the job to run at forked projects
@@ -25,54 +16,6 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Set up crane
-        uses: imjasonh/setup-crane@v0.1
-
-      - name: Configure AWS Credentials from CI Trusted account
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.CI_TRUSTED_IAM_ROLE }}
-          aws-region: ${{ vars.AWS_CI_TRUSTED_REGION }}
-      - name: Login to Amazon ECR (trusted)
-        id: login-ecr-trusted
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Configure AWS Credentials from Prod account
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
-          aws-region: ${{ vars.AWS_PROD_ECR_REGION }}
-      - name: Login to Amazon ECR (prod)
-        id: login-ecr-prod
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Configure AWS Credentials from Prod account (for ECR public)
-        if: ${{ env.PUBLIC_REGISTRY != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.PROD_IAM_IMAGE_ROLE }}
-          aws-region: us-east-1
-      - name: Login to Amazon ECR (public)
-        if: ${{ env.PUBLIC_REGISTRY != '' }}
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v1
-        with:
-          registry-type: public
-
-      - name: Promote image
-        env:
-          SOURCE_REGISTRY: ${{ steps.login-ecr-trusted.outputs.registry }}
-        run: |
-          crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${ARS_REGISTRY}:${GIT_TAG}
-          if [ -n "${PUBLIC_REGISTRY}" ]; then
-            crane copy ${SOURCE_REGISTRY}/${IMAGE_NAME}:${TAG_PASSED} ${PUBLIC_REGISTRY}:${GIT_TAG}
-          fi
-
       - name: Create Release
         id: create-release
         uses: actions/create-release@v1
