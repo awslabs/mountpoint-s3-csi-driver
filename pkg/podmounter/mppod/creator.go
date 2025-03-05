@@ -3,6 +3,7 @@ package mppod
 import (
 	"path/filepath"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -30,6 +31,7 @@ type Config struct {
 	PriorityClassName string
 	Container         ContainerConfig
 	CSIDriverVersion  string
+	ClusterVariant    cluster.Variant
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -76,6 +78,11 @@ func (c *Creator) Create(pod *corev1.Pod, pvc *corev1.PersistentVolumeClaim) *co
 					AllowPrivilegeEscalation: ptr.To(false),
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
+					},
+					RunAsUser:    c.config.ClusterVariant.MountpointPodUserID(),
+					RunAsNonRoot: ptr.To(true),
+					SeccompProfile: &corev1.SeccompProfile{
+						Type: corev1.SeccompProfileTypeRuntimeDefault,
 					},
 				},
 				VolumeMounts: []corev1.VolumeMount{

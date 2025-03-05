@@ -266,7 +266,45 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 			},
 		},
 		{
-			name: "success: doesn't set extra flags if fsGroup is empty string",
+			name: "success: sets gid, allow-other, dir-mode, file-mode flags if fsGroup is provided and allow-other flag is provided in mountOptions",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags:       []string{"--allow-other"},
+								VolumeMountGroup: "123",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"}))).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: sets only allow-root flag if fsGroup is empty string and allow-other flag is not provided in mountOptions",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
 				ctx := context.Background()
@@ -294,7 +332,45 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 					gomock.Eq(credentialprovider.ProvideContext{
 						VolumeID: volumeId,
 					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{}))).Return(nil)
+					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root"}))).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: does not set allow-root flag if fsGroup is empty string and allow-other flag is provided in mountOptions",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags:       []string{"--allow-other"},
+								VolumeMountGroup: "",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID: volumeId,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-other"}))).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
 					t.Fatalf("NodePublishVolume is failed: %v", err)

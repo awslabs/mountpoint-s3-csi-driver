@@ -9,14 +9,13 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile/awsprofiletest"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 const testAccessKeyId = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
-const testFilePerm = util.FileModeUserReadWrite
+const testFilePerm = fs.FileMode(0600)
 
 func TestCreatingAWSProfile(t *testing.T) {
 	defaultSettings := awsprofile.Settings{

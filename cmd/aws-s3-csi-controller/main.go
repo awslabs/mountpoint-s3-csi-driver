@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
@@ -35,8 +36,9 @@ func main() {
 	logf.SetLogger(zap.New())
 
 	log := logf.Log.WithName(csicontroller.Name)
+	client := config.GetConfigOrDie()
 
-	mgr, err := manager.New(config.GetConfigOrDie(), manager.Options{})
+	mgr, err := manager.New(client, manager.Options{})
 	if err != nil {
 		log.Error(err, "Failed to create a new manager")
 		os.Exit(1)
@@ -52,6 +54,7 @@ func main() {
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
+		ClusterVariant:   cluster.DetectVariant(client, log),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		log.Error(err, "Failed to create controller")

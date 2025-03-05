@@ -28,7 +28,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const defaultNonRootUser = int64(e2epod.DefaultNonRootUser)
+const defaultNonRootUser = int64(1001)
 const defaultNonRootGroup = int64(2000)
 
 type jsonMap = map[string]interface{}

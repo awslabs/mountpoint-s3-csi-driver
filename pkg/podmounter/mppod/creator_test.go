@@ -6,28 +6,28 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func TestCreatingMountpointPods(t *testing.T) {
-	// Mountpoint Pod values
-	namespace := "mount-s3"
-	mountpointVersion := "1.10.0"
-	image := "mp-image:latest"
-	imagePullPolicy := corev1.PullAlways
-	command := "/bin/aws-s3-csi-mounter"
-	priorityClassName := "mount-s3-critical"
+const (
+	namespace         = "mount-s3"
+	mountpointVersion = "1.10.0"
+	image             = "mp-image:latest"
+	imagePullPolicy   = corev1.PullAlways
+	command           = "/bin/aws-s3-csi-mounter"
+	priorityClassName = "mount-s3-critical"
+	testNode          = "test-node"
+	testPodUID        = "test-pod-uid"
+	testVolName       = "test-vol"
+	csiDriverVersion  = "1.12.0"
+)
 
-	// Test Pod values
-	testNode := "test-node"
-	testPodUID := "test-pod-uid"
-	testVolName := "test-vol"
-
-	csiDriverVersion := "1.12.0"
-
-	creator := mppod.NewCreator(mppod.Config{
+func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
+	return mppod.Config{
 		Namespace:         namespace,
 		MountpointVersion: mountpointVersion,
 		PriorityClassName: priorityClassName,
@@ -37,7 +37,12 @@ func TestCreatingMountpointPods(t *testing.T) {
 			Command:         command,
 		},
 		CSIDriverVersion: csiDriverVersion,
-	})
+		ClusterVariant:   clusterVariant,
+	}
+}
+
+func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRunAsUser *int64) {
+	creator := mppod.NewCreator(createTestConfig(clusterVariant))
 
 	mpPod := creator.Create(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -94,10 +99,27 @@ func TestCreatingMountpointPods(t *testing.T) {
 	assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 	assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
 	assert.Equals(t, []string{command}, mpPod.Spec.Containers[0].Command)
+	assert.Equals(t, ptr.To(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+	assert.Equals(t, &corev1.Capabilities{
+		Drop: []corev1.Capability{"ALL"},
+	}, mpPod.Spec.Containers[0].SecurityContext.Capabilities)
+	assert.Equals(t, expectedRunAsUser, mpPod.Spec.Containers[0].SecurityContext.RunAsUser)
+	assert.Equals(t, ptr.To(true), mpPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+	assert.Equals(t, &corev1.SeccompProfile{
+		Type: corev1.SeccompProfileTypeRuntimeDefault,
+	}, mpPod.Spec.Containers[0].SecurityContext.SeccompProfile)
 	assert.Equals(t, []corev1.VolumeMount{
 		{
 			Name:      mppod.CommunicationDirName,
 			MountPath: "/" + mppod.CommunicationDirName,
 		},
 	}, mpPod.Spec.Containers[0].VolumeMounts)
+}
+
+func TestCreatingMountpointPods(t *testing.T) {
+	createAndVerifyPod(t, cluster.DefaultKubernetes, ptr.To(int64(1000)))
+}
+
+func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
+	createAndVerifyPod(t, cluster.OpenShift, (*int64)(nil))
 }

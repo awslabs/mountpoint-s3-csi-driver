@@ -15,6 +15,16 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
+// CredentialFilePerm is the default permissions to be used for credential files.
+// It's only readable and writeable by the owner and group.
+// Group access is needed as Mountpoint Pod is run as non-root user
+const CredentialFilePerm = fs.FileMode(0640)
+
+// CredentialDirPerm is the default permissions to be used for credential directories.
+// It's only readable, listable (execute bit), and writeable by the owner and group.
+// Group access is needed as Mountpoint Pod is run as non-root user
+const CredentialDirPerm = fs.FileMode(0750)
+
 // An AuthenticationSource represents the source (i.e., driver-level or pod-level) where the credentials was obtained.
 type AuthenticationSource = string
 
@@ -43,9 +53,6 @@ type Provider struct {
 // access some path visible from both the CSI Driver Node Pod and Mountpoint, and setups files in that volume
 // using [WritePath] and returns paths to these files in [EnvPath], so Mountpoint can correctly read these files.
 type ProvideContext struct {
-	CredentialDirPerm  fs.FileMode
-	CredentialFilePerm fs.FileMode
-
 	// WritePath is basepath to write credentials into.
 	WritePath string
 	// EnvPath is basepath to use while creating environment variables to pass Mountpoint.
@@ -63,12 +70,6 @@ type ProvideContext struct {
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
-}
-
-// SetCredentialPerm sets credential permissions for credential file and directory for `ctx`
-func (ctx *ProvideContext) SetCredentialPerm(credentialDirPerm, credentialFilePerm fs.FileMode) {
-	ctx.CredentialDirPerm = credentialDirPerm
-	ctx.CredentialFilePerm = credentialFilePerm
 }
 
 // SetWriteAndEnvPath sets `WritePath` and `EnvPath` for `ctx`.
