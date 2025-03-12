@@ -224,6 +224,19 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
       - name: Mark tests as passed
         env:
+          AWS_REGION: "${{ vars.AWS_REGION }}"
           REPOSITORY: "${{ steps.login-ecr.outputs.registry }}/${{ env.IMAGE_NAME }}"
+          REPOSITORY_NAME: "${{ env.IMAGE_NAME }}"
         run: |
           docker buildx imagetools create --tag ${REPOSITORY}:${TAG_PASSED} ${REPOSITORY}:${TAG_UNTESTED}
+          for ARCH in amd64 arm64; do
+            MANIFEST=$(aws ecr batch-get-image --repository-name ${REPOSITORY_NAME} \
+              --image-ids imageTag=${TAG_UNTESTED}-linux-${ARCH}-amazon \
+              --region ${AWS_REGION} --query 'images[].imageManifest' --output text)
+
+            aws ecr put-image \
+              --repository-name ${REPOSITORY_NAME} \
+              --image-tag ${TAG_PASSED}-linux-${ARCH}-amazon \
+              --image-manifest "$MANIFEST" \
+              --region ${AWS_REGION}
+          done
