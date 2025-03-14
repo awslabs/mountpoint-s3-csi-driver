@@ -238,5 +238,6 @@ jobs:
               --repository-name ${REPOSITORY_NAME} \
               --image-tag ${TAG_PASSED}-linux-${ARCH}-amazon \
               --image-manifest "$MANIFEST" \
-              --region ${AWS_REGION}
+              --region ${AWS_REGION} 2>&1 | grep -q "ImageAlreadyExistsException" || \
+              { err=$?; [ $err -eq 1 ] || exit $err; }
           done
