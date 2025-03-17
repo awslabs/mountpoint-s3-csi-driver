@@ -4,6 +4,7 @@ set -euox pipefail
 
 # If the cluster is not older than this, it will be re-used.
 MAX_CLUSTER_AGE_SECONDS=$((3 * 24 * 60 * 60)) # 3 days
+CW_LOG_RETENTION_DAYS=30
 
 function eksctl_install() {
   INSTALL_PATH=${1}
@@ -74,6 +75,8 @@ function eksctl_create_cluster() {
     echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
     eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "true"
   fi
+
+  create_log_group_if_absent "${CLUSTER_NAME}" "${REGION}" "${CW_LOG_RETENTION_DAYS}"
 
   # CAUTION: this may fail with "the targeted availability zone, does not currently have sufficient capacity to support the cluster" error, we may require a fix for that
   ${BIN} create cluster \
@@ -164,6 +167,32 @@ function eksctl_cluster_exists() {
     set -e
     return 1
   fi
+}
+
+# CloudWatch Observability addon for EKS creates log groups with no retention policy.
+# And it's cumbersome to configure retention via addon configuration.
+# We pre-create these log groups if they don't exist and set the retention policy here.
+function create_log_group_if_absent() {
+  CLUSTER_NAME=${1}
+  REGION=${2}
+  RETENTION_DAYS=${3}
+
+  container_insights_log_groups=(
+    "/aws/containerinsights/${CLUSTER_NAME}/application"
+    "/aws/containerinsights/${CLUSTER_NAME}/dataplane"
+    "/aws/containerinsights/${CLUSTER_NAME}/host"
+    "/aws/containerinsights/${CLUSTER_NAME}/performance"
+  )
+
+  for log_group in "${container_insights_log_groups[@]}"; do
+    # Check if the log group exists
+    if ! aws logs describe-log-groups --region ${REGION} --log-group-name-prefix "$log_group" \
+        --query "logGroups[?logGroupName=='$log_group'] | length(@)" \
+        --output text | grep -q "1"; then
+      aws logs create-log-group --region ${REGION} --log-group-name "$log_group"
+      aws logs put-retention-policy --region ${REGION} --log-group-name "$log_group" --retention-in-days "$RETENTION_DAYS"
+    fi
+  done
 }
 
 function delete_security_group() {
