@@ -42,7 +42,7 @@ metadata:
 spec:
   containers:
     - name: app
-      image: centos
+      image: ubuntu
       command: ["/bin/sh"]
       args: ["-c", "echo 'Hello from the container!' >> /data/$(date -u).txt; tail -f /dev/null"]
       volumeMounts:
