@@ -17,7 +17,7 @@ spec:
     - cache-xz s3-csi-driver--usw2-az1--x-s3 # Must be an Express One Zone bucket. More information: https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#shared-cache
   csi:
     driver: s3.csi.aws.com # Required
-    volumeHandle: s3-csi-driver-volume
+    volumeHandle: s3-csi-driver-volume # Must be unique
     volumeAttributes:
       bucketName: s3-csi-driver
 ---
