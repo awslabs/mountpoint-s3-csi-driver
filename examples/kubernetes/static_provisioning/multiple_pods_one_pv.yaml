@@ -16,7 +16,7 @@ spec:
     - region us-east-1
   csi:
     driver: s3.csi.aws.com # required
-    volumeHandle: s3-csi-driver-volume
+    volumeHandle: s3-csi-driver-volume # Must be unique
     volumeAttributes:
       bucketName: s3-csi-bucket-name
 ---

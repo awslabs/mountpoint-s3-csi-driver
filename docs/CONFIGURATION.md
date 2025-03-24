@@ -23,6 +23,7 @@ spec:
     name: s3-pvc # Name of your PVC
   csi:
     driver: s3.csi.aws.com
+    volumeHandle: s3-csi-driver-volume # Must be unique
     ...
 ---
 apiVersion: v1
@@ -36,6 +37,9 @@ spec:
 ```
 
 See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
+
+> [!IMPORTANT]
+> You need to make sure that `volumeHandle` of your PV is unique, this is needed because Kubernetes will only process a volume once per its `volumeHandle`. If multiple PVs uses the same `volumeHandle`, only one will get processed. See [I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide for more information.
 
 ## AWS Credentials
 
@@ -290,10 +294,10 @@ spec:
     - region us-east-1
   csi:
     driver: s3.csi.aws.com
-    volumeHandle: example-s3-pv
+    volumeHandle: example-s3-pv # Must be unique
     volumeAttributes:
       bucketName: amzn-s3-demo-bucket
-      authenticationSource: pod
+      authenticationSource: pod # <-- HERE
 ```
 
 Pods mounting the specified PV will use the pod's own Service Account for IRSA authentication.
@@ -352,11 +356,11 @@ This may be required in case the CSI Driver is unable to automatically configure
 ```yaml
 csi:
   driver: s3.csi.aws.com
-  volumeHandle: example-s3-pv
+  volumeHandle: example-s3-pv # Must be unique
   volumeAttributes:
     bucketName: amzn-s3-demo-bucket
     authenticationSource: pod
-    stsRegion: us-east-1
+    stsRegion: us-east-1 # <-- HERE
 ```
 
 Alternatively, the CSI Driver will detect the `--region` argument specified in the Mountpoint options.
