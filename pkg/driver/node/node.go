@@ -268,6 +268,9 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
 		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
+		AccessKeyID:          volumeCtx[volumecontext.AccessKeyID],
+		SecretAccessKey:      volumeCtx[volumecontext.SecretAccessKey],
+		SessionToken:         volumeCtx[volumecontext.SessionToken],
 	}
 }
 
