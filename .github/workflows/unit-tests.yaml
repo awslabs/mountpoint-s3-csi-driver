@@ -1,12 +1,9 @@
 name: Unit tests
 
-# on:
-#   push:
-#     branches: [ "main", "feature/*" ]
-#   pull_request:
-#     branches: [ "main", "feature/*" ]
-#   merge_group:
-#     types: [ "checks_requested" ]
+on:
+  push:
+    branches:
+      - '**'
 
 jobs:
   build:
@@ -32,21 +29,21 @@ jobs:
       # Run tests as root as we require it for systemd tests
       run: sudo make test
 
-    - name: Check test coverage
-      run: make cover
+    # - name: Check test coverage
+    #   run: make cover
 
-    - name: Upload report
-      uses: actions/upload-artifact@v4
-      id: uploaded-report
-      with:
-        name: cover
-        path: cover.html
+    # - name: Upload report
+    #   uses: actions/upload-artifact@v4
+    #   id: uploaded-report
+    #   with:
+    #     name: cover
+    #     path: cover.html
 
-    - name: Comment test coverage
-      if: ${{ github.event_name == 'pull_request' }}
-      env:
-        TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
-        ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
-      run: |
-        echo "### Total test coverage: ${{ env.TOTAL_COVERAGE }}%" >> $GITHUB_STEP_SUMMARY
-        echo "Download report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
+    # - name: Comment test coverage
+    #   if: ${{ github.event_name == 'pull_request' }}
+    #   env:
+    #     TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
+    #     ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
+    #   run: |
+    #     echo "### Total test coverage: ${{ env.TOTAL_COVERAGE }}%" >> $GITHUB_STEP_SUMMARY
+    #     echo "Download report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
