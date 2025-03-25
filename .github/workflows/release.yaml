@@ -1,52 +1,84 @@
 name: Release
-
-# on:
-#   push:
-#     # Sequence of patterns matched against refs/tags
-#     tags:
-#       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+run-name: release ${{ github.event.inputs.tag }}
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to be released (e.g., 1.0.0)"
+        required: true
+      all_platforms:
+        description: "Build for all platforms (linux/amd64,linux/arm64) or just linux/amd64"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
-    # this is to prevent the job to run at forked projects
-    if: ${{ ! github.repository.fork }}
-    environment: release
-    runs-on: ubuntu-latest
+  prod-container-with-docker:
     permissions:
-      id-token: write
-      contents: write
+      contents: read
+      packages: write
+    uses: scality/workflows/.github/workflows/docker-build.yaml@v2
+    with:
+      context: .
+      name: mountpoint-s3-csi-driver
+      namespace: ${{ github.repository_owner }}
+      tag: ${{ inputs.tag }}
+      platforms: ${{ inputs.all_platforms && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+
+  package-helm-chart:
+    runs-on: ubuntu-latest
     steps:
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.16.2
+
+      - name: login to ghcr.io with helm
+        run: helm registry login -u actions -p ${{ github.token }} ghcr.io
+
+      - name: Package Helm Chart
+        run: |
+          helm package ./charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }} --app-version ${{ inputs.tag }}
+
+      - name: Upload Helm Chart as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: scality-mountpoint-s3-csi-driver-${{ inputs.tag }}.tgz
+
+      - name: Push helm chart to ghcr.io
+        run: helm push scality-mountpoint-s3-csi-driver-${{ inputs.tag }}.tgz oci://ghcr.io/${{ github.repository }}/helm-charts
+
+      - name: Pull the helm chart
+        run: helm pull oci://ghcr.io/${{ github.repository }}/helm-charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }}
+
+      - name: Show the helm chart
+        run: helm show all oci://ghcr.io/${{ github.repository }}/helm-charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }}
+  
+      - name: Template the helm chart
+        run: helm template oci://ghcr.io/${{ github.repository }}/helm-charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }}
+
+  create-github-release:
+    runs-on: ubuntu-latest
+    needs: [prod-container-with-docker, package-helm-chart]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
+          target_commitish: ${{ github.sha }}
+          tag_name: ${{ inputs.tag }}
+          name: Release ${{ inputs.tag }}
+          generate_release_notes: true
           body: |
-            Mountpoint for Amazon S3 CSI Driver
+            Mountpoint for Scality S3 CSI Driver
 
             ## CHANGELOG
-            See [CHANGELOG](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/CHANGELOG.md) for full list of changes
-          draft: true
-          prerelease: false
-  helm:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        with:
-          config: .github/cr.yaml
-          mark_as_latest: false
+            See [CHANGELOG](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/CHANGELOG.md) for full list of changes
