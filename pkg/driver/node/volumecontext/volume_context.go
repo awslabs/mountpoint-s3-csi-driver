@@ -3,6 +3,9 @@ package volumecontext
 
 const (
 	BucketName           = "bucketName"
+	AccessKeyID          = "accessKeyId"
+	SecretAccessKey      = "secretAccessKey"
+	SessionToken         = "sessionToken"
 	AuthenticationSource = "authenticationSource"
 	STSRegion            = "stsRegion"
 

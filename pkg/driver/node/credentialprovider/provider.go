@@ -34,6 +34,7 @@ const (
 	AuthenticationSourceUnspecified AuthenticationSource = ""
 	AuthenticationSourceDriver      AuthenticationSource = "driver"
 	AuthenticationSourcePod         AuthenticationSource = "pod"
+	AuthenticationSourceAttr        AuthenticationSource = "attr"
 )
 
 // A Provider provides methods for accessing AWS credentials.
@@ -66,6 +67,10 @@ type ProvideContext struct {
 	PodNamespace         string
 	ServiceAccountTokens string
 	ServiceAccountName   string
+	// Authentication values in volume attributes
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
 	// StsRegion is the `stsRegion` parameter passed via volume attribute.
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
@@ -99,6 +104,9 @@ func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envp
 	case AuthenticationSourcePod:
 		env, err := c.provideFromPod(ctx, provideCtx)
 		return env, AuthenticationSourcePod, err
+	case AuthenticationSourceAttr:
+		env, err := c.provideFromAttr(provideCtx)
+		return env, AuthenticationSourceAttr, err
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		env, err := c.provideFromDriver(provideCtx)
 		return env, AuthenticationSourceDriver, err
