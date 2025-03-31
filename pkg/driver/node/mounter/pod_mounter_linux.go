@@ -47,8 +47,6 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 
 	if args.Has(mountpoint.ArgReadOnly) {
 		flags |= syscall.MS_RDONLY
-		// Remove the read-only argument from the list as mount-s3 does not support it when using FUSE file descriptor
-		args.Remove(mountpoint.ArgReadOnly)
 	}
 
 	if args.Has(mountpoint.ArgAllowOther) || args.Has(mountpoint.ArgAllowRoot) {
