@@ -92,7 +92,7 @@ func checkListingPathWithEntries(f *framework.Framework, pod *v1.Pod, path strin
 	gomega.Expect(strings.Fields(stdout)).To(gomega.Equal(entries))
 }
 
-func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
+func createVolumeResource(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, accessMode v1.PersistentVolumeAccessMode, mountOptions []string) *storageframework.VolumeResource {
 	f := config.Framework
 	r := storageframework.VolumeResource{
 		Config:  config,
@@ -114,7 +114,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 			StorageClassName:       "", // for static provisioning
 			NodeAffinity:           volumeNodeAffinity,
 			MountOptions:           mountOptions, // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
-			AccessModes:            []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+			AccessModes:            []v1.PersistentVolumeAccessMode{accessMode},
 			Capacity: v1.ResourceList{
 				v1.ResourceStorage: resource.MustParse("1200Gi"),
 			},
@@ -132,7 +132,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 		Spec: v1.PersistentVolumeClaimSpec{
 			StorageClassName: ptr.To(""), // for static provisioning
 			VolumeName:       pvName,
-			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+			AccessModes:      []v1.PersistentVolumeAccessMode{accessMode},
 			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{
 					v1.ResourceStorage: resource.MustParse("1200Gi"),
@@ -153,6 +153,14 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
 	framework.ExpectNoError(err, "PVC, PV failed to bind")
 	return &r
+}
+
+func createVolumeResourceWithAccessMode(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, accessMode v1.PersistentVolumeAccessMode) *storageframework.VolumeResource {
+	return createVolumeResource(ctx, config, pattern, accessMode, []string{})
+}
+
+func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
+	return createVolumeResource(ctx, config, pattern, v1.ReadWriteMany, mountOptions)
 }
 
 func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
