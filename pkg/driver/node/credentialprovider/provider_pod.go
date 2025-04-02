@@ -48,56 +48,51 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to parse service account tokens: %v", err)
 	}
 
-	// stsToken := tokens[serviceAccountTokenAudienceSTS]
-	stsToken := tokens[serviceAccountTokenAudiencePodIdentity]
-	if stsToken == nil {
-		klog.Errorf("credentialprovider: `authenticationSource` configured to `pod` but no service account tokens for %s received. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage, serviceAccountTokenAudiencePodIdentity)
-		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudiencePodIdentity)
-	}
-
-	// roleARN, err := c.findPodServiceAccountRole(ctx, provideCtx)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// region, err := c.stsRegion(provideCtx)
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
-	// }
-
-	// defaultRegion := os.Getenv(envprovider.EnvDefaultRegion)
-	// if defaultRegion == "" {
-	// 	defaultRegion = region
-	// }
-
 	podID := provideCtx.PodID
 	volumeID := provideCtx.VolumeID
 	if podID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
 
-	tokenName := podLevelServiceAccountTokenName(podID, volumeID)
-
-	err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to write service account token: %v", err)
+	stsToken := tokens[serviceAccountTokenAudienceSTS]
+	if stsToken == nil {
+		klog.Errorf("credentialprovider: `authenticationSource` configured to `pod` but no service account tokens for %s received. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage, serviceAccountTokenAudienceSTS)
+		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudienceSTS)
 	}
 
+	tokenName := podLevelServiceAccountTokenName(podID, volumeID)
+	err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to write service account STS token: %v", err)
+	}
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
+
+	eksToken := tokens[serviceAccountTokenAudiencePodIdentity]
+	if eksToken == nil {
+		klog.Errorf("credentialprovider: `authenticationSource` configured to `pod` but no service account tokens for %s received. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage, serviceAccountTokenAudiencePodIdentity)
+		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudiencePodIdentity)
+	}
+
+	tokenNameEKS := eksPodIdentityServiceAccountTokenName(podID, volumeID)
+	err = renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
+	}
+	tokenFileEKS := filepath.Join(provideCtx.EnvPath, tokenNameEKS)
 
 	podNamespace := provideCtx.PodNamespace
 	podServiceAccount := provideCtx.ServiceAccountName
 	cacheKey := podNamespace + "/" + podServiceAccount
 
-	eksPodIdentityCredentialsEnvironment, eksPodIdentityCredentialsEnvironmentError := c.createEKSPodIdentityCredentialsEnvironment(tokenFile)
+	irsaCredentialsEnvironment, irsaCredentialsEnvironmentError := c.createIRSACredentialsEnvironment(ctx, provideCtx, tokenFile)
+	eksPodIdentityCredentialsEnvironment, eksPodIdentityCredentialsEnvironmentError := c.createEKSPodIdentityCredentialsEnvironment(tokenFileEKS)
+
+	if irsaCredentialsEnvironmentError != nil && eksPodIdentityCredentialsEnvironmentError != nil {
+		klog.Error("IRSA and EKS Pod Identity failed")                                                                                                                    // TODO: Improve error message
+		return nil, status.Errorf(codes.Internal, "IRSA and EKS Pod Identity failed: %v, %v", irsaCredentialsEnvironmentError, eksPodIdentityCredentialsEnvironmentError) // TODO: Improve error message
+	}
 
 	env := envprovider.Environment{
-		// envprovider.EnvRoleARN:              roleARN,
-		// envprovider.EnvWebIdentityTokenFile: filepath.Join(provideCtx.EnvPath, tokenName),
-
-		// envprovider.EnvRegion:        region,
-		// envprovider.EnvDefaultRegion: defaultRegion,
-
 		envprovider.EnvEC2MetadataDisabled: "true",
 
 		// TODO: These were needed with `systemd` but probably won't be necessary with containerization.
@@ -105,12 +100,19 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		envprovider.EnvConfigFile:            filepath.Join(provideCtx.EnvPath, "disable-config"),
 		envprovider.EnvSharedCredentialsFile: filepath.Join(provideCtx.EnvPath, "disable-credentials"),
 	}
+
+	if irsaCredentialsEnvironmentError != nil {
+		klog.Error("irsaCredentialsEnvironmentError") // TODO: Improve error message
+	} else {
+		env.Merge(irsaCredentialsEnvironment)
+	}
+
 	if eksPodIdentityCredentialsEnvironmentError != nil {
-		klog.Error("eksPodIdentityCredentialsEnvironmentError")
-		return nil, status.Errorf(codes.Internal, "eksPodIdentityCredentialsEnvironmentError: %v", err)
+		klog.Error("eksPodIdentityCredentialsEnvironmentError") // TODO: Improve error message
 	} else {
 		env.Merge(eksPodIdentityCredentialsEnvironment)
 	}
+
 	return env, nil
 }
 
@@ -155,9 +157,41 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 
 // podLevelServiceAccountTokenName returns service account token name for Pod-level identity.
 // It escapes from slashes to make this token name path-safe.
-func podLevelServiceAccountTokenName(podID string, volumeID string) string {
+func podLevelServiceAccountTokenName(podID string, volumeID string) string { // TODO: Consider reusability with eksPodIdentityServiceAccountTokenName or at least renaming this one.
 	id := escapedVolumeIdentifier(podID, volumeID)
 	return id + ".token"
+}
+
+// eksPodIdentityServiceAccountTokenName returns service account token name for Pod-level identity with EKS Pod Identity.
+// It escapes from slashes to make this token name path-safe.
+func eksPodIdentityServiceAccountTokenName(podID string, volumeID string) string {
+	id := escapedVolumeIdentifier(podID, volumeID)
+	return id + "-eks-pod-identity.token"
+}
+
+// createIRSACredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with IRSA
+func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provideCtx ProvideContext, tokenFile string) (envprovider.Environment, error) {
+	roleARN, err := c.findPodServiceAccountRole(ctx, provideCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	region, err := c.stsRegion(provideCtx)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect STS AWS Region, please explicitly set the AWS Region, see "+stsConfigDocsPage)
+	}
+
+	defaultRegion := os.Getenv(envprovider.EnvDefaultRegion)
+	if defaultRegion == "" {
+		defaultRegion = region
+	}
+
+	return envprovider.Environment{
+		envprovider.EnvRoleARN:              roleARN,
+		envprovider.EnvWebIdentityTokenFile: tokenFile,
+		envprovider.EnvRegion:               region,
+		envprovider.EnvDefaultRegion:        defaultRegion,
+	}, nil
 }
 
 // createEKSPodIdentityCredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with EKS Pod Identity
