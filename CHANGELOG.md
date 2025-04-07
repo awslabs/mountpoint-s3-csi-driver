@@ -1,5 +1,9 @@
 # Unreleased
 
+# v1.14.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.14.0/README.md)
+
 ### Notable changes
 * Support Mountpoint [version 1.16.1](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.16.1)
   * __Breaking change:__ The logging target used by a significant amount of Mountpoint code has changed. Some logs originally written under the `mountpoint_s3` target are now written under `mountpoint_s3_fs`. You may need to update any code configuring or filtering logging. ([mountpoint-s3#1304](https://github.com/awslabs/mountpoint-s3/pull/1304))
