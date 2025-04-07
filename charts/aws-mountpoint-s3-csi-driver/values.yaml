@@ -78,6 +78,9 @@ sidecars:
         name: plugin-dir
     resources: {}
 
+initContainer:
+  resources: {}
+
 controller:
   serviceAccount:
     # Specifies whether a service account should be created
