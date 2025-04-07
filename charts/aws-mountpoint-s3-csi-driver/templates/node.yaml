@@ -67,9 +67,13 @@ spec:
           env:
             - name: MOUNTPOINT_INSTALL_DIR
               value: /target
+          resources: {{ toYaml .Values.initContainer.resources | nindent 12 }}
           volumeMounts:
             - name: mp-install
               mountPath: /target
+          {{- with default .Values.node.resources .Values.initContainer.install-mountpoint.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- end }}
 
       containers:
