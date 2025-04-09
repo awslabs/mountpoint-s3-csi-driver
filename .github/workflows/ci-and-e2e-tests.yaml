@@ -1,0 +1,35 @@
+name: CI & E2E Tests
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  dev-image:
+    name: Dev Image
+    permissions:
+      contents: read
+      packages: write
+    uses: scality/workflows/.github/workflows/docker-build.yaml@v2
+    with:
+      context: .
+      name: mountpoint-s3-csi-driver
+      namespace: ${{ github.repository_owner }}
+      tag: ${{ github.sha }}
+
+  controller-e2e-tests:
+    name: E2E Controller Tests
+    runs-on: ubuntu-22.04
+    needs: dev-image
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run Common Setup
+        uses: ./.github/actions/e2e-setup-common
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Run Controller Tests
+        run: make e2e-controller

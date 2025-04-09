@@ -1,0 +1,41 @@
+name: "Setup Common"
+description: "Common setup steps for E2E tests"
+inputs:
+  ref:
+    description: "Git ref to checkout"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+
+    - name: Login to Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io/scality
+        username: "${{ github.repository_owner }}"
+        password: "${{ github.token }}"
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: "go.mod"
+
+    - name: Install Ginkgo CLI
+      shell: bash
+      run: go install github.com/onsi/ginkgo/v2/ginkgo
+
+    - name: Create Kind Cluster
+      uses: helm/kind-action@v1.12.0
+      with:
+        wait: 90s
+        cluster_name: helm-test-cluster
+
+    - name: Pull Dev Image into KIND Cluster
+      shell: bash
+      run: |
+        docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
+        kind load docker-image ghcr.io/${{ github.repository }}:${{ github.sha }} --name helm-test-cluster
