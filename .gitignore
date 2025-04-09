@@ -6,4 +6,4 @@ go.work.sum
 .github/artifacts/benchmark-data.json
 .github/artifacts/data.json
 cover.out
-cover.html
+coverage.txt
