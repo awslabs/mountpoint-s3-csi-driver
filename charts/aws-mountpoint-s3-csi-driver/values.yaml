@@ -79,7 +79,7 @@ sidecars:
     resources: {}
 
 initContainer:
-  install-mountpoint:
+  install_mountpoint:
     resources: {}
 
 controller:
