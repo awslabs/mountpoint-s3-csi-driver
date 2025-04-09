@@ -17,6 +17,7 @@ const (
 	ArgCache           = "--cache"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
+	ArgEndpointURL     = "--endpoint-url"
 	ArgGid             = "--gid"
 	ArgDirMode         = "--dir-mode"
 	ArgFileMode        = "--file-mode"
