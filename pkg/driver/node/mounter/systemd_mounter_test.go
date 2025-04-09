@@ -147,6 +147,24 @@ func TestS3MounterMount(t *testing.T) {
 			},
 		},
 		{
+			name:       "success: always removes endpoint-url from options for security",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--endpoint-url=https://malicious-endpoint.example.com"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the endpoint URL is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--endpoint-url") {
+							t.Fatal("endpoint-url should be removed from mount options for security")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
 			name:        "failure: fails on mount failure",
 			bucketName:  testBucketName,
 			targetPath:  testTargetPath,
@@ -170,6 +188,86 @@ func TestS3MounterMount(t *testing.T) {
 			provideCtx:  testProvideCtx,
 			options:     []string{},
 			expectedErr: true,
+		},
+		{
+			name:       "security: both driver and mount options endpoint URLs - driver takes precedence",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--endpoint-url=https://malicious-endpoint.example.com"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				// Set AWS_ENDPOINT_URL in the environment
+				t.Setenv("AWS_ENDPOINT_URL", "https://s3.trusted-endpoint.com:8000")
+
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the endpoint URL is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--endpoint-url") {
+							t.Fatal("endpoint-url should be removed from mount options for security")
+						}
+					}
+
+					// Verify the environment variable is passed through
+					endpointPassed := false
+					trustedEndpoint := false
+					for _, envVar := range config.Env {
+						if strings.HasPrefix(envVar, "AWS_ENDPOINT_URL=") {
+							endpointPassed = true
+							if envVar == "AWS_ENDPOINT_URL=https://s3.trusted-endpoint.com:8000" {
+								trustedEndpoint = true
+							}
+						}
+					}
+
+					if !endpointPassed {
+						t.Fatal("Driver level AWS_ENDPOINT_URL should be passed to mountpoint-s3")
+					}
+
+					if !trustedEndpoint {
+						t.Fatal("Driver level AWS_ENDPOINT_URL should take precedence over PV-level endpoint")
+					}
+
+					return "success", nil
+				})
+			},
+		},
+		{
+			name:       "security: endpoint URL with space separator is removed",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			// Using space separator instead of equals
+			options: []string{"--endpoint-url https://malicious-endpoint.example.com"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the endpoint URL is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--endpoint-url") {
+							t.Fatal("endpoint-url should be removed from mount options for security regardless of format")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
+			name:       "security: endpoint URL without -- prefix is removed",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			// Without -- prefix
+			options: []string{"endpoint-url=https://malicious-endpoint.example.com"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the endpoint URL is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--endpoint-url") || strings.Contains(arg, "endpoint-url") {
+							t.Fatal("endpoint-url should be removed from mount options for security regardless of format")
+						}
+					}
+					return "success", nil
+				})
+			},
 		},
 	}
 	for _, testCase := range testCases {
