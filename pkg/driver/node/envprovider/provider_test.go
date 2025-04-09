@@ -72,6 +72,17 @@ func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
 			},
 		},
 		{
+			name: "s3 endpoint url env var set",
+			env: map[string]string{
+				"AWS_REGION":       "us-west-1",
+				"AWS_ENDPOINT_URL": "https://custom-endpoint.example.com",
+			},
+			want: []string{
+				"AWS_ENDPOINT_URL=https://custom-endpoint.example.com",
+				"AWS_REGION=us-west-1",
+			},
+		},
+		{
 			name: "additional env variables shouldn't be passed",
 			env: map[string]string{
 				"AWS_REGION":       "us-west-1",

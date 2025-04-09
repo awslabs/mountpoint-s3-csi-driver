@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"slices"
+
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
@@ -16,7 +18,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
-	"slices"
 )
 
 type mounterTestEnv struct {
@@ -114,6 +115,34 @@ func TestS3MounterMount(t *testing.T) {
 					}
 					t.Fatal("Bad env")
 					return "", nil
+				})
+			},
+		},
+		{
+			name:       "success: driver environment s3 endpoint url",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--aws-max-attempts=10"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				// Set AWS_ENDPOINT_URL in the environment
+				t.Setenv("AWS_ENDPOINT_URL", "https://s3.scality-storage.local:8000")
+
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify that the environment variable is passed to mountpoint-s3
+					endpointPassed := false
+					for _, envVar := range config.Env {
+						if envVar == "AWS_ENDPOINT_URL=https://s3.scality-storage.local:8000" {
+							endpointPassed = true
+							break
+						}
+					}
+
+					if !endpointPassed {
+						t.Fatal("Driver level AWS_ENDPOINT_URL should be passed to mountpoint-s3")
+					}
+
+					return "success", nil
 				})
 			},
 		},
