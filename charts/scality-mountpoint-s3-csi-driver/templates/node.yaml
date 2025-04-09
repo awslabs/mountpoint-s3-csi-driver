@@ -115,6 +115,10 @@ spec:
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             {{- end -}}
+            {{- if .Values.node.s3EndpointUrl }}
+            - name: AWS_ENDPOINT_URL
+              value: {{ .Values.node.s3EndpointUrl }}
+            {{- end -}}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

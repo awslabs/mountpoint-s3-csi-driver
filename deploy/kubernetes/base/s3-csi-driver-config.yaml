@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-csi-driver-config
+  labels:
+    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+data:
+  # Uncomment and set the s3-endpoint-url if needed
+  # s3-endpoint-url: "https://s3.scality.com:8000"

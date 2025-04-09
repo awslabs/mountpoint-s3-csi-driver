@@ -6,3 +6,9 @@ images:
   - name: csi-driver
     newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
     newTag: v1.13.0
+# Uncomment to set the S3 endpoint URL
+# configMapGenerator:
+#   - name: s3-csi-driver-config
+#     behavior: merge
+#     literals:
+#       - s3-endpoint-url=https://s3.scality.com:8000
