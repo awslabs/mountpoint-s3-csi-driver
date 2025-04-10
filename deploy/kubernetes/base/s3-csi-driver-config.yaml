@@ -6,5 +6,6 @@ metadata:
   labels:
     app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
 data:
+  dummy: "" # This ensures data is a proper object even when no values are set
   # Uncomment and set the s3-endpoint-url if needed
   # s3-endpoint-url: "https://s3.scality.com:8000"

@@ -7,9 +7,22 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 - `s3_express_specify_az.yaml` - same as above, but this uses a [S3 Express One Zone](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-one-zone.html) directory bucket and shows how to specify the availability zone (AZ) of the [persistent volume](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity) to co-locate the pods with the bucket for lower latency access
 - `multiple_buckets_one_pod.yaml` - same as above, with multiple buckets mounted in one pod. Note: when mounting multiple buckets in the same pod, the `volumeHandle` must be unique as specified in the [CSI documentation](https://kubernetes.io/docs/concepts/storage/volumes/#csi).
 - `multiple_pods_one_pv.yaml` - same as above, with multiple pods mounting the same persistent volume, in Deployment kind, that can be used to scale pods, using HPA or other method to create more replicas
-- `caching.yaml` - shows how to configure mountpoint to use a cache directory. See the [Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#caching-configuration) for more details on caching options. Please thumbs up [#11](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/141) or add deatils about your use case if you want improvements in this area.
+- `caching.yaml` - shows how to configure mountpoint to use a cache directory. See the [Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#caching-configuration) for more details on caching options. Please thumbs up [#11](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/141) or add details about your use case if you want improvements in this area.
 - `kms_sse.yaml` - demonstrates using SSE-KMS encryption with a customer supplied key id. See the [Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#data-encryption) for more details.
 - `aws_max_attempts.yaml` - configure the number of retries for requests to S3. This option is passed to Mountpoint as the `AWS_MAX_ATTEMPTS` environment variable. See the [Mountpoint configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#other-s3-bucket-configuration) for more details.
+
+## AWS Endpoint URL Configuration
+For security and consistency reasons, if `--endpoint-url` is specified in the `mountOptions` of a PersistentVolume, it will be **ignored** by the driver. This is enforced in both systemd and pod mounters to prevent potential security risks like endpoint redirection attacks.
+
+To configure a custom endpoint URL for S3 requests, you must set it at the driver level using one of the following methods:
+
+### Using Helm
+```yaml
+# values.yaml for Helm chart
+node:
+  s3EndpointUrl: "https://s3.example.com:8000"
+```
+
 ## Configure
 ### Edit [Persistent Volume](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
 > Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html) for a general purpose bucket or the [S3 Express One Zone documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-create.html) for a directory bucket.

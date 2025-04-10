@@ -288,6 +288,230 @@ func TestPodMounter(t *testing.T) {
 			}
 		})
 
+		t.Run("Always removes endpoint URL from mount options for security", func(t *testing.T) {
+			testCtx := setup(t)
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Explicitly include endpoint-url in the mount options
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+				mountpoint.ArgEndpointURL + "=https://malicious-endpoint.example.com",
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			gotFile := os.NewFile(uintptr(got.Fd), "fd")
+			mountertest.AssertSameFile(t, devNull, gotFile)
+			// Reset fd as they might be different in different ends.
+			got.Fd = 0
+
+			// Verify --endpoint-url is not in the args list
+			for _, arg := range got.Args {
+				if strings.HasPrefix(arg, "--endpoint-url") {
+					t.Fatalf("Expected --endpoint-url to be removed from args, but found: %s", arg)
+				}
+			}
+
+			assert.Equals(t, mountoptions.Options{
+				BucketName: testCtx.bucketName,
+				Args: []string{
+					"--read-only",
+					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion),
+				},
+				Env: envprovider.Default().List(),
+			}, got)
+		})
+
+		t.Run("Security: both driver and mount options endpoint URLs - driver takes precedence", func(t *testing.T) {
+			testCtx := setup(t)
+
+			// Set AWS_ENDPOINT_URL in the environment
+			t.Setenv("AWS_ENDPOINT_URL", "https://s3.trusted-endpoint.com:8000")
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Explicitly include endpoint-url in the mount options
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+				mountpoint.ArgEndpointURL + "=https://malicious-endpoint.example.com",
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			gotFile := os.NewFile(uintptr(got.Fd), "fd")
+			mountertest.AssertSameFile(t, devNull, gotFile)
+			// Reset fd as they might be different in different ends.
+			got.Fd = 0
+
+			// Verify --endpoint-url is not in the args list
+			for _, arg := range got.Args {
+				if strings.HasPrefix(arg, "--endpoint-url") {
+					t.Fatalf("Expected --endpoint-url to be removed from args, but found: %s", arg)
+				}
+			}
+
+			// Verify the trusted environment variable is passed through
+			hasEndpointURL := false
+			hasTrustedEndpoint := false
+			for _, envVar := range got.Env {
+				if strings.HasPrefix(envVar, "AWS_ENDPOINT_URL=") {
+					hasEndpointURL = true
+					if envVar == "AWS_ENDPOINT_URL=https://s3.trusted-endpoint.com:8000" {
+						hasTrustedEndpoint = true
+					}
+				}
+			}
+			assert.Equals(t, true, hasEndpointURL)
+			assert.Equals(t, true, hasTrustedEndpoint)
+		})
+
+		t.Run("Security: endpoint URL with space separator is removed", func(t *testing.T) {
+			testCtx := setup(t)
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Use space separator instead of equals
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+				"--endpoint-url https://malicious-endpoint.example.com",
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			// Verify endpoint-url is not in the args list regardless of format
+			for _, arg := range got.Args {
+				if strings.Contains(arg, "--endpoint-url") {
+					t.Fatalf("Expected --endpoint-url to be removed from args, but found: %s", arg)
+				}
+			}
+		})
+
+		t.Run("Security: endpoint URL without -- prefix is removed", func(t *testing.T) {
+			testCtx := setup(t)
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Without -- prefix
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+				"endpoint-url=https://malicious-endpoint.example.com",
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			// Verify endpoint-url is not in the args list regardless of format
+			for _, arg := range got.Args {
+				if strings.Contains(arg, "--endpoint-url") || strings.Contains(arg, "endpoint-url") {
+					t.Fatalf("Expected endpoint-url to be removed from args, but found: %s", arg)
+				}
+			}
+		})
+
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {
 			testCtx := setup(t)
 
