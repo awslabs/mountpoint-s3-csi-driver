@@ -234,6 +234,60 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, credentialprovider.CredentialDirPerm, credDirInfo.Mode().Perm())
 		})
 
+		t.Run("success: driver environment s3 endpoint url", func(t *testing.T) {
+			testCtx := setup(t)
+
+			// Set AWS_ENDPOINT_URL in the environment
+			t.Setenv("AWS_ENDPOINT_URL", "https://s3.scality-storage.local:8000")
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			// Verify AWS_ENDPOINT_URL environment variable is passed to the pod
+			endpointPassed := false
+			for _, env := range got.Env {
+				if env == "AWS_ENDPOINT_URL=https://s3.scality-storage.local:8000" {
+					endpointPassed = true
+					break
+				}
+			}
+
+			if !endpointPassed {
+				t.Fatal("Driver level AWS_ENDPOINT_URL should be passed to mountpoint-s3 pod")
+			}
+		})
+
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {
 			testCtx := setup(t)
 

@@ -13,6 +13,7 @@ const (
 	EnvDefaultRegion         = "AWS_DEFAULT_REGION"
 	EnvSTSRegionalEndpoints  = "AWS_STS_REGIONAL_ENDPOINTS"
 	EnvMaxAttempts           = "AWS_MAX_ATTEMPTS"
+	EnvEndpointURL           = "AWS_ENDPOINT_URL"
 	EnvProfile               = "AWS_PROFILE"
 	EnvConfigFile            = "AWS_CONFIG_FILE"
 	EnvSharedCredentialsFile = "AWS_SHARED_CREDENTIALS_FILE"
@@ -40,6 +41,7 @@ var envAllowlist = []Key{
 	EnvRegion,
 	EnvDefaultRegion,
 	EnvSTSRegionalEndpoints,
+	EnvEndpointURL,
 }
 
 // Region returns detected region from environment variables `AWS_REGION` or `AWS_DEFAULT_REGION`.
