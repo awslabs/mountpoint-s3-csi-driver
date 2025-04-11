@@ -78,6 +78,10 @@ sidecars:
         name: plugin-dir
     resources: {}
 
+initContainer:
+  installMountpoint:
+    resources: {}
+
 controller:
   serviceAccount:
     # Specifies whether a service account should be created
