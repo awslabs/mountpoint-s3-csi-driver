@@ -1,3 +1,20 @@
+# Unreleased
+
+### Notable changes
+* Support Mountpoint [version 1.16.2](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.16.2)
+  * Address an issue introduced in v1.16.0 (with CSI Driver v1.14.0) that could affect throughput and memory usage in workloads with many concurrent random read operations. ([mountpoint-s3#1355](https://github.com/awslabs/mountpoint-s3/pull/1355))
+
+# v1.14.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.14.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.16.1](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.16.1)
+  * __Breaking change:__ The logging target used by a significant amount of Mountpoint code has changed. Some logs originally written under the `mountpoint_s3` target are now written under `mountpoint_s3_fs`. You may need to update any code configuring or filtering logging. ([mountpoint-s3#1304](https://github.com/awslabs/mountpoint-s3/pull/1304))
+  * Mountpoint for Amazon S3 adds support for S3 Access Points for directory buckets in AWS Dedicated Local Zones. ([aws-c-s3#502](https://github.com/awslabs/aws-c-s3/pull/502))
+  * Address an issue in GetObject requests that could result in read operations to fail. ([mountpoint-s3#1334](https://github.com/awslabs/mountpoint-s3/pull/1334))
+* Ensure `util.ReplaceFile` is safe to call concurrently ([#421](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/421)) (Fixes [#418](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/418))
+
 # v1.13.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.13.0/README.md)

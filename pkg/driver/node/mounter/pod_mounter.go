@@ -137,6 +137,12 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to mount %s: %w", target, err)
 	}
 
+	// Remove the read-only argument from the list as mount-s3 does not support it when using FUSE
+	// file descriptor (we already pass MS_RDONLY flag during mount syscall in `pod_mounter_linux.go`)
+	if args.Has(mountpoint.ArgReadOnly) {
+		args.Remove(mountpoint.ArgReadOnly)
+	}
+
 	// This will set to false in the success condition. This is set to `true` by default to
 	// ensure we don't leave `target` mounted if Mountpoint is not started to serve requests for it.
 	unmount := true

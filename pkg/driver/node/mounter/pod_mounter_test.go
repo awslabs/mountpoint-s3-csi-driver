@@ -178,7 +178,6 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
-					"--read-only",
 					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion),
 				},
 				Env: envprovider.Default().List(),

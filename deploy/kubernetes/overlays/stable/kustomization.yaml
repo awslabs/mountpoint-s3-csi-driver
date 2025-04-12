@@ -5,4 +5,4 @@ resources:
 images:
   - name: csi-driver
     newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
-    newTag: v1.13.0
+    newTag: v1.14.0

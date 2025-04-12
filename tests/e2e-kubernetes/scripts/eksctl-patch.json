@@ -19,9 +19,7 @@
       "Statement": [
         {
           "Effect": "Allow",
-          "Action": [
-            "s3express:*"
-          ],
+          "Action": ["s3express:*"],
           "Resource": "*"
         }
       ]
@@ -37,6 +35,14 @@
     "path": "/addons/-",
     "value": {
       "name": "amazon-cloudwatch-observability"
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/cloudWatch/clusterLogging",
+    "value": {
+      "enableTypes": ["api", "audit", "authenticator"],
+      "logRetentionInDays": 30
     }
   }
 ]
