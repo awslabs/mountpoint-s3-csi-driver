@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -105,6 +106,11 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 	pvName := "s3-e2e-pv-" + uuid.New().String()
 	pvcName := "s3-e2e-pvc-" + uuid.New().String()
 
+	// Add debug options if they're not already present
+	normalizedOptions := mountpoint.ParseArgs(mountOptions)
+	normalizedOptions.Set(mountpoint.ArgDebug, mountpoint.ArgNoValue)
+	normalizedOptions.Set(mountpoint.ArgDebugCRT, mountpoint.ArgNoValue)
+
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: pvName,
@@ -113,7 +119,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 			PersistentVolumeSource: *pvSource,
 			StorageClassName:       "", // for static provisioning
 			NodeAffinity:           volumeNodeAffinity,
-			MountOptions:           mountOptions, // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
+			MountOptions:           normalizedOptions.SortedList(), // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
 			AccessModes:            []v1.PersistentVolumeAccessMode{accessMode},
 			Capacity: v1.ResourceList{
 				v1.ResourceStorage: resource.MustParse("1200Gi"),

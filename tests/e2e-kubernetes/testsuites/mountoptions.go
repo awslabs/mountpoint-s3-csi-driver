@@ -83,6 +83,42 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		ginkgo.DeferCleanup(cleanup)
 	})
 
+	ginkgo.It("should add debug MountOptions in createVolumeResource", func(ctx context.Context) {
+		resource := createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
+			"allow-other",
+		})
+		expectedMountOptions := []string{
+			"--allow-other",
+			"--debug",
+			"--debug-crt",
+		}
+		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
+
+		resource = createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
+			"allow-other",
+			"--debug",
+			"--debug-crt",
+		})
+		expectedMountOptions = []string{
+			"--allow-other",
+			"--debug",
+			"--debug-crt",
+		}
+		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
+
+		resource = createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
+			"allow-other",
+			"debug",
+			"debug-crt",
+		})
+		expectedMountOptions = []string{
+			"--allow-other",
+			"--debug",
+			"--debug-crt",
+		}
+		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
+	})
+
 	validateWriteToVolume := func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
 			fmt.Sprintf("uid=%d", defaultNonRootUser),
