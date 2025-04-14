@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -104,6 +105,14 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 
 	pvName := "s3-e2e-pv-" + uuid.New().String()
 	pvcName := "s3-e2e-pvc-" + uuid.New().String()
+
+	// Add debug options if they're not already present
+	debugOptions := []string{"debug", "debug-crt"}
+	for _, option := range debugOptions {
+		if !slices.Contains(mountOptions, option) {
+			mountOptions = append(mountOptions, option)
+		}
+	}
 
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
