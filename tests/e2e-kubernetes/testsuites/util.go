@@ -108,12 +108,8 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 
 	// Add debug options if they're not already present
 	normalizedOptions := mountpoint.ParseArgs(mountOptions)
-	debugOptions := []string{"debug", "debug-crt"}
-	for _, option := range debugOptions {
-		if !normalizedOptions.Has(option) {
-			mountOptions = append(mountOptions, option)
-		}
-	}
+	normalizedOptions.Set(mountpoint.ArgDebug, mountpoint.ArgNoValue)
+	normalizedOptions.Set(mountpoint.ArgDebugCRT, mountpoint.ArgNoValue)
 
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -123,7 +119,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 			PersistentVolumeSource: *pvSource,
 			StorageClassName:       "", // for static provisioning
 			NodeAffinity:           volumeNodeAffinity,
-			MountOptions:           mountOptions, // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
+			MountOptions:           normalizedOptions.SortedList(), // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
 			AccessModes:            []v1.PersistentVolumeAccessMode{accessMode},
 			Capacity: v1.ResourceList{
 				v1.ResourceStorage: resource.MustParse("1200Gi"),

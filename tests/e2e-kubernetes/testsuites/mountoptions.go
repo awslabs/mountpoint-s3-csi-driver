@@ -88,20 +88,9 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			"allow-other",
 		})
 		expectedMountOptions := []string{
-			"allow-other",
-			"debug",
-			"debug-crt",
-		}
-		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
-
-		resource = createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
-			"allow-other",
+			"--allow-other",
 			"--debug",
-		})
-		expectedMountOptions = []string{
-			"allow-other",
-			"--debug",
-			"debug-crt",
+			"--debug-crt",
 		}
 		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
 
@@ -111,7 +100,19 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			"--debug-crt",
 		})
 		expectedMountOptions = []string{
+			"--allow-other",
+			"--debug",
+			"--debug-crt",
+		}
+		gomega.Expect(resource.Pv.Spec.MountOptions).To(gomega.Equal(expectedMountOptions))
+
+		resource = createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
 			"allow-other",
+			"debug",
+			"debug-crt",
+		})
+		expectedMountOptions = []string{
+			"--allow-other",
 			"--debug",
 			"--debug-crt",
 		}
