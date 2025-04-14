@@ -83,7 +83,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		ginkgo.DeferCleanup(cleanup)
 	})
 
-	ginkgo.FIt("should add debug MountOptions in createVolumeResource", func(ctx context.Context) {
+	ginkgo.It("should add debug MountOptions in createVolumeResource", func(ctx context.Context) {
 		resource := createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
 			"allow-other",
 		})
