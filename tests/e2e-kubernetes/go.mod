@@ -20,6 +20,8 @@ require (
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 )
 
+replace github.com/awslabs/aws-s3-csi-driver => ../../
+
 require (
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
