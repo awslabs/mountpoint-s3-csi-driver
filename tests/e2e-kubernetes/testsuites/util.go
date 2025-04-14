@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -107,9 +107,10 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 	pvcName := "s3-e2e-pvc-" + uuid.New().String()
 
 	// Add debug options if they're not already present
+	normalizedOptions := mountpoint.ParseArgs(mountOptions)
 	debugOptions := []string{"debug", "debug-crt"}
 	for _, option := range debugOptions {
-		if !slices.Contains(mountOptions, option) {
+		if !normalizedOptions.Has(option) {
 			mountOptions = append(mountOptions, option)
 		}
 	}
