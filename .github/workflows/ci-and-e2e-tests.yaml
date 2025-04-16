@@ -6,7 +6,7 @@ on:
       - '**'
 
 env:
-  CLOUDSERVER_IMAGE: ${{ vars.CLOUDSERVER_IMAGE }}
+  CLOUDSERVER_TAG: ${{ vars.CLOUDSERVER_TAG }}
 
 jobs:
   dev-image:
