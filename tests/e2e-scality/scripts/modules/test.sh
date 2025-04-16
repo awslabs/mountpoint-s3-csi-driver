@@ -1,0 +1,246 @@
+#!/bin/bash
+# test.sh - Test functions for e2e-scality scripts
+
+# Source common functions
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Default namespace value
+DEFAULT_NAMESPACE="kube-system"
+
+# Run Go tests
+run_go_tests() {
+  local project_root=$(get_project_root)
+  local e2e_tests_dir="${project_root}/tests/e2e-scality/e2e-tests"
+  local namespace="${1:-$DEFAULT_NAMESPACE}"
+  local junit_report="$2"
+  
+  log "Running Go-based end-to-end tests for Scality CSI driver in namespace: $namespace..."
+  
+  # Check if Go is installed
+  if ! command -v go &> /dev/null; then
+    error "Go is not installed. Please install Go to run the tests."
+    return 1
+  fi
+  
+  # Check if the tests directory exists
+  if [ ! -d "$e2e_tests_dir" ]; then
+    error "End-to-end tests directory not found: $e2e_tests_dir"
+    return 1
+  fi
+  
+  # Build the Go test command with enhanced verbosity
+  local go_test_cmd="NAMESPACE=$namespace go test -v -tags=e2e ./... -ginkgo.vv -ginkgo.progress"
+  
+  # Add JUnit report if specified
+  if [ -n "$junit_report" ]; then
+    log "Using JUnit report file: $junit_report"
+    
+    # Handle absolute and relative paths
+    local junit_absolute_path
+    
+    # If path is absolute, use it directly
+    if [[ "$junit_report" = /* ]]; then
+      junit_absolute_path="$junit_report"
+    else
+      # For relative paths, determine if we need to adjust the path based on the CWD
+      # If path starts with ./ then make it relative to the e2e-tests directory
+      if [[ "$junit_report" = ./* ]]; then
+        # For paths starting with ./, keep them relative to the test directory
+        junit_absolute_path="$junit_report"
+        log "Using relative path from e2e-tests directory: $junit_absolute_path"
+      else
+        # For other paths (like just a filename), ensure they're created in the test directory
+        junit_absolute_path="./$junit_report"
+        log "Adjusted path to be relative to e2e-tests directory: $junit_absolute_path"
+      fi
+    fi
+    
+    # Create the output directory if it doesn't exist
+    local junit_dir=$(dirname "$junit_absolute_path")
+    if [ ! -d "$junit_dir" ] && [ "$junit_dir" != "." ]; then
+      log "Creating output directory for JUnit report: $junit_dir"
+      mkdir -p "$junit_dir"
+    fi
+    
+    # Use the correct format for Ginkgo JUnit report
+    go_test_cmd="NAMESPACE=$namespace go test -v -tags=e2e ./... -ginkgo.vv -ginkgo.progress -ginkgo.junit-report=$junit_absolute_path"
+    log "Final JUnit report path: $junit_absolute_path"
+  fi
+  
+  # Run the Go tests
+  log "Executing Go tests in $e2e_tests_dir"
+  log "Test command: $go_test_cmd"
+  
+  if ! (cd "$e2e_tests_dir" && eval "$go_test_cmd"); then
+    error "Go tests failed with exit code $?"
+    # List any XML files that were created
+    if [ -n "$junit_report" ]; then
+      log "Checking for JUnit report files:"
+      (cd "$e2e_tests_dir" && find . -name "*.xml" -ls || true)
+    fi
+    return 1
+  fi
+  
+  # Verify the JUnit report was created
+  if [ -n "$junit_report" ]; then
+    log "Checking for JUnit report file:"
+    (cd "$e2e_tests_dir" && find . -name "*.xml" -ls || true)
+  fi
+  
+  log "Go tests completed successfully."
+  return 0
+}
+
+# Wait for pods to reach the Running state
+wait_for_pods() {
+  local namespace="${1:-$DEFAULT_NAMESPACE}"
+  local max_attempts=30
+  local wait_seconds=10
+  local attempt=1
+  local all_namespaces=false
+  
+  if [ "$2" = "all-namespaces" ]; then
+    all_namespaces=true
+  fi
+  
+  log "Waiting for CSI driver pods to reach Running state..."
+  
+  while [ $attempt -le $max_attempts ]; do
+    local pods_running=false
+    local pod_output=""
+    
+    if [ "$all_namespaces" = true ]; then
+      pod_output=$(exec_cmd kubectl get pods --all-namespaces | grep -E "s3|csi" || true)
+    else
+      pod_output=$(exec_cmd kubectl get pods -n "$namespace" | grep -E "s3|csi" || true)
+    fi
+    
+    if [ -z "$pod_output" ]; then
+      log "Attempt $attempt/$max_attempts: No CSI driver pods found yet. Waiting ${wait_seconds}s..."
+    elif echo "$pod_output" | grep -q "Running"; then
+      pods_running=true
+      break
+    else
+      log "Attempt $attempt/$max_attempts: Pods are not running yet. Current status:"
+      echo "$pod_output"
+      log "Waiting ${wait_seconds}s for pods to start..."
+    fi
+    
+    sleep $wait_seconds
+    attempt=$((attempt + 1))
+  done
+  
+  if [ "$pods_running" = true ]; then
+    log "CSI driver pods are now in Running state:"
+    echo "$pod_output"
+    return 0
+  else
+    error "Timed out waiting for CSI driver pods to reach Running state after $((max_attempts * wait_seconds)) seconds."
+    if [ "$all_namespaces" = true ]; then
+      exec_cmd kubectl get pods --all-namespaces | grep -E "s3|csi"
+    else
+      exec_cmd kubectl get pods -n "$namespace" | grep -E "s3|csi"
+    fi
+    return 1
+  fi
+}
+
+# Run basic verification tests
+run_verification_tests() {
+  local namespace="${1:-$DEFAULT_NAMESPACE}"
+  
+  log "Verifying Scality CSI driver installation in namespace: $namespace..."
+  
+  # Check if the CSI driver is registered
+  if exec_cmd kubectl get csidrivers | grep -q "s3.csi.aws.com"; then
+    log "CSI driver is registered properly."
+  else
+    error "CSI driver is not registered properly."
+    return 1
+  fi
+  
+  # Wait for the CSI driver pods to reach Running state
+  if ! wait_for_pods "$namespace"; then
+    # If pods not found in the specified namespace, try all namespaces
+    log "CSI driver pods not found in namespace $namespace. Checking all namespaces..."
+    if ! wait_for_pods "$namespace" "all-namespaces"; then
+      error "Failed to find running CSI driver pods in any namespace."
+      return 1
+    fi
+  fi
+  
+  log "Basic verification tests passed."
+  return 0
+}
+
+# Main test function that will be called from run.sh
+do_test() {
+  log "Starting Scality CSI driver tests..."
+  
+  local skip_go_tests=false
+  local skip_verification=false
+  local namespace="$DEFAULT_NAMESPACE"
+  local junit_report=""
+  
+  # Parse command-line parameters
+  while [[ $# -gt 0 ]]; do
+    key="$1"
+    case "$key" in
+      --namespace)
+        namespace="$2"
+        shift 2
+        ;;
+      --skip-go-tests)
+        skip_go_tests=true
+        shift
+        ;;
+      --skip-verification)
+        skip_verification=true
+        shift
+        ;;
+      --junit-report=*)
+        # Extract the value after the equals sign
+        junit_report="${key#*=}"
+        shift
+        ;;
+      --junit-report)
+        # Handle both formats: --junit-report=path and --junit-report path
+        if [[ "$2" != --* && -n "$2" ]]; then
+          junit_report="$2"
+          shift 2
+        else
+          error "Missing value for parameter: $key"
+          return 1
+        fi
+        ;;
+      *)
+        error "Unknown parameter: $key"
+        return 1
+        ;;
+    esac
+  done
+  
+  log "Using namespace: $namespace"
+  
+  # Run basic verification tests unless skipped
+  if [ "$skip_verification" != "true" ]; then
+    if ! run_verification_tests "$namespace"; then
+      error "Verification tests failed. Cannot proceed with Go tests."
+      return 1
+    fi
+  else
+    log "Skipping verification tests as requested."
+  fi
+  
+  # Run Go-based tests if not skipped
+  if [ "$skip_go_tests" != "true" ]; then
+    if ! run_go_tests "$namespace" "$junit_report"; then
+      error "Go tests failed."
+      return 1
+    fi
+  else
+    log "Skipping Go-based end-to-end tests as requested."
+  fi
+  
+  log "All tests completed successfully."
+}
