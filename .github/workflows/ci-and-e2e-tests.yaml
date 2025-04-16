@@ -5,6 +5,9 @@ on:
     branches:
       - '**'
 
+env:
+  CLOUDSERVER_IMAGE: ${{ vars.CLOUDSERVER_IMAGE }}
+
 jobs:
   dev-image:
     name: Dev Image
@@ -21,7 +24,6 @@ jobs:
   controller-e2e-tests:
     name: E2E Controller Tests
     runs-on: ubuntu-22.04
-    needs: dev-image
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -30,6 +32,62 @@ jobs:
         uses: ./.github/actions/e2e-setup-common
         with:
           ref: ${{ github.sha }}
+          deploy_s3: false
 
       - name: Run Controller Tests
         run: make e2e-controller
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./e2e-controller-tests-results.xml
+          flags: e2e_controller_tests
+          slug: scality/mountpoint-s3-csi-driver
+
+  scality-e2e-tests:
+    name: Scality E2E Tests
+    runs-on: ubuntu-22.04
+    needs: dev-image
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Common Setup
+        uses: ./.github/actions/e2e-setup-common
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Get Host IP Address
+        id: get_ip
+        run: echo "host_ip=$(hostname -I | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Run Scality Tests
+        run: |
+          mkdir -p test-results
+          make e2e-scality-all \
+            S3_ENDPOINT_URL=http://${{ steps.get_ip.outputs.host_ip }}:8000 \
+            ACCESS_KEY_ID=accessKey1 \
+            SECRET_ACCESS_KEY=verySecretKey1 \
+            CSI_IMAGE_TAG=${{ github.sha }} \
+            CSI_IMAGE_REPOSITORY=ghcr.io/${{ github.repository }} \
+            ADDITIONAL_ARGS="--junit-report=./test-results/scality-e2e-tests-results.xml"
+        
+      - name: Check JUnit report location
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Searching for JUnit report files:"
+          find ./tests/e2e-scality/e2e-tests -name "*.xml" -ls || true
+          find ./test-results -name "*.xml" -ls || true
+        
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./tests/e2e-scality/e2e-tests/test-results/scality-e2e-tests-results.xml
+          flags: scality_e2e_tests
+          slug: scality/mountpoint-s3-csi-driver

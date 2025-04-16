@@ -7,3 +7,4 @@ go.work.sum
 .github/artifacts/data.json
 cover.out
 coverage.txt
+test-results/

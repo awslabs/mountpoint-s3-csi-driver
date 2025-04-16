@@ -4,6 +4,10 @@ inputs:
   ref:
     description: "Git ref to checkout"
     required: true
+  deploy_s3:
+    description: "Whether to deploy s3 via docker compose"
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -39,3 +43,20 @@ runs:
       run: |
         docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
         kind load docker-image ghcr.io/${{ github.repository }}:${{ github.sha }} --name helm-test-cluster
+      if: ${{ inputs.deploy_s3 == 'true' }}
+
+    - name: Deploy Scality Storage
+      shell: bash
+      run: |-
+        set -e -o pipefail;
+        mkdir -p logs/s3 logs/iam logs/cosi_driver data/vaultdb
+        chown -R runner:docker logs
+        chmod -R ugo+rwx data
+        docker compose --profile s3 up -d --quiet-pull
+        bash ../scripts/wait_for_local_port.bash 8000 30
+      working-directory: .github/scality-storage-deployment
+      if: ${{ inputs.deploy_s3 == 'true' }}
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4.3.0
+      if: ${{ inputs.deploy_s3 == 'true' }}
