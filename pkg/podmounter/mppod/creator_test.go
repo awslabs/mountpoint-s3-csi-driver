@@ -5,7 +5,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
@@ -45,14 +44,13 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	creator := mppod.NewCreator(createTestConfig(clusterVariant))
 
 	verifyDefaultValues := func(mpPod *corev1.Pod) {
-		// This is a hash of `testPodUID` + `testVolName`
-		assert.Equals(t, "mp-8ef7856a0c7f1d5706bd6af93fdc4bc90b33cf2ceb6769b4afd62586", mpPod.Name)
+		assert.Equals(t, "mp-", mpPod.GenerateName)
+		assert.Equals(t, "", mpPod.Name)
 		assert.Equals(t, namespace, mpPod.Namespace)
 		assert.Equals(t, map[string]string{
 			mppod.LabelMountpointVersion: mountpointVersion,
-			mppod.LabelPodUID:            testPodUID,
-			mppod.LabelVolumeName:        testVolName,
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
+			mppod.LabelVolumeName:        testVolName,
 		}, mpPod.Labels)
 
 		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
@@ -105,14 +103,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	}
 
 	t.Run("Empty PV", func(t *testing.T) {
-		mpPod := creator.Create(&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				UID: types.UID(testPodUID),
-			},
-			Spec: corev1.PodSpec{
-				NodeName: testNode,
-			},
-		}, &corev1.PersistentVolume{
+		mpPod := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
@@ -122,14 +113,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	})
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
-		mpPod := creator.Create(&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				UID: types.UID(testPodUID),
-			},
-			Spec: corev1.PodSpec{
-				NodeName: testNode,
-			},
-		}, &corev1.PersistentVolume{
+		mpPod := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},

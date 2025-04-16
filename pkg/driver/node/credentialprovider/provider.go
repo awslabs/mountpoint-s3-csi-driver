@@ -62,10 +62,11 @@ type ProvideContext struct {
 	VolumeID string
 
 	// The following values are provided from CSI volume context.
-	AuthenticationSource AuthenticationSource
-	PodNamespace         string
-	ServiceAccountTokens string
-	ServiceAccountName   string
+	AuthenticationSource     AuthenticationSource
+	PodNamespace             string
+	ServiceAccountTokens     string
+	ServiceAccountName       string
+	ServiceAccountEKSRoleARN string
 	// StsRegion is the `stsRegion` parameter passed via volume attribute.
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
@@ -76,6 +77,11 @@ type ProvideContext struct {
 func (ctx *ProvideContext) SetWriteAndEnvPath(writePath, envPath string) {
 	ctx.WritePath = writePath
 	ctx.EnvPath = envPath
+}
+
+// SetServiceAccountEKSRoleARN sets `ServiceAccountEKSRoleARN` for `ctx`.
+func (ctx *ProvideContext) SetServiceAccountEKSRoleARN(roleArn string) {
+	ctx.ServiceAccountEKSRoleARN = roleArn
 }
 
 // A CleanupContext contains parameters needed to clean up credentials after volume unmount.

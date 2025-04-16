@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"slices"
+
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
@@ -16,7 +18,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
-	"slices"
 )
 
 type mounterTestEnv struct {
@@ -150,7 +151,7 @@ func TestS3MounterMount(t *testing.T) {
 				testCase.before(t, env)
 			}
 			err := env.mounter.Mount(env.ctx, testCase.bucketName, testCase.targetPath,
-				testCase.provideCtx, mountpoint.ParseArgs(testCase.options))
+				testCase.provideCtx, mountpoint.ParseArgs(testCase.options), "", "")
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)

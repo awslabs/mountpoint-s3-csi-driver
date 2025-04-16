@@ -174,6 +174,14 @@ check_style:
 clean:
 	rm -rf bin/ && docker system prune
 
+# Generate files for Custom Resources (`zz_generated.deepcopy.go` and CustomResourceDefinition YAML file).
+# TODO: Wrap CRD YAML file with experimental.podMounter=true Helm flag
+# POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/s3.csi.aws.com_mountpoints3podattachments.yaml"
+.PHONY: generate
+generate:
+	controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
+	controller-gen crd paths="./pkg/api/..." output:crd:dir=./charts/aws-mountpoint-s3-csi-driver/templates
+
 ## Binaries used in tests.
 
 TESTBIN ?= $(shell pwd)/tests/bin

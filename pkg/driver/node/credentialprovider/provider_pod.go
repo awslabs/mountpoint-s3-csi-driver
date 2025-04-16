@@ -113,6 +113,11 @@ func (c *Provider) cleanupFromPod(cleanupCtx CleanupContext) error {
 
 // findPodServiceAccountRole tries to provide associated AWS IAM role for service account specified in the volume context.
 func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx ProvideContext) (string, error) {
+	// In PodMounter we get IAM Role ARN from MountpointS3PodAttachment custom resource
+	if provideCtx.ServiceAccountEKSRoleARN != "" {
+		return provideCtx.ServiceAccountEKSRoleARN, nil
+	}
+
 	podNamespace := provideCtx.PodNamespace
 	podServiceAccount := provideCtx.ServiceAccountName
 	if podNamespace == "" || podServiceAccount == "" {

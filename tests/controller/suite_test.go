@@ -3,9 +3,12 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -18,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
@@ -65,7 +69,14 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("Bootstrapping test environment")
-	testEnv = &envtest.Environment{}
+
+	crdv1.AddToScheme(scheme.Scheme)
+	testEnv = &envtest.Environment{
+		CRDInstallOptions: envtest.CRDInstallOptions{
+			Paths: []string{"../../charts/aws-mountpoint-s3-csi-driver/templates/s3.csi.aws.com_mountpoints3podattachments.yaml"},
+		},
+		ErrorIfCRDPathMissing: true,
+	}
 
 	var err error
 	cfg, err = testEnv.Start()
@@ -78,6 +89,8 @@ var _ = BeforeSuite(func() {
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
+
+	IndexMountpointS3PodAttachmentFields(logf.Log.WithName("controller-test"), k8sManager)
 
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
 		Namespace:         mountpointNamespace,
@@ -99,6 +112,7 @@ var _ = BeforeSuite(func() {
 	}()
 
 	createMountpointNamespace()
+	createDefaultServiceAccount()
 	createMountpointPriorityClass()
 })
 
@@ -117,6 +131,20 @@ func createMountpointNamespace() {
 	waitForObject(namespace)
 }
 
+// createDefaultServiceAccount creates default service account in the control plane.
+func createDefaultServiceAccount() {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "default",
+			Namespace: defaultNamespace,
+		},
+	}
+
+	By(fmt.Sprintf("Creating default service account in %q", mountpointNamespace))
+	Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+	waitForObject(sa)
+}
+
 // createMountpointPriorityClass creates priority class for Mountpoint Pods.
 func createMountpointPriorityClass() {
 	By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", mountpointPriorityClassName))
@@ -126,4 +154,26 @@ func createMountpointPriorityClass() {
 	}
 	Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
 	waitForObject(priorityClass)
+}
+
+func IndexMountpointS3PodAttachmentFields(log logr.Logger, mgr manager.Manager) {
+	indexField(log, mgr, crdv1.FieldNodeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
+	indexField(log, mgr, crdv1.FieldPersistentVolumeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
+	indexField(log, mgr, crdv1.FieldVolumeID, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
+	indexField(log, mgr, crdv1.FieldMountOptions, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
+	indexField(log, mgr, crdv1.FieldAuthenticationSource, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
+	indexField(log, mgr, crdv1.FieldWorkloadFSGroup, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
+	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
+	indexField(log, mgr, crdv1.FieldWorkloadNamespace, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
+	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
+}
+
+func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1.MountpointS3PodAttachment) string) {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
+		return []string{extractor(obj.(*crdv1.MountpointS3PodAttachment))}
+	})
+	if err != nil {
+		log.Error(err, fmt.Sprintf("Failed to create a %s field indexer", field))
+		os.Exit(1)
+	}
 }
