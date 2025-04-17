@@ -33,6 +33,7 @@ jobs:
       run: make cover
 
     - name: Upload coverage reports to Codecov
+      if: ${{ !cancelled() }}
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

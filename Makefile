@@ -156,7 +156,7 @@ fmt:
 # Run controller tests with envtest.
 .PHONY: e2e-controller
 e2e-controller: envtest
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -ginkgo.junit-report=../../e2e-controller-tests-results.xml -test.v
 
 .PHONY: e2e
 e2e: e2e-controller
@@ -204,3 +204,203 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+
+################################################################
+# Scality CSI driver configuration
+################################################################
+
+# Image tag for the CSI driver (optional)
+CSI_IMAGE_TAG ?=
+
+# Custom image repository for the CSI driver (optional)
+CSI_IMAGE_REPOSITORY ?=
+
+# Namespace to deploy the CSI driver in (optional, defaults to kube-system)
+CSI_NAMESPACE ?=
+
+# S3 endpoint URL (REQUIRED)
+# Example: https://s3.your-scality.com
+S3_ENDPOINT_URL ?=
+
+# AWS/S3 access key for authentication (REQUIRED)
+ACCESS_KEY_ID ?=
+
+# AWS/S3 secret key for authentication (REQUIRED)
+SECRET_ACCESS_KEY ?=
+
+# Set to 'true' to validate S3 credentials before installation (optional)
+# Checks endpoint connectivity and validates credentials (if AWS CLI is available)
+VALIDATE_S3 ?= false
+
+# Additional arguments to pass to the script (optional)
+ADDITIONAL_ARGS ?=
+
+################################################################
+# Scality CSI driver commands
+################################################################
+
+# Install the Scality CSI driver
+# 
+# Required parameters:
+#   S3_ENDPOINT_URL - Your Scality S3 endpoint 
+#   ACCESS_KEY_ID - Your S3 access key
+#   SECRET_ACCESS_KEY - Your S3 secret key
+#
+# Optional parameters:
+#   CSI_IMAGE_TAG - Specific version of the driver
+#   CSI_IMAGE_REPOSITORY - Custom image repository for the driver
+#   CSI_NAMESPACE - Namespace to deploy the CSI driver in (defaults to kube-system)
+#   VALIDATE_S3 - Set to "true" to verify S3 credentials
+#
+# Example: make csi-install S3_ENDPOINT_URL=https://s3.example.com ACCESS_KEY_ID=key SECRET_ACCESS_KEY=secret
+.PHONY: csi-install
+csi-install:
+	@if [ -z "$(S3_ENDPOINT_URL)" ]; then \
+		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://your-s3-endpoint.com csi-install'"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(ACCESS_KEY_ID)" ]; then \
+		echo "Error: ACCESS_KEY_ID is required. Please provide it with 'make ACCESS_KEY_ID=your_access_key csi-install'"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(SECRET_ACCESS_KEY)" ]; then \
+		echo "Error: SECRET_ACCESS_KEY is required. Please provide it with 'make SECRET_ACCESS_KEY=your_secret_key csi-install'"; \
+		exit 1; \
+	fi; \
+	INSTALL_ARGS=""; \
+	if [ ! -z "$(CSI_IMAGE_TAG)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --image-tag $(CSI_IMAGE_TAG)"; \
+	fi; \
+	if [ ! -z "$(CSI_IMAGE_REPOSITORY)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --image-repository $(CSI_IMAGE_REPOSITORY)"; \
+	fi; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	INSTALL_ARGS="$$INSTALL_ARGS --endpoint-url $(S3_ENDPOINT_URL)"; \
+	INSTALL_ARGS="$$INSTALL_ARGS --access-key-id $(ACCESS_KEY_ID)"; \
+	INSTALL_ARGS="$$INSTALL_ARGS --secret-access-key $(SECRET_ACCESS_KEY)"; \
+	if [ "$(VALIDATE_S3)" = "true" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --validate-s3"; \
+	fi; \
+	if [ ! -z "$(ADDITIONAL_ARGS)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS $(ADDITIONAL_ARGS)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh install $$INSTALL_ARGS
+
+# Uninstall the Scality CSI driver (interactive mode)
+# This will uninstall from the default namespace (kube-system) or the specified namespace
+# Note: kube-system namespace will NOT be deleted even with --delete-ns
+.PHONY: csi-uninstall
+csi-uninstall:
+	@UNINSTALL_ARGS=""; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		UNINSTALL_ARGS="$$UNINSTALL_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh uninstall $$UNINSTALL_ARGS
+
+# Uninstall the Scality CSI driver and delete custom namespace
+# This automatically deletes namespace without prompting ONLY for custom namespaces
+# Note: kube-system namespace will NOT be deleted even with --delete-ns
+.PHONY: csi-uninstall-clean
+csi-uninstall-clean:
+	@UNINSTALL_ARGS="--delete-ns"; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		UNINSTALL_ARGS="$$UNINSTALL_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh uninstall $$UNINSTALL_ARGS
+
+# Force uninstall the Scality CSI driver
+# Use this when standard uninstall methods aren't working
+# Note: kube-system namespace will NOT be deleted even with --force
+.PHONY: csi-uninstall-force
+csi-uninstall-force:
+	@UNINSTALL_ARGS="--force"; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		UNINSTALL_ARGS="$$UNINSTALL_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh uninstall $$UNINSTALL_ARGS
+
+################################################################
+# E2E test commands for Scality
+################################################################
+
+# Run tests on an already installed CSI driver
+.PHONY: e2e-scality
+e2e-scality:
+	@TEST_ARGS=""; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh test $$TEST_ARGS
+
+# Run only the Go-based e2e tests (skips verification checks)
+# 
+# Usage: make e2e-scality-go
+.PHONY: e2e-scality-go
+e2e-scality-go:
+	@TEST_ARGS=""; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh go-test $$TEST_ARGS
+
+# Run the verification tests only (skips Go tests)
+# Makes sure the CSI driver is properly installed
+.PHONY: e2e-scality-verify
+e2e-scality-verify:
+	@TEST_ARGS="--skip-go-tests"; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh test $$TEST_ARGS
+
+# Install CSI driver and run all tests in one command
+# 
+# Required parameters:
+#   S3_ENDPOINT_URL - Your Scality S3 endpoint 
+#   ACCESS_KEY_ID - Your S3 access key
+#   SECRET_ACCESS_KEY - Your S3 secret key
+#
+# Optional parameters:
+#   CSI_IMAGE_TAG - Specific version of the driver
+#   CSI_IMAGE_REPOSITORY - Custom image repository for the driver
+#   CSI_NAMESPACE - Namespace to deploy the CSI driver in (defaults to kube-system)
+#   VALIDATE_S3 - Set to "true" to verify S3 credentials
+#
+# Example: make e2e-scality-all S3_ENDPOINT_URL=https://s3.example.com ACCESS_KEY_ID=key SECRET_ACCESS_KEY=secret
+.PHONY: e2e-scality-all
+e2e-scality-all:
+	@if [ -z "$(S3_ENDPOINT_URL)" ]; then \
+		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://your-s3-endpoint.com e2e-scality-all'"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(ACCESS_KEY_ID)" ]; then \
+		echo "Error: ACCESS_KEY_ID is required. Please provide it with 'make ACCESS_KEY_ID=your_access_key e2e-scality-all'"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(SECRET_ACCESS_KEY)" ]; then \
+		echo "Error: SECRET_ACCESS_KEY is required. Please provide it with 'make SECRET_ACCESS_KEY=your_secret_key e2e-scality-all'"; \
+		exit 1; \
+	fi; \
+	INSTALL_ARGS=""; \
+	if [ ! -z "$(CSI_IMAGE_TAG)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --image-tag $(CSI_IMAGE_TAG)"; \
+	fi; \
+	if [ ! -z "$(CSI_IMAGE_REPOSITORY)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --image-repository $(CSI_IMAGE_REPOSITORY)"; \
+	fi; \
+	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	INSTALL_ARGS="$$INSTALL_ARGS --endpoint-url $(S3_ENDPOINT_URL)"; \
+	INSTALL_ARGS="$$INSTALL_ARGS --access-key-id $(ACCESS_KEY_ID)"; \
+	INSTALL_ARGS="$$INSTALL_ARGS --secret-access-key $(SECRET_ACCESS_KEY)"; \
+	if [ "$(VALIDATE_S3)" = "true" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS --validate-s3"; \
+	fi; \
+	if [ ! -z "$(ADDITIONAL_ARGS)" ]; then \
+		INSTALL_ARGS="$$INSTALL_ARGS $(ADDITIONAL_ARGS)"; \
+	fi; \
+	./tests/e2e-scality/scripts/run.sh all $$INSTALL_ARGS

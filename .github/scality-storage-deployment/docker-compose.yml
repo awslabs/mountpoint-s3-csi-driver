@@ -1,0 +1,11 @@
+services:
+  s3:
+    profiles: ['s3']
+    image: ghcr.io/scality/cloudserver:${CLOUDSERVER_TAG:-7.70.65}
+    network_mode: host
+    environment:
+      S3_CONFIG_FILE: /conf/config.json
+    command: /bin/sh -c "yarn run mem_backend > /logs/s3/s3.log 2>&1"
+    volumes:
+      - ./cloudserver-config.json:/conf/config.json:ro
+      - ./logs/s3:/logs/s3
