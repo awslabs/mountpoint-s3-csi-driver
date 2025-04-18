@@ -47,43 +47,12 @@ The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.or
 
 Monthly releases will contain at minimum a `MINOR` version bump, even if the content would normally be treated as a `PATCH` version.
 
-## Support
-
-Support will be provided for the latest version and one prior version. Bugs or vulnerabilities found in the latest version will be backported to the previous release in a new minor version.
-
-This policy is non-binding and subject to change.
-
 ## Compatibility
 
 The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0. The driver supports **x86-64** and **arm64** architectures.
 
-## Distros Support Matrix
-
-The following table provides the support status for various distros with regards to CSI Driver version:
-
-| Distro                                  | Experimental | Stable | Deprecated | Removed |
-|-----------------------------------------|-------------:|-------:|-----------:|--------:|
-| Amazon Linux 2       |         - |   1.0.0 |          - |       - |
-| Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
-| Ubuntu 20.04         |         - |   1.0.0 |          - |       - |
-| Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
-| Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
-
 ## Documentation
 
-* [Driver Installation](docs/install.md)
-* [Kubernetes Static Provisioning Example](/examples/kubernetes/static_provisioning)
-* [Driver Uninstallation](docs/install.md#uninstalling-the-driver)
-* [Development and Contributing](CONTRIBUTING.md)
+<!-- TODO(S3CSI-17): Update documentation links in README.md -->
 
-## Contributing
-
-We welcome contributions to the Mountpoint for Amazon S3 CSI driver! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more information on how to report bugs or submit pull requests.
-
-### Security
-
-If you discover a potential security issue in this project we ask that you notify AWS Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public GitHub issue.
-
-### Code of conduct
-
-This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct). See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for more details.
+<!-- TODO(S3CSI-17): Link to quick start or other docs -->
