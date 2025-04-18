@@ -22,7 +22,7 @@ jobs:
       tag: ${{ github.sha }}
 
   scality-e2e-tests:
-    name: Scality E2E Tests
+    name: Run
     runs-on: ubuntu-22.04
     needs: dev-image
     steps:

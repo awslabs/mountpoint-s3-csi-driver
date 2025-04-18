@@ -51,12 +51,12 @@ bin:
 	# TODO: `install-mp` component won't be necessary with the containerization.
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/install-mp ./cmd/install-mp/
 
-.PHONY: test-unit
-test-unit:
+.PHONY: unit-test
+unit-test:
 	go test -v -parallel 8 ./{cmd,pkg}/... -coverprofile=./coverage.out -covermode=atomic -coverpkg=./{cmd,pkg}/...
 
-.PHONY: test-csi-compliance
-test-csi-compliance:
+.PHONY: csi-compliance-test
+csi-compliance-test:
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
 
 .PHONY: test
@@ -79,8 +79,8 @@ fmt:
 controller-integration-test: envtest
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -ginkgo.junit-report=../../controller-integration-tests-results.xml -test.v
 
-.PHONY: check_style
-check_style:
+.PHONY: lint
+lint:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
 
 .PHONY: clean
