@@ -26,3 +26,6 @@ flag_management:
   default_rules: # the rules that will be followed for any flag added, generally
     carryforward: true
     statuses: []
+
+ignore:
+  - "**/*.pb.go"  # Ignore all protobuf generated files
