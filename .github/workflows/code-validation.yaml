@@ -1,0 +1,82 @@
+name: Code Validation
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  basic-validation:
+    name: Basic Validation
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Code formatting check
+      id: style
+      continue-on-error: true
+      run: make check_style
+
+    - name: Unit tests
+      id: unit
+      continue-on-error: true
+      run: make test-unit
+
+    - name: CSI spec compliance tests
+      id: csi
+      continue-on-error: true
+      run: make test-csi-compliance
+
+    - name: Upload unit test coverage to Codecov
+      if: ${{ always() }}
+      continue-on-error: true
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        slug: scality/mountpoint-s3-csi-driver
+
+    - name: Determine workflow status
+      if: ${{ always() }}
+      run: |
+        if [[ "${{ steps.style.outcome }}" == "failure" || \
+              "${{ steps.unit.outcome }}" == "failure" || \
+              "${{ steps.csi.outcome }}" == "failure" ]]; then
+          echo "One or more validation tests failed!"
+          exit 1
+        else
+          echo "All validation tests passed!"
+        fi
+
+  controller-tests:
+    name: Controller Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Controller tests (K8s API mock)
+      id: controller
+      run: make controller-integration-test
+
+    - name: Upload test results to Codecov
+      if: ${{ always() }}
+      continue-on-error: true
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./controller-integration-tests-results.xml
+        flags: controller_integration_tests
+        slug: scality/mountpoint-s3-csi-driver
