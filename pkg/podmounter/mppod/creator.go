@@ -5,6 +5,7 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -126,7 +127,10 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 				{
 					Name: CommunicationDirName,
 					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium:    corev1.StorageMediumMemory,
+							SizeLimit: resource.NewQuantity(10*1024*1024, resource.BinarySI),
+						},
 					},
 				},
 			},
