@@ -2,10 +2,13 @@ package e2e
 
 import (
 	"flag"
+	"fmt"
+	"os"
 	"testing"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/pkg/s3client"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
 	"k8s.io/kubernetes/test/e2e/storage/testsuites"
@@ -14,14 +17,27 @@ import (
 
 func init() {
 	testing.Init()
-
 	f.RegisterClusterFlags(flag.CommandLine) // configures --kubeconfig flag
 	f.RegisterCommonFlags(flag.CommandLine)  // configures --kubectl flag
 	// Finalize and validate the test context after all flags are parsed.
 	// This sets up global test configuration (e.g., kubeconfig, kubectl path, timeouts)
 	// and ensures the E2E framework is ready to run tests.
 	f.AfterReadingAllFlags(&f.TestContext)
+
+	flag.StringVar(&AccessKeyId, "access-key-id", "", "S3 access key, e.g. accessKey1")
+	flag.StringVar(&SecretAccessKey, "secret-access-key", "", "S3 secret access key, e.g. verySecretKey1")
+	flag.StringVar(&S3EndpointUrl, "s3-endpoint-url", "", "S3 endpoint URL, e.g. http://s3.scality.com:8000")
 	flag.Parse()
+
+	// Check if mandatory flags are provided
+	if AccessKeyId == "" || SecretAccessKey == "" || S3EndpointUrl == "" {
+		fmt.Println("Error: --access-key-id, --secret-access-key, and --s3-endpoint-url are required flags")
+		os.Exit(1)
+	}
+
+	s3client.DefaultAccessKey = AccessKeyId
+	s3client.DefaultSecretAccessKey = SecretAccessKey
+	s3client.DefaultS3EndpointUrl = S3EndpointUrl
 }
 
 func TestE2E(t *testing.T) {

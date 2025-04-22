@@ -1,4 +1,4 @@
-module github.com/scality/mountpoint-s3-csi-driver/tests/e2e-tests
+module github.com/scality/mountpoint-s3-csi-driver/tests/e2e
 
 go 1.24
 

@@ -3,12 +3,18 @@ package e2e
 import (
 	"context"
 
-	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e-tests/pkg/s3client"
+	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/pkg/s3client"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
+)
+
+var (
+	AccessKeyId     string
+	SecretAccessKey string
+	S3EndpointUrl   string
 )
 
 type s3Driver struct {

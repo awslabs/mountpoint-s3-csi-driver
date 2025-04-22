@@ -14,6 +14,12 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
+var (
+	DefaultAccessKey       string
+	DefaultSecretAccessKey string
+	DefaultS3EndpointUrl   string
+)
+
 const DefaultRegion = "us-east-1"
 const s3BucketNameMaxLength = 63
 const s3BucketNamePrefix = "s3-csi-k8s-e2e-"
@@ -36,8 +42,8 @@ func NewWithRegion(region string) *Client {
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			"accessKey1",
-			"verySecretKey1",
+			DefaultAccessKey,
+			DefaultSecretAccessKey,
 			"",
 		)),
 		config.WithRetryer(func() aws.Retryer {
@@ -50,8 +56,8 @@ func NewWithRegion(region string) *Client {
 	framework.ExpectNoError(err)
 	return &Client{region: region, client: s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = true
-		o.BaseEndpoint = aws.String("http://localhost:8000")
-	})} // TODO: Add endpoint here
+		o.BaseEndpoint = aws.String(DefaultS3EndpointUrl)
+	})}
 }
 
 // CreateBucket creates a new standard S3 bucket with a random name,
