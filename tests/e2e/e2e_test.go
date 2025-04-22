@@ -6,9 +6,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/customsuites"
+	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/pkg/s3client"
+
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/pkg/s3client"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
 	"k8s.io/kubernetes/test/e2e/storage/testsuites"
@@ -64,7 +66,9 @@ var CSITestSuites = []func() framework.TestSuite{
 	// This is part of the standard CSI driver compliance test suite and is
 	// used to verify functional support for static provisioning with S3 storage.
 	testsuites.InitVolumesTestSuite,
-	// TODO(S3CSI-9): Add custom Scality specific test suites here.
+
+	// Custom test suites specific to Scality S3 CSI driver.
+	customsuites.InitS3MountOptionsTestSuite,
 }
 
 // initS3Driver initializes and returns an S3 CSI driver implementation for E2E testing.
