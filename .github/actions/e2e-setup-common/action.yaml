@@ -26,7 +26,8 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version-file: "go.mod"
+        go-version-file: "tests/e2e/go.mod"
+        cache: true
 
     - name: Install Ginkgo CLI
       shell: bash
