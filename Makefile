@@ -246,6 +246,15 @@ e2e:
 	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
 		TEST_ARGS="$$TEST_ARGS --namespace $(CSI_NAMESPACE)"; \
 	fi; \
+	if [ ! -z "$(S3_ENDPOINT_URL)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --endpoint-url $(S3_ENDPOINT_URL)"; \
+	fi; \
+	if [ ! -z "$(ACCESS_KEY_ID)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --access-key-id $(ACCESS_KEY_ID)"; \
+	fi; \
+	if [ ! -z "$(SECRET_ACCESS_KEY)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --secret-access-key $(SECRET_ACCESS_KEY)"; \
+	fi; \
 	./tests/e2e/scripts/run.sh test $$TEST_ARGS
 
 # Run only the Go-based e2e tests (skips verification checks)
@@ -256,6 +265,15 @@ e2e-go:
 	@TEST_ARGS=""; \
 	if [ ! -z "$(CSI_NAMESPACE)" ]; then \
 		TEST_ARGS="$$TEST_ARGS --namespace $(CSI_NAMESPACE)"; \
+	fi; \
+	if [ ! -z "$(S3_ENDPOINT_URL)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --endpoint-url $(S3_ENDPOINT_URL)"; \
+	fi; \
+	if [ ! -z "$(ACCESS_KEY_ID)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --access-key-id $(ACCESS_KEY_ID)"; \
+	fi; \
+	if [ ! -z "$(SECRET_ACCESS_KEY)" ]; then \
+		TEST_ARGS="$$TEST_ARGS --secret-access-key $(SECRET_ACCESS_KEY)"; \
 	fi; \
 	./tests/e2e/scripts/run.sh go-test $$TEST_ARGS
 

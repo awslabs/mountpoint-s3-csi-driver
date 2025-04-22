@@ -13,6 +13,9 @@ run_go_tests() {
   local e2e_tests_dir="${project_root}/tests/e2e"
   local namespace="${1:-$DEFAULT_NAMESPACE}"
   local junit_report="$2"
+  local access_key_id="${ACCESS_KEY_ID:-}"
+  local secret_access_key="${SECRET_ACCESS_KEY:-}"
+  local s3_endpoint_url="${S3_ENDPOINT_URL:-}"
   
   log "Running Go-based end-to-end tests for Scality CSI driver in namespace: $namespace..."
   
@@ -28,16 +31,32 @@ run_go_tests() {
     return 1
   fi
   
-  # Build the Go test command with enhanced verbosity
-  local go_test_cmd="KUBECONFIG=${KUBECONFIG} go test -v ./... -ginkgo.v"
-  
+  # Validate required parameters
+  if [ -z "$access_key_id" ]; then
+    error "Missing S3 access key. Please set ACCESS_KEY_ID environment variable or provide --access-key-id parameter."
+    return 1
+  fi
+
+  if [ -z "$secret_access_key" ]; then
+    error "Missing S3 secret key. Please set SECRET_ACCESS_KEY environment variable or provide --secret-access-key parameter."
+    return 1
+  fi
+
+  if [ -z "$s3_endpoint_url" ]; then
+    error "Missing S3 endpoint URL. Please set S3_ENDPOINT_URL environment variable or provide --endpoint-url parameter."
+    return 1
+  fi
+
+  # Build the Go test command with required S3 credentials
+  local go_test_cmd="KUBECONFIG=${KUBECONFIG} go test --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url} -v ./... -ginkgo.v"
+
   # Add JUnit report if specified
   if [ -n "$junit_report" ]; then
     log "Using JUnit report file: $junit_report"
-    
+
     # Handle absolute and relative paths
     local junit_absolute_path
-    
+
     # If path is absolute, use it directly
     if [[ "$junit_report" = /* ]]; then
       junit_absolute_path="$junit_report"
@@ -54,23 +73,23 @@ run_go_tests() {
         log "Adjusted path to be relative to e2e directory: $junit_absolute_path"
       fi
     fi
-    
+
     # Create the output directory if it doesn't exist
     local junit_dir=$(dirname "$junit_absolute_path")
     if [ ! -d "$junit_dir" ] && [ "$junit_dir" != "." ]; then
       log "Creating output directory for JUnit report: $junit_dir"
       mkdir -p "$junit_dir"
     fi
-    
+
     # Use the correct format for Ginkgo JUnit report
-    go_test_cmd="KUBECONFIG=${KUBECONFIG} go test -v ./... -ginkgo.v -ginkgo.junit-report=$junit_absolute_path"
+    go_test_cmd="KUBECONFIG=${KUBECONFIG} go test --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url} -v ./... -ginkgo.v -ginkgo.junit-report=$junit_absolute_path"
     log "Final JUnit report path: $junit_absolute_path"
   fi
-  
+
   # Run the Go tests
   log "Executing Go tests in $e2e_tests_dir"
   log "Test command: $go_test_cmd"
-  
+
   if ! (cd "$e2e_tests_dir" && eval "$go_test_cmd"); then
     error "Go tests failed with exit code $?"
     # List any XML files that were created
@@ -80,13 +99,13 @@ run_go_tests() {
     fi
     return 1
   fi
-  
+
   # Verify the JUnit report was created
   if [ -n "$junit_report" ]; then
     log "Checking for JUnit report file:"
     (cd "$e2e_tests_dir" && find . -name "*.xml" -ls || true)
   fi
-  
+
   log "Go tests completed successfully."
   return 0
 }
@@ -98,23 +117,23 @@ wait_for_pods() {
   local wait_seconds=10
   local attempt=1
   local all_namespaces=false
-  
+
   if [ "$2" = "all-namespaces" ]; then
     all_namespaces=true
   fi
-  
+
   log "Waiting for CSI driver pods to reach Running state..."
   
   while [ $attempt -le $max_attempts ]; do
     local pods_running=false
     local pod_output=""
-    
+
     if [ "$all_namespaces" = true ]; then
       pod_output=$(exec_cmd kubectl get pods --all-namespaces | grep -E "s3|csi" || true)
     else
       pod_output=$(exec_cmd kubectl get pods -n "$namespace" | grep -E "s3|csi" || true)
     fi
-    
+
     if [ -z "$pod_output" ]; then
       log "Attempt $attempt/$max_attempts: No CSI driver pods found yet. Waiting ${wait_seconds}s..."
     elif echo "$pod_output" | grep -q "Running"; then
@@ -125,11 +144,11 @@ wait_for_pods() {
       echo "$pod_output"
       log "Waiting ${wait_seconds}s for pods to start..."
     fi
-    
+
     sleep $wait_seconds
     attempt=$((attempt + 1))
   done
-  
+
   if [ "$pods_running" = true ]; then
     log "CSI driver pods are now in Running state:"
     echo "$pod_output"
@@ -148,9 +167,9 @@ wait_for_pods() {
 # Run basic verification tests
 run_verification_tests() {
   local namespace="${1:-$DEFAULT_NAMESPACE}"
-  
+
   log "Verifying Scality CSI driver installation in namespace: $namespace..."
-  
+
   # Check if the CSI driver is registered
   if exec_cmd kubectl get csidrivers | grep -q "s3.csi.aws.com"; then
     log "CSI driver is registered properly."
@@ -158,7 +177,7 @@ run_verification_tests() {
     error "CSI driver is not registered properly."
     return 1
   fi
-  
+
   # Wait for the CSI driver pods to reach Running state
   if ! wait_for_pods "$namespace"; then
     # If pods not found in the specified namespace, try all namespaces
@@ -168,7 +187,7 @@ run_verification_tests() {
       return 1
     fi
   fi
-  
+
   log "Basic verification tests passed."
   return 0
 }
@@ -176,12 +195,12 @@ run_verification_tests() {
 # Main test function that will be called from run.sh
 do_test() {
   log "Starting Scality CSI driver tests..."
-  
+
   local skip_go_tests=false
   local skip_verification=false
   local namespace="$DEFAULT_NAMESPACE"
   local junit_report=""
-  
+
   # Parse command-line parameters
   while [[ $# -gt 0 ]]; do
     key="$1"
@@ -213,15 +232,27 @@ do_test() {
           return 1
         fi
         ;;
+      --access-key-id)
+        export ACCESS_KEY_ID="$2"
+        shift 2
+        ;;
+      --secret-access-key)
+        export SECRET_ACCESS_KEY="$2"
+        shift 2
+        ;;
+      --endpoint-url)
+        export S3_ENDPOINT_URL="$2"
+        shift 2
+        ;;
       *)
         error "Unknown parameter: $key"
         return 1
         ;;
     esac
   done
-  
+
   log "Using namespace: $namespace"
-  
+
   # Run basic verification tests unless skipped
   if [ "$skip_verification" != "true" ]; then
     if ! run_verification_tests "$namespace"; then
@@ -231,7 +262,7 @@ do_test() {
   else
     log "Skipping verification tests as requested."
   fi
-  
+
   # Run Go-based tests if not skipped
   if [ "$skip_go_tests" != "true" ]; then
     if ! run_go_tests "$namespace" "$junit_report"; then

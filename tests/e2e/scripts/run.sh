@@ -37,6 +37,10 @@ show_help() {
   echo
   echo "Options for test command:"
   echo "  --skip-go-tests           Skip executing Go-based end-to-end tests"
+  echo "  --endpoint-url VALUE      Specify custom S3 endpoint URL for tests (REQUIRED)"
+  echo "  --access-key-id VALUE     Specify S3 access key ID for tests (REQUIRED)"
+  echo "  --secret-access-key VALUE Specify S3 secret access key for tests (REQUIRED)"
+  echo "  --junit-report VALUE      Generate JUnit XML report at specified path"
   echo
   echo "Options for uninstall command:"
   echo "  --delete-ns               Delete the CSI driver namespace without prompting (only for custom namespaces, not kube-system)"
@@ -51,6 +55,7 @@ show_help() {
   echo "  $0 test                                 # Run all tests including Go-based e2e tests"
   echo "  $0 test --namespace custom-namespace    # Run tests in a custom namespace"
   echo "  $0 test --skip-go-tests                 # Run only basic verification tests"
+  echo "  $0 test --endpoint-url https://s3.example.com --access-key-id AKIAXXXXXXXX --secret-access-key xxxxxxxx  # Run tests with custom S3 credentials"
   echo "  $0 go-test                              # Run Go tests directly (skips verification)"
   echo "  $0 all                                  # Install driver and run tests"
   echo "  $0 all --namespace custom-namespace     # Install driver and run tests in a custom namespace"
@@ -123,13 +128,13 @@ parse_install_parameters() {
     show_help
     exit 1
   fi
-  
+
   if [ "$has_access_key_id" = false ]; then
     error "Missing required parameter: --access-key-id"
     show_help
     exit 1
   fi
-  
+
   if [ "$has_secret_access_key" = false ]; then
     error "Missing required parameter: --secret-access-key"
     show_help
@@ -143,7 +148,7 @@ parse_install_parameters() {
 # Parse uninstall parameters
 parse_uninstall_parameters() {
   local params=""
-  
+
   # Process options
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -166,7 +171,7 @@ parse_uninstall_parameters() {
         ;;
     esac
   done
-  
+
   # Return parameters
   echo "$params"
 }
@@ -174,7 +179,7 @@ parse_uninstall_parameters() {
 # Parse test parameters
 parse_test_parameters() {
   local params=""
-  
+
   # Process options
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -190,6 +195,18 @@ parse_test_parameters() {
         params="$params --junit-report $2"
         shift 2
         ;;
+      --endpoint-url)
+        params="$params --endpoint-url $2"
+        shift 2
+        ;;
+      --access-key-id)
+        params="$params --access-key-id $2"
+        shift 2
+        ;;
+      --secret-access-key)
+        params="$params --secret-access-key $2"
+        shift 2
+        ;;
       *)
         echo "Error: Unknown option: $1"
         show_help
@@ -197,7 +214,20 @@ parse_test_parameters() {
         ;;
     esac
   done
+
+  # Pass environment variables if set and not already passed as parameters
+  if [[ -n "$ENDPOINT_URL" && ! "$params" =~ "--endpoint-url" ]]; then
+    params="$params --endpoint-url $ENDPOINT_URL"
+  fi
+
+  if [[ -n "$ACCESS_KEY_ID" && ! "$params" =~ "--access-key-id" ]]; then
+    params="$params --access-key-id $ACCESS_KEY_ID"
+  fi
   
+  if [[ -n "$SECRET_ACCESS_KEY" && ! "$params" =~ "--secret-access-key" ]]; then
+    params="$params --secret-access-key $SECRET_ACCESS_KEY"
+  fi
+
   # Return parameters
   echo "$params"
 }
@@ -206,14 +236,14 @@ parse_test_parameters() {
 get_namespace_param() {
   local namespace="$DEFAULT_NAMESPACE"
   local args=("$@")
-  
+
   for ((i=0; i<${#args[@]}; i++)); do
     if [[ "${args[$i]}" == "--namespace" && $((i+1)) -lt ${#args[@]} ]]; then
       namespace="${args[$i+1]}"
       break
     fi
   done
-  
+
   echo "--namespace $namespace"
 }
 
@@ -221,11 +251,11 @@ get_namespace_param() {
 main() {
   # Set default namespace
   local namespace_param=$(get_namespace_param "$@")
-  
+
   # Process command line arguments
   COMMAND=${1:-install}
   shift || true # Remove the command from the arguments
-  
+
   case $COMMAND in
     install)
       source "${MODULES_DIR}/install.sh"
@@ -250,29 +280,40 @@ main() {
       ;;
     all)
       log "Starting Scality CSI driver installation and tests..."
-      
+
       source "${MODULES_DIR}/install.sh"
-      
+
       # Get namespace parameter
       local namespace_param=$(get_namespace_param "$@")
       
       # Extract installation related arguments, exclude the test-specific arguments
       local install_args=""
       local test_args=""
-      
-      # Separate install and test args
-      for arg in "$@"; do
+
+      # Preserve S3 credentials for tests
+      local endpoint_url=""
+      local access_key_id=""
+      local secret_access_key=""
+
+      # Make a copy of all arguments to preserve them
+      local all_args=("$@")
+
+      # Separate install and test args with a while loop that properly handles shifts
+      while [[ $# -gt 0 ]]; do
+        arg="$1"
+        
         # Check for JUnit report param with equals sign format
         if [[ "$arg" == --junit-report=* ]]; then
           test_args="$test_args $arg"
+          shift
           continue
         fi
-        
+
         case "$arg" in
           --junit-report)
             test_args="$test_args $arg"
             shift
-            
+
             # If this argument requires a value, add it to test_args
             if [[ $# -gt 0 && "$1" != --* ]]; then
               test_args="$test_args $1"
@@ -281,21 +322,69 @@ main() {
             ;;
           --skip-go-tests | --skip-verification)
             test_args="$test_args $arg"
+            shift
+            ;;
+          --endpoint-url)
+            if [[ $# -gt 1 ]]; then
+              install_args="$install_args $arg $2"
+              endpoint_url="$2"
+              shift 2
+            else
+              error "Missing value for $arg"
+              exit 1
+            fi
+            ;;
+          --access-key-id)
+            if [[ $# -gt 1 ]]; then
+              install_args="$install_args $arg $2"
+              access_key_id="$2"
+              shift 2
+            else
+              error "Missing value for $arg"
+              exit 1
+            fi
+            ;;
+          --secret-access-key)
+            if [[ $# -gt 1 ]]; then
+              install_args="$install_args $arg $2"
+              secret_access_key="$2"
+              shift 2
+            else
+              error "Missing value for $arg"
+              exit 1
+            fi
             ;;
           *)
             install_args="$install_args $arg"
+            shift
             ;;
         esac
       done
-      
+
+      # Restore original arguments for namespace parameter extraction
+      set -- "${all_args[@]}"
+
       # Pass all command-line parameters to install module
       exec_cmd do_install $namespace_param $install_args
-      
+
       source "${MODULES_DIR}/test.sh"
-      
+
+      # Add S3 credentials to test args if specified
+      if [ -n "$endpoint_url" ]; then
+        test_args="$test_args --endpoint-url $endpoint_url"
+      fi
+
+      if [ -n "$access_key_id" ]; then
+        test_args="$test_args --access-key-id $access_key_id"
+      fi
+
+      if [ -n "$secret_access_key" ]; then
+        test_args="$test_args --secret-access-key $secret_access_key"
+      fi
+
       # Run tests with same namespace and any test-specific arguments
       exec_cmd do_test $namespace_param $test_args
-      
+
       log "Scality CSI driver setup and tests completed successfully."
       ;;
     uninstall)
