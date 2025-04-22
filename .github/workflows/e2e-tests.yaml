@@ -23,7 +23,7 @@ jobs:
       tag: ${{ github.sha }}
 
   e2e-tests:
-    name: Run
+    name: Execute E2E Tests
     runs-on: ubuntu-22.04
     needs: dev-image
     steps:
