@@ -1,5 +1,5 @@
 #!/bin/bash
-# uninstall.sh - Uninstallation functions for e2e-scality scripts
+# uninstall.sh - Uninstallation functions for e2e scripts
 
 # Source common functions
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"

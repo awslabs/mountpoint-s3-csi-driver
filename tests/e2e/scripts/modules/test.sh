@@ -1,5 +1,5 @@
 #!/bin/bash
-# test.sh - Test functions for e2e-scality scripts
+# test.sh - Test functions for e2e scripts
 
 # Source common functions
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -10,7 +10,7 @@ DEFAULT_NAMESPACE="kube-system"
 # Run Go tests
 run_go_tests() {
   local project_root=$(get_project_root)
-  local e2e_tests_dir="${project_root}/tests/e2e-scality/e2e-tests"
+  local e2e_tests_dir="${project_root}/tests/e2e"
   local namespace="${1:-$DEFAULT_NAMESPACE}"
   local junit_report="$2"
   
@@ -43,15 +43,15 @@ run_go_tests() {
       junit_absolute_path="$junit_report"
     else
       # For relative paths, determine if we need to adjust the path based on the CWD
-      # If path starts with ./ then make it relative to the e2e-tests directory
+      # If path starts with ./ then make it relative to the e2e directory
       if [[ "$junit_report" = ./* ]]; then
         # For paths starting with ./, keep them relative to the test directory
         junit_absolute_path="$junit_report"
-        log "Using relative path from e2e-tests directory: $junit_absolute_path"
+        log "Using relative path from e2e directory: $junit_absolute_path"
       else
         # For other paths (like just a filename), ensure they're created in the test directory
         junit_absolute_path="./$junit_report"
-        log "Adjusted path to be relative to e2e-tests directory: $junit_absolute_path"
+        log "Adjusted path to be relative to e2e directory: $junit_absolute_path"
       fi
     fi
     

@@ -28,6 +28,6 @@ Example:
 ```bash
 # Run from project root
 make csi-install
-make e2e-scality
-make e2e-scality-all
+make e2e
+make e2e-all
 ``` 

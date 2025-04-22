@@ -1,5 +1,5 @@
 #!/bin/bash
-# run.sh - Main entry point for e2e-scality scripts
+# run.sh - Main entry point for e2e scripts
 set -e
 
 # Get the directory where this script is located
@@ -60,8 +60,8 @@ show_help() {
   echo "  $0 uninstall --force                    # Force delete all resources"
   echo "  $0 help                                 # Show this help message"
   echo
-  echo "For advanced filtering of Go tests, use 'go test' directly in the tests/e2e-scality/e2e-tests directory:"
-  echo "  cd tests/e2e-scality/e2e-tests && go test -v -tags=e2e -ginkgo.focus=\"Basic Functionality\""
+  echo "For advanced filtering of Go tests, use 'go test' directly in the tests/e2e directory:"
+  echo "  cd tests/e2e && go test -v -tags=e2e -ginkgo.focus=\"Basic Functionality\""
 }
 
 parse_install_parameters() {

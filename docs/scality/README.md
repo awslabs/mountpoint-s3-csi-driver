@@ -25,8 +25,8 @@ make csi-install \
 | Command | Description |
 |---------|-------------|
 | `make csi-install` | Install the driver |
-| `make e2e-scality` | Run tests on installed driver |
-| `make e2e-scality-all` | Install driver and run tests |
+| `make e2e` | Run tests on installed driver |
+| `make e2e-all` | Install driver and run tests |
 | `make csi-uninstall` | Remove the driver (interactive) |
 | `make csi-uninstall-clean` | Remove driver and namespace |
 | `make csi-uninstall-force` | Force complete removal |
@@ -127,7 +127,7 @@ kubectl get csidrivers
 If you've already installed the driver:
 
 ```bash
-make e2e-scality
+make e2e
 ```
 
 ### Installing and Testing in One Step
@@ -135,7 +135,7 @@ make e2e-scality
 Install the driver and run all tests together:
 
 ```bash
-make e2e-scality-all \
+make e2e-all \
   S3_ENDPOINT_URL=https://s3.example.com \
   ACCESS_KEY_ID=your_access_key \
   SECRET_ACCESS_KEY=your_secret_key

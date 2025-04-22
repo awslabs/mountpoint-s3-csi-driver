@@ -21,7 +21,7 @@ jobs:
       namespace: ${{ github.repository_owner }}
       tag: ${{ github.sha }}
 
-  scality-e2e-tests:
+  e2e-tests:
     name: Run
     runs-on: ubuntu-22.04
     needs: dev-image
@@ -43,19 +43,19 @@ jobs:
       - name: Run Scality Tests
         run: |
           mkdir -p test-results
-          make e2e-scality-all \
+          make e2e-all \
             S3_ENDPOINT_URL=http://${{ steps.get_ip.outputs.host_ip }}:8000 \
             ACCESS_KEY_ID=accessKey1 \
             SECRET_ACCESS_KEY=verySecretKey1 \
             CSI_IMAGE_TAG=${{ github.sha }} \
             CSI_IMAGE_REPOSITORY=ghcr.io/${{ github.repository }} \
-            ADDITIONAL_ARGS="--junit-report=./test-results/scality-e2e-tests-results.xml"
+            ADDITIONAL_ARGS="--junit-report=./test-results/e2e-tests-results.xml"
 
       - name: Upload test results to Codecov
         if: ${{ always() }}
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./tests/e2e-scality/e2e-tests/test-results/scality-e2e-tests-results.xml
-          flags: scality_e2e_tests
+          file: ./tests/e2e/test-results/e2e-tests-results.xml
+          flags: e2e_tests
           slug: scality/mountpoint-s3-csi-driver
