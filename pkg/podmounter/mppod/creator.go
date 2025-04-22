@@ -20,6 +20,8 @@ const (
 	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
 )
 
+const EmptyDirSizeLimit = 10 * 1024 * 1024 // 10MB
+
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
 type ContainerConfig struct {
 	Command         string
@@ -129,7 +131,7 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 					VolumeSource: corev1.VolumeSource{
 						EmptyDir: &corev1.EmptyDirVolumeSource{
 							Medium:    corev1.StorageMediumMemory,
-							SizeLimit: resource.NewQuantity(10*1024*1024, resource.BinarySI),
+							SizeLimit: resource.NewQuantity(EmptyDirSizeLimit, resource.BinarySI),
 						},
 					},
 				},

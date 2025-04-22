@@ -64,7 +64,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
 						Medium:    corev1.StorageMediumMemory,
-						SizeLimit: resource.NewQuantity(10*1024*1024, resource.BinarySI),
+						SizeLimit: resource.NewQuantity(mppod.EmptyDirSizeLimit, resource.BinarySI),
 					},
 				},
 			},
