@@ -22,6 +22,17 @@ The multi-volume test suite (`multivolume.go`) validates scenarios involving mul
 
 This suite verifies the core functionality needed for both stateless and stateful workloads in Kubernetes when using S3 CSI volumes.
 
+### Cache Test Suite
+
+The cache test suite (`cache.go`) provides smoke tests to validate the caching functionality of the Mountpoint S3 client when deployed through the CSI driver. It includes tests for:
+
+- Basic read/write operations with local caching enabled
+- Persistence of cached data even after removal from the underlying S3 bucket
+- Cache behavior with different user contexts (root and non-root)
+- Cache sharing between containers in the same pod
+
+Note that comprehensive caching functionality tests are part of the upstream [Mountpoint S3 project](https://github.com/awslabs/mountpoint-s3), while these tests focus specifically on validating CSI driver integration with caching features.
+
 ### Utilities
 
 The `util.go` file contains utility functions that support all test suites:
