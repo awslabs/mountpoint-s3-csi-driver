@@ -69,6 +69,7 @@ var CSITestSuites = []func() framework.TestSuite{
 
 	// Custom test suites specific to Scality S3 CSI driver.
 	customsuites.InitS3MountOptionsTestSuite,
+	customsuites.InitS3MultiVolumeTestSuite,
 }
 
 // initS3Driver initializes and returns an S3 CSI driver implementation for E2E testing.
