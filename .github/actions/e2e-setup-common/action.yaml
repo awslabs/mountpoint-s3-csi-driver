@@ -4,10 +4,7 @@ inputs:
   ref:
     description: "Git ref to checkout"
     required: true
-  deploy_s3:
-    description: "Whether to deploy s3 via docker compose"
-    required: false
-    default: "true"
+
 runs:
   using: "composite"
   steps:
@@ -26,11 +23,8 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version-file: "go.mod"
-
-    - name: Install Ginkgo CLI
-      shell: bash
-      run: go install github.com/onsi/ginkgo/v2/ginkgo
+        go-version-file: "tests/e2e/go.mod"
+        cache: true
 
     - name: Create Kind Cluster
       uses: helm/kind-action@v1.12.0
@@ -38,25 +32,35 @@ runs:
         wait: 90s
         cluster_name: helm-test-cluster
 
-    - name: Pull Dev Image into KIND Cluster
+    - name: Setup Helm
+      uses: azure/setup-helm@v4.3.0
+
+    - name: Pull Container Images and Download GO Dependencies in Parallel
       shell: bash
       run: |
-        docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
-        kind load docker-image ghcr.io/${{ github.repository }}:${{ github.sha }} --name helm-test-cluster
-      if: ${{ inputs.deploy_s3 == 'true' }}
+        # Start Docker pulls in parallel
+        docker pull ghcr.io/${{ github.repository }}:${{ github.sha }} &
+        DRIVER_PID=$!
 
-    - name: Deploy Scality Storage
+        docker pull ghcr.io/scality/cloudserver:${CLOUDSERVER_TAG} &
+        CLOUDSERVER_PID=$!
+
+        # Start Go dependency download in parallel
+        (cd tests/e2e && go mod download) &
+        GO_DEPS_PID=$!
+
+        # Wait for all operations to complete
+        wait $DRIVER_PID || { echo "❌ Driver image pull failed"; exit 1; }
+        wait $CLOUDSERVER_PID || { echo "❌ CloudServer image pull failed"; exit 1; }
+        wait $GO_DEPS_PID || { echo "❌ Go dependencies download failed"; exit 1; }
+
+    - name: Load CSI Driver into KIND and Deploy Cloudserver (S3)
       shell: bash
       run: |-
+        kind load docker-image ghcr.io/${{ github.repository }}:${{ github.sha }} --name helm-test-cluster
         set -e -o pipefail;
-        mkdir -p logs/s3 logs/iam logs/cosi_driver data/vaultdb
+        mkdir -p logs/s3
         chown -R runner:docker logs
-        chmod -R ugo+rwx data
         docker compose --profile s3 up -d --quiet-pull
         bash ../scripts/wait_for_local_port.bash 8000 30
       working-directory: .github/scality-storage-deployment
-      if: ${{ inputs.deploy_s3 == 'true' }}
-
-    - name: Setup Helm
-      uses: azure/setup-helm@v4.3.0
-      if: ${{ inputs.deploy_s3 == 'true' }}

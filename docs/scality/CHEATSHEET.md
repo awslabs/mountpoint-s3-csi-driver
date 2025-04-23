@@ -41,18 +41,18 @@ make csi-install \
 
 ### Basic Testing of Already Installed Driver
 ```bash
-make e2e-scality
+make e2e
 ```
 Tests the CSI driver in the default namespace (kube-system).
 
 ### Testing with Custom Namespace
 ```bash
-make e2e-scality CSI_NAMESPACE=custom-namespace
+make e2e CSI_NAMESPACE=custom-namespace
 ```
 
 ### Run Only Basic Verification Tests (Skip Go Tests)
 ```bash
-make e2e-scality-verify CSI_NAMESPACE=custom-namespace
+make e2e-verify CSI_NAMESPACE=custom-namespace
 ```
 This command only checks if:
 - The CSI driver pods are running correctly in the specified namespace (or in any namespace as a fallback)
@@ -61,13 +61,13 @@ It skips running the Go-based tests.
 
 ### Run Only Go-Based End-to-End Tests
 ```bash
-make e2e-scality-go CSI_NAMESPACE=custom-namespace
+make e2e-go CSI_NAMESPACE=custom-namespace
 ```
 
 ### Advanced Testing with Go Test (for filtering tests)
 ```bash
 # Go to the tests directory
-cd tests/e2e-scality/e2e-tests
+cd tests/e2e
 
 # Run tests with focus on specific test patterns (runs only matching tests)
 go test -v -tags=e2e -ginkgo.focus="Basic Functionality" -args -namespace=custom-namespace
@@ -81,7 +81,7 @@ go test -v -tags=e2e -ginkgo.focus="Basic" -ginkgo.skip="Volume" -args -namespac
 
 ### Install and Test in One Step
 ```bash
-make e2e-scality-all \
+make e2e-all \
   S3_ENDPOINT_URL=https://s3.example.com \
   ACCESS_KEY_ID=your_key \
   SECRET_ACCESS_KEY=your_secret
@@ -90,7 +90,7 @@ Installs in the default namespace (kube-system).
 
 ### Install with Custom Namespace and Test
 ```bash
-make e2e-scality-all \
+make e2e-all \
   S3_ENDPOINT_URL=https://s3.example.com \
   ACCESS_KEY_ID=your_key \
   SECRET_ACCESS_KEY=your_secret \

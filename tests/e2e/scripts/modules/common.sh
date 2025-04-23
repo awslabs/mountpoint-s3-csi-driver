@@ -1,5 +1,5 @@
 #!/bin/bash
-# common.sh - Shared functions for e2e-scality scripts
+# common.sh - Shared functions for e2e scripts
 
 # Define colors for better readability
 GREEN='\033[0;32m'
