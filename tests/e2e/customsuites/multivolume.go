@@ -260,7 +260,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 	// Test 3: Data persistence across pod recreations
 	// This test validates the following configuration:
 	//
-	//  [Pod-1 (writes)]  →  ✓ Delete  →  [Pod-2 (reads)]
+	//  [Pod-1 (writes)]  →  ✓ Delete Pod-1 →  [Pod-2 (reads)]
 	//         |                               |
 	//         |                               |
 	//         ↓                               ↓
