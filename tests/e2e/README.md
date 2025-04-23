@@ -7,6 +7,7 @@ This directory contains the end-to-end (E2E) test framework for the Scality S3 C
 - `e2e_test.go`: Main test file with Kubernetes CSI test framework integration
 - `testdriver.go`: Implementation of Kubernetes test driver interfaces for S3 storage
 - `pkg/s3client`: S3 client for creating managing buckets and volumes 
+- `customsuites/`: Custom test suites specific to S3 CSI driver functionality
 - `scripts/`: Helper scripts for test automation
 
 ## Tests
@@ -16,6 +17,10 @@ The E2E tests verify:
 - CSI driver integration with Kubernetes
 - Data persistence with pre-provisioned PVs
 - Volume mounting and unmounting
+- Mount options and permission handling
+- Multi-volume and multi-pod scenarios
+
+Custom test suites provide specialized validation for S3-specific functionality. For details on these custom tests, see the [Custom Test Suites README](customsuites/README.md).
 
 ## Running Tests
 
@@ -77,4 +82,5 @@ KUBECONFIG=/path/to/kubeconfig go test --access-key-id=accessKey1 --secret-acces
 Additional tests can be added to the framework by:
 
 1. Extending the testdriver.go implementation
-2. Adding new test suites to the CSITestSuites array in e2e_test.go 
+2. Adding new test suites to the CSITestSuites array in e2e_test.go
+3. For custom S3-specific tests, adding new test suites in the customsuites/ directory (see the [Custom Test Suites README](customsuites/README.md) for guidelines)

@@ -12,6 +12,16 @@ The mount options test suite (`mountoptions.go`) verifies that the S3 CSI driver
 - Proper enforcement of permissions when mount options are absent
 - File and directory ownership when mounting with specific uid/gid
 
+### Multi-Volume Test Suite
+
+The multi-volume test suite (`multivolume.go`) validates scenarios involving multiple volumes and pods to ensure the S3 CSI driver properly handles concurrent access and volume isolation. It includes tests for:
+
+- Multiple pods accessing the same volume simultaneously
+- A single pod accessing multiple volumes concurrently
+- Data persistence across pod recreations with the same volume
+
+This suite verifies the core functionality needed for both stateless and stateful workloads in Kubernetes when using S3 CSI volumes.
+
 ### Utilities
 
 The `util.go` file contains utility functions that support all test suites:
