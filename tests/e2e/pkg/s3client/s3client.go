@@ -116,6 +116,24 @@ func (c *Client) WipeoutBucket(ctx context.Context, bucketName string) error {
 	return nil
 }
 
+// DeleteObject deletes a single object with the given key from the specified bucket
+func (c *Client) DeleteObject(ctx context.Context, bucketName string, key string) error {
+	framework.Logf("Deleting object %s from bucket %s", key, bucketName)
+
+	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		framework.Logf("Failed to delete object %s: %v", key, err)
+		return err
+	}
+
+	framework.Logf("Successfully deleted object %s from bucket %s", key, bucketName)
+	return nil
+}
+
 func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) DeleteBucketFunc {
 	bucketName := *input.Bucket
 
