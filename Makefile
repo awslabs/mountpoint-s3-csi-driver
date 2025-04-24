@@ -47,6 +47,10 @@ ALL_OS_ARCH_OSVERSION=$(foreach os, $(ALL_OS), ${ALL_OS_ARCH_OSVERSION_${os}})
 
 PLATFORM?=linux/amd64,linux/arm64
 
+# List of allowed licenses in the CSI Driver's dependencies.
+# See https://github.com/google/licenseclassifier/blob/e6a9bb99b5a6f71d5a34336b8245e305f5430f99/license_type.go#L28 for list of cannonical names for licenses.
+ALLOWED_LICENSES="Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT"
+
 # region is expected to be the same where cluster is created
 E2E_REGION?=us-east-1
 E2E_COMMIT_ID?=local
@@ -169,6 +173,10 @@ e2e: e2e-controller
 .PHONY: check_style
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
+
+.PHONY: check_licenses
+check_licenses:
+	go mod download && go tool github.com/google/go-licenses check --allowed_licenses ${ALLOWED_LICENSES} ./...
 
 .PHONY: clean
 clean:
