@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"os"
 
 	"github.com/google/uuid"
 	v1 "k8s.io/api/core/v1"
@@ -162,7 +163,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 			MountOptions:           mountOptions, // this is not set by kubernetes storageframework.CreateVolumeResource, which is why we need this function
 			AccessModes:            []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
 			Capacity: v1.ResourceList{
-				v1.ResourceStorage: resource.MustParse("1Gi"),
+				v1.ResourceStorage: resource.MustParse("1200Gi"),
 			},
 			ClaimRef: &v1.ObjectReference{
 				Name:      pvcName,
@@ -181,7 +182,7 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
 			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{
-					v1.ResourceStorage: resource.MustParse("1Gi"),
+					v1.ResourceStorage: resource.MustParse("1200Gi"),
 				},
 			},
 		},
@@ -199,4 +200,11 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
 	framework.ExpectNoError(err, "PVC, PV failed to bind")
 	return &r
+}
+
+// copySmallFileToPod copies a small file from host to pod
+func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, srcFile, destFile string) {
+	content, err := os.ReadFile(srcFile)
+	framework.ExpectNoError(err)
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", destFile, string(content)))
 }

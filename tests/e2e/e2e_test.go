@@ -29,6 +29,7 @@ func init() {
 	flag.StringVar(&AccessKeyId, "access-key-id", "", "S3 access key, e.g. accessKey1")
 	flag.StringVar(&SecretAccessKey, "secret-access-key", "", "S3 secret access key, e.g. verySecretKey1")
 	flag.StringVar(&S3EndpointUrl, "s3-endpoint-url", "", "S3 endpoint URL, e.g. http://s3.scality.com:8000")
+	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.Parse()
 
 	// Check if mandatory flags are provided
@@ -83,6 +84,9 @@ var CSITestSuites = []func() framework.TestSuite{
 // This implementation supports both ReadWriteMany and ReadOnlyMany access modes and only works
 // with pre-provisioned persistent volumes.
 var _ = utils.SIGDescribe("CSI Volumes", func() {
+	if Performance {
+		CSITestSuites = []func() framework.TestSuite{customsuites.InitS3PerformanceTestSuite}
+	}
 	curDriver := initS3Driver()
 
 	args := framework.GetDriverNameWithFeatureTags(curDriver)

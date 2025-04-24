@@ -15,6 +15,7 @@ var (
 	AccessKeyId     string
 	SecretAccessKey string
 	S3EndpointUrl   string
+	Performance     bool
 )
 
 type s3Driver struct {
