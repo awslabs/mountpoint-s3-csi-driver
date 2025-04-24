@@ -19,6 +19,7 @@ The E2E tests verify:
 - Volume mounting and unmounting
 - Mount options and permission handling
 - Multi-volume and multi-pod scenarios
+- Local caching functionality and persistence
 
 Custom test suites provide specialized validation for S3-specific functionality. For details on these custom tests, see the [Custom Test Suites README](customsuites/README.md).
 
