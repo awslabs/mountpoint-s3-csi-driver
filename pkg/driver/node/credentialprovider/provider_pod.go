@@ -23,8 +23,8 @@ const (
 	serviceAccountRoleAnnotation   = "eks.amazonaws.com/role-arn"
 )
 
-const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
-const stsConfigDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#configuring-the-sts-region"
+const podLevelCredentialsDocsPage = "https://github.com/scality/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
+const stsConfigDocsPage = "https://github.com/scality/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#configuring-the-sts-region"
 
 type serviceAccountToken struct {
 	Token               string    `json:"token"`

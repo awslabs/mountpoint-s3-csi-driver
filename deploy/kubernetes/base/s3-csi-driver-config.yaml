@@ -4,7 +4,7 @@ kind: ConfigMap
 metadata:
   name: s3-csi-driver-config
   labels:
-    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+    app.kubernetes.io/name: scality-mountpoint-s3-csi-driver
 data:
   dummy: "" # This ensures data is a proper object even when no values are set
   # Uncomment and set the s3-endpoint-url if needed

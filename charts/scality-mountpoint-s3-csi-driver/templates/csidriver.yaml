@@ -3,7 +3,7 @@ kind: CSIDriver
 metadata:
   name: s3.csi.scality.com
   labels:
-    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "scality-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   attachRequired: false
   {{- if or (.Values.node.podInfoOnMountCompat.enable) (semverCompare ">=1.30.0-0" .Capabilities.KubeVersion.Version) }}

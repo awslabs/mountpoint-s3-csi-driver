@@ -12,30 +12,30 @@ For Amazon EKS clusters, the Mountpoint for Amazon S3 CSI driver is also availab
 Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md) for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
 
 ## Container Images
-| Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
+| Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.13.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.13.0                      |
+| v1.13.0        | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.13.0                      |
 
 <details>
 <summary>Previous Images</summary>
 
-| Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
+| Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.12.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.12.0                      |
-| v1.11.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.11.0                      |
-| v1.10.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.10.0                      |
-| v1.9.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.9.0                       |
-| v1.8.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.8.1                       |
-| v1.8.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.8.0                       |
-| v1.7.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.7.0                       |
-| v1.6.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.6.0                       |
-| v1.5.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.5.1                       |
-| v1.4.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.4.0                       |
-| v1.3.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.3.1                       |
-| v1.3.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.3.0                       |
-| v1.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.2.0                       |
-| v1.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.1.0                       |
-| v1.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.0.0                       |
+| v1.12.0        | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.12.0                      |
+| v1.11.0        | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.11.0                      |
+| v1.10.0        | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.10.0                      |
+| v1.9.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.9.0                       |
+| v1.8.1         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.8.1                       |
+| v1.8.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.8.0                       |
+| v1.7.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.7.0                       |
+| v1.6.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.6.0                       |
+| v1.5.1         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.5.1                       |
+| v1.4.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.4.0                       |
+| v1.3.1         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.3.1                       |
+| v1.3.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.3.0                       |
+| v1.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.2.0                       |
+| v1.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.1.0                       |
+| v1.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver:v1.0.0                       |
 </details>
 
 ## Releases

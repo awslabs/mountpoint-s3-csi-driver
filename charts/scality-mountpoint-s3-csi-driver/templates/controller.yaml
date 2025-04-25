@@ -6,18 +6,18 @@ metadata:
   name: s3-csi-controller
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "scality-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: s3-csi-controller
-      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
+      {{- include "scality-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         app: s3-csi-controller
-        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        {{- include "scality-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
@@ -45,7 +45,7 @@ spec:
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
-            - "/bin/aws-s3-csi-controller"
+            - "/bin/scality-s3-csi-controller"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
