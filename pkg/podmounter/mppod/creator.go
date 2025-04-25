@@ -67,7 +67,7 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 		},
 		Spec: corev1.PodSpec{
 			// Mountpoint terminates with zero exit code on a successful termination,
-			// and in turn `/bin/aws-s3-csi-mounter` also exits with Mountpoint process' exit code,
+			// and in turn `/bin/scality-s3-csi-mounter` also exits with Mountpoint process' exit code,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
 			RestartPolicy: corev1.RestartPolicyOnFailure,

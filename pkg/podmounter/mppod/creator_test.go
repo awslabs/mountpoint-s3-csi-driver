@@ -18,7 +18,7 @@ const (
 	mountpointVersion = "1.10.0"
 	image             = "mp-image:latest"
 	imagePullPolicy   = corev1.PullAlways
-	command           = "/bin/aws-s3-csi-mounter"
+	command           = "/bin/scality-s3-csi-mounter"
 	priorityClassName = "mount-s3-critical"
 	testNode          = "test-node"
 	testPodUID        = "test-pod-uid"

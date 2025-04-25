@@ -8,7 +8,7 @@ import (
 // between Mountpoint Pod and the CSI Driver Node Pod.
 const KnownPathMountSock = "mount.sock"
 
-// KnownPathMountError is the path of error file that's created by `aws-s3-csi-mounter` if Mountpoint fails
+// KnownPathMountError is the path of error file that's created by `scality-s3-csi-mounter` if Mountpoint fails
 // during mount operation. Existence of this file indicates that Mountpoint failed to start and [PodMounter]
 // will propagate contents of this error file to the Kubernetes and to the operator to resolve any operator error.
 const KnownPathMountError = "mount.err"
