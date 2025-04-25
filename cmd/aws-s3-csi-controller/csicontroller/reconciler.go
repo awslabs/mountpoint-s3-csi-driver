@@ -13,7 +13,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 const debugLevel = 4
