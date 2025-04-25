@@ -108,7 +108,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
+              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.scality.com/
             {{- if .Values.experimental.podMounter }}
             - name: MOUNTER_KIND
               value: pod
@@ -186,7 +186,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
+              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.scality.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -243,7 +243,7 @@ spec:
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
+            path: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.scality.com/
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:

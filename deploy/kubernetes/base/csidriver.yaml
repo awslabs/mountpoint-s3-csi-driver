@@ -3,7 +3,7 @@
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
-  name: s3.csi.aws.com
+  name: s3.csi.scality.com
 spec:
   attachRequired: false
   podInfoOnMount: true

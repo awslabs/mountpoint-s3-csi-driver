@@ -85,7 +85,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/
+              value: /var/lib/kubelet/plugins/s3.csi.scality.com/
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -155,7 +155,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
+              value: /var/lib/kubelet/plugins/s3.csi.scality.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -217,7 +217,7 @@ spec:
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/s3.csi.aws.com/
+            path: /var/lib/kubelet/plugins/s3.csi.scality.com/
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
