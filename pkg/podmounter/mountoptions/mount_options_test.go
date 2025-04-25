@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func TestMountOptions(t *testing.T) {

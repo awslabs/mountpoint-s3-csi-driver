@@ -10,10 +10,10 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/system"
 )
 
 type SystemdMounter struct {

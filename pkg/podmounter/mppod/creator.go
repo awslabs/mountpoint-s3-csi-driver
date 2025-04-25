@@ -3,12 +3,12 @@ package mppod
 import (
 	"path/filepath"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 // Labels populated on spawned Mountpoint Pods.

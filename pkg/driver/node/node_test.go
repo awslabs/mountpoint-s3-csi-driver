@@ -9,12 +9,12 @@ import (
 	"github.com/golang/mock/gomock"
 	"golang.org/x/net/context"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	mock_driver "github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 type nodeServerTestEnv struct {

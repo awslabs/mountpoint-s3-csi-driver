@@ -8,7 +8,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	system "github.com/scality/mountpoint-s3-csi-driver/pkg/system"
 	dbus "github.com/godbus/dbus/v5"
 	gomock "github.com/golang/mock/gomock"
 )

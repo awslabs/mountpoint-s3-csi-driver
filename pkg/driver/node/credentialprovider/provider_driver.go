@@ -7,9 +7,9 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
-	mock_system "github.com/awslabs/aws-s3-csi-driver/pkg/system/mocks"
 	"github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/system"
+	mock_system "github.com/scality/mountpoint-s3-csi-driver/pkg/system/mocks"
 )
 
 func isRoot() bool {

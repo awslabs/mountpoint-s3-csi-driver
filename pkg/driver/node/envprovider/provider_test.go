@@ -3,9 +3,9 @@ package envprovider_test
 import (
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func TestGettingRegion(t *testing.T) {
