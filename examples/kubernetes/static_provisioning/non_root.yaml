@@ -16,7 +16,7 @@ spec:
     - gid=2000
     - allow-other
   csi:
-    driver: s3.csi.aws.com # required
+    driver: s3.csi.scality.com # required
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
       bucketName: s3-csi-driver
