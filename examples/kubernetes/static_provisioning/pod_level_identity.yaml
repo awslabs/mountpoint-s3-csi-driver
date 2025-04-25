@@ -75,7 +75,7 @@ kind: ServiceAccount
 metadata:
   name: s3-csi-admin-sa
   labels:
-    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+    app.kubernetes.io/name: scality-mountpoint-s3-csi-driver
   annotations:
     eks.amazonaws.com/role-arn: "arn:aws:iam::<user_id>:role/Admin"
 ---
