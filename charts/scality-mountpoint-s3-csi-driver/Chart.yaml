@@ -7,7 +7,7 @@ home: https://github.com/scality/mountpoint-s3-csi-driver
 sources:
   - https://github.com/scality/mountpoint-s3-csi-driver
 keywords:
-  - aws
+  - scality
   - mountpoint
   - s3
   - csi
