@@ -1,6 +1,6 @@
 // WIP: Part of https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279.
 //
-// `aws-s3-csi-mounter` is the entrypoint binary running on Mountpoint Pods.
+// `scality-s3-csi-mounter` is the entrypoint binary running on Mountpoint Pods.
 // It is responsible for receiving mount options from the CSI Driver Node Pod,
 // and spawning a Mountpoint instance in turn.
 // It will then wait until Mountpoint process terminates (which normally happens as a result of `unmount`).
@@ -15,7 +15,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/scality-csi-mounter/csimounter"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )

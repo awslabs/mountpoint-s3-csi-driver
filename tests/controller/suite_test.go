@@ -19,7 +19,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/scality-csi-controller/csicontroller"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
@@ -34,7 +34,7 @@ const defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl
 const mountpointNamespace = "mount-s3"
 const mountpointVersion = "1.10.0"
 const mountpointPriorityClassName = "mount-s3-critical"
-const mountpointContainerCommand = "/bin/aws-s3-csi-mounter"
+const mountpointContainerCommand = "/bin/scality-s3-csi-mounter"
 const mountpointImage = "mp-image:latest"
 const mountpointImagePullPolicy = corev1.PullNever
 
