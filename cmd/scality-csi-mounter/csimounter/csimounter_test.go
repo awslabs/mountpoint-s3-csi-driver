@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/scality-csi-mounter/csimounter"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mountoptions"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"

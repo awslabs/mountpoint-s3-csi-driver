@@ -1,6 +1,6 @@
 // WIP: Part of https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279.
 //
-// `aws-s3-csi-controller` is the entrypoint binary for the CSI Driver's controller component.
+// `scality-csi-controller` is the entrypoint binary for the CSI Driver's controller component.
 // It is responsible for acting on cluster events and spawning Mountpoint Pods when necessary.
 // It is also responsible for managing Mountpoint Pods, for example it ensures that completed Mountpoint Pods gets deleted.
 // It doesn't implement CSI's controller service as of today.
@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/scality-csi-controller/csicontroller"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -28,7 +28,7 @@ var mountpointVersion = flag.String("mountpoint-version", os.Getenv("MOUNTPOINT_
 var mountpointPriorityClassName = flag.String("mountpoint-priority-class-name", os.Getenv("MOUNTPOINT_PRIORITY_CLASS_NAME"), "Priority class name of the Mountpoint Pods.")
 var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAGE"), "Image of Mountpoint to use in spawned Mountpoint Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
-var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
+var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/scality-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 
 func main() {
 	flag.Parse()
