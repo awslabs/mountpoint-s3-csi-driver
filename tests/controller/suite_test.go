@@ -19,9 +19,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 const s3CSIDriver = "s3.csi.aws.com"
