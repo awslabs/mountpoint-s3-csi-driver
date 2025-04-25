@@ -66,8 +66,8 @@ COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
 
 # Copy CSI Driver binaries
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/scality-s3-csi-driver /bin/scality-s3-csi-driver
-COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-controller /bin/aws-s3-csi-controller
-COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-mounter /bin/aws-s3-csi-mounter
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/scality-csi-controller /bin/scality-csi-controller
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/scality-s3-csi-mounter /bin/scality-s3-csi-mounter
 # TODO: This won't be necessary with containerization.
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/install-mp /bin/install-mp
 
