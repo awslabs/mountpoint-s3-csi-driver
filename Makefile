@@ -17,7 +17,7 @@ SHELL = /bin/bash
 # MP CSI Driver version
 VERSION=1.13.0
 
-PKG=github.com/awslabs/aws-s3-csi-driver
+PKG=github.com/awslabs/scality-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -45,7 +45,7 @@ ENVTEST_K8S_VERSION ?= 1.30.x
 .PHONY: bin
 bin:
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/aws-s3-csi-driver/
+	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/scality-s3-csi-driver ./cmd/scality-s3-csi-driver/
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-controller ./cmd/aws-s3-csi-controller/
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-mounter ./cmd/aws-s3-csi-mounter/
 	# TODO: `install-mp` component won't be necessary with the containerization.
