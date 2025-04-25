@@ -130,14 +130,14 @@ uninstall_csi_driver() {
   fi
   
   # Check if CSI driver is still registered
-  if exec_cmd kubectl get csidrivers | grep -q "s3.csi.aws.com"; then
-    warn "CSI driver s3.csi.aws.com is still registered. You may need to delete it manually:"
-    warn "kubectl delete csidriver s3.csi.aws.com"
+  if exec_cmd kubectl get csidrivers | grep -q "s3.csi.scality.com"; then
+    warn "CSI driver s3.csi.scality.com is still registered. You may need to delete it manually:"
+    warn "kubectl delete csidriver s3.csi.scality.com"
     
     # In force mode, automatically delete the CSI driver
     if [ "$FORCE" = true ]; then
-      log "Force mode enabled. Deleting CSI driver s3.csi.aws.com..."
-      if ! exec_cmd kubectl delete csidriver s3.csi.aws.com; then
+      log "Force mode enabled. Deleting CSI driver s3.csi.scality.com..."
+      if ! exec_cmd kubectl delete csidriver s3.csi.scality.com; then
         error "Failed to delete CSI driver. Error code: $ERROR_CSI_DELETE"
         warn "You may need to manually delete the CSI driver registration."
         return $ERROR_CSI_DELETE

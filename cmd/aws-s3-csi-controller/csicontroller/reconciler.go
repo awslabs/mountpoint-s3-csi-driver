@@ -18,7 +18,7 @@ import (
 
 const debugLevel = 4
 
-const mountpointCSIDriverName = "s3.csi.aws.com"
+const mountpointCSIDriverName = "s3.csi.scality.com"
 
 // A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
 type Reconciler struct {

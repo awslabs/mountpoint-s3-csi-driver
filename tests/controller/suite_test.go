@@ -24,7 +24,7 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-const s3CSIDriver = "s3.csi.aws.com"
+const s3CSIDriver = "s3.csi.scality.com"
 const ebsCSIDriver = "ebs.csi.aws.com"
 
 const defaultNamespace = "default"

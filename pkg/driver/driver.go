@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	driverName = "s3.csi.aws.com"
+	driverName = "s3.csi.scality.com"
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
