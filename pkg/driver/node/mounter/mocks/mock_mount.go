@@ -8,10 +8,10 @@ import (
 	context "context"
 	reflect "reflect"
 
+	gomock "github.com/golang/mock/gomock"
 	credentialprovider "github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mountpoint "github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
 	system "github.com/scality/mountpoint-s3-csi-driver/pkg/system"
-	gomock "github.com/golang/mock/gomock"
 )
 
 // MockServiceRunner is a mock of ServiceRunner interface.
