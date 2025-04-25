@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func TestGeneratingPathsInsideMountpointPod(t *testing.T) {

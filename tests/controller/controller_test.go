@@ -11,8 +11,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 var _ = Describe("Mountpoint Controller", func() {

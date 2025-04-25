@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
 )
 
 // mountSyscallDefault creates a FUSE file descriptor and performs a `mount` syscall with given `target` and mount arguments.

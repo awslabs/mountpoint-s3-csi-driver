@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/scality/mountpoint-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func TestRunningMountpoint(t *testing.T) {

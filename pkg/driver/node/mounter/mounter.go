@@ -9,9 +9,9 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/system"
 )
 
 // https://github.com/awslabs/mountpoint-s3/blob/9ed8b6243f4511e2013b2f4303a9197c3ddd4071/mountpoint-s3/src/cli.rs#L421

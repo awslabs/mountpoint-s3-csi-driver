@@ -28,12 +28,12 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/util"
 )
 
 var kubeletPath = util.KubeletPath()

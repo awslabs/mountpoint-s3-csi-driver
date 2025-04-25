@@ -1,4 +1,4 @@
-module github.com/awslabs/aws-s3-csi-driver
+module github.com/scality/mountpoint-s3-csi-driver
 
 go 1.24
 

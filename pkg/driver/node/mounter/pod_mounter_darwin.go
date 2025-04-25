@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/mountpoint"
 )
 
 func (pm *PodMounter) mountSyscallDefault(_ string, _ mountpoint.Args) (int, error) {
