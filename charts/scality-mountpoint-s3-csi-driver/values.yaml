@@ -3,13 +3,10 @@
 # Declare variables to be passed into your templates.
 
 image:
-  # Our regional ECR repositories are labelled `eks/scality-s3-csi-driver`.
-  # See https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html for the per-region registry list.
-  # Example: `602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/scality-s3-csi-driver` for us-east-1.
-  repository: public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver
+  repository: ghcr.io/scality/mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1.13.0"
+  tag: "0.1.0"
 
 node:
   kubeletPath: /var/lib/kubelet
