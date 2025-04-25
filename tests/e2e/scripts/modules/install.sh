@@ -230,7 +230,7 @@ verify_installation() {
   # Check if CSI driver is registered
   log "Checking if CSI driver is registered..."
   
-  if exec_cmd kubectl get csidrivers | grep -q "s3.csi.aws.com"; then
+  if exec_cmd kubectl get csidrivers | grep -q "s3.csi.scality.com"; then
     log "CSI driver is registered successfully."
   else
     error "CSI driver is not registered properly."

@@ -16,7 +16,7 @@ spec:
     - region us-west-2
     - prefix some-s3-prefix/
   csi:
-    driver: s3.csi.aws.com # Required
+    driver: s3.csi.scality.com # Required
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
       bucketName: s3-csi-driver

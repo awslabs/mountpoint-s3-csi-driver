@@ -22,7 +22,7 @@ spec:
     namespace: default # Namespace is required even though it's in "default" namespace.
     name: s3-pvc # Name of your PVC
   csi:
-    driver: s3.csi.aws.com
+    driver: s3.csi.scality.com
     ...
 ---
 apiVersion: v1

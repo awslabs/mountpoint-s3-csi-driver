@@ -17,7 +17,7 @@ spec:
     - metadata-ttl 3 # 3 second time to live
     - max-cache-size 500 # 500 MB maximum size
   csi:
-    driver: s3.csi.aws.com # required
+    driver: s3.csi.scality.com # required
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
       bucketName: s3-csi-driver

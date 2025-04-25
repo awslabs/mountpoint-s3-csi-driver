@@ -13,10 +13,10 @@ import (
 
 // Labels populated on spawned Mountpoint Pods.
 const (
-	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
-	LabelPodUID            = "s3.csi.aws.com/pod-uid"
-	LabelVolumeName        = "s3.csi.aws.com/volume-name"
-	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
+	LabelMountpointVersion = "s3.csi.scality.com/mountpoint-version"
+	LabelPodUID            = "s3.csi.scality.com/pod-uid"
+	LabelVolumeName        = "s3.csi.scality.com/volume-name"
+	LabelCSIDriverVersion  = "s3.csi.scality.com/mounted-by-csi-driver-version"
 )
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.

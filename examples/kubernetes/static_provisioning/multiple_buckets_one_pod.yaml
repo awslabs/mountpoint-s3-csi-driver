@@ -15,7 +15,7 @@ spec:
     - allow-delete
     - region us-west-2
   csi:
-    driver: s3.csi.aws.com # required
+    driver: s3.csi.scality.com # required
     volumeHandle: s3-csi-driver-volume # must be unique
     volumeAttributes:
       bucketName: s3-csi-driver
@@ -50,7 +50,7 @@ spec:
     - allow-delete
     - region us-west-2
   csi:
-    driver: s3.csi.aws.com # required
+    driver: s3.csi.scality.com # required
     volumeHandle: s3-csi-driver-volume-2 # must be unique
     volumeAttributes:
       bucketName: s3-csi-driver-2

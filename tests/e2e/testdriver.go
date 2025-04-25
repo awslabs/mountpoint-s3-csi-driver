@@ -37,7 +37,7 @@ func initS3Driver() *s3Driver {
 	return &s3Driver{
 		client: s3client.New(),
 		driverInfo: framework.DriverInfo{
-			Name:        "s3.csi.aws.com", // TODO(S3CSI-10): Change to Scality S3 CSI Driver
+			Name:        "s3.csi.scality.com",
 			MaxFileSize: framework.FileSizeLarge,
 			SupportedFsType: sets.NewString(
 				"", // Default fsType

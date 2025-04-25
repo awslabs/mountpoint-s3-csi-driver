@@ -187,7 +187,7 @@ func (m *SystemdMounter) credentialWriteAndEnvPath() (writePath string, envPath 
 func hostPluginDirWithDefault() string {
 	hostPluginDir := os.Getenv("HOST_PLUGIN_DIR")
 	if hostPluginDir == "" {
-		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.scality.com/"
 	}
 	return hostPluginDir
 }
