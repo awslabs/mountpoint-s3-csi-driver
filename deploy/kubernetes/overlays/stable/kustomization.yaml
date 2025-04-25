@@ -4,8 +4,8 @@ resources:
   - ../../base
 images:
   - name: csi-driver
-    newName: public.ecr.aws/mountpoint-s3-csi-driver/scality-mountpoint-s3-csi-driver
-    newTag: v1.13.0
+    newName: ghcr.io/scality/mountpoint-s3-csi-driver
+    newTag: 0.1.0
 # Uncomment to set the S3 endpoint URL
 # configMapGenerator:
 #   - name: s3-csi-driver-config
