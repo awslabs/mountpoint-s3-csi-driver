@@ -4,17 +4,17 @@ metadata:
   name: s3-csi-node
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "scality-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
       app: s3-csi-node
-      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
+      {{- include "scality-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         app: s3-csi-node
-        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        {{- include "scality-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
