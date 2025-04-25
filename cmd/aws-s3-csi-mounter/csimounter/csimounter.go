@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
