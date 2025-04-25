@@ -128,6 +128,10 @@ push_image:
 login_registry:
 	aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${REGISTRY}
 
+.PHONY: download_go_deps
+download_go_deps:
+	go mod download
+
 .PHONY: bin
 bin:
 	mkdir -p bin
@@ -175,8 +179,12 @@ check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
 
 .PHONY: check_licenses
-check_licenses:
-	go mod download && go tool github.com/google/go-licenses check --allowed_licenses ${ALLOWED_LICENSES} ./...
+check_licenses: download_go_deps
+	go tool github.com/google/go-licenses check --allowed_licenses ${ALLOWED_LICENSES} ./...
+
+.PHONY: generate_licenses
+generate_licenses: download_go_deps
+	go tool github.com/google/go-licenses save --save_path="./LICENSES" --force ./...
 
 .PHONY: clean
 clean:

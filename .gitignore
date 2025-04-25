@@ -1,6 +1,7 @@
 **/credentials
 bin/
 tests/bin
+LICENSES/
 go.work
 go.work.sum
 .github/artifacts/benchmark-data.json
