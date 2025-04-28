@@ -180,11 +180,11 @@ check_style:
 
 .PHONY: check_licenses
 check_licenses: download_go_deps
-	go tool github.com/google/go-licenses check --allowed_licenses ${ALLOWED_LICENSES} ./...
+	go tool github.com/google/go-licenses/v2 check --allowed_licenses ${ALLOWED_LICENSES} ./...
 
 .PHONY: generate_licenses
 generate_licenses: download_go_deps
-	go tool github.com/google/go-licenses save --save_path="./LICENSES" --force ./...
+	go tool github.com/google/go-licenses/v2 save --save_path="./LICENSES" --force ./...
 
 .PHONY: clean
 clean:
