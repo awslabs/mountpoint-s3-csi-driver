@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -102,5 +103,98 @@ func TestReplaceFile(t *testing.T) {
 		wg.Wait()
 
 		expectContentAndPerm(t, dest, content, 0644)
+	})
+
+	// Error path tests
+	t.Run("Error opening non-existent source file", func(t *testing.T) {
+		basedir := t.TempDir()
+		nonExistentSource := filepath.Join(basedir, "non-existent-source")
+		dest := filepath.Join(basedir, "dest")
+
+		err := util.ReplaceFile(dest, nonExistentSource, 0644)
+
+		// The error should not be nil
+		if err == nil {
+			t.Fatal("Expected error when opening non-existent source file, got nil")
+		}
+
+		// The error should contain "no such file"
+		if !strings.Contains(err.Error(), "no such file") {
+			t.Fatalf("Expected error to contain 'no such file', got: %v", err)
+		}
+	})
+
+	t.Run("Error with non-readable source file", func(t *testing.T) {
+		// Skip on non-Unix systems as permissions work differently
+		if os.PathSeparator != '/' {
+			t.Skip("Skipping on non-Unix systems")
+		}
+
+		basedir := t.TempDir()
+		source := filepath.Join(basedir, "non-readable-source")
+
+		// Create the file first
+		err := os.WriteFile(source, []byte("test content"), 0600)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+
+		// Then remove read permissions
+		err = os.Chmod(source, 0)
+		if err != nil {
+			t.Fatalf("Failed to change permissions: %v", err)
+		}
+
+		dest := filepath.Join(basedir, "dest")
+
+		// Try to copy from a non-readable source
+		err = util.ReplaceFile(dest, source, 0644)
+
+		// The error should not be nil
+		if err == nil {
+			t.Fatal("Expected error when reading from non-readable source file, got nil")
+		}
+
+		// On some systems, we may get 'permission denied'
+		if !(strings.Contains(err.Error(), "permission denied") ||
+			strings.Contains(err.Error(), "no such file")) {
+			t.Fatalf("Expected permission error, got: %v", err)
+		}
+	})
+
+	t.Run("Error during rename", func(t *testing.T) {
+		// Skip on non-Unix systems as permissions work differently
+		if os.PathSeparator != '/' {
+			t.Skip("Skipping on non-Unix systems")
+		}
+
+		basedir := t.TempDir()
+		source := filepath.Join(basedir, "source")
+		err := os.WriteFile(source, []byte("test content"), 0600)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+
+		// Create a read-only directory
+		readOnlyDir := filepath.Join(basedir, "readonly")
+		err = os.Mkdir(readOnlyDir, 0500) // read + execute, no write
+		if err != nil {
+			t.Fatalf("Failed to create directory: %v", err)
+		}
+
+		dest := filepath.Join(readOnlyDir, "dest")
+
+		// Try to replace file in read-only directory
+		err = util.ReplaceFile(dest, source, 0644)
+
+		// The error should not be nil
+		if err == nil {
+			t.Fatal("Expected error when operating in read-only directory, got nil")
+		}
+
+		// The error should contain "failed to create a temporary file"
+		if !strings.Contains(err.Error(), "failed to create a temporary file") {
+			t.Fatalf("Expected error to contain 'failed to create a temporary file', got: %v", err)
+		}
 	})
 }
