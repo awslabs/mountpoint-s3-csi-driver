@@ -1,6 +1,10 @@
 package mounter
 
-import "sync"
+import (
+	"sync"
+
+	"k8s.io/klog/v2"
+)
 
 // MPPodLock represents a reference-counted mutex lock for Mountpoint Pod.
 // It ensures synchronized access to pod-specific resources.
@@ -44,6 +48,7 @@ func releaseMPPodLock(mpPodUID string) {
 	lock, exists := mpPodLocks[mpPodUID]
 	if !exists {
 		// Should never happen
+		klog.Errorf("Attempted to release non-existent lock for Mountpoint Pod UID %s", mpPodUID)
 		return
 	}
 

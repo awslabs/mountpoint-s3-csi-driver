@@ -131,7 +131,7 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mount, mountSyscall, testK8sVersion)
+	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mount, mountSyscall, testK8sVersion, nodeName)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter

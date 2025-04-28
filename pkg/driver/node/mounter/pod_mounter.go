@@ -47,10 +47,11 @@ type PodMounter struct {
 	bindMountSyscall  bindMountSyscall
 	kubernetesVersion string
 	credProvider      *credentialprovider.Provider
+	nodeID            string
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
+func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion, nodeID string) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
 		s3paCache:         s3paCache,
@@ -59,6 +60,7 @@ func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvi
 		kubeletPath:       util.KubeletPath(),
 		mountSyscall:      mountSyscall,
 		kubernetesVersion: kubernetesVersion,
+		nodeID:            nodeID,
 	}, nil
 }
 
@@ -106,19 +108,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 			releaseMPPodLock(mpPodUID)
 		}()
 
-		podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
-		if err != nil {
-			klog.Errorf("Failed to create credentials directory for %q: %v", target, err)
-			return fmt.Errorf("Failed to create credentials directory for %q: %w", target, err)
-		}
-
-		credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
-
-		_, _, err = pm.credProvider.Provide(ctx, credentialCtx)
-		if err != nil {
-			klog.Errorf("Failed to provide credentials for %s: %v\n%s", target, err, "TODO: pm.helpMessageForGettingMountpointLogs(pod)")
-			return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", target, err, "TODO: pm.helpMessageForGettingMountpointLogs(pod)")
-		}
+		pm.provideCredentials(ctx, podPath, credentialCtx)
 
 		return nil
 	}
@@ -159,92 +149,19 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Could not check if %q is already a mount point: %w", source, err)
 	}
 
-	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
-	if err != nil {
-		klog.Errorf("Failed to create credentials directory for %q: %v", source, err)
-		return fmt.Errorf("Failed to create credentials directory for %q: %w", source, err)
-	}
-
-	credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
-
 	// Note that this part happens before `isMountPoint` check, as we want to update credentials even though
 	// there is an existing mount point at `target`.
-	credEnv, authenticationSource, err := pm.credProvider.Provide(ctx, credentialCtx)
+	credEnv, authenticationSource, err := pm.provideCredentials(ctx, podPath, credentialCtx)
 	if err != nil {
 		klog.Errorf("Failed to provide credentials for %s: %v\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 		return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	if !isSourceMountPoint {
-		env := envprovider.Default()
-		env.Merge(credEnv)
-
-		// Move `--aws-max-attempts` to env if provided
-		if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
-			env.Set(envprovider.EnvMaxAttempts, maxAttempts)
-		}
-
-		args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion))
-
-		podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
-		podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)
-
-		klog.V(4).Infof("Mounting %s for %s", source, pod.Name)
-
-		fuseDeviceFD, err := pm.mountSyscallWithDefault(source, args)
+		err = pm.mountS3AtSource(ctx, source, pod, podPath, bucketName, credEnv, authenticationSource, args)
 		if err != nil {
-			klog.Errorf("Failed to mount %s: %v", source, err)
-			return fmt.Errorf("Failed to mount %s: %w", source, err)
+			return fmt.Errorf("Failed to mount at source %s: %v", source, err)
 		}
-
-		// Remove the read-only argument from the list as mount-s3 does not support it when using FUSE
-		// file descriptor (we already pass MS_RDONLY flag during mount syscall in `pod_mounter_linux.go`)
-		if args.Has(mountpoint.ArgReadOnly) {
-			args.Remove(mountpoint.ArgReadOnly)
-		}
-
-		// This will set to false in the success condition. This is set to `true` by default to
-		// ensure we don't leave `source` mounted if Mountpoint is not started to serve requests for it.
-		unmount := true
-		defer func() {
-			if unmount {
-				if err := pm.unmountTarget(source); err != nil {
-					klog.V(4).ErrorS(err, "Failed to unmount mounted source %s\n", source)
-				} else {
-					klog.V(4).Infof("Source %s unmounted successfully\n", source)
-				}
-			}
-		}()
-
-		// This function can either fail or successfully send mount options to Mountpoint Pod - in which
-		// Mountpoint Pod will get its own fd referencing the same underlying file description.
-		// In both case we need to close the fd in this process.
-		defer pm.closeFUSEDevFD(fuseDeviceFD)
-
-		// Remove old mount error file if exists
-		_ = os.Remove(podMountErrorPath)
-
-		klog.V(4).Infof("Sending mount options to Mountpoint Pod %s on %s", pod.Name, podMountSockPath)
-
-		err = mountoptions.Send(ctx, podMountSockPath, mountoptions.Options{
-			Fd:         fuseDeviceFD,
-			BucketName: bucketName,
-			Args:       args.SortedList(),
-			Env:        env.List(),
-		})
-		if err != nil {
-			klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-			return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		}
-
-		err = pm.waitForMount(ctx, source, pod.Name, podMountErrorPath)
-		if err != nil {
-			klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-			return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		}
-
-		// Mountpoint successfully started, so don't unmount the filesystem
-		unmount = false
 	}
 
 	err = pm.bindMountSyscallWithDefault(source, target)
@@ -253,6 +170,81 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to bind mount %s to target %s: %w", source, target, err)
 	}
 
+	return nil
+}
+
+func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, pod *corev1.Pod, podPath string,
+	bucketName string, credEnv envprovider.Environment, authenticationSource credentialprovider.AuthenticationSource,
+	args mountpoint.Args) error {
+	env := envprovider.Default()
+	env.Merge(credEnv)
+
+	// Move `--aws-max-attempts` to env if provided
+	if maxAttempts, ok := args.Remove(mountpoint.ArgAWSMaxAttempts); ok {
+		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
+	}
+
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion))
+
+	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
+	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)
+
+	klog.V(4).Infof("Mounting %s for %s", source, pod.Name)
+
+	fuseDeviceFD, err := pm.mountSyscallWithDefault(source, args)
+	if err != nil {
+		klog.Errorf("Failed to mount %s: %v", source, err)
+		return fmt.Errorf("Failed to mount %s: %w", source, err)
+	}
+
+	// Remove the read-only argument from the list as mount-s3 does not support it when using FUSE
+	// file descriptor (we already pass MS_RDONLY flag during mount syscall in `pod_mounter_linux.go`)
+	if args.Has(mountpoint.ArgReadOnly) {
+		args.Remove(mountpoint.ArgReadOnly)
+	}
+
+	// This will set to false in the success condition. This is set to `true` by default to
+	// ensure we don't leave `source` mounted if Mountpoint is not started to serve requests for it.
+	unmount := true
+	defer func() {
+		if unmount {
+			if err := pm.unmountTarget(source); err != nil {
+				klog.V(4).ErrorS(err, "Failed to unmount mounted source %s\n", source)
+			} else {
+				klog.V(4).Infof("Source %s unmounted successfully\n", source)
+			}
+		}
+	}()
+
+	// This function can either fail or successfully send mount options to Mountpoint Pod - in which
+	// Mountpoint Pod will get its own fd referencing the same underlying file description.
+	// In both case we need to close the fd in this process.
+	defer pm.closeFUSEDevFD(fuseDeviceFD)
+
+	// Remove old mount error file if exists
+	_ = os.Remove(podMountErrorPath)
+
+	klog.V(4).Infof("Sending mount options to Mountpoint Pod %s on %s", pod.Name, podMountSockPath)
+
+	err = mountoptions.Send(ctx, podMountSockPath, mountoptions.Options{
+		Fd:         fuseDeviceFD,
+		BucketName: bucketName,
+		Args:       args.SortedList(),
+		Env:        env.List(),
+	})
+	if err != nil {
+		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+	}
+
+	err = pm.waitForMount(ctx, source, pod.Name, podMountErrorPath)
+	if err != nil {
+		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+	}
+
+	// Mountpoint successfully started, so don't unmount the filesystem
+	unmount = false
 	return nil
 }
 
@@ -374,6 +366,18 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 	return err
 }
 
+func (pm *PodMounter) provideCredentials(ctx context.Context, podPath string, credentialCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
+	if err != nil {
+		klog.Errorf("Failed to create credentials directory: %v", err)
+		return nil, "", fmt.Errorf("Failed to create credentials directory: %w", err)
+	}
+
+	credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
+
+	return pm.credProvider.Provide(ctx, credentialCtx)
+}
+
 // ensureCredentialsDirExists ensures credentials dir for `podPath` is exists.
 // It returns credentials dir and any error.
 func (pm *PodMounter) ensureCredentialsDirExists(podPath string) (string, error) {
@@ -433,9 +437,11 @@ func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) strin
 	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
 }
 
+// getS3PodAttachmentWithRetry retrieves a MountpointS3PodAttachment resource that matches the given volume and credential context.
+// It continuously retries the operation until either a matching attachment is found or the context is canceled.
 func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup, pvMountOptions string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
 	fieldFilters := client.MatchingFields{
-		crdv1beta.FieldNodeName:             os.Getenv("CSI_NODE_NAME"), // TODO
+		crdv1beta.FieldNodeName:             pm.nodeID,
 		crdv1beta.FieldPersistentVolumeName: volumeName,
 		crdv1beta.FieldVolumeID:             credentialCtx.VolumeID,
 		crdv1beta.FieldMountOptions:         pvMountOptions,
@@ -445,6 +451,9 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
 		fieldFilters[crdv1beta.FieldWorkloadNamespace] = credentialCtx.PodNamespace
 		fieldFilters[crdv1beta.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
+		// Note that we intentionally do not include `FieldWorkloadServiceAccountIAMRoleARN` to list filters because
+		// CSI Driver Node does not know which role ARN to use (if any).
+		// Role ARN is determined by reconciler and passed to node via MountpointS3PodAttachment.
 	}
 
 	for {
