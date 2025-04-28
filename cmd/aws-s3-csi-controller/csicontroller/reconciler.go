@@ -36,7 +36,7 @@ const (
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
 	mountpointPodCreator *mppod.Creator
-	s3paExpectations     *Expectations
+	s3paExpectations     *expectations
 
 	client.Client
 }
@@ -44,7 +44,7 @@ type Reconciler struct {
 // NewReconciler returns a new reconciler created from `client` and `podConfig`.
 func NewReconciler(client client.Client, podConfig mppod.Config) *Reconciler {
 	creator := mppod.NewCreator(podConfig)
-	return &Reconciler{Client: client, mountpointPodConfig: podConfig, mountpointPodCreator: creator, s3paExpectations: NewExpectations()}
+	return &Reconciler{Client: client, mountpointPodConfig: podConfig, mountpointPodCreator: creator, s3paExpectations: newExpectations()}
 }
 
 // SetupWithManager configures reconciler to run with given `mgr`.
@@ -284,9 +284,9 @@ func (r *Reconciler) handleInactivePod(ctx context.Context, workloadPod *corev1.
 func (r *Reconciler) handleExistingS3PodAttachment(ctx context.Context, s3paList *crdv1.MountpointS3PodAttachmentList, workloadUID string, fieldFilters client.MatchingFields, log logr.Logger) (bool, error) {
 	s3pa := &s3paList.Items[0]
 
-	if r.s3paExpectations.IsPending(fieldFilters) {
+	if r.s3paExpectations.isPending(fieldFilters) {
 		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
-		r.s3paExpectations.Clear(fieldFilters)
+		r.s3paExpectations.clear(fieldFilters)
 	}
 
 	if s3paContainsWorkload(s3pa, workloadUID) {
@@ -373,7 +373,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 	fieldFilters client.MatchingFields,
 	log logr.Logger,
 ) (bool, error) {
-	if r.s3paExpectations.IsPending(fieldFilters) {
+	if r.s3paExpectations.isPending(fieldFilters) {
 		log.Info("MountpointS3PodAttachment creation is pending, requeueing")
 		return true, nil
 	}
@@ -382,7 +382,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 		return false, err
 	}
 
-	r.s3paExpectations.SetPending(fieldFilters)
+	r.s3paExpectations.setPending(fieldFilters)
 	return true, nil
 }
 

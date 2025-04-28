@@ -8,36 +8,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Expectations is a structure that manages pending expectations for Kubernetes resources.
+// expectations is a structure that manages pending expectations for Kubernetes resources.
 // It uses field filters as keys to track resources that are expected to be created
-// helping to reduce unnecessary processing and API server load.
-type Expectations struct {
+// helping with eventual consistency, reducing unnecessary processing and API server load.
+type expectations struct {
 	pending sync.Map
 }
 
-// NewExpectations creates and returns a new Expectations instance.
-func NewExpectations() *Expectations {
-	return &Expectations{}
+// newExpectations creates and returns a new Expectations instance.
+func newExpectations() *expectations {
+	return &expectations{}
 }
 
-// SetPending marks a resource as pending based on the given field filters.
+// setPending marks a resource as pending based on the given field filters.
 // This is typically used when a create operation is initiated.
-func (e *Expectations) SetPending(fieldFilters client.MatchingFields) {
+func (e *expectations) setPending(fieldFilters client.MatchingFields) {
 	key := deriveExpectationKeyFromFilters(fieldFilters)
 	e.pending.Store(key, struct{}{})
 }
 
-// IsPending checks if a resource is marked as pending based on the given field filters.
+// isPending checks if a resource is marked as pending based on the given field filters.
 // Returns true if the resource is pending, false otherwise.
-func (e *Expectations) IsPending(fieldFilters client.MatchingFields) bool {
+func (e *expectations) isPending(fieldFilters client.MatchingFields) bool {
 	key := deriveExpectationKeyFromFilters(fieldFilters)
 	_, ok := e.pending.Load(key)
 	return ok
 }
 
-// Clear removes the pending mark for a resource based on the given field filters.
+// clear removes the pending mark for a resource based on the given field filters.
 // This is typically called when an expected operation has been confirmed as completed.
-func (e *Expectations) Clear(fieldFilters client.MatchingFields) {
+func (e *expectations) clear(fieldFilters client.MatchingFields) {
 	key := deriveExpectationKeyFromFilters(fieldFilters)
 	e.pending.Delete(key)
 }
