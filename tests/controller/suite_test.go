@@ -73,7 +73,7 @@ var _ = BeforeSuite(func() {
 	crdv1.AddToScheme(scheme.Scheme)
 	testEnv = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
-			Paths: []string{"../../charts/aws-mountpoint-s3-csi-driver/templates/s3.csi.aws.com_mountpoints3podattachments.yaml"},
+			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
 		},
 		ErrorIfCRDPathMissing: true,
 	}
