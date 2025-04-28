@@ -7,18 +7,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -33,13 +32,13 @@ const targetDirPerm = fs.FileMode(0755)
 
 // mountSyscall is the function that performs `mount` operation for given `target` with given Mountpoint `args`.
 // It returns mounted FUSE file descriptor as a result.
-// This is mainly exposed for testing, in production platform-native function (`mountSyscallDefault`) will be used.
+// This is mainly exposed for testing, in production platform-native function (`mpmounter.Mount`) will be used.
 type mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
 
 // A PodMounter is a [Mounter] that mounts Mountpoint on pre-created Kubernetes Pod running in the same node.
 type PodMounter struct {
 	podWatcher        *watcher.Watcher
-	mount             mount.Interface
+	mount             *mpmounter.Mounter
 	kubeletPath       string
 	mountSyscall      mountSyscall
 	kubernetesVersion string
@@ -47,7 +46,7 @@ type PodMounter struct {
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
+func NewPodMounter(podWatcher *watcher.Watcher, credProvider *credentialprovider.Provider, mount *mpmounter.Mounter, mountSyscall mountSyscall, kubernetesVersion string) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
 		credProvider:      credProvider,
@@ -77,14 +76,12 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	podID := credentialCtx.PodID
 
-	err = pm.verifyOrSetupMountTarget(target)
+	isMountPoint, err := pm.mount.IsMountPoint(target)
 	if err != nil {
-		return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
-	}
-
-	isMountPoint, err := pm.IsMountPoint(target)
-	if err != nil {
-		return fmt.Errorf("Could not check if %q is already a mount point: %w", target, err)
+		err = pm.verifyOrSetupMountTarget(target, err)
+		if err != nil {
+			return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
+		}
 	}
 
 	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
@@ -232,8 +229,7 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
-	// TODO: Can we just use regular `IsMountPoint` check from `mounter` with containerization?
-	return isMountPoint(pm.mount, target)
+	return pm.mount.IsMountPoint(target)
 }
 
 // waitForMountpointPod waints until Mountpoint Pod for given `podID` and `volumeName` is in `Running` state.
@@ -300,7 +296,7 @@ func (pm *PodMounter) waitForMount(parentCtx context.Context, target, podName, p
 
 // closeFUSEDevFD closes given FUSE file descriptor.
 func (pm *PodMounter) closeFUSEDevFD(fd int) {
-	err := syscall.Close(fd)
+	err := mpmounter.CloseFD(fd)
 	if err != nil {
 		klog.V(4).Infof("Mount: Failed to close /dev/fuse file descriptor %d: %v\n", fd, err)
 	}
@@ -309,12 +305,7 @@ func (pm *PodMounter) closeFUSEDevFD(fd int) {
 // verifyOrSetupMountTarget checks target path for existence and corrupted mount error.
 // If the target dir does not exists it tries to create it.
 // If the target dir is corrupted (decided with `mount.IsCorruptedMnt`) it tries to unmount it to have a clean mount.
-func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
-	err := verifyMountPointStatx(target)
-	if err == nil {
-		return nil
-	}
-
+func (pm *PodMounter) verifyOrSetupMountTarget(target string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		klog.V(5).Infof("Target path does not exists %s, trying to create", target)
 		if err := os.MkdirAll(target, targetDirPerm); err != nil {
@@ -322,7 +313,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 		}
 
 		return nil
-	} else if mount.IsCorruptedMnt(err) {
+	} else if pm.mount.IsMountPointCorrupted(err) {
 		klog.V(4).Infof("Target path %q is a corrupted mount. Trying to unmount", target)
 		if unmountErr := pm.unmountTarget(target); unmountErr != nil {
 			klog.V(4).Infof("Failed to unmount target path %q: %v, original failure of stat: %v", target, unmountErr, err)
@@ -332,6 +323,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 		return nil
 	}
 
+	// Some other error that we cannot recover from, just propagate it.
 	return err
 }
 
@@ -358,13 +350,17 @@ func (pm *PodMounter) podPath(pod *corev1.Pod) string {
 	return filepath.Join(pm.kubeletPath, "pods", string(pod.UID))
 }
 
-// mountSyscallWithDefault delegates to `mountSyscall` if set, or fallbacks to platform-native `mountSyscallDefault`.
+// mountSyscallWithDefault delegates to `mountSyscall` if set, or fallbacks to platform-native `mpmounter.Mount`.
 func (pm *PodMounter) mountSyscallWithDefault(target string, args mountpoint.Args) (int, error) {
 	if pm.mountSyscall != nil {
 		return pm.mountSyscall(target, args)
 	}
 
-	return pm.mountSyscallDefault(target, args)
+	opts := mpmounter.MountOptions{
+		ReadOnly:   args.Has(mountpoint.ArgReadOnly),
+		AllowOther: args.Has(mountpoint.ArgAllowOther) || args.Has(mountpoint.ArgAllowRoot),
+	}
+	return pm.mount.Mount(target, opts)
 }
 
 // unmountTarget calls `unmount` syscall on `target`.

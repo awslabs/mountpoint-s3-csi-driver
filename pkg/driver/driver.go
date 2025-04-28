@@ -23,18 +23,19 @@ import (
 	"os"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
+
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -90,6 +91,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var mounterImpl mounter.Mounter
+	mpMounter := mpmounter.New()
 	if util.UsePodMounter() {
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, podWatcherResyncPeriod)
 		err = podWatcher.Start(stopCh)
@@ -97,13 +99,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
 		}
 
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, credProvider, mount.New(""), nil, kubernetesVersion)
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, credProvider, mpMounter, nil, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)
 		}
 		klog.Infoln("Using pod mounter")
 	} else {
-		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
+		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpMounter, mpVersion, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)
 		}

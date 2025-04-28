@@ -8,15 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"slices"
+
+	"github.com/golang/mock/gomock"
+	"k8s.io/mount-utils"
+
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
-	"github.com/golang/mock/gomock"
-	"k8s.io/mount-utils"
-	"slices"
 )
 
 type mounterTestEnv struct {
@@ -40,6 +43,7 @@ func initMounterTestEnv(t *testing.T) *mounterTestEnv {
 		mounter: &mounter.SystemdMounter{
 			Runner:      mockRunner,
 			Mounter:     mount.NewFakeMounter(nil),
+			MpMounter:   mpmounter.NewWithMount(mount.NewFakeMounter(nil)),
 			MpVersion:   mountpointVersion,
 			MountS3Path: mounter.MountS3Path(),
 		},
@@ -235,7 +239,7 @@ func TestIsMountPoint(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			mounter := &mounter.SystemdMounter{Mounter: mount.NewFakeMounter(test.procMountsContent)}
+			mounter := &mounter.SystemdMounter{MpMounter: mpmounter.NewWithMount(mount.NewFakeMounter(test.procMountsContent))}
 			isMountPoint, err := mounter.IsMountPoint(test.target)
 			assert.Equals(t, test.isMountPoint, isMountPoint)
 			assert.Equals(t, test.expectErr, err != nil)
