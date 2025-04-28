@@ -15,7 +15,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
@@ -433,18 +433,18 @@ func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) strin
 	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
 }
 
-func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup, pvMountOptions string) (*crdv1.MountpointS3PodAttachment, string, error) {
+func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup, pvMountOptions string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
 	fieldFilters := client.MatchingFields{
-		crdv1.FieldNodeName:             os.Getenv("CSI_NODE_NAME"), // TODO
-		crdv1.FieldPersistentVolumeName: volumeName,
-		crdv1.FieldVolumeID:             credentialCtx.VolumeID,
-		crdv1.FieldMountOptions:         pvMountOptions,
-		crdv1.FieldWorkloadFSGroup:      fsGroup,
-		crdv1.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
+		crdv1beta.FieldNodeName:             os.Getenv("CSI_NODE_NAME"), // TODO
+		crdv1beta.FieldPersistentVolumeName: volumeName,
+		crdv1beta.FieldVolumeID:             credentialCtx.VolumeID,
+		crdv1beta.FieldMountOptions:         pvMountOptions,
+		crdv1beta.FieldWorkloadFSGroup:      fsGroup,
+		crdv1beta.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
 	}
 	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
-		fieldFilters[crdv1.FieldWorkloadNamespace] = credentialCtx.PodNamespace
-		fieldFilters[crdv1.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
+		fieldFilters[crdv1beta.FieldWorkloadNamespace] = credentialCtx.PodNamespace
+		fieldFilters[crdv1beta.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
 	}
 
 	for {
@@ -454,7 +454,7 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		default:
 		}
 
-		s3paList := &crdv1.MountpointS3PodAttachmentList{}
+		s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
 		err := pm.s3paCache.List(ctx, s3paList, fieldFilters)
 		if err != nil {
 			klog.Errorf("Failed to list MountpointS3PodAttachments: %v", err)

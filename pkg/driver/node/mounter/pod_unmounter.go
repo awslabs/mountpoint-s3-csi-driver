@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -42,7 +42,7 @@ func NewPodUnmounter(
 }
 
 func (u *PodUnmounter) HandleS3PodAttachmentUpdate(old, new any) {
-	s3pa := new.(*crdv1.MountpointS3PodAttachment)
+	s3pa := new.(*crdv1beta.MountpointS3PodAttachment)
 	if s3pa.Spec.NodeName != u.nodeID {
 		return
 	}
@@ -54,7 +54,7 @@ func (u *PodUnmounter) HandleS3PodAttachmentUpdate(old, new any) {
 	}
 }
 
-func (u *PodUnmounter) unmountSourceForPod(s3pa *crdv1.MountpointS3PodAttachment, mpPodName string) {
+func (u *PodUnmounter) unmountSourceForPod(s3pa *crdv1beta.MountpointS3PodAttachment, mpPodName string) {
 	klog.Infof("Found Mountpoint pod with zero workload pods, unmounting it - %s", mpPodName)
 	mpPod, err := u.podWatcher.Get(mpPodName)
 	if err != nil {
@@ -103,7 +103,7 @@ func (u *PodUnmounter) unmountAndCleanup(source string) error {
 	return nil
 }
 
-func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1.MountpointS3PodAttachment, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
+func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1beta.MountpointS3PodAttachment, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
 	err := u.credProvider.Cleanup(credentialprovider.CleanupContext{
 		VolumeID:  s3pa.Spec.VolumeID,
 		PodID:     mpPodUID,
@@ -179,7 +179,7 @@ func (u *PodUnmounter) findPodByUID(mpPodUID string) (*corev1.Pod, error) {
 }
 
 func (u *PodUnmounter) checkForWorkloads(mpPod *corev1.Pod) (bool, error) {
-	s3paList := &crdv1.MountpointS3PodAttachmentList{}
+	s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
 	err := u.s3paCache.List(context.Background(), s3paList)
 	if err != nil {
 		return false, err

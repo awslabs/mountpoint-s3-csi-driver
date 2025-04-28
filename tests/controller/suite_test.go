@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -70,7 +70,7 @@ var _ = BeforeSuite(func() {
 
 	By("Bootstrapping test environment")
 
-	crdv1.AddToScheme(scheme.Scheme)
+	crdv1beta.AddToScheme(scheme.Scheme)
 	testEnv = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
 			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
@@ -157,20 +157,20 @@ func createMountpointPriorityClass() {
 }
 
 func IndexMountpointS3PodAttachmentFields(log logr.Logger, mgr manager.Manager) {
-	indexField(log, mgr, crdv1.FieldNodeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(log, mgr, crdv1.FieldPersistentVolumeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(log, mgr, crdv1.FieldVolumeID, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(log, mgr, crdv1.FieldMountOptions, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(log, mgr, crdv1.FieldAuthenticationSource, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(log, mgr, crdv1.FieldWorkloadFSGroup, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(log, mgr, crdv1.FieldWorkloadNamespace, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
+	indexField(log, mgr, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
+	indexField(log, mgr, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
+	indexField(log, mgr, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
+	indexField(log, mgr, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
+	indexField(log, mgr, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
+	indexField(log, mgr, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
+	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
+	indexField(log, mgr, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
+	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
 }
 
-func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1.MountpointS3PodAttachment) string) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1.MountpointS3PodAttachment))}
+func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
+		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
 	})
 	if err != nil {
 		log.Error(err, fmt.Sprintf("Failed to create a %s field indexer", field))

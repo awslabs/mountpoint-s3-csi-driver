@@ -23,7 +23,7 @@ import (
 	"os"
 	"time"
 
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
@@ -62,7 +62,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(crdv1.AddToScheme(scheme))
+	utilruntime.Must(crdv1beta.AddToScheme(scheme))
 }
 
 type Driver struct {
@@ -119,7 +119,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			SyncPeriod:                  &podWatcherResyncPeriod,
 			ReaderFailOnMissingInformer: true,
 			ByObject: map[client.Object]ctrlcache.ByObject{
-				&crdv1.MountpointS3PodAttachment{}: {
+				&crdv1beta.MountpointS3PodAttachment{}: {
 					Field: fields.OneTermEqualSelector("spec.nodeName", nodeID),
 				},
 			},
@@ -130,7 +130,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 		indexMountpointS3PodAttachmentFields(s3paCache)
 
-		s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv1.MountpointS3PodAttachment{})
+		s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv1beta.MountpointS3PodAttachment{})
 		if err != nil {
 			klog.Fatalf("Failed to create informer for MountpointS3PodAttachment: %v\n", err)
 		}
@@ -244,20 +244,20 @@ func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {
 
 // TODO: This is duplicated multiple times
 func indexMountpointS3PodAttachmentFields(s3paCache ctrlcache.Cache) {
-	indexField(s3paCache, crdv1.FieldNodeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(s3paCache, crdv1.FieldPersistentVolumeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(s3paCache, crdv1.FieldVolumeID, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(s3paCache, crdv1.FieldMountOptions, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(s3paCache, crdv1.FieldAuthenticationSource, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(s3paCache, crdv1.FieldWorkloadFSGroup, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(s3paCache, crdv1.FieldWorkloadServiceAccountName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(s3paCache, crdv1.FieldWorkloadNamespace, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(s3paCache, crdv1.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
+	indexField(s3paCache, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
+	indexField(s3paCache, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
+	indexField(s3paCache, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
+	indexField(s3paCache, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
+	indexField(s3paCache, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
+	indexField(s3paCache, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
+	indexField(s3paCache, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
+	indexField(s3paCache, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
+	indexField(s3paCache, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
 }
 
-func indexField(cache ctrlcache.Cache, field string, extractor func(*crdv1.MountpointS3PodAttachment) string) {
-	err := cache.IndexField(context.Background(), &crdv1.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1.MountpointS3PodAttachment))}
+func indexField(cache ctrlcache.Cache, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
+	err := cache.IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
+		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
 	})
 	if err != nil {
 		klog.Fatalf("Failed to create a %s field indexer: %v", field, err)

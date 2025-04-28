@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
@@ -44,7 +44,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(crdv1.AddToScheme(scheme))
+	utilruntime.Must(crdv1beta.AddToScheme(scheme))
 }
 
 func main() {
@@ -88,21 +88,24 @@ func main() {
 	}
 }
 
+// IndexMountpointS3PodAttachmentFields adds internal index on fields for our custom resource.
+// This is needed for `List()` method to work with field filters.
 func IndexMountpointS3PodAttachmentFields(log logr.Logger, mgr manager.Manager) {
-	indexField(log, mgr, crdv1.FieldNodeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(log, mgr, crdv1.FieldPersistentVolumeName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(log, mgr, crdv1.FieldVolumeID, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(log, mgr, crdv1.FieldMountOptions, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(log, mgr, crdv1.FieldAuthenticationSource, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(log, mgr, crdv1.FieldWorkloadFSGroup, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountName, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(log, mgr, crdv1.FieldWorkloadNamespace, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(log, mgr, crdv1.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
+	indexField(log, mgr, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
+	indexField(log, mgr, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
+	indexField(log, mgr, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
+	indexField(log, mgr, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
+	indexField(log, mgr, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
+	indexField(log, mgr, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
+	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
+	indexField(log, mgr, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
+	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
 }
 
-func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1.MountpointS3PodAttachment) string) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1.MountpointS3PodAttachment))}
+// indexField adds index on a field.
+func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
+		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
 	})
 	if err != nil {
 		log.Error(err, fmt.Sprintf("Failed to create a %s field indexer", field))

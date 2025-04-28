@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
@@ -1054,7 +1054,7 @@ func waitForMountpointPodWithName(mpPodName string) *testPod {
 // expectNoS3PodAttachmentWithFields verifies that no MountpointS3PodAttachment matching specified fields exists within a time period
 func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 	Consistently(func(g Gomega) {
-		list := &crdv1.MountpointS3PodAttachmentList{}
+		list := &crdv1beta.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1067,7 +1067,7 @@ func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 }
 
 // expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodToWorkloadPodUIDs map
-func expectNoPodUIDInS3PodAttachment(s3pa *crdv1.MountpointS3PodAttachment, podUID string) {
+func expectNoPodUIDInS3PodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, podUID string) {
 	for _, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
 		for _, uid := range uids {
 			if uid == podUID {
@@ -1083,7 +1083,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	node string,
 	vol *testVolume,
 	pod *testPod,
-) (*crdv1.MountpointS3PodAttachment, *testPod) {
+) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(node, vol.pv), "")
 	Expect(len(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
@@ -1097,7 +1097,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 	vol *testVolume,
 	pod *testPod,
 	minVersion string,
-) (*crdv1.MountpointS3PodAttachment, *testPod) {
+) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv), minVersion)
 	Expect(len(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
@@ -1105,7 +1105,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 }
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
-func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
+func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
 	// Find the mpPodName where pod.UID exists in the value slice
 	var mpPodName string
 	podUID := string(pod.UID)
@@ -1175,12 +1175,12 @@ func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
 func waitForS3PodAttachmentWithFields(
 	expectedFields map[string]string,
 	minResourceVersion string,
-	verifiers ...func(Gomega, *crdv1.MountpointS3PodAttachment),
-) *crdv1.MountpointS3PodAttachment {
-	var matchedCR *crdv1.MountpointS3PodAttachment
+	verifiers ...func(Gomega, *crdv1beta.MountpointS3PodAttachment),
+) *crdv1beta.MountpointS3PodAttachment {
+	var matchedCR *crdv1beta.MountpointS3PodAttachment
 
 	Eventually(func(g Gomega) {
-		list := &crdv1.MountpointS3PodAttachmentList{}
+		list := &crdv1beta.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1214,7 +1214,7 @@ func waitForS3PodAttachmentWithFields(
 }
 
 // matchesSpec checks whether MountpointS3PodAttachmentSpec matches `expected` fields
-func matchesSpec(spec crdv1.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
+func matchesSpec(spec crdv1beta.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
 	specValues := map[string]string{
 		"NodeName":                         spec.NodeName,
 		"PersistentVolumeName":             spec.PersistentVolumeName,

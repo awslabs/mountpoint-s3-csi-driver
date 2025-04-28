@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	crdv1 "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -148,7 +148,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 }
 
 func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, pods []*v1.Pod, pv *v1.PersistentVolume) {
-	var s3paList *crdv1.MountpointS3PodAttachmentList
+	var s3paList *crdv1beta.MountpointS3PodAttachmentList
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		list, err := f.DynamicClient.Resource(s3paGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -183,7 +183,7 @@ func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, p
 }
 
 func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Framework, pods []*v1.Pod, pv *v1.PersistentVolume, expectedFieldsFunc func(pod *v1.Pod) map[string]string) {
-	var s3paList *crdv1.MountpointS3PodAttachmentList
+	var s3paList *crdv1beta.MountpointS3PodAttachmentList
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		list, err := f.DynamicClient.Resource(s3paGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -233,13 +233,13 @@ func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Fra
 }
 
 // Convert UnstructuredList to MountpointS3PodAttachmentList
-func convertToCustomResourceList(list *unstructured.UnstructuredList) (*crdv1.MountpointS3PodAttachmentList, error) {
-	crList := &crdv1.MountpointS3PodAttachmentList{
-		Items: make([]crdv1.MountpointS3PodAttachment, 0, len(list.Items)),
+func convertToCustomResourceList(list *unstructured.UnstructuredList) (*crdv1beta.MountpointS3PodAttachmentList, error) {
+	crList := &crdv1beta.MountpointS3PodAttachmentList{
+		Items: make([]crdv1beta.MountpointS3PodAttachment, 0, len(list.Items)),
 	}
 
 	for _, item := range list.Items {
-		cr := &crdv1.MountpointS3PodAttachment{}
+		cr := &crdv1beta.MountpointS3PodAttachment{}
 		err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, cr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert item to MountpointS3PodAttachment: %v", err)
@@ -251,7 +251,7 @@ func convertToCustomResourceList(list *unstructured.UnstructuredList) (*crdv1.Mo
 }
 
 // matchesSpec checks whether MountpointS3PodAttachmentSpec matches `expected` fields
-func matchesSpec(spec crdv1.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
+func matchesSpec(spec crdv1beta.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
 	specValues := map[string]string{
 		"NodeName":                         spec.NodeName,
 		"PersistentVolumeName":             spec.PersistentVolumeName,
