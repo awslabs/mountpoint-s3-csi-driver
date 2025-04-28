@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -61,7 +62,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			{
 				Name: mppod.CommunicationDirName,
 				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{},
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium:    corev1.StorageMediumMemory,
+						SizeLimit: resource.NewQuantity(mppod.EmptyDirSizeLimit, resource.BinarySI),
+					},
 				},
 			},
 		}, mpPod.Spec.Volumes)
