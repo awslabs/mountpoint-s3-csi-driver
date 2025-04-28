@@ -33,7 +33,8 @@ const (
 	// We're defaulting to `driver` in this case.
 	AuthenticationSourceUnspecified AuthenticationSource = ""
 	AuthenticationSourceDriver      AuthenticationSource = "driver"
-	AuthenticationSourcePod         AuthenticationSource = "pod"
+	AuthenticationSourcePod         AuthenticationSource = "pod" // TODO(S3C-9762): Remove other sources of credentials
+	AuthenticationSourceSecret      AuthenticationSource = "secret"
 )
 
 // A Provider provides methods for accessing AWS credentials.
@@ -70,6 +71,8 @@ type ProvideContext struct {
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
+	// SecretData is a map of key-value pairs from the Kubernetes Secret referenced by nodePublishSecretRef.
+	SecretData map[string]string
 }
 
 // SetWriteAndEnvPath sets `WritePath` and `EnvPath` for `ctx`.
@@ -99,11 +102,14 @@ func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envp
 	case AuthenticationSourcePod:
 		env, err := c.provideFromPod(ctx, provideCtx)
 		return env, AuthenticationSourcePod, err
+	case AuthenticationSourceSecret:
+		env, err := c.provideFromSecret(ctx, provideCtx)
+		return env, AuthenticationSourceSecret, err
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		env, err := c.provideFromDriver(provideCtx)
 		return env, AuthenticationSourceDriver, err
 	default:
-		return nil, AuthenticationSourceUnspecified, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified) and `pod` supported", authenticationSource)
+		return nil, AuthenticationSourceUnspecified, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified), `pod`, and `secret` supported", authenticationSource)
 	}
 }
 
