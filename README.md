@@ -41,6 +41,7 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 </details>
 
 ## Releases
+
 The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.org/). The version will be bumped following the rules below:
 
 * Significant breaking changes will be released as a `MAJOR` update.
@@ -48,6 +49,10 @@ The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.or
 * Bug or vulnerability fixes will be released as a `PATCH` update.
 
 Monthly releases will contain at minimum a `MINOR` version bump, even if the content would normally be treated as a `PATCH` version.
+
+### Unstable Releases
+
+Unstable versions (i.e., `beta`, `alpha`, or `rc`) are for testing purposes only and should not be used in production environments or with valuable data. The security of these releases is not guaranteed. Use unstable versions at your own risk.
 
 ## Support
 
