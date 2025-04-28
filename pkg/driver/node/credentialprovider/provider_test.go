@@ -874,3 +874,114 @@ func serviceAccount(name, namespace string, annotations map[string]string) *v1.S
 		Annotations: annotations,
 	}}
 }
+
+// TestProvideWithSecretAuthSource tests authentication with Secret credentials
+func TestProvideWithSecretAuthSource(t *testing.T) {
+	tests := []struct {
+		name         string
+		secretData   map[string]string
+		expectError  bool
+		expectedAuth credentialprovider.AuthenticationSource
+	}{
+		{
+			name: "valid secret credentials",
+			secretData: map[string]string{
+				"key_id":     "AKIA123456789ABC",
+				"access_key": "SECRET123456789ABCDEFGHIJKLMNOPQRSTUV",
+			},
+			expectError:  false,
+			expectedAuth: credentialprovider.AuthenticationSourceSecret,
+		},
+		{
+			name: "invalid secret credentials",
+			secretData: map[string]string{
+				"key_id": "invalid",
+			},
+			expectError: true,
+		},
+		{
+			name: "secret with unexpected keys",
+			secretData: map[string]string{
+				"key_id":     "AKIA123456789ABC",
+				"access_key": "SECRET123456789ABCDEFGHIJKLMNOPQRSTUV",
+				"unexpected": "value", // This will trigger the unexpected key warning
+			},
+			expectError:  false,
+			expectedAuth: credentialprovider.AuthenticationSourceSecret,
+		},
+		{
+			name: "invalid access_key format",
+			secretData: map[string]string{
+				"key_id": "AKIA123456789ABC",
+				// This will trigger the invalid access_key warning
+				"access_key": "SECRET!@#$%^&*()",
+			},
+			expectError: true,
+		},
+		{
+			name: "access_key exceeds max length",
+			secretData: map[string]string{
+				"key_id": "AKIA123456789ABC",
+				// This will trigger the max length warning for access_key
+				"access_key": "SECRET123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := credentialprovider.New(nil, nil)
+
+			provideCtx := credentialprovider.ProvideContext{
+				VolumeID:             "test-volume-id",
+				AuthenticationSource: credentialprovider.AuthenticationSourceSecret,
+				SecretData:           tt.secretData,
+			}
+
+			env, authSource, err := provider.Provide(context.Background(), provideCtx)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equals(t, tt.expectedAuth, authSource)
+				if env == nil {
+					t.Errorf("Expected environment to be not nil")
+				}
+			}
+		})
+	}
+}
+
+func TestProvideWithUnknownAuthSource(t *testing.T) {
+	provider := credentialprovider.New(nil, dummyRegionProvider)
+
+	writePath := t.TempDir()
+	provideCtx := credentialprovider.ProvideContext{
+		AuthenticationSource: "unknown-source", // Using an unknown authentication source
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		PodID:                testPodID,
+		VolumeID:             testVolumeID,
+	}
+
+	env, source, err := provider.Provide(context.Background(), provideCtx)
+
+	// Verify error was returned
+	if err == nil {
+		t.Errorf("Expected error for unknown authentication source, got nil")
+	}
+
+	// Verify error message contains all supported auth sources
+	expectedErrMsg := "unknown `authenticationSource`: unknown-source, only `driver` (default option if not specified), `pod`, and `secret` supported"
+	if err.Error() != expectedErrMsg {
+		t.Errorf("Expected error message %q, got %q", expectedErrMsg, err.Error())
+	}
+
+	// Verify returned values
+	assert.Equals(t, credentialprovider.AuthenticationSourceUnspecified, source)
+	assert.Equals(t, envprovider.Environment(nil), env)
+}

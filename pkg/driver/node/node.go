@@ -317,3 +317,8 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		Secrets:           redactedCredential,
 	}
 }
+
+// LogSafeNodePublishVolumeRequestForTest exports logSafeNodePublishVolumeRequest for testing
+func LogSafeNodePublishVolumeRequestForTest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
+	return logSafeNodePublishVolumeRequest(req)
+}
