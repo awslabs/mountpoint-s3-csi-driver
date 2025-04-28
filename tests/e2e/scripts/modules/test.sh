@@ -1,6 +1,8 @@
 #!/bin/bash
 # test.sh - Test functions for e2e scripts
 
+set -euxo pipefail
+
 # Source common functions
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 

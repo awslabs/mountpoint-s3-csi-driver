@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euxo pipefail
 # install.sh - Installation functions for e2e scripts
 
 # Source common functions
