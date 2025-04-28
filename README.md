@@ -52,7 +52,7 @@ Monthly releases will contain at minimum a `MINOR` version bump, even if the con
 
 ### Unstable Releases
 
-Unstable versions (i.e., `beta`, `alpha`, or `rc`) are for testing purposes only and should not be used in production environments or with valuable data. The security of these releases is not guaranteed. Use unstable versions at your own risk.
+Unstable versions (i.e., `beta`, `alpha`, or `rc`) are for testing purposes only and should not be used in production environments or with valuable data. The security and correctness of these releases are not guaranteed. Use unstable versions at your own risk.
 
 ## Support
 
