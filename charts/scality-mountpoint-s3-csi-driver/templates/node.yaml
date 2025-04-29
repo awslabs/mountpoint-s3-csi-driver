@@ -70,6 +70,9 @@ spec:
           volumeMounts:
             - name: mp-install
               mountPath: /target
+          {{- with default .Values.node.resources .Values.initContainer.installMountpoint.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- end }}
 
       containers:
