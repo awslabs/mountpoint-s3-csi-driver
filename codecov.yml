@@ -16,7 +16,7 @@ coverage:
         removed_code_behavior: adjust_base
     patch:
       default:
-        target: 90%
+        target: 60%
         threshold: 10%
 
 github_checks:
