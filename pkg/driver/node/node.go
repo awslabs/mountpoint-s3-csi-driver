@@ -268,6 +268,7 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
 		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
+		SecretData:           req.GetSecrets(),
 	}
 }
 
@@ -294,6 +295,17 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 	safeVolumeContext := maps.Clone(req.VolumeContext)
 	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
 
+	// Create a copy of credential with sensitive values redacted
+	redactedCredential := make(map[string]string)
+	for k, v := range req.Secrets {
+		if k == "access_key" {
+			// Redact the secret access key
+			redactedCredential[k] = "[REDACTED]"
+		} else {
+			redactedCredential[k] = v
+		}
+	}
+
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,
 		PublishContext:    req.PublishContext,
@@ -302,5 +314,11 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		VolumeCapability:  req.VolumeCapability,
 		Readonly:          req.Readonly,
 		VolumeContext:     safeVolumeContext,
+		Secrets:           redactedCredential,
 	}
+}
+
+// LogSafeNodePublishVolumeRequestForTest exports logSafeNodePublishVolumeRequest for testing
+func LogSafeNodePublishVolumeRequestForTest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
+	return logSafeNodePublishVolumeRequest(req)
 }
