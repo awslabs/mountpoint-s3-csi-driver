@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-* Kubernetes Version >= 1.23
+* Kubernetes Version >= 1.25
 
 ## Installation
 > [!NOTE]
@@ -70,12 +70,12 @@ helm upgrade --install aws-mountpoint-s3-csi-driver \
 
 > [!NOTE]
 > For EKS users, you need to pass your Role ARN here if you're using IAM roles for service accounts:
-> 
+>
 > ```bash
 > $ helm upgrade --install aws-mountpoint-s3-csi-driver \
 >    --namespace kube-system \
 >    --set node.serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="arn:aws:iam::account:role/csi-driver-role-name" \
->    aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver 
+>    aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
 > ```
 
 Review the [configuration values](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/charts/aws-mountpoint-s3-csi-driver/values.yaml) for the Helm chart.
