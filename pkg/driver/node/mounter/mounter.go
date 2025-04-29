@@ -31,8 +31,6 @@ type Mounter interface {
 	IsMountPoint(target string) (bool, error)
 }
 
-// Internal S3 CSI Driver directory for source mount points
-const SourceMountDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/"
 const MountS3PathEnv = "MOUNT_S3_PATH"
 const defaultMountS3Path = "/usr/bin/mount-s3"
 
@@ -71,11 +69,12 @@ func isMountPoint(mounter mount.Interface, target string) (bool, error) {
 }
 
 // findSourceMountPoint locates the source S3 mount point for a given target path by comparing
-// device IDs and inodes with all S3 mount points at driver source directory `SourceMountDir`.
+// device IDs and inodes with all S3 mount points at driver source directory `sourceMountDir`.
 //
 // Parameters:
 //   - mounter: Interface providing mounting operations and mount point listing capabilities
 //   - target: The target path whose source mount point needs to be found
+//   - sourceMountDir: directory where to find source mount points
 //
 // Returns:
 //   - string: The path of the source mount point if found
@@ -83,9 +82,9 @@ func isMountPoint(mounter mount.Interface, target string) (bool, error) {
 //
 // The function works by:
 // 1. Getting the device ID and inode of the target path
-// 2. Listing all mount points in the system that has "mountpoint-s3" as device name and prefix `SourceMountDir`
+// 2. Listing all mount points in the system that has "mountpoint-s3" as device name and prefix `sourceMountDir`
 // 3. Finding a mount point that matches both the device ID and inode of the target
-func findSourceMountPoint(mounter mount.Interface, target string) (string, error) {
+func findSourceMountPoint(mounter mount.Interface, target, sourceMountDir string) (string, error) {
 	if mounter == nil {
 		return "", fmt.Errorf("mounter interface cannot be nil")
 	}
@@ -109,7 +108,7 @@ func findSourceMountPoint(mounter mount.Interface, target string) (string, error
 	}
 
 	for _, mountPoint := range mountPoints {
-		if mountPoint.Device != mountpointDeviceName || !strings.HasPrefix(mountPoint.Path, SourceMountDir) {
+		if mountPoint.Device != mountpointDeviceName || !strings.HasPrefix(mountPoint.Path, sourceMountDir) {
 			continue
 		}
 

@@ -28,6 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Internal S3 CSI Driver directory for source mount points
+const SourceMountDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/"
+
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
 
@@ -36,31 +39,39 @@ const targetDirPerm = fs.FileMode(0755)
 // This is mainly exposed for testing, in production platform-native function (`mountSyscallDefault`) will be used.
 type mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
 type bindMountSyscall func(source, target string) (err error)
+type sourceMountPointFinder func(mounter mount.Interface, target, sourceMountDir string) (string, error)
 
 // A PodMounter is a [Mounter] that mounts Mountpoint on pre-created Kubernetes Pod running in the same node.
 type PodMounter struct {
-	podWatcher        *watcher.Watcher
-	s3paCache         cache.Cache
-	mount             mount.Interface
-	kubeletPath       string
-	mountSyscall      mountSyscall
-	bindMountSyscall  bindMountSyscall
-	kubernetesVersion string
-	credProvider      *credentialprovider.Provider
-	nodeID            string
+	podWatcher             *watcher.Watcher
+	s3paCache              cache.Cache
+	mount                  mount.Interface
+	kubeletPath            string
+	sourceMountDir         string
+	mountSyscall           mountSyscall
+	bindMountSyscall       bindMountSyscall
+	sourceMountPointFinder sourceMountPointFinder
+	kubernetesVersion      string
+	credProvider           *credentialprovider.Provider
+	nodeID                 string
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount mount.Interface, mountSyscall mountSyscall, kubernetesVersion, nodeID string) (*PodMounter, error) {
+func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount mount.Interface,
+	mountSyscall mountSyscall, bindMountSyscall bindMountSyscall, sourceMountPointFinder sourceMountPointFinder, kubernetesVersion, nodeID,
+	sourceMountDir string) (*PodMounter, error) {
 	return &PodMounter{
-		podWatcher:        podWatcher,
-		s3paCache:         s3paCache,
-		credProvider:      credProvider,
-		mount:             mount,
-		kubeletPath:       util.KubeletPath(),
-		mountSyscall:      mountSyscall,
-		kubernetesVersion: kubernetesVersion,
-		nodeID:            nodeID,
+		podWatcher:             podWatcher,
+		s3paCache:              s3paCache,
+		credProvider:           credProvider,
+		mount:                  mount,
+		kubeletPath:            util.KubeletPath(),
+		sourceMountDir:         sourceMountDir,
+		mountSyscall:           mountSyscall,
+		bindMountSyscall:       bindMountSyscall,
+		sourceMountPointFinder: sourceMountPointFinder,
+		kubernetesVersion:      kubernetesVersion,
+		nodeID:                 nodeID,
 	}, nil
 }
 
@@ -93,7 +104,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	if isTargetMountPoint {
 		klog.V(4).Infof("Target path %q is already mounted. Only refreshing credentials.", target)
-		source, err := pm.findSourceMountPoint(target)
+		source, err := pm.findSourceMountPointWithDefault(target)
 		if err != nil {
 			klog.Errorf("Failed to find source mount point for %q: %v", target, err)
 			return fmt.Errorf("Failed to find source mount point for %q: %w", target, err)
@@ -138,7 +149,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		releaseMPPodLock(mpPodUID)
 	}()
 
-	source := filepath.Join(SourceMountDir, mpPodUID)
+	source := filepath.Join(pm.sourceMountDir, mpPodUID)
 	err = pm.verifyOrSetupMountTarget(source)
 	if err != nil {
 		return fmt.Errorf("Failed to verify source path can be used as a mount point %q: %w", source, err)
@@ -264,9 +275,13 @@ func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
 	return isMountPoint(pm.mount, target)
 }
 
-// findSourceMountPoint calls `findSourceMountPoint` on `target`.
-func (pm *PodMounter) findSourceMountPoint(target string) (string, error) {
-	return findSourceMountPoint(pm.mount, target)
+// findSourceMountPointWithDefault calls `findSourceMountPoint` on `target`.
+func (pm *PodMounter) findSourceMountPointWithDefault(target string) (string, error) {
+	if pm.sourceMountPointFinder != nil {
+		return pm.sourceMountPointFinder(pm.mount, target, pm.sourceMountDir)
+	}
+
+	return findSourceMountPoint(pm.mount, target, pm.sourceMountDir)
 }
 
 // waitForMountpointPod waits until Mountpoint Pod for given `podName` is in `Running` state.

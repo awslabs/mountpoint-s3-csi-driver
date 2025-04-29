@@ -153,7 +153,8 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 		unmounter.CleanupDanglingMounts()
 
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mountUtil, nil, kubernetesVersion, nodeID)
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mountUtil, nil, nil, nil,
+			kubernetesVersion, nodeID, mounter.SourceMountDir)
 		if err != nil {
 			klog.Fatalln(err)
 		}
