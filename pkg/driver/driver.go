@@ -141,7 +141,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			}
 		}()
 
-		unmounter := mounter.NewPodUnmounter(nodeID, mountUtil, podWatcher, s3paCache, credProvider)
+		unmounter := mounter.NewPodUnmounter(nodeID, mountUtil, podWatcher, s3paCache, credProvider, mounter.SourceMountDir)
 
 		s3podAttachmentInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			UpdateFunc: unmounter.HandleS3PodAttachmentUpdate,

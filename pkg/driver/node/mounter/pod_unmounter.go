@@ -18,11 +18,13 @@ import (
 )
 
 type PodUnmounter struct {
-	nodeID       string
-	mountUtil    mount.Interface
-	podWatcher   *watcher.Watcher
-	s3paCache    cache.Cache
-	credProvider *credentialprovider.Provider
+	nodeID         string
+	mountUtil      mount.Interface
+	kubeletPath    string
+	sourceMountDir string
+	podWatcher     *watcher.Watcher
+	s3paCache      cache.Cache
+	credProvider   *credentialprovider.Provider
 }
 
 func NewPodUnmounter(
@@ -31,13 +33,16 @@ func NewPodUnmounter(
 	podWatcher *watcher.Watcher,
 	s3paCache cache.Cache,
 	credProvider *credentialprovider.Provider,
+	sourceMountDir string,
 ) *PodUnmounter {
 	return &PodUnmounter{
-		nodeID:       nodeID,
-		mountUtil:    mountUtil,
-		podWatcher:   podWatcher,
-		s3paCache:    s3paCache,
-		credProvider: credProvider,
+		nodeID:         nodeID,
+		mountUtil:      mountUtil,
+		kubeletPath:    util.KubeletPath(),
+		sourceMountDir: sourceMountDir,
+		podWatcher:     podWatcher,
+		s3paCache:      s3paCache,
+		credProvider:   credProvider,
 	}
 }
 
@@ -55,16 +60,16 @@ func (u *PodUnmounter) HandleS3PodAttachmentUpdate(old, new any) {
 }
 
 func (u *PodUnmounter) unmountSourceForPod(s3pa *crdv1beta.MountpointS3PodAttachment, mpPodName string) {
-	klog.Infof("Found Mountpoint pod with zero workload pods, unmounting it - %s", mpPodName)
+	klog.Infof("Found Mountpoint Pod with zero workload pods, unmounting it - %s", mpPodName)
 	mpPod, err := u.podWatcher.Get(mpPodName)
 	if err != nil {
-		klog.Infof("failed to find mpPodName during update event")
+		klog.Infof("failed to find Mountpoint Pod %s during update event", mpPodName)
 		return
 	}
 
 	mpPodUID := string(mpPod.UID)
-	podPath := filepath.Join(util.KubeletPath(), "pods", mpPodUID)
-	source := filepath.Join(SourceMountDir, mpPodUID)
+	podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
+	source := filepath.Join(u.sourceMountDir, mpPodUID)
 
 	if err := u.writeExitFile(podPath, mpPod); err != nil {
 		return
@@ -107,7 +112,7 @@ func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1beta.MountpointS3PodAttachm
 	err := u.credProvider.Cleanup(credentialprovider.CleanupContext{
 		VolumeID:  s3pa.Spec.VolumeID,
 		PodID:     mpPodUID,
-		WritePath: filepath.Join(util.KubeletPath(), "pods", mpPodUID),
+		WritePath: filepath.Join(u.kubeletPath, "pods", mpPodUID),
 	})
 	if err != nil {
 		klog.Errorf("Failed to clean up credentials for %s: %v", source, err)
@@ -117,9 +122,9 @@ func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1beta.MountpointS3PodAttachm
 }
 
 func (u *PodUnmounter) CleanupDanglingMounts() {
-	entries, err := os.ReadDir(SourceMountDir)
+	entries, err := os.ReadDir(u.sourceMountDir)
 	if err != nil {
-		klog.Errorf("Failed to read source mount directory (`%s`): %v", SourceMountDir, err)
+		klog.Errorf("Failed to read source mount directory (`%s`): %v", u.sourceMountDir, err)
 		return
 	}
 
@@ -129,7 +134,7 @@ func (u *PodUnmounter) CleanupDanglingMounts() {
 		}
 
 		mpPodUID := file.Name()
-		source := filepath.Join(SourceMountDir, mpPodUID)
+		source := filepath.Join(u.sourceMountDir, mpPodUID)
 		// Try to find corresponding pod
 		mpPod, err := u.findPodByUID(mpPodUID)
 		if err != nil {
@@ -149,7 +154,7 @@ func (u *PodUnmounter) CleanupDanglingMounts() {
 
 		if !hasWorkloads {
 			klog.Infof("Found dangling mount for Mountpoint Pod %s (UID: %s), cleaning up", mpPod.Name, mpPodUID)
-			podPath := filepath.Join(util.KubeletPath(), "pods", mpPodUID)
+			podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
 			if err := u.writeExitFile(podPath, mpPod); err != nil {
 				return
 			}
