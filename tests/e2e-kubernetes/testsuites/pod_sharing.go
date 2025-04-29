@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,7 +25,12 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-var s3paGVR = schema.GroupVersionResource{Group: "s3.csi.aws.com", Version: "v1", Resource: "mountpoints3podattachments"}
+var s3paGVR = schema.GroupVersionResource{Group: "s3.csi.aws.com", Version: "v1beta", Resource: "mountpoints3podattachments"}
+
+const mountpointNamespace = "mount-s3"
+
+const defaultTimeout = 10 * time.Second
+const defaultInterval = 1 * time.Second
 
 type s3CSIPodSharingTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -32,7 +39,7 @@ type s3CSIPodSharingTestSuite struct {
 func InitS3CSIPodSharingTestSuite() storageframework.TestSuite {
 	return &s3CSIPodSharingTestSuite{
 		tsInfo: storageframework.TestSuiteInfo{
-			Name: "multivolume",
+			Name: "podsharing",
 			TestPatterns: []storageframework.TestPattern{
 				storageframework.DefaultFsPreprovisionedPV,
 			},
@@ -56,7 +63,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		l local
 	)
 
-	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"multivolume", storageframework.GetDriverTimeouts(driver))
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"podsharing", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	cleanup := func(ctx context.Context) {
@@ -76,25 +83,35 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 
+		var s3paNames []string
+		var mountpointPodNames []string
 		var pods []*v1.Pod
-		node := l.config.ClientNodeSelection
-		// Create each pod with pvc
+		var targetNode string
+		var nodeSelector map[string]string
 		for i := 0; i < 2; i++ {
 			index := i + 1
-			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, node))
-			pod, err := e2epod.CreatePod(ctx, f.ClientSet, f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
-			framework.ExpectNoError(err)
-			// The pod must get deleted before this function returns because the caller may try to
-			// delete volumes as part of the tests. Keeping the pod running would block that.
-			// If the test times out, then the namespace deletion will take care of it.
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-			}()
-			pods = append(pods, pod)
-			e2epod.SetAffinity(&node, pod.Spec.NodeName)
-		}
 
-		verifyPodsShareMountpointPod(ctx, f, pods, resource.Pv)
+			if i > 0 && targetNode != "" {
+				nodeSelector = map[string]string{"kubernetes.io/hostname": targetNode}
+			}
+
+			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume", index))
+			pod, err := e2epod.CreatePod(ctx, f.ClientSet, f.Namespace.Name, nodeSelector, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			framework.ExpectNoError(err)
+
+			if i == 0 {
+				targetNode = pod.Spec.NodeName
+			}
+			pods = append(pods, pod)
+		}
+		defer func() {
+			for _, pod := range pods {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}
+			verifyMountpointResourcesCleanup(ctx, f, s3paNames, mountpointPodNames)
+		}()
+
+		s3paNames, mountpointPodNames = verifyPodsShareMountpointPod(ctx, f, pods, resource.Pv)
 		checkCrossReadWrite(f, pods[0], pods[1])
 	})
 
@@ -102,6 +119,8 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 
+		var s3paNames []string
+		var mountpointPodNames []string
 		var pods []*v1.Pod
 		var targetNode string
 		for i := 0; i < 2; i++ {
@@ -129,16 +148,18 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			if i == 0 {
 				targetNode = pod.Spec.NodeName
 			}
-
-			defer func() {
-				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-			}()
 			pods = append(pods, pod)
 		}
+		defer func() {
+			for _, pod := range pods {
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+			}
+			verifyMountpointResourcesCleanup(ctx, f, s3paNames, mountpointPodNames)
+		}()
 
-		verifyPodsHaveDifferentMountpointPods(ctx, f, pods, resource.Pv, func(pod *v1.Pod) map[string]string {
+		s3paNames, mountpointPodNames = verifyPodsHaveDifferentMountpointPods(ctx, f, pods, func(pod *v1.Pod) map[string]string {
 			expectedFields := defaultExpectedFields(pod.Spec.NodeName, resource.Pv)
-			expectedFields["WorkloadFSGroup"] = fmt.Sprintf("%d", pod.Spec.SecurityContext.FSGroup)
+			expectedFields["WorkloadFSGroup"] = strconv.FormatInt(*pod.Spec.SecurityContext.FSGroup, 10)
 			return expectedFields
 		})
 		checkCrossReadWrite(f, pods[0], pods[1])
@@ -147,7 +168,9 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 	// TODO: Add more test cases
 }
 
-func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, pods []*v1.Pod, pv *v1.PersistentVolume) {
+func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, pods []*v1.Pod, pv *v1.PersistentVolume) ([]string, []string) {
+	var s3paNames []string
+	var mountpointPodNames []string
 	var s3paList *crdv1beta.MountpointS3PodAttachmentList
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		list, err := f.DynamicClient.Resource(s3paGVR).List(ctx, metav1.ListOptions{})
@@ -160,8 +183,10 @@ func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, p
 		}
 		for _, s3pa := range s3paList.Items {
 			if matchesSpec(s3pa.Spec, defaultExpectedFields(pods[0].Spec.NodeName, pv)) {
+				s3paNames = append(s3paNames, s3pa.Name)
 				allUIDs := make(map[string]bool)
-				for _, uids := range s3paList.Items[0].Spec.MountpointS3PodToWorkloadPodUIDs {
+				for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
+					mountpointPodNames = append(mountpointPodNames, mpPodName)
 					for _, uid := range uids {
 						allUIDs[uid] = true
 					}
@@ -178,11 +203,14 @@ func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, p
 		}
 
 		return false, err
-	})).WithTimeout(10 * time.Second).WithPolling(1 * time.Second).Should(gomega.BeTrue())
+	})).WithTimeout(defaultTimeout).WithPolling(defaultInterval).Should(gomega.BeTrue())
 
+	return s3paNames, mountpointPodNames
 }
 
-func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Framework, pods []*v1.Pod, pv *v1.PersistentVolume, expectedFieldsFunc func(pod *v1.Pod) map[string]string) {
+func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Framework, pods []*v1.Pod, expectedFieldsFunc func(pod *v1.Pod) map[string]string) ([]string, []string) {
+	var s3paNames []string
+	var mountpointPodNames []string
 	var s3paList *crdv1beta.MountpointS3PodAttachmentList
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		list, err := f.DynamicClient.Resource(s3paGVR).List(ctx, metav1.ListOptions{})
@@ -198,6 +226,7 @@ func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Fra
 		for _, s3pa := range s3paList.Items {
 			for _, pod := range pods {
 				if matchesSpec(s3pa.Spec, expectedFieldsFunc(pod)) {
+					s3paNames = append(s3paNames, s3pa.Name)
 					matchCount++
 					break
 				}
@@ -205,7 +234,7 @@ func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Fra
 		}
 
 		return matchCount == len(pods), nil
-	})).WithTimeout(10 * time.Second).WithPolling(1 * time.Second).Should(gomega.BeTrue())
+	})).WithTimeout(defaultTimeout).WithPolling(defaultInterval).Should(gomega.BeTrue())
 
 	podToMountpointPod := make(map[string]string)
 	for _, s3pa := range s3paList.Items {
@@ -227,9 +256,44 @@ func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Fra
 		framework.Gomega().Expect(alreadySeen).To(gomega.BeFalse())
 
 		seenMountpointPods[mpPodName] = true
+		mountpointPodNames = append(mountpointPodNames, mpPodName)
 	}
 
 	framework.Gomega().Expect(len(seenMountpointPods)).To(gomega.Equal(len(pods)))
+
+	return s3paNames, mountpointPodNames
+}
+
+func verifyMountpointResourcesCleanup(ctx context.Context, f *framework.Framework, s3paNames []string, mountpointPodNames []string) {
+	// Verify specific MountpointS3PodAttachments are deleted
+	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
+		for _, s3paName := range s3paNames {
+			_, err := f.DynamicClient.Resource(s3paGVR).Get(ctx, s3paName, metav1.GetOptions{})
+			if err == nil {
+				// S3PodAttachment still exists
+				return false, nil
+			}
+			if !apierrors.IsNotFound(err) {
+				return false, err
+			}
+		}
+		return true, nil
+	})).WithTimeout(defaultTimeout).WithPolling(defaultInterval).Should(gomega.BeTrue())
+
+	// Verify specific Mountpoint Pods are deleted
+	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
+		for _, mpPodName := range mountpointPodNames {
+			_, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
+			if err == nil {
+				// Pod still exists
+				return false, nil
+			}
+			if !apierrors.IsNotFound(err) {
+				return false, err
+			}
+		}
+		return true, nil
+	})).WithTimeout(defaultTimeout).WithPolling(defaultInterval).Should(gomega.BeTrue())
 }
 
 // Convert UnstructuredList to MountpointS3PodAttachmentList
