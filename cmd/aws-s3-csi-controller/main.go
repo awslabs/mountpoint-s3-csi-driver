@@ -65,7 +65,7 @@ func main() {
 
 	IndexMountpointS3PodAttachmentFields(log, mgr)
 
-	err = csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
+	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:         *mountpointNamespace,
 		MountpointVersion: *mountpointVersion,
 		PriorityClassName: *mountpointPriorityClassName,
@@ -76,9 +76,15 @@ func main() {
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
 		ClusterVariant:   cluster.DetectVariant(conf, log),
-	}).SetupWithManager(mgr)
-	if err != nil {
+	})
+
+	if err := reconciler.SetupWithManager(mgr); err != nil {
 		log.Error(err, "Failed to create controller")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(csicontroller.NewStaleAttachmentCleaner(reconciler)); err != nil {
+		log.Error(err, "Failed to add stale attachment cleaner to manager")
 		os.Exit(1)
 	}
 
