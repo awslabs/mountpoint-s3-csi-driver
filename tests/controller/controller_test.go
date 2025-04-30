@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1123,7 +1124,12 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3Pod
 	}
 
 	Expect(mpPodName).NotTo(BeEmpty(), "No Mountpoint Pod found for pod UID %s in MountpointS3PodAttachment: %#v", podUID, s3pa)
-	Expect(s3pa.Spec.MountpointS3PodAttachments[mpPodName]).To(ContainElement(podUID))
+	Expect(s3pa.Spec.MountpointS3PodAttachments[mpPodName]).To(ContainElement(
+		MatchFields(IgnoreExtras, Fields{
+			"WorkloadPodUID": Equal(podUID),
+			"AttachmentTime": Not(BeZero()),
+		}),
+	))
 
 	mountpointPod := waitForMountpointPodWithName(mpPodName)
 	verifyMountpointPodFor(pod, vol, mountpointPod)
