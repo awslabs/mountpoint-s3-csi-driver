@@ -32,6 +32,8 @@ const mountpointNamespace = "mount-s3"
 const defaultTimeout = 10 * time.Second
 const defaultInterval = 1 * time.Second
 
+var IsPodMounter bool
+
 type s3CSIPodSharingTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
 }
@@ -74,6 +76,10 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup resource")
 	}
 	ginkgo.BeforeEach(func(ctx context.Context) {
+		if !IsPodMounter {
+			ginkgo.Skip("Pod Mounter is not enabled, skipping pod sharing tests")
+		}
+
 		l = local{}
 		l.config = driver.PrepareTest(ctx, f)
 		ginkgo.DeferCleanup(cleanup)

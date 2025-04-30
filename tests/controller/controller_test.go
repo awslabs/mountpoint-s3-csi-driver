@@ -364,17 +364,16 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod1 := createPod(withPVC(vol.pvc), withFSGroup(1111))
 						pod2 := createPod(withPVC(vol.pvc), withFSGroup(1111))
 						pod1.schedule(testNode)
-						pod2.schedule(testNode)
 
 						expectedFields := defaultExpectedFields(testNode, vol.pv)
 						expectedFields["WorkloadFSGroup"] = "1111"
-						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
-						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
-						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
+						pod2.schedule(testNode)
+
+						s3pa1, mpPod1 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod1, s3pa.ResourceVersion, expectedFields)
+						s3pa2, mpPod2 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod2, s3pa.ResourceVersion, expectedFields)
 
 						Expect(s3pa1.Name).To(Equal(s3pa2.Name), "S3PodAttachment should have the same name")
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name), "Mountpoint Pods should have the same name")
@@ -433,19 +432,18 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod1 := createPod(withPVC(vol.pvc), withServiceAccount(sa.Name))
 						pod2 := createPod(withPVC(vol.pvc), withServiceAccount(sa.Name))
 						pod1.schedule(testNode)
-						pod2.schedule(testNode)
 
 						expectedFields := defaultExpectedFields(testNode, vol.pv)
 						expectedFields["AuthenticationSource"] = "pod"
 						expectedFields["WorkloadServiceAccountName"] = sa.Name
 						expectedFields["WorkloadNamespace"] = defaultNamespace
-						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
-						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
-						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
+						pod2.schedule(testNode)
+
+						s3pa1, mpPod1 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod1, s3pa.ResourceVersion, expectedFields)
+						s3pa2, mpPod2 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod2, s3pa.ResourceVersion, expectedFields)
 
 						Expect(s3pa1.Name).To(Equal(s3pa2.Name), "S3PodAttachment should have the same name")
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name), "Mountpoint Pods should have the same name")
@@ -469,20 +467,19 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod1 := createPod(withPVC(vol.pvc), withServiceAccount(sa.Name))
 						pod2 := createPod(withPVC(vol.pvc), withServiceAccount(sa.Name))
 						pod1.schedule(testNode)
-						pod2.schedule(testNode)
 
 						expectedFields := defaultExpectedFields(testNode, vol.pv)
 						expectedFields["AuthenticationSource"] = "pod"
 						expectedFields["WorkloadServiceAccountName"] = sa.Name
 						expectedFields["WorkloadNamespace"] = defaultNamespace
 						expectedFields["WorkloadServiceAccountIAMRoleARN"] = "test-role"
-						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
-						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
-						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
+						pod2.schedule(testNode)
+
+						s3pa1, mpPod1 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod1, s3pa.ResourceVersion, expectedFields)
+						s3pa2, mpPod2 := waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod2, s3pa.ResourceVersion, expectedFields)
 
 						Expect(s3pa1.Name).To(Equal(s3pa2.Name), "S3PodAttachment should have the same name")
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name), "Mountpoint Pods should have the same name")
@@ -1078,6 +1075,20 @@ func expectNoPodUIDInS3PodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, 
 	}
 }
 
+// waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields waits and verifies that MountpointS3PodAttachment and Mountpoint Pod
+// are created for given `node`, `vol`, `pod` and `expectedFields`
+func waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(
+	node string,
+	vol *testVolume,
+	pod *testPod,
+	expectedFields map[string]string,
+) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+	s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
+	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
+	return s3pa, mpPod
+}
+
 // waitAndVerifyS3PodAttachmentAndMountpointPod waits and verifies that MountpointS3PodAttachment and Mountpoint Pod
 // are created for given `node`, `vol` and `pod`
 func waitAndVerifyS3PodAttachmentAndMountpointPod(
@@ -1085,7 +1096,19 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	vol *testVolume,
 	pod *testPod,
 ) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
-	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(node, vol.pv), "")
+	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv))
+}
+
+// waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField waits and verifies that MountpointS3PodAttachment with `minVersion` and Mountpoint Pod
+// are created for given `node`, `vol`, `pod` and `expectedFields`
+func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(
+	testNode string,
+	vol *testVolume,
+	pod *testPod,
+	minVersion string,
+	expectedFields map[string]string,
+) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+	s3pa := waitForS3PodAttachmentWithFields(expectedFields, minVersion)
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
 	return s3pa, mpPod
@@ -1099,10 +1122,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 	pod *testPod,
 	minVersion string,
 ) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
-	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv), minVersion)
-	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
-	return s3pa, mpPod
+	return waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod, minVersion, defaultExpectedFields(testNode, vol.pv))
 }
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
