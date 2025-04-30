@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
@@ -342,8 +343,11 @@ var _ = Describe("Mountpoint Controller", func() {
 
 						s3pa1, mpPod1 := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod1)
 
-						pv.Spec.MountOptions = []string{"--allow-delete"}
+						// Adding some sleep time before updating PV because reconciler requeues pod1 event to clear expectation
+						// and it can cause transient test failure if we update PV MountOptions too quickly
+						time.Sleep(5 * time.Second)
 
+						pv.Spec.MountOptions = []string{"--allow-delete"}
 						Expect(k8sClient.Update(ctx, pv)).To(Succeed())
 
 						pod2 := createPod(withPVC(vol.pvc))
