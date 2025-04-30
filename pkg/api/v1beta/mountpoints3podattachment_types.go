@@ -48,8 +48,17 @@ type MountpointS3PodAttachmentSpec struct {
 	// EKS IAM Role ARN from workload pod's service account annotation (IRSA). Exists only if `authenticationSource: pod` and service account has `eks.amazonaws.com/role-arn` annotation.
 	WorkloadServiceAccountIAMRoleARN string `json:"workloadServiceAccountIAMRoleARN,omitempty"`
 
-	// Maps each Mountpoint S3 pod name to the list of workload pod UIDs it is attached to.
-	MountpointS3PodToWorkloadPodUIDs map[string][]string `json:"mountpointS3PodToWorkloadPodUIDs"`
+	// Maps each Mountpoint S3 pod name to its workload attachments
+	MountpointS3PodAttachments map[string][]WorkloadAttachment `json:"mountpointS3PodAttachments"`
+}
+
+// WorkloadAttachment represents the attachment details of a workload pod to a Mountpoint S3 pod.
+type WorkloadAttachment struct {
+	// WorkloadPodUID is the unique identifier of the attached workload pod
+	WorkloadPodUID string `json:"workloadPodUID"`
+
+	// AttachmentTime represents when the workload pod was attached to the Mountpoint S3 pod
+	AttachmentTime metav1.Time `json:"attachmentTime"`
 }
 
 // +kubebuilder:object:root=true

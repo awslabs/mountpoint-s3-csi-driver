@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -332,8 +333,11 @@ func (r *Reconciler) handleExistingS3PodAttachment(ctx context.Context, s3pa *cr
 func (r *Reconciler) addWorkloadToS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
 
-	for key := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-		s3pa.Spec.MountpointS3PodToWorkloadPodUIDs[key] = append(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs[key], workloadUID)
+	for key := range s3pa.Spec.MountpointS3PodAttachments {
+		s3pa.Spec.MountpointS3PodAttachments[key] = append(s3pa.Spec.MountpointS3PodAttachments[key], crdv1beta.WorkloadAttachment{
+			WorkloadPodUID: workloadUID,
+			AttachmentTime: metav1.NewTime(time.Now().UTC()),
+		})
 		break
 	}
 
@@ -354,18 +358,18 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(ctx context.Context, s3pa *crd
 // It will delete MountpointS3PodAttachment if map becomes empty.
 func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	// Remove workload UID from mountpoint pods
-	for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-		filteredUIDs := []string{}
+	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		filteredUIDs := []crdv1beta.WorkloadAttachment{}
 		found := false
-		for _, uid := range uids {
-			if uid == workloadUID {
+		for _, attachment := range attachments {
+			if attachment.WorkloadPodUID == workloadUID {
 				found = true
 				continue
 			}
-			filteredUIDs = append(filteredUIDs, uid)
+			filteredUIDs = append(filteredUIDs, attachment)
 		}
 		if found {
-			s3pa.Spec.MountpointS3PodToWorkloadPodUIDs[mpPodName] = filteredUIDs
+			s3pa.Spec.MountpointS3PodAttachments[mpPodName] = filteredUIDs
 			err := r.Update(ctx, s3pa)
 			if err != nil {
 				if apierrors.IsConflict(err) {
@@ -381,11 +385,11 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 	}
 
 	// Remove Mountpoint pods with zero workloads
-	for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
+	for mpPodName, uids := range s3pa.Spec.MountpointS3PodAttachments {
 		if len(uids) == 0 {
 			log.Info("Mountpoint pod has zero workload UIDs. Will remove it from MountpointS3PodAttachment",
 				"mountpointPodName", mpPodName)
-			delete(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs, mpPodName)
+			delete(s3pa.Spec.MountpointS3PodAttachments, mpPodName)
 			err := r.Update(ctx, s3pa)
 			if err != nil {
 				if apierrors.IsConflict(err) {
@@ -400,7 +404,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 	}
 
 	// Delete MountpointS3PodAttachment if map is empty
-	if len(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs) == 0 {
+	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
 		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
 		err := r.Delete(ctx, s3pa)
 		if err != nil {
@@ -466,8 +470,8 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 			MountOptions:         strings.Join(pv.Spec.MountOptions, ","),
 			WorkloadFSGroup:      r.getFSGroup(workloadPod),
 			AuthenticationSource: authSource,
-			MountpointS3PodToWorkloadPodUIDs: map[string][]string{
-				mpPod.Name: {string(workloadPod.UID)},
+			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+				mpPod.Name: {{WorkloadPodUID: string(workloadPod.UID), AttachmentTime: metav1.NewTime(time.Now().UTC())}},
 			},
 		},
 	}
@@ -623,9 +627,9 @@ func isPodActive(p *corev1.Pod) bool {
 }
 
 func s3paContainsWorkload(s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string) bool {
-	for _, workloads := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-		for _, workload := range workloads {
-			if workload == workloadUID {
+	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		for _, attachment := range attachments {
+			if attachment.WorkloadPodUID == workloadUID {
 				return true
 			}
 		}

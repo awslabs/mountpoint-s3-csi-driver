@@ -132,8 +132,8 @@ func setup(t *testing.T) *testCtx {
 			VolumeID:             testCtx.volumeID,
 			WorkloadFSGroup:      testCtx.fsGroup,
 			MountOptions:         testCtx.pvMountOptions,
-			MountpointS3PodToWorkloadPodUIDs: map[string][]string{
-				testCtx.mpPodName: {testCtx.podUID},
+			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+				testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
 			},
 		},
 	}
@@ -397,8 +397,8 @@ func TestPodMounter(t *testing.T) {
 					VolumeID:             testCtx.volumeID,
 					WorkloadFSGroup:      testCtx.fsGroup,
 					MountOptions:         testCtx.pvMountOptions,
-					MountpointS3PodToWorkloadPodUIDs: map[string][]string{
-						testCtx.mpPodName: {testCtx.podUID},
+					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+						testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
 					},
 				},
 			}

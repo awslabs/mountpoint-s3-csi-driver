@@ -372,10 +372,10 @@ func verifyPodsShareMountpointPod(ctx context.Context, f *framework.Framework, p
 			if matchesSpec(s3pa.Spec, expectedFields) {
 				s3paNames = append(s3paNames, s3pa.Name)
 				allUIDs := make(map[string]bool)
-				for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
+				for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 					mountpointPodNames = append(mountpointPodNames, mpPodName)
-					for _, uid := range uids {
-						allUIDs[uid] = true
+					for _, attachment := range attachments {
+						allUIDs[attachment.WorkloadPodUID] = true
 					}
 				}
 				for _, pod := range pods {
@@ -425,9 +425,9 @@ func verifyPodsHaveDifferentMountpointPods(ctx context.Context, f *framework.Fra
 
 	podToMountpointPod := make(map[string]string)
 	for _, s3pa := range s3paList.Items {
-		for mpPodName, workloadPodUIDs := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-			for _, uid := range workloadPodUIDs {
-				podToMountpointPod[uid] = mpPodName
+		for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+			for _, attachment := range attachments {
+				podToMountpointPod[attachment.WorkloadPodUID] = mpPodName
 			}
 		}
 	}

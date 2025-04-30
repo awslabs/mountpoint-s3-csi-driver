@@ -370,8 +370,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 
@@ -397,9 +397,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadFSGroup"] = "2222"
 						s3pa3 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa3.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
@@ -441,8 +441,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 
@@ -478,8 +478,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 
@@ -524,9 +524,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadServiceAccountIAMRoleARN"] = "test-role-2"
 						s3pa3 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa3.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
@@ -578,9 +578,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadServiceAccountName"] = sa2.Name
 						s3pa3 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
-						Expect(len(s3pa3.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
@@ -644,7 +644,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadNamespace"] = defaultNamespace
 						expectedFields["WorkloadServiceAccountName"] = sa1.Name
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
-						Expect(len(s3pa1.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
 
 						pod2 := createPod(withPVC(pvc2), withServiceAccount(sa1.Name), withNamespace(ns.Name))
@@ -653,7 +653,7 @@ var _ = Describe("Mountpoint Controller", func() {
 
 						expectedFields["WorkloadNamespace"] = ns.Name
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
-						Expect(len(s3pa2.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
 
 						Expect(s3pa1.Name).NotTo(Equal(s3pa2.Name), "S3PodAttachment should not have the same name")
@@ -1066,11 +1066,11 @@ func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 	}, defaultWaitTimeout/2, defaultWaitTimeout/4).Should(Succeed())
 }
 
-// expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodToWorkloadPodUIDs map
+// expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodAttachments map
 func expectNoPodUIDInS3PodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, podUID string) {
-	for _, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-		for _, uid := range uids {
-			if uid == podUID {
+	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		for _, attachment := range attachments {
+			if attachment.WorkloadPodUID == podUID {
 				Expect(false).To(BeTrue(), "Found pod UID %s in S3PodAttachment when none was expected: %#v", podUID, s3pa)
 			}
 		}
@@ -1085,7 +1085,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	pod *testPod,
 ) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(node, vol.pv), "")
-	Expect(len(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
 	return s3pa, mpPod
 }
@@ -1099,7 +1099,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 	minVersion string,
 ) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv), minVersion)
-	Expect(len(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs)).To(Equal(1))
+	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
 	return s3pa, mpPod
 }
@@ -1110,9 +1110,9 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3Pod
 	var mpPodName string
 	podUID := string(pod.UID)
 
-	for k, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-		for _, uid := range uids {
-			if uid == podUID {
+	for k, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		for _, attachment := range attachments {
+			if attachment.WorkloadPodUID == podUID {
 				mpPodName = k
 				break
 			}
@@ -1123,7 +1123,7 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3Pod
 	}
 
 	Expect(mpPodName).NotTo(BeEmpty(), "No Mountpoint Pod found for pod UID %s in MountpointS3PodAttachment: %#v", podUID, s3pa)
-	Expect(s3pa.Spec.MountpointS3PodToWorkloadPodUIDs[mpPodName]).To(ContainElement(podUID))
+	Expect(s3pa.Spec.MountpointS3PodAttachments[mpPodName]).To(ContainElement(podUID))
 
 	mountpointPod := waitForMountpointPodWithName(mpPodName)
 	verifyMountpointPodFor(pod, vol, mountpointPod)

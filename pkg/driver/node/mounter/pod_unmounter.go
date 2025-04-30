@@ -52,7 +52,7 @@ func (u *PodUnmounter) HandleS3PodAttachmentUpdate(old, new any) {
 		return
 	}
 
-	for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
+	for mpPodName, uids := range s3pa.Spec.MountpointS3PodAttachments {
 		if len(uids) == 0 {
 			u.unmountSourceForPod(s3pa, mpPodName)
 		}
@@ -192,7 +192,7 @@ func (u *PodUnmounter) checkForWorkloads(mpPod *corev1.Pod) (bool, error) {
 
 	// Find attachment for this pod and check if it has workloads
 	for _, s3pa := range s3paList.Items {
-		for mpPodName, workloadUIDs := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
+		for mpPodName, workloadUIDs := range s3pa.Spec.MountpointS3PodAttachments {
 			if mpPodName == mpPod.Name {
 				return len(workloadUIDs) > 0, nil
 			}

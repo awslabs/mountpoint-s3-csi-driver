@@ -87,7 +87,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			s3pa: &crdv1beta.MountpointS3PodAttachment{
 				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
 					NodeName: nodeName,
-					MountpointS3PodToWorkloadPodUIDs: map[string][]string{
+					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 						"pod1": {},
 					},
 				},
@@ -107,7 +107,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			s3pa: &crdv1beta.MountpointS3PodAttachment{
 				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
 					NodeName: nodeName,
-					MountpointS3PodToWorkloadPodUIDs: map[string][]string{
+					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 						"pod1": {},
 					},
 				},
@@ -184,8 +184,10 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			s3paItems: []crdv1beta.MountpointS3PodAttachment{
 				{
 					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodToWorkloadPodUIDs: map[string][]string{
-							"pod1": {"workload1"},
+						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+							"pod1": []crdv1beta.WorkloadAttachment{crdv1beta.WorkloadAttachment{
+								WorkloadPodUID: "workload1",
+							}},
 						},
 					},
 				},
@@ -206,7 +208,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			s3paItems: []crdv1beta.MountpointS3PodAttachment{
 				{
 					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodToWorkloadPodUIDs: map[string][]string{
+						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 							"pod1": {},
 						},
 					},
@@ -228,7 +230,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			s3paItems: []crdv1beta.MountpointS3PodAttachment{
 				{
 					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodToWorkloadPodUIDs: map[string][]string{
+						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 							"pod1": {},
 						},
 					},

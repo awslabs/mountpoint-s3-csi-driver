@@ -52,13 +52,27 @@ spec:
               mountOptions:
                 description: Comma separated mount options taken from volume.
                 type: string
-              mountpointS3PodToWorkloadPodUIDs:
+              mountpointS3PodAttachments:
                 additionalProperties:
                   items:
-                    type: string
+                    description: WorkloadAttachment represents the attachment details
+                      of a workload pod to a Mountpoint S3 pod.
+                    properties:
+                      attachmentTime:
+                        description: AttachmentTime represents when the workload pod
+                          was attached to the Mountpoint S3 pod
+                        format: date-time
+                        type: string
+                      workloadPodUID:
+                        description: WorkloadPodUID is the unique identifier of the
+                          attached workload pod
+                        type: string
+                    required:
+                    - attachmentTime
+                    - workloadPodUID
+                    type: object
                   type: array
-                description: Maps each Mountpoint S3 pod name to the list of workload
-                  pod UIDs it is attached to.
+                description: Maps each Mountpoint S3 pod name to its workload attachments
                 type: object
               nodeName:
                 description: Name of the node.
@@ -88,7 +102,7 @@ spec:
             required:
             - authenticationSource
             - mountOptions
-            - mountpointS3PodToWorkloadPodUIDs
+            - mountpointS3PodAttachments
             - nodeName
             - persistentVolumeName
             - volumeID

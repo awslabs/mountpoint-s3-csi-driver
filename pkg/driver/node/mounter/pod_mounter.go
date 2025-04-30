@@ -485,9 +485,9 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 			return nil, "", err
 		}
 		for _, s3pa := range s3paList.Items {
-			for mpPodName, uids := range s3pa.Spec.MountpointS3PodToWorkloadPodUIDs {
-				for _, uid := range uids {
-					if uid == credentialCtx.PodID {
+			for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+				for _, attachment := range attachments {
+					if attachment.WorkloadPodUID == credentialCtx.PodID {
 						return &s3pa, mpPodName, nil
 					}
 				}
