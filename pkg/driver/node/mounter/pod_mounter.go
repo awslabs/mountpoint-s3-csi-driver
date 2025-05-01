@@ -184,7 +184,29 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	return nil
 }
 
-func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, pod *corev1.Pod, podPath string,
+// mountS3AtSource mounts an S3 bucket at the specified source path using the Mountpoint Pod.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control
+//   - source: The path where the S3 bucket should be mounted
+//   - mpPod: Mountpoint Pod that will serve this mount point
+//   - podPath: Base path for Pod-specific files
+//   - bucketName: Name of the S3 bucket to mount
+//   - credEnv: Environment variables related to AWS credentials
+//   - authenticationSource: Authentication source from PV volume attribute
+//   - args: Mountpoint arguments
+//
+// Returns:
+//   - error: nil if successful, otherwise an error describing what went wrong
+//
+// The function performs the following steps:
+//  1. Prepares environment and mount arguments
+//  2. Performs the initial mount syscall to obtain FUSE file descriptor
+//  3. Sends mount options to the Mountpoint Pod
+//  4. Waits for the mount to be ready
+//
+// If any step fails, it ensures cleanup by unmounting the source path.
+func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod *corev1.Pod, podPath string,
 	bucketName string, credEnv envprovider.Environment, authenticationSource credentialprovider.AuthenticationSource,
 	args mountpoint.Args) error {
 	env := envprovider.Default()
@@ -200,7 +222,7 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, pod *c
 	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
 	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)
 
-	klog.V(4).Infof("Mounting %s for %s", source, pod.Name)
+	klog.V(4).Infof("Mounting %s for %s", source, mpPod.Name)
 
 	fuseDeviceFD, err := pm.mountSyscallWithDefault(source, args)
 	if err != nil {
@@ -235,7 +257,7 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, pod *c
 	// Remove old mount error file if exists
 	_ = os.Remove(podMountErrorPath)
 
-	klog.V(4).Infof("Sending mount options to Mountpoint Pod %s on %s", pod.Name, podMountSockPath)
+	klog.V(4).Infof("Sending mount options to Mountpoint Pod %s on %s", mpPod.Name, podMountSockPath)
 
 	err = mountoptions.Send(ctx, podMountSockPath, mountoptions.Options{
 		Fd:         fuseDeviceFD,
@@ -244,14 +266,14 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, pod *c
 		Env:        env.List(),
 	})
 	if err != nil {
-		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
-	err = pm.waitForMount(ctx, source, pod.Name, podMountErrorPath)
+	err = pm.waitForMount(ctx, source, mpPod.Name, podMountErrorPath)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", pod.Name, source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
 	// Mountpoint successfully started, so don't unmount the filesystem
@@ -381,6 +403,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 	return err
 }
 
+// provideCredentials provides credentials
 func (pm *PodMounter) provideCredentials(ctx context.Context, podPath string, credentialCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
 	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
 	if err != nil {

@@ -242,7 +242,9 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 		klog.Fatalf("Failed to create cache: %v\n", err)
 	}
 
-	indexMountpointS3PodAttachmentFields(s3paCache)
+	if err := crdv1beta.SetupCacheIndices(s3paCache); err != nil {
+		klog.Fatalf("Failed to setup field indexers: %v", err)
+	}
 
 	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv1beta.MountpointS3PodAttachment{})
 	if err != nil {
@@ -260,26 +262,4 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 	}
 
 	return s3paCache
-}
-
-// TODO: This is duplicated multiple times
-func indexMountpointS3PodAttachmentFields(s3paCache ctrlcache.Cache) {
-	indexField(s3paCache, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(s3paCache, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(s3paCache, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(s3paCache, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(s3paCache, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(s3paCache, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(s3paCache, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(s3paCache, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(s3paCache, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
-}
-
-func indexField(cache ctrlcache.Cache, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
-	err := cache.IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
-	})
-	if err != nil {
-		klog.Fatalf("Failed to create a %s field indexer: %v", field, err)
-	}
 }

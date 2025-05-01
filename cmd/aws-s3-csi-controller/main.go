@@ -7,16 +7,13 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"fmt"
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -28,7 +25,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/go-logr/logr"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -63,7 +59,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	IndexMountpointS3PodAttachmentFields(log, mgr)
+	if err := crdv1beta.SetupManagerIndices(mgr); err != nil {
+		log.Error(err, "Failed to setup field indexers")
+		os.Exit(1)
+	}
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:         *mountpointNamespace,
@@ -90,31 +89,6 @@ func main() {
 
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
 		log.Error(err, "Failed to start manager")
-		os.Exit(1)
-	}
-}
-
-// IndexMountpointS3PodAttachmentFields adds internal index on fields for our custom resource.
-// This is needed for `List()` method to work with field filters.
-func IndexMountpointS3PodAttachmentFields(log logr.Logger, mgr manager.Manager) {
-	indexField(log, mgr, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(log, mgr, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(log, mgr, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(log, mgr, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(log, mgr, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(log, mgr, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(log, mgr, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
-}
-
-// indexField adds index on a field.
-func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
-	})
-	if err != nil {
-		log.Error(err, fmt.Sprintf("Failed to create a %s field indexer", field))
 		os.Exit(1)
 	}
 }

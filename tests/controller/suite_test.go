@@ -3,12 +3,10 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -21,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
@@ -90,7 +87,9 @@ var _ = BeforeSuite(func() {
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
 
-	IndexMountpointS3PodAttachmentFields(logf.Log.WithName("controller-test"), k8sManager)
+	if err := crdv1beta.SetupManagerIndices(k8sManager); err != nil {
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
 		Namespace:         mountpointNamespace,
@@ -154,26 +153,4 @@ func createMountpointPriorityClass() {
 	}
 	Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
 	waitForObject(priorityClass)
-}
-
-func IndexMountpointS3PodAttachmentFields(log logr.Logger, mgr manager.Manager) {
-	indexField(log, mgr, crdv1beta.FieldNodeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.NodeName })
-	indexField(log, mgr, crdv1beta.FieldPersistentVolumeName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.PersistentVolumeName })
-	indexField(log, mgr, crdv1beta.FieldVolumeID, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.VolumeID })
-	indexField(log, mgr, crdv1beta.FieldMountOptions, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.MountOptions })
-	indexField(log, mgr, crdv1beta.FieldAuthenticationSource, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.AuthenticationSource })
-	indexField(log, mgr, crdv1beta.FieldWorkloadFSGroup, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadFSGroup })
-	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountName, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountName })
-	indexField(log, mgr, crdv1beta.FieldWorkloadNamespace, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadNamespace })
-	indexField(log, mgr, crdv1beta.FieldWorkloadServiceAccountIAMRoleARN, func(cr *crdv1beta.MountpointS3PodAttachment) string { return cr.Spec.WorkloadServiceAccountIAMRoleARN })
-}
-
-func indexField(log logr.Logger, mgr manager.Manager, field string, extractor func(*crdv1beta.MountpointS3PodAttachment) string) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &crdv1beta.MountpointS3PodAttachment{}, field, func(obj client.Object) []string {
-		return []string{extractor(obj.(*crdv1beta.MountpointS3PodAttachment))}
-	})
-	if err != nil {
-		log.Error(err, fmt.Sprintf("Failed to create a %s field indexer", field))
-		os.Exit(1)
-	}
 }

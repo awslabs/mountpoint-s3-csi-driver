@@ -663,6 +663,7 @@ func isPodActive(p *corev1.Pod) bool {
 		p.DeletionTimestamp == nil
 }
 
+// s3paContainsWorkload checks whether MountpointS3PodAttachment has `workloadUID` in it.
 func s3paContainsWorkload(s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string) bool {
 	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 		for _, attachment := range attachments {
