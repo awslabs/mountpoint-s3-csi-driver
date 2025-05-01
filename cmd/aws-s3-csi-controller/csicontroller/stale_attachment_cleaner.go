@@ -7,8 +7,6 @@ import (
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -21,14 +19,12 @@ const (
 type StaleAttachmentCleaner struct {
 	reconciler *Reconciler
 	mutex      sync.Mutex
-	stopCh     chan struct{}
 }
 
 // NewStaleAttachmentCleaner creates a new StaleAttachmentCleaner
 func NewStaleAttachmentCleaner(reconciler *Reconciler) *StaleAttachmentCleaner {
 	return &StaleAttachmentCleaner{
 		reconciler: reconciler,
-		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -40,8 +36,6 @@ func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-cm.stopCh:
 			return nil
 		case <-ticker.C:
 			if err := cm.runCleanup(ctx); err != nil {
@@ -94,7 +88,7 @@ func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
 // cleanupStaleWorkloads removes stale workload references from a single S3PodAttachment.
 // A workload reference is considered stale if the referenced Pod no longer exists in the cluster
 // and the attachment is older than staleAttachmentThreshold (this is to avoid race condition with reconciler).
-// If a Mountpoint Pod has zero attachments after cleanup, both the Pod and its entry in S3PodAttachment are deleted.
+// If a Mountpoint Pod has zero attachments after cleanup, "s3.csi.aws.com/needs-unmount" annotation is added and its entry in S3PodAttachment is deleted.
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, existingPods map[string]struct{}) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
@@ -123,24 +117,9 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 		}
 
 		if len(validAttachments) == 0 {
-			// Delete the Mountpoint Pod
-			mpPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      mpPodName,
-					Namespace: cm.reconciler.mountpointPodConfig.Namespace,
-				},
+			if err := cm.reconciler.addNeedsUnmountAnnotation(ctx, mpPodName, log); err != nil {
+				return err
 			}
-			if err := cm.reconciler.Delete(ctx, mpPod); err != nil {
-				if !apierrors.IsNotFound(err) {
-					log.Error(err, "Failed to delete Mountpoint Pod", "mountpointPod", mpPodName)
-					return err
-				}
-				// If pod is not found, that's fine - continue with removing it from s3pa
-				log.Info("Mountpoint Pod does not exist", "mountpointPod", mpPodName)
-			} else {
-				log.Info("Deleted Mountpoint Pod with no attachments", "mountpointPod", mpPodName)
-			}
-
 			delete(s3pa.Spec.MountpointS3PodAttachments, mpPodName)
 		} else {
 			s3pa.Spec.MountpointS3PodAttachments[mpPodName] = validAttachments
@@ -150,7 +129,7 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 	// Update the S3PodAttachment if modified
 	if modified {
 		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			cm.reconciler.Delete(ctx, s3pa)
+			return cm.reconciler.Delete(ctx, s3pa)
 		}
 		return cm.reconciler.Update(ctx, s3pa)
 	}

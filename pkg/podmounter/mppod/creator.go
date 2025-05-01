@@ -15,7 +15,12 @@ import (
 const (
 	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
 	LabelVolumeName        = "s3.csi.aws.com/volume-name"
+	LabelVolumeId          = "s3.csi.aws.com/volume-id"
 	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
+)
+
+const (
+	AnnotationNeedsUnmount = "s3.csi.aws.com/needs-unmount"
 )
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
@@ -54,6 +59,7 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) *corev1.Pod {
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
 				LabelVolumeName:        pv.Name,
+				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 		},

@@ -22,6 +22,7 @@ const (
 	testNode          = "test-node"
 	testPodUID        = "test-pod-uid"
 	testVolName       = "test-vol"
+	testVolID         = "test-vol-id"
 	csiDriverVersion  = "1.12.0"
 )
 
@@ -51,6 +52,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			mppod.LabelMountpointVersion: mountpointVersion,
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
 			mppod.LabelVolumeName:        testVolName,
+			mppod.LabelVolumeId:          testVolID,
 		}, mpPod.Labels)
 
 		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
@@ -107,6 +109,13 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
+					},
+				},
+			},
 		})
 
 		verifyDefaultValues(mpPod)
@@ -120,6 +129,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
 						VolumeAttributes: map[string]string{
 							"mountpointPodServiceAccountName": "mount-s3-sa",
 						},

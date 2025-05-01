@@ -141,17 +141,15 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			}
 		}()
 
-		unmounter := mounter.NewPodUnmounter(nodeID, mountUtil, podWatcher, s3paCache, credProvider, mounter.SourceMountDir)
-
-		s3podAttachmentInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			UpdateFunc: unmounter.HandleS3PodAttachmentUpdate,
-		})
-
 		if !cache.WaitForCacheSync(stopCh, s3podAttachmentInformer.HasSynced) {
 			klog.Fatalf("Failed to sync informer cache within the timeout: %v\n", err)
 		}
 
-		unmounter.CleanupDanglingMounts()
+		unmounter := mounter.NewPodUnmounter(nodeID, mountUtil, podWatcher, credProvider, mounter.SourceMountDir)
+
+		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
+
+		go unmounter.StartPeriodicCleanup(stopCh)
 
 		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mountUtil, nil, nil, nil,
 			kubernetesVersion, nodeID, mounter.SourceMountDir)

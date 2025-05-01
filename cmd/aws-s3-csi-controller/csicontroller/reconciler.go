@@ -387,10 +387,17 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 	// Remove Mountpoint pods with zero workloads
 	for mpPodName, uids := range s3pa.Spec.MountpointS3PodAttachments {
 		if len(uids) == 0 {
+			log.Info("Mountpoint pod has zero workload UIDs. Adding "+mppod.AnnotationNeedsUnmount+" annotation",
+				"mountpointPodName", mpPodName)
+			err := r.addNeedsUnmountAnnotation(ctx, mpPodName, log)
+			if err != nil {
+				return Requeue, err
+			}
+
 			log.Info("Mountpoint pod has zero workload UIDs. Will remove it from MountpointS3PodAttachment",
 				"mountpointPodName", mpPodName)
 			delete(s3pa.Spec.MountpointS3PodAttachments, mpPodName)
-			err := r.Update(ctx, s3pa)
+			err = r.Update(ctx, s3pa)
 			if err != nil {
 				if apierrors.IsConflict(err) {
 					log.Info("Failed to remove Mountpoint pod from MountpointS3PodAttachment due to resource conflict, requeueing",
@@ -599,6 +606,36 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 	}
 
 	return sa.Annotations[AnnotationServiceAccountRole], nil
+}
+
+// addNeedsUnmountAnnotation add "s3.csi.aws.com/needs-unmount" to Mountpoint Pod.
+// This will trigger CSI Driver Node to cleanly unmount and Mountpoint Pod will become 'Succeeded'.
+func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName string, log logr.Logger) error {
+	// Get the pod
+	mpPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: mpPodName}, mpPod)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Failed to find Mountpoint Pod - ignoring")
+			return nil
+		}
+		log.Error(err, "Failed to get Pod")
+		return err
+	}
+
+	if mpPod.Annotations == nil {
+		mpPod.Annotations = make(map[string]string)
+	}
+	mpPod.Annotations[mppod.AnnotationNeedsUnmount] = "true"
+
+	// Update the pod
+	err = r.Update(ctx, mpPod)
+	if err != nil {
+		log.Error(err, "Failed to update Mountpoint Pod")
+		return err
+	}
+
+	return nil
 }
 
 // isMountpointPod returns whether given `pod` is a Mountpoint Pod.

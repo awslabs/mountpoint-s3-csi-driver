@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
@@ -59,7 +58,6 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 	tests := []struct {
 		name          string
 		nodeID        string
-		s3pa          *crdv1beta.MountpointS3PodAttachment
 		pod           *corev1.Pod
 		unmountError  error
 		expectUnmount bool
@@ -67,35 +65,44 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 		{
 			name:   "different node",
 			nodeID: "node1",
-			s3pa: &crdv1beta.MountpointS3PodAttachment{
-				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-					NodeName: "node2",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       "uid1",
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: "different-node",
 				},
 			},
 			expectUnmount: false,
 		},
 		{
-			name:   "same node with empty workload",
+			name:   "same node with unmount annotation",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
 					UID:       "uid1",
-				},
-			},
-			s3pa: &crdv1beta.MountpointS3PodAttachment{
-				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-					NodeName: nodeName,
-					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-						"pod1": {},
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
 					},
+					Labels: map[string]string{
+						mppod.LabelVolumeId: "vol1",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
 				},
 			},
 			expectUnmount: true,
 		},
 		{
-			name:   "same node with empty workload and unmount error",
+			name:   "same node without unmount annotation",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -103,17 +110,11 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					Namespace: mountpointPodNamespace,
 					UID:       "uid1",
 				},
-			},
-			s3pa: &crdv1beta.MountpointS3PodAttachment{
-				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+				Spec: corev1.PodSpec{
 					NodeName: nodeName,
-					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-						"pod1": {},
-					},
 				},
 			},
-			unmountError:  errors.New("unmount error"),
-			expectUnmount: true,
+			expectUnmount: false,
 		},
 	}
 
@@ -147,10 +148,9 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 				return dummyIMDSRegion, nil
 			})
-			s3paCache := &mounter.FakeCache{}
 
-			unmounter := mounter.NewPodUnmounter(tt.nodeID, fakeMounter, podWatcher, s3paCache, credProvider, sourceMountDir)
-			unmounter.HandleS3PodAttachmentUpdate(nil, tt.s3pa)
+			unmounter := mounter.NewPodUnmounter(tt.nodeID, fakeMounter, podWatcher, credProvider, sourceMountDir)
+			unmounter.HandleMountpointPodUpdate(nil, tt.pod)
 
 			unmountCalls := countUnmountCalls(fakeMounter)
 			expectedUnmounts := 0
@@ -166,7 +166,6 @@ func TestCleanupDanglingMounts(t *testing.T) {
 	tests := []struct {
 		name          string
 		pods          []*corev1.Pod
-		s3paItems     []crdv1beta.MountpointS3PodAttachment
 		unmountError  error
 		expectedCalls int
 	}{
@@ -179,38 +178,30 @@ func TestCleanupDanglingMounts(t *testing.T) {
 						Namespace: mountpointPodNamespace,
 						UID:       "uid1",
 					},
-				},
-			},
-			s3paItems: []crdv1beta.MountpointS3PodAttachment{
-				{
-					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-							"pod1": []crdv1beta.WorkloadAttachment{crdv1beta.WorkloadAttachment{
-								WorkloadPodUID: "workload1",
-							}},
-						},
+					Spec: corev1.PodSpec{
+						NodeName: nodeName,
 					},
 				},
 			},
 			expectedCalls: 0,
 		},
 		{
-			name: "with dangling mount",
+			name: "pod marked for unmount",
 			pods: []*corev1.Pod{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
 						UID:       "uid1",
-					},
-				},
-			},
-			s3paItems: []crdv1beta.MountpointS3PodAttachment{
-				{
-					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-							"pod1": {},
+						Annotations: map[string]string{
+							mppod.AnnotationNeedsUnmount: "true",
 						},
+						Labels: map[string]string{
+							mppod.LabelVolumeId: "vol1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: nodeName,
 					},
 				},
 			},
@@ -224,15 +215,15 @@ func TestCleanupDanglingMounts(t *testing.T) {
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
 						UID:       "uid1",
-					},
-				},
-			},
-			s3paItems: []crdv1beta.MountpointS3PodAttachment{
-				{
-					Spec: crdv1beta.MountpointS3PodAttachmentSpec{
-						MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-							"pod1": {},
+						Annotations: map[string]string{
+							mppod.AnnotationNeedsUnmount: "true",
 						},
+						Labels: map[string]string{
+							mppod.LabelVolumeId: "vol1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: nodeName,
 					},
 				},
 			},
@@ -243,7 +234,6 @@ func TestCleanupDanglingMounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			podWatcher, client := setupPodWatcher(t, tt.pods...)
 			kubeletPath := t.TempDir()
 			t.Setenv("KUBELET_PATH", kubeletPath)
 			t.Chdir(kubeletPath)
@@ -266,16 +256,14 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				}
 			}
 
-			s3paCache := &mounter.FakeCache{
-				TestItems: tt.s3paItems,
-			}
-
+			podWatcher, client := setupPodWatcher(t, tt.pods...)
 			credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 				return dummyIMDSRegion, nil
 			})
 
-			unmounter := mounter.NewPodUnmounter(nodeName, fakeMounter, podWatcher, s3paCache, credProvider, sourceMountDir)
-			unmounter.CleanupDanglingMounts()
+			unmounter := mounter.NewPodUnmounter(nodeName, fakeMounter, podWatcher, credProvider, sourceMountDir)
+			err := unmounter.CleanupDanglingMounts()
+			assert.NoError(t, err)
 
 			unmountCalls := countUnmountCalls(fakeMounter)
 			assert.Equals(t, tt.expectedCalls, unmountCalls)

@@ -71,6 +71,11 @@ func (w *Watcher) List() ([]*corev1.Pod, error) {
 	return w.lister.List(labels.Everything())
 }
 
+// AddEventHandler adds pod event handler.
+func (w *Watcher) AddEventHandler(handler cache.ResourceEventHandler) (cache.ResourceEventHandlerRegistration, error) {
+	return w.informer.AddEventHandler(handler)
+}
+
 // Wait blocks until the specified Mountpoint Pod is found and ready, or until the context is cancelled.
 func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 	// Set a watcher for Pod create & update events

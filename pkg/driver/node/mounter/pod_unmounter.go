@@ -1,12 +1,12 @@
 package mounter
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -14,8 +14,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 )
+
+const cleanupInterval = 10 * time.Second
 
 type PodUnmounter struct {
 	nodeID         string
@@ -23,15 +24,14 @@ type PodUnmounter struct {
 	kubeletPath    string
 	sourceMountDir string
 	podWatcher     *watcher.Watcher
-	s3paCache      cache.Cache
 	credProvider   *credentialprovider.Provider
+	mutex          sync.Mutex
 }
 
 func NewPodUnmounter(
 	nodeID string,
 	mountUtil mount.Interface,
 	podWatcher *watcher.Watcher,
-	s3paCache cache.Cache,
 	credProvider *credentialprovider.Provider,
 	sourceMountDir string,
 ) *PodUnmounter {
@@ -41,51 +41,51 @@ func NewPodUnmounter(
 		kubeletPath:    util.KubeletPath(),
 		sourceMountDir: sourceMountDir,
 		podWatcher:     podWatcher,
-		s3paCache:      s3paCache,
 		credProvider:   credProvider,
 	}
 }
 
-func (u *PodUnmounter) HandleS3PodAttachmentUpdate(old, new any) {
-	s3pa := new.(*crdv1beta.MountpointS3PodAttachment)
-	if s3pa.Spec.NodeName != u.nodeID {
+func (u *PodUnmounter) HandleMountpointPodUpdate(old, new any) {
+	mpPod := new.(*corev1.Pod)
+	if mpPod.Spec.NodeName != u.nodeID {
 		return
 	}
 
-	for mpPodName, uids := range s3pa.Spec.MountpointS3PodAttachments {
-		if len(uids) == 0 {
-			u.unmountSourceForPod(s3pa, mpPodName)
-		}
+	if value, exists := mpPod.Annotations[mppod.AnnotationNeedsUnmount]; exists && value == "true" {
+		u.unmountSourceForPod(mpPod)
 	}
 }
 
-func (u *PodUnmounter) unmountSourceForPod(s3pa *crdv1beta.MountpointS3PodAttachment, mpPodName string) {
-	klog.Infof("Found Mountpoint Pod with zero workload pods, unmounting it - %s", mpPodName)
-	mpPod, err := u.podWatcher.Get(mpPodName)
-	if err != nil {
-		klog.Infof("failed to find Mountpoint Pod %s during update event", mpPodName)
-		return
-	}
-
+func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	mpPodUID := string(mpPod.UID)
+	mpPodLock := getMPPodLock(mpPodUID)
+	mpPodLock.mutex.Lock()
+	defer func() {
+		mpPodLock.mutex.Unlock()
+		releaseMPPodLock(mpPodUID)
+	}()
+
+	klog.Infof("Found Mountpoint Pod %s (UID: %s) with %s annotation, unmounting it", mpPod.Name, mpPodUID, mppod.AnnotationNeedsUnmount)
+
 	podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
 	source := filepath.Join(u.sourceMountDir, mpPodUID)
+	volumeId := mpPod.Labels[mppod.LabelVolumeId]
 
-	if err := u.writeExitFile(podPath, mpPod); err != nil {
+	if err := u.writeExitFile(podPath); err != nil {
 		return
 	}
 
 	if err := u.unmountAndCleanup(source); err != nil {
 		return
 	}
-	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPodName)
+	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPod.Name)
 
-	if err := u.cleanupCredentials(s3pa, mpPodUID, podPath, source, mpPod); err != nil {
+	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source, mpPod); err != nil {
 		return
 	}
 }
 
-func (u *PodUnmounter) writeExitFile(podPath string, mpPod *corev1.Pod) error {
+func (u *PodUnmounter) writeExitFile(podPath string) error {
 	podMountExitPath := mppod.PathOnHost(podPath, mppod.KnownPathMountExit)
 	_, err := os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, credentialprovider.CredentialFilePerm)
 	if err != nil {
@@ -108,9 +108,9 @@ func (u *PodUnmounter) unmountAndCleanup(source string) error {
 	return nil
 }
 
-func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1beta.MountpointS3PodAttachment, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
+func (u *PodUnmounter) cleanupCredentials(volumeId, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
 	err := u.credProvider.Cleanup(credentialprovider.CleanupContext{
-		VolumeID:  s3pa.Spec.VolumeID,
+		VolumeID:  volumeId,
 		PodID:     mpPodUID,
 		WritePath: filepath.Join(u.kubeletPath, "pods", mpPodUID),
 	})
@@ -121,11 +121,33 @@ func (u *PodUnmounter) cleanupCredentials(s3pa *crdv1beta.MountpointS3PodAttachm
 	return nil
 }
 
-func (u *PodUnmounter) CleanupDanglingMounts() {
+func (u *PodUnmounter) StartPeriodicCleanup(stopCh <-chan struct{}) error {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return nil
+		case <-ticker.C:
+			if err := u.CleanupDanglingMounts(); err != nil {
+				klog.Errorf("Failed to run clean up of dangling mounts: %v", err)
+			}
+		}
+	}
+}
+
+func (u *PodUnmounter) CleanupDanglingMounts() error {
+	// Ensure only one cleanup runs at a time
+	if !u.mutex.TryLock() {
+		return nil
+	}
+	defer u.mutex.Unlock()
+
 	entries, err := os.ReadDir(u.sourceMountDir)
 	if err != nil {
 		klog.Errorf("Failed to read source mount directory (`%s`): %v", u.sourceMountDir, err)
-		return
+		return err
 	}
 
 	for _, file := range entries {
@@ -145,30 +167,16 @@ func (u *PodUnmounter) CleanupDanglingMounts() {
 			continue
 		}
 
-		// Check if pod has an S3PodAttachment
-		hasWorkloads, err := u.checkForWorkloads(mpPod)
-		if err != nil {
-			klog.Errorf("Failed to check workloads for Mountpoint Pod %s: %v", mpPod.Name, err)
-			continue
-		}
-
-		if !hasWorkloads {
-			klog.Infof("Found dangling mount for Mountpoint Pod %s (UID: %s), cleaning up", mpPod.Name, mpPodUID)
-			podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
-			if err := u.writeExitFile(podPath, mpPod); err != nil {
-				return
-			}
-
-			if err := u.unmountAndCleanup(source); err != nil {
-				klog.Errorf("Failed to cleanup dangling mount for Mountpoint Pod %s: %v", mpPod.Name, err)
-				continue
-			}
-
-			// TODO: Skip credential clean up as we do not know volumeID OR delete all files in credential folder?
+		// Unmount if Mountpoint Pod is marked for unmounting
+		if value, exists := mpPod.Annotations[mppod.AnnotationNeedsUnmount]; exists && value == "true" {
+			u.unmountSourceForPod(mpPod)
 		}
 	}
+
+	return nil
 }
 
+// findPodByUID finds Mountpoint Pod by UID in podWatcher's cache
 func (u *PodUnmounter) findPodByUID(mpPodUID string) (*corev1.Pod, error) {
 	pods, err := u.podWatcher.List()
 	if err != nil {
@@ -181,22 +189,4 @@ func (u *PodUnmounter) findPodByUID(mpPodUID string) (*corev1.Pod, error) {
 		}
 	}
 	return nil, fmt.Errorf("Mountpoint Pod not found for UID %s", mpPodUID)
-}
-
-func (u *PodUnmounter) checkForWorkloads(mpPod *corev1.Pod) (bool, error) {
-	s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
-	err := u.s3paCache.List(context.Background(), s3paList)
-	if err != nil {
-		return false, err
-	}
-
-	// Find attachment for this pod and check if it has workloads
-	for _, s3pa := range s3paList.Items {
-		for mpPodName, workloadUIDs := range s3pa.Spec.MountpointS3PodAttachments {
-			if mpPodName == mpPod.Name {
-				return len(workloadUIDs) > 0, nil
-			}
-		}
-	}
-	return false, nil
 }
