@@ -5,6 +5,7 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -22,6 +23,8 @@ const (
 const (
 	AnnotationNeedsUnmount = "s3.csi.aws.com/needs-unmount"
 )
+
+const EmptyDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
 type ContainerConfig struct {
@@ -124,7 +127,10 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) *corev1.Pod {
 				{
 					Name: CommunicationDirName,
 					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium:    corev1.StorageMediumMemory,
+							SizeLimit: resource.NewQuantity(EmptyDirSizeLimit, resource.BinarySI),
+						},
 					},
 				},
 			},

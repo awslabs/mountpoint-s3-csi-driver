@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
 
