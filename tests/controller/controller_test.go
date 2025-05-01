@@ -512,12 +512,18 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadServiceAccountIAMRoleARN"] = ""
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
 
+						// Adding some sleep time before updating SA because reconciler requeues pod1 event to clear expectation
+						// and it can cause transient test failure if we update SA annotation too quickly
+						time.Sleep(5 * time.Second)
+
 						sa.Annotations = map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role-1"}
 						Expect(k8sClient.Update(ctx, sa)).To(Succeed())
 						pod2 := createPod(withPVC(vol.pvc), withServiceAccount(sa.Name))
 						pod2.schedule(testNode)
 						expectedFields["WorkloadServiceAccountIAMRoleARN"] = "test-role-1"
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
+
+						time.Sleep(5 * time.Second)
 
 						sa.Annotations = map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role-2"}
 						Expect(k8sClient.Update(ctx, sa)).To(Succeed())
