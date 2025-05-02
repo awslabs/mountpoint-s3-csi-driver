@@ -58,16 +58,16 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 		env.Merge(stsWebIdentityCredsEnv)
 	}
 
-	// EKS Pod Identity
-	podIdentityTokenFile := os.Getenv(envprovider.EnvPodIdentityTokenFile)
-	podIdentityCredURI := os.Getenv(envprovider.EnvPodIdentityCredURI)
-	if podIdentityTokenFile != "" && podIdentityCredURI != "" {
-		podIdentityCredsEnv, err := providePodIdentityCredentialsFromDriver(provideCtx, podIdentityTokenFile, podIdentityCredURI)
+	// Container credential provider (EKS Pod Identity)
+	containerAuthorizationTokenFile := os.Getenv(envprovider.EnvContainerAuthorizationTokenFile)
+	containerCredentialsFullURI := os.Getenv(envprovider.EnvContainerCredentialsFullURI)
+	if containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
+		containerCredsEnv, err := provideContainerCredentialsFromDriver(provideCtx, containerAuthorizationTokenFile, containerCredentialsFullURI)
 		if err != nil {
-			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide EKS Pod Identity credentials from driver")
+			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide container credentials from driver")
 			return nil, err
 		}
-		env.Merge(podIdentityCredsEnv)
+		env.Merge(containerCredsEnv)
 	}
 
 	return env, nil
@@ -98,18 +98,18 @@ func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envp
 	}, nil
 }
 
-// providePodIdentityCredentialsFromDriver provides credentials for EKS Pod Identity from the driver's service account.
+// provideContainerCredentialsFromDriver provides Container credentials from the driver's service account.
 // It basically copies driver's injected service account token to [provideCtx.WritePath].
-func providePodIdentityCredentialsFromDriver(provideCtx ProvideContext, podIdentityTokenFile string, podIdentityCredURI string) (envprovider.Environment, error) {
+func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerAuthorizationTokenFile string, containerCredentialsFullURI string) (envprovider.Environment, error) {
 	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
-	err := util.ReplaceFile(tokenFile, podIdentityTokenFile, CredentialFilePerm)
+	err := util.ReplaceFile(tokenFile, containerAuthorizationTokenFile, CredentialFilePerm)
 	if err != nil {
-		return nil, fmt.Errorf("credentialprovider: eks-pod-identity: failed to copy driver's service account token: %w", err)
+		return nil, fmt.Errorf("credentialprovider: container: failed to copy driver's service account token: %w", err)
 	}
 
 	return envprovider.Environment{
-		envprovider.EnvPodIdentityCredURI:   podIdentityCredURI,
-		envprovider.EnvPodIdentityTokenFile: filepath.Join(provideCtx.EnvPath, driverLevelServiceAccountTokenName),
+		envprovider.EnvContainerAuthorizationTokenFile: containerCredentialsFullURI,
+		envprovider.EnvContainerCredentialsFullURI:     filepath.Join(provideCtx.EnvPath, driverLevelServiceAccountTokenName),
 	}, nil
 }
 
