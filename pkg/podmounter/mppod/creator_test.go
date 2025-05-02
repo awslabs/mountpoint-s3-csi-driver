@@ -3,6 +3,7 @@ package mppod_test
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,7 +65,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
 						Medium:    corev1.StorageMediumMemory,
-						SizeLimit: resource.NewQuantity(mppod.EmptyDirSizeLimit, resource.BinarySI),
+						SizeLimit: resource.NewQuantity(mppod.CommunicationDirSizeLimit, resource.BinarySI),
 					},
 				},
 			},
@@ -88,6 +89,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			{Operator: corev1.TolerationOpExists},
 		}, mpPod.Spec.Tolerations)
 
+		assert.Equals(t, 1, len(mpPod.Spec.Containers))
 		assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 		assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
 		assert.Equals(t, []string{command}, mpPod.Spec.Containers[0].Command)
@@ -109,7 +111,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	}
 
 	t.Run("Empty PV", func(t *testing.T) {
-		mpPod := creator.Create(testNode, &corev1.PersistentVolume{
+		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
@@ -122,11 +124,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			},
 		})
 
+		assert.NoError(t, err)
 		verifyDefaultValues(mpPod)
 	})
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
-		mpPod := creator.Create(testNode, &corev1.PersistentVolume{
+		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
@@ -142,8 +145,149 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			},
 		})
 
+		assert.NoError(t, err)
 		verifyDefaultValues(mpPod)
 		assert.Equals(t, "mount-s3-sa", mpPod.Spec.ServiceAccountName)
+	})
+
+	t.Run("With Container Resources specified in PV", func(t *testing.T) {
+		t.Run("With valid requests and limits", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								"mountpointContainerResourcesRequestsCpu":    "1",
+								"mountpointContainerResourcesRequestsMemory": "100Mi",
+								"mountpointContainerResourcesLimitsCpu":      "2",
+								"mountpointContainerResourcesLimitsMemory":   "200Mi",
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			mpContainer := mpPod.Spec.Containers[0]
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}, mpContainer.Resources.Requests)
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("200Mi"),
+			}, mpContainer.Resources.Limits)
+		})
+
+		t.Run("With valid requests only", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								"mountpointContainerResourcesRequestsCpu":    "1",
+								"mountpointContainerResourcesRequestsMemory": "100Mi",
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			mpContainer := mpPod.Spec.Containers[0]
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}, mpContainer.Resources.Requests)
+			assert.Equals(t, true, mpContainer.Resources.Limits.Cpu().IsZero())
+			assert.Equals(t, true, mpContainer.Resources.Limits.Memory().IsZero())
+		})
+
+		t.Run("With valid limits only", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								"mountpointContainerResourcesLimitsCpu":    "2",
+								"mountpointContainerResourcesLimitsMemory": "200Mi",
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			mpContainer := mpPod.Spec.Containers[0]
+			assert.Equals(t, true, mpContainer.Resources.Requests.Cpu().IsZero())
+			assert.Equals(t, true, mpContainer.Resources.Requests.Memory().IsZero())
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("200Mi"),
+			}, mpContainer.Resources.Limits)
+		})
+
+		t.Run("With invalid values", func(t *testing.T) {
+			for name, volumeAttributes := range map[string]map[string]string{
+				"mountpointContainerResourcesRequestsCpu": {
+					"mountpointContainerResourcesRequestsCpu":    "invalid",
+					"mountpointContainerResourcesRequestsMemory": "100Mi",
+					"mountpointContainerResourcesLimitsCpu":      "2",
+					"mountpointContainerResourcesLimitsMemory":   "200Mi",
+				},
+				"mountpointContainerResourcesRequestsMemory": {
+					"mountpointContainerResourcesRequestsCpu":    "1",
+					"mountpointContainerResourcesRequestsMemory": "invalid",
+					"mountpointContainerResourcesLimitsCpu":      "2",
+					"mountpointContainerResourcesLimitsMemory":   "200Mi",
+				},
+				"mountpointContainerResourcesLimitsCpu": {
+					"mountpointContainerResourcesRequestsCpu":    "1",
+					"mountpointContainerResourcesRequestsMemory": "100Mi",
+					"mountpointContainerResourcesLimitsCpu":      "invalid",
+					"mountpointContainerResourcesLimitsMemory":   "200Mi",
+				},
+				"mountpointContainerResourcesLimitsMemory": {
+					"mountpointContainerResourcesRequestsCpu":    "1",
+					"mountpointContainerResourcesRequestsMemory": "100Mi",
+					"mountpointContainerResourcesLimitsCpu":      "2",
+					"mountpointContainerResourcesLimitsMemory":   "invalid",
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					_, err := creator.Create(testNode, &corev1.PersistentVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: testVolName,
+						},
+						Spec: corev1.PersistentVolumeSpec{
+							PersistentVolumeSource: corev1.PersistentVolumeSource{
+								CSI: &corev1.CSIPersistentVolumeSource{
+									VolumeAttributes: volumeAttributes,
+								},
+							},
+						},
+					})
+
+					assert.Equals(t, cmpopts.AnyError, err)
+				})
+			}
+
+		})
 	})
 }
 

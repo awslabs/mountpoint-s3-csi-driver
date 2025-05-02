@@ -840,6 +840,34 @@ var _ = Describe("Mountpoint Controller", func() {
 			mountpointPod.succeed()
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
+
+		It("should use configured resource requests and limits in PV", func() {
+			vol := createVolume(withVolumeAttributes(map[string]string{
+				"mountpointContainerResourcesRequestsCpu":    "1",
+				"mountpointContainerResourcesRequestsMemory": "100Mi",
+				"mountpointContainerResourcesLimitsCpu":      "2",
+				"mountpointContainerResourcesLimitsMemory":   "200Mi",
+			}))
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule(testNode)
+
+			_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+			mpContainer := mountpointPod.Spec.Containers[0]
+			Expect(mpContainer.Resources.Requests).To(Equal(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}))
+			Expect(mpContainer.Resources.Limits).To(Equal(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("200Mi"),
+			}))
+
+			mountpointPod.succeed()
+			waitForObjectToDisappear(mountpointPod.Pod)
+		})
 	})
 })
 
