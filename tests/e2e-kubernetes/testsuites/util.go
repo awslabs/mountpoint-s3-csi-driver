@@ -244,6 +244,20 @@ func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
 	}
 }
 
+func CSIDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
+	framework.Logf("Killing CSI Driver Pods")
+	ds := csiDriverDaemonSet(ctx, f)
+	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
+
+	pods, err := client.List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
+	})
+	framework.ExpectNoError(err)
+
+	pod := pods.Items[0]
+	return &pod
+}
+
 func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
 	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
 	ds, err := client.Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
