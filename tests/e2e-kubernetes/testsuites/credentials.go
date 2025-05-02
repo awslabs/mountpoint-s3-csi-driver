@@ -10,6 +10,8 @@ import (
 
 	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/eksauth"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -17,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,8 +57,11 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
 
+const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
+
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
+var ClusterName string
 
 // IMDSAvailable indicates whether the Instance Metadata Service is accessible.
 // When true, it enables a test that rely on automatic detection of the STS region.
@@ -278,6 +284,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			sa := csiDriverServiceAccount(ctx, f)
 			overrideServiceAccountRole(ctx, f, sa, "")
 
+			// TODO: Cleanup associations (tests might be affected by leftovers)
+			// TODO: Consider also cleaning up roles (even though they wont affect other tests) (separate PR)
+
 			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
 
 			// Trigger recreation of our pods to ensure they're not using deleted resources
@@ -289,8 +298,13 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			policyRoleMapping = map[string]*iamtypes.Role{}
 		)
 
+		var (
+			eksPodIdentityAgentDaemonSet *appsv1.DaemonSet
+		)
+
 		BeforeAll(func(ctx context.Context) {
 			oidcProvider = oidcProviderForCluster(ctx, f)
+			eksPodIdentityAgentDaemonSet = eksPodIdentityAgentDaemonSetForCluster(ctx, f)
 
 			var afterAllCleanup []func(context.Context) error
 
@@ -319,7 +333,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		})
 
 		updateCSIDriversServiceAccountRole := func(ctx context.Context, policyName string) {
-			By("Updating CSI Driver's Service Account Role")
+			By("Updating CSI Driver's Service Account Role for IRSA")
 			sa := csiDriverServiceAccount(ctx, f)
 
 			role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
@@ -329,6 +343,24 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			deferCleanup(restoreServiceAccountRole)
 
 			waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+
+			// Trigger recreation of our pods to use the new IAM role
+			killCSIDriverPods(ctx, f)
+		}
+
+		updateCSIDriversServiceAccountRoleEKSPodIdentity := func(ctx context.Context, policyName string, pod *v1.Pod) { // TODO: Improve name and add doc
+			By("Updating CSI Driver's Service Account Role for EKS Pod Identity")
+			sa := csiDriverServiceAccount(ctx, f)
+
+			role, removeRole := createRole(ctx, f, eksPodIdentityRoleTrustPolicyDocument(), policyName)
+			deferCleanup(removeRole)
+
+			removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
+			deferCleanup(removeAssociation)
+
+			// time.Sleep(10 * time.Second)
+
+			waitUntilRoleIsAssumableWithEKS(ctx, f, sa, pod)
 
 			// Trigger recreation of our pods to use the new IAM role
 			killCSIDriverPods(ctx, f)
@@ -396,6 +428,39 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(ctx, "", nil)
+				})
+			})
+
+			Context("EKS Pod Identity", Ordered, func() {
+				BeforeEach(func(ctx context.Context) { // Maybe BeforeAll
+					if eksPodIdentityAgentDaemonSet == nil {
+						Skip("EKS Pod Identity Agent is not configured, skipping EKS Pod Identity tests")
+					}
+				})
+
+				FIt("should use service account's read-only role", func(ctx context.Context) {
+					pod := createPodWithVolume(ctx)
+					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3ReadOnlyAccess, pod)
+					time.Sleep(3 * time.Minute)
+					// time.Sleep(10 * time.Minute)
+					expectReadOnly(pod)
+				})
+
+				It("should use service account's full access role", func(ctx context.Context) {
+					// updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(pod)
+				})
+
+				It("should use service account's full access role as non-root", func(ctx context.Context) {
+					// updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDeleteNonRoot(ctx)
+					expectFullAccess(pod)
+				})
+
+				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
+					// updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3NoAccess)
 					expectFailToMount(ctx, "", nil)
 				})
 			})
@@ -681,6 +746,24 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	return string(buf)
 }
 
+func eksPodIdentityRoleTrustPolicyDocument() string {
+	buf, err := json.Marshal(&jsonMap{
+		"Version": "2012-10-17",
+		"Statement": []jsonMap{
+			{
+				"Effect": "Allow",
+				"Principal": jsonMap{
+					"Service": "pods.eks.amazonaws.com",
+				},
+				"Action": []string{"sts:AssumeRole", "sts:TagSession"},
+			},
+		},
+	})
+	framework.ExpectNoError(err)
+
+	return string(buf)
+}
+
 func getARNPartition(arn string) string {
 	parsedArn, err := awsarn.Parse(arn)
 	framework.ExpectNoError(err)
@@ -761,6 +844,39 @@ func waitUntilRoleIsAssumable[Input any, Output any](ctx context.Context, assume
 	return output
 }
 
+// waitUntilRoleIsAssumableEKS waits until the given role is assumable.
+// This is needed because we're creating new roles in our test cases and then trying to assume those roles,
+// but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
+func waitUntilRoleIsAssumableEKS[Input any, Output any](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*eksauth.Options)) (*Output, error), input *Input) *Output {
+	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
+	defer cancel()
+
+	output, err := assumeFunc(ctx, input, func(o *eksauth.Options) {
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
+	})
+	framework.ExpectNoError(err)
+	gomega.Expect(output).ToNot(gomega.BeNil())
+
+	return output
+}
+
+// func waitUntilRoleIsAssumableBoth[Input any, Output any, Options sts.Options | eksauth.Options](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*Options)) (*Output, error), input *Input) *Output {
+// 	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
+// 	defer cancel()
+
+// 	output, err := assumeFunc(ctx, input, func(o *sts.Options | eksauth.Options) {
+// 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
+// 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
+// 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
+// 	})
+// 	framework.ExpectNoError(err)
+// 	gomega.Expect(output).ToNot(gomega.BeNil())
+
+// 	return output
+// }
+
 func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
 	roleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Waiting until IAM role %s for ServiceAccount %s is assumable with web identity", roleARN, sa.Name)
@@ -779,6 +895,31 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 		RoleSessionName:  ptr.To(f.BaseName),
 		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),
 		DurationSeconds:  ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+	})
+}
+
+func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
+	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity", sa.Name)
+	framework.Logf("Pod Name: %s UID: %s", pod.Name, pod.UID)
+
+	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
+		Spec: authenticationv1.TokenRequestSpec{
+			Audiences: []string{serviceAccountTokenAudienceEKS},
+			BoundObjectRef: &authenticationv1.BoundObjectReference{
+				Kind:       "Pod",
+				APIVersion: "v1",
+				Name:       pod.Name,
+				UID:        pod.UID,
+			},
+		},
+	}, metav1.CreateOptions{})
+	framework.ExpectNoError(err)
+
+	client := eksauth.NewFromConfig(awsConfig(ctx))
+	waitUntilRoleIsAssumableEKS(ctx, client.AssumeRoleForPodIdentity, &eksauth.AssumeRoleForPodIdentityInput{
+		ClusterName: ptr.To(ClusterName),
+		Token:       ptr.To(serviceAccountToken.Status.Token),
 	})
 }
 
@@ -870,6 +1011,33 @@ func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa 
 	}
 }
 
+func createPodIdentityAssociation(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleArn string) func(context.Context) error {
+	framework.Logf("Creating Pod Identity Association for ServiceAccount %s with role %s", sa.Name, roleArn)
+
+	client := eks.NewFromConfig(awsConfig(ctx))
+
+	// ClusterName := framework.KubeConfig.Clusters[0] // `kubectl config view --minify -o jsonpath='{.clusters[].name}'`
+
+	input := &eks.CreatePodIdentityAssociationInput{
+		ClusterName:    &ClusterName,
+		Namespace:      &sa.Namespace,
+		RoleArn:        &roleArn,
+		ServiceAccount: &sa.Name,
+	}
+
+	output, err := client.CreatePodIdentityAssociation(ctx, input)
+	framework.ExpectNoError(err)
+
+	return func(ctx context.Context) error {
+		framework.Logf("Deleting Pod Identity Association for ServiceAccount %s", sa.Name)
+		_, err := client.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
+			AssociationId: output.Association.AssociationId,
+			ClusterName:   &ClusterName,
+		})
+		return err
+	}
+}
+
 //-- OIDC utils
 
 // oidcProviderForCluster tries to find configured OpenID Connect (OIDC) provider for the cluster we're testing against.
@@ -901,6 +1069,19 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 
 	// For EKS, OIDC provider ID is the URL of the provider without "https://"
 	return strings.TrimPrefix(issuer, "https://")
+}
+
+//-- EKS Pod Identity utils
+
+// eksPodIdentityAgentDaemonSetForCluster tries to find configured EKS Pod Identity for the cluster we're testing against.
+func eksPodIdentityAgentDaemonSetForCluster(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
+	eksPodIdentityAgentDaemonSetName := "eks-pod-identity-agent"
+	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := client.Get(ctx, eksPodIdentityAgentDaemonSetName, metav1.GetOptions{})
+	if err != nil {
+		return nil
+	}
+	return ds
 }
 
 //-- Test Driver Context utils
