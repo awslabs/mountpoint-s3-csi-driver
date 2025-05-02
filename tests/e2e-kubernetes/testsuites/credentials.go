@@ -56,6 +56,12 @@ const (
 	stsAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
+const (
+	eksauthAssumeRoleRetryCode            = "AccessDeniedException"
+	eksauthAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
+)
+
 const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
@@ -360,7 +366,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
 			deferCleanup(removeAssociation)
 
-			pod := CSIDriverPod(ctx, f)
+			pod := csiDriverPod(ctx, f)
 			waitUntilRoleIsAssumableWithEKS(ctx, f, sa, pod)
 
 			// Trigger recreation of our pods to use the new IAM role
@@ -752,7 +758,7 @@ func eksPodIdentityRoleTrustPolicyDocument() string {
 			{
 				"Effect": "Allow",
 				"Principal": jsonMap{
-					"Service": "pods.eks.amazonaws.com",
+					"Service": serviceAccountTokenAudienceEKS,
 				},
 				"Action": []string{"sts:AssumeRole", "sts:TagSession"},
 			},
@@ -818,7 +824,7 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 	framework.Logf("Assuming IAM role %s", roleArn)
 
 	client := sts.NewFromConfig(awsConfig(ctx))
-	return waitUntilRoleIsAssumable(ctx, client.AssumeRole, &sts.AssumeRoleInput{
+	return waitUntilRoleIsAssumableSTS(ctx, client.AssumeRole, &sts.AssumeRoleInput{
 		RoleArn:         ptr.To(roleArn),
 		RoleSessionName: ptr.To(f.BaseName),
 		DurationSeconds: ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
@@ -828,38 +834,44 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 // waitUntilRoleIsAssumable waits until the given role is assumable.
 // This is needed because we're creating new roles in our test cases and then trying to assume those roles,
 // but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
-func waitUntilRoleIsAssumable[Input any, Output any](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*sts.Options)) (*Output, error), input *Input) *Output {
+func waitUntilRoleIsAssumable[Input any, Output any, O any](
+	ctx context.Context,
+	assumeFunc func(context.Context, *Input, ...func(O)) (*Output, error),
+	input *Input,
+	optionsFunc func(O),
+) *Output {
 	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
 	defer cancel()
 
-	output, err := assumeFunc(ctx, input, func(o *sts.Options) {
-		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
-		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
-		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
-	})
+	output, err := assumeFunc(ctx, input, optionsFunc)
 	framework.ExpectNoError(err)
 	gomega.Expect(output).ToNot(gomega.BeNil())
 
 	return output
 }
 
-// waitUntilRoleIsAssumableEKS waits until the given role is assumable.
-// This is needed because we're creating new roles in our test cases and then trying to assume those roles,
-// but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
-func waitUntilRoleIsAssumableEKS[Input any, Output any](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*eksauth.Options)) (*Output, error), input *Input) *Output {
-	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
-	defer cancel()
-
-	output, err := assumeFunc(ctx, input, func(o *eksauth.Options) {
-		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode, "AccessDeniedException")
+func waitUntilRoleIsAssumableSTS[Input any, Output any](
+	ctx context.Context,
+	assumeFunc func(context.Context, *Input, ...func(*sts.Options)) (*Output, error),
+	input *Input,
+) *Output {
+	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *sts.Options) {
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
+}
 
-	framework.ExpectNoError(err)
-	gomega.Expect(output).ToNot(gomega.BeNil())
-
-	return output
+func waitUntilRoleIsAssumableEKS[Input any, Output any](
+	ctx context.Context,
+	assumeFunc func(context.Context, *Input, ...func(*eksauth.Options)) (*Output, error),
+	input *Input,
+) *Output {
+	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *eksauth.Options) {
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryCode)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, eksauthAssumeRoleRetryMaxBackoffDelay)
+	})
 }
 
 func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
@@ -875,7 +887,7 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 	framework.ExpectNoError(err)
 
 	client := sts.NewFromConfig(awsConfig(ctx))
-	waitUntilRoleIsAssumable(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
+	waitUntilRoleIsAssumableSTS(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
 		RoleArn:          ptr.To(roleARN),
 		RoleSessionName:  ptr.To(f.BaseName),
 		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),

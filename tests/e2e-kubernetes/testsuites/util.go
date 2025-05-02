@@ -256,8 +256,6 @@ func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
 	})
 	framework.ExpectNoError(listErr)
 
-	framework.Logf("listOutput.Associations: %s", listOutput.Associations)
-
 	for _, association := range listOutput.Associations {
 		_, deleteErr := eksClient.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
 			ClusterName:   &ClusterName,
@@ -267,7 +265,7 @@ func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
 	}
 }
 
-func CSIDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
+func csiDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
 	ds := csiDriverDaemonSet(ctx, f)
 	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
 
