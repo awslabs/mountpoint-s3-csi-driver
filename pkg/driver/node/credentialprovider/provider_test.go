@@ -953,6 +953,8 @@ func setEnvForStsWebIdentityCredentials(t *testing.T) {
 func setEnvForContainerCredentials(t *testing.T) {
 	t.Helper()
 
+	t.Setenv("MOUNTER_KIND", "pod")
+
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
 
