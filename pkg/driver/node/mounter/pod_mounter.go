@@ -76,7 +76,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	podID := credentialCtx.PodID
 
-	isMountPoint, err := pm.mount.IsMountPoint(target)
+	isMountPoint, err := pm.IsMountPoint(target)
 	if err != nil {
 		err = pm.verifyOrSetupMountTarget(target, err)
 		if err != nil {
@@ -229,7 +229,7 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
-	return pm.mount.IsMountPoint(target)
+	return pm.mount.CheckMountPoint(target)
 }
 
 // waitForMountpointPod waints until Mountpoint Pod for given `podID` and `volumeName` is in `Running` state.

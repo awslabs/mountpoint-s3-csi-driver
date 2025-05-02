@@ -4,8 +4,6 @@ package mounter
 import (
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
@@ -63,17 +61,22 @@ func (m *Mounter) Unmount(target Target) error {
 	return m.mount.Unmount(target)
 }
 
-// IsMountPoint checks whether `target` is a Mountpoint mount.
+// CheckMountPoint checks whether `target` is a healthy Mountpoint mount.
 //
-// It returns an error if it encounters, some notable errors that requires callers to perform some operations are:
+// If the `target` is a:
+//   - Healthy Mountpoint mount, it returns "true, nil"
+//   - Healthy any other mount, it returns "false, nil"
+//   - Unhealthy mount, it returns a non-nil error.
+//
+// Some notable errors that requires callers to perform some operations are:
 //   - If `errors.Is(err, fs.ErrNotExist)` - it means the `target` does not exists, and the caller should create the target folder
 //   - If `mounter.IsMountPointCorrupted(err)` - it means the `target` is corrupted, and the caller should `Unmount` and `Mount` the file system
 //
 // We implement additional check on top of `mountutils.IsMountPoint()` because we need
 // to verify not only that the target is a mount point but also that it is specifically a Mountpoint mount point.
 // This is achieved by calling the `mountutils.List()` method to enumerate all mount points.
-func (m *Mounter) IsMountPoint(target Target) (bool, error) {
-	if _, err := os.Stat(target); err != nil && errors.Is(err, fs.ErrNotExist) {
+func (m *Mounter) CheckMountPoint(target Target) (bool, error) {
+	if err := statx(target); err != nil {
 		return false, err
 	}
 
@@ -95,7 +98,7 @@ func (m *Mounter) IsMountPoint(target Target) (bool, error) {
 	return false, nil
 }
 
-// IsMountPointCorrupted returns whether an error returned from `IsMountPoint`
+// IsMountPointCorrupted returns whether an error returned from `CheckMountPoint`
 // indicates the queried mount point is corrupted or not.
 //
 // If its corrupted, the mount point should be re-mounted.

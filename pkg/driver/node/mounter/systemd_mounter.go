@@ -45,7 +45,7 @@ func NewSystemdMounter(credProvider *credentialprovider.Provider, mpMounter *mpm
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
-	return m.MpMounter.IsMountPoint(target)
+	return m.MpMounter.CheckMountPoint(target)
 }
 
 // Mount mounts the given bucket at the target path using provided credentials.
@@ -72,7 +72,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 
 	cleanupDir := false
 
-	isMountPoint, err := m.MpMounter.IsMountPoint(target)
+	isMountPoint, err := m.IsMountPoint(target)
 	// check if the target path exists and is a directory
 	if err != nil {
 		// does not exist, create the directory
