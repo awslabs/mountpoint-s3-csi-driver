@@ -99,7 +99,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)
 			}
 		} else {
-			return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, err, err)
+			return fmt.Errorf("Could not check if %q is a mount point: %v", target, err)
 		}
 	}
 
