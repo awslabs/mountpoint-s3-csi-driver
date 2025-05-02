@@ -36,7 +36,7 @@ const testVolumeID = "test-vol"
 const testProfilePrefix = testPodID + "-" + testVolumeID + "-"
 
 const testPodLevelServiceAccountToken = testPodID + "-" + testVolumeID + ".token"
-const testDriverLevelServiceAccountToken = "token" // TODO: Consider improving name now that we have two
+const testWebIdentityServiceAccountToken = "token"
 const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
 
 const testPodServiceAccount = "test-sa"
@@ -102,9 +102,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
 				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
+				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 			}, env)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
 	})
 
@@ -170,10 +170,10 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				"AWS_CONFIG_FILE":             "/test-env/" + testProfilePrefix + "s3-csi-config",
 				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testProfilePrefix + "s3-csi-credentials",
 				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
+				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 			}, env)
 			assertLongTermCredentials(t, writePath)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
 	})
 
@@ -213,12 +213,12 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
 				"AWS_ROLE_ARN":                           testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
+				"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
 				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
 			}, env)
 			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
 	})
 

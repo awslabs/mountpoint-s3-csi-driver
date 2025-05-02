@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	driverLevelServiceAccountTokenName = "token" // TODO: Consider improving name now that we have two
-	eksPodIdentityServiceAccountToken  = "eks-pod-identity-token"
+	webIdentityServiceAccountTokenName    = "token"
+	eksPodIdentityServiceAccountTokenName = "eks-pod-identity-token"
 )
 
 // provideFromDriver provides driver-level AWS credentials.
@@ -54,7 +54,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 		stsWebIdentityCredsEnv, err := provideStsWebIdentityCredentialsFromDriver(provideCtx)
 		if err != nil {
 			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide STS Web Identity credentials from driver")
-			return nil, err // how did the tests work even with this?
+			return nil, err
 		}
 
 		env.Merge(stsWebIdentityCredsEnv)
@@ -89,7 +89,7 @@ func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 // It basically copies driver's injected service account token to [provideCtx.WritePath].
 func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
 	driverServiceAccountTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
-	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
+	tokenFile := filepath.Join(provideCtx.WritePath, webIdentityServiceAccountTokenName)
 	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
@@ -97,21 +97,21 @@ func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envp
 
 	return envprovider.Environment{
 		envprovider.EnvRoleARN:              os.Getenv(envprovider.EnvRoleARN),
-		envprovider.EnvWebIdentityTokenFile: filepath.Join(provideCtx.EnvPath, driverLevelServiceAccountTokenName),
+		envprovider.EnvWebIdentityTokenFile: filepath.Join(provideCtx.EnvPath, webIdentityServiceAccountTokenName),
 	}, nil
 }
 
 // provideContainerCredentialsFromDriver provides Container credentials from the driver's service account.
 // It basically copies driver's injected service account token to [provideCtx.WritePath].
 func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerAuthorizationTokenFile string, containerCredentialsFullURI string) (envprovider.Environment, error) {
-	tokenFile := filepath.Join(provideCtx.WritePath, eksPodIdentityServiceAccountToken)
+	tokenFile := filepath.Join(provideCtx.WritePath, eksPodIdentityServiceAccountTokenName)
 	err := util.ReplaceFile(tokenFile, containerAuthorizationTokenFile, CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: container: failed to copy driver's service account token: %w", err)
 	}
 
 	return envprovider.Environment{
-		envprovider.EnvContainerAuthorizationTokenFile: filepath.Join(provideCtx.EnvPath, eksPodIdentityServiceAccountToken),
+		envprovider.EnvContainerAuthorizationTokenFile: filepath.Join(provideCtx.EnvPath, eksPodIdentityServiceAccountTokenName),
 		envprovider.EnvContainerCredentialsFullURI:     containerCredentialsFullURI,
 	}, nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
 	"github.com/onsi/gomega"
@@ -244,8 +245,29 @@ func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
 	}
 }
 
+func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
+	framework.Logf("Deleting Pod Identity Associations of Service Account with name %s", sa.Name)
+	eksClient := eks.NewFromConfig(awsConfig(ctx))
+
+	listOutput, listErr := eksClient.ListPodIdentityAssociations(ctx, &eks.ListPodIdentityAssociationsInput{
+		ClusterName:    &ClusterName,
+		Namespace:      &sa.Namespace,
+		ServiceAccount: &sa.Name,
+	})
+	framework.ExpectNoError(listErr)
+
+	framework.Logf("listOutput.Associations: %s", listOutput.Associations)
+
+	for _, association := range listOutput.Associations {
+		_, deleteErr := eksClient.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
+			ClusterName:   &ClusterName,
+			AssociationId: association.AssociationId,
+		})
+		framework.ExpectNoError(deleteErr)
+	}
+}
+
 func CSIDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
-	framework.Logf("Killing CSI Driver Pods")
 	ds := csiDriverDaemonSet(ctx, f)
 	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
 
