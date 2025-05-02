@@ -234,14 +234,19 @@ func (r *Reconciler) spawnMountpointPod(
 
 	log.Info("Spawning Mountpoint Pod")
 
-	mpPod := r.mountpointPodCreator.Create(workloadPod, pv)
+	mpPod, err := r.mountpointPodCreator.Create(workloadPod, pv)
+	if err != nil {
+		log.Error(err, "Failed to create Mountpoint Pod Spec")
+		return err
+	}
+
 	if mpPod.Name != name {
 		err := fmt.Errorf("Mountpoint Pod name mismatch %s vs %s", mpPod.Name, name)
 		log.Error(err, "Name mismatch on Mountpoint Pod")
 		return err
 	}
 
-	err := r.Create(ctx, mpPod)
+	err = r.Create(ctx, mpPod)
 	if err != nil {
 		log.Error(err, "Failed to create Mountpoint Pod")
 		return err
