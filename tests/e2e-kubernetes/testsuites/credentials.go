@@ -40,6 +40,7 @@ const (
 	iamPolicyS3FullAccess     = "AmazonS3FullAccess"
 	iamPolicyS3ReadOnlyAccess = "AmazonS3ReadOnlyAccess"
 	iamPolicyS3NoAccess       = "AmazonEC2ReadOnlyAccess" // `AmazonEC2ReadOnlyAccess` gives no S3 access
+	iamPolicyEKSClusterPolicy = "AmazonEKSClusterPolicy"
 )
 
 const (
@@ -138,7 +139,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	})
 
 	createVolume := func(ctx context.Context) *storageframework.VolumeResource {
-		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"debug", "debug-crt"})
 		deferCleanup(vol.CleanupResource)
 
 		return vol
@@ -348,19 +349,22 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			killCSIDriverPods(ctx, f)
 		}
 
-		updateCSIDriversServiceAccountRoleEKSPodIdentity := func(ctx context.Context, policyName string, pod *v1.Pod) { // TODO: Improve name and add doc
+		updateCSIDriversServiceAccountRoleEKSPodIdentity := func(ctx context.Context, policyName string) { // TODO: Improve name and add doc
 			By("Updating CSI Driver's Service Account Role for EKS Pod Identity")
 			sa := csiDriverServiceAccount(ctx, f)
 
-			role, removeRole := createRole(ctx, f, eksPodIdentityRoleTrustPolicyDocument(), policyName)
+			role, removeRole := createRole(ctx, f, eksPodIdentityRoleTrustPolicyDocument(), policyName, iamPolicyEKSClusterPolicy)
 			deferCleanup(removeRole)
 
 			removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
 			deferCleanup(removeAssociation)
 
-			// time.Sleep(10 * time.Second)
+			framework.Logf("Role created with arn: %s", *role.Arn)
+			By("Will wait 2 minutes")
 
-			waitUntilRoleIsAssumableWithEKS(ctx, f, sa, pod)
+			// time.Sleep(1 * time.Minute)
+
+			waitUntilRoleIsAssumableWithEKS(ctx, f, sa)
 
 			// Trigger recreation of our pods to use the new IAM role
 			killCSIDriverPods(ctx, f)
@@ -441,9 +445,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				FIt("should use service account's read-only role", func(ctx context.Context) {
 					pod := createPodWithVolume(ctx)
-					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3ReadOnlyAccess, pod)
-					time.Sleep(3 * time.Minute)
-					// time.Sleep(10 * time.Minute)
+					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3ReadOnlyAccess)
+					// time.Sleep(3 * time.Minute)
+					time.Sleep(10 * time.Minute)
 					expectReadOnly(pod)
 				})
 
@@ -852,10 +856,11 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](ctx context.Context, ass
 	defer cancel()
 
 	output, err := assumeFunc(ctx, input, func(o *eksauth.Options) {
-		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode, "AccessDeniedException")
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
+	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 400, RequestID: b94b423b-2011-460f-8dd7-712343ee3ece, AccessDeniedException: Unauthorized Exception! EKS does not have permissions to assume the associated role.
 	framework.ExpectNoError(err)
 	gomega.Expect(output).ToNot(gomega.BeNil())
 
@@ -898,12 +903,15 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 	})
 }
 
-func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
+func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
 	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity", sa.Name)
-	framework.Logf("Pod Name: %s UID: %s", pod.Name, pod.UID)
+	pod := CSIDriverPod(ctx, f)
 
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: pod.Namespace,
+		},
 		Spec: authenticationv1.TokenRequestSpec{
 			Audiences: []string{serviceAccountTokenAudienceEKS},
 			BoundObjectRef: &authenticationv1.BoundObjectReference{
