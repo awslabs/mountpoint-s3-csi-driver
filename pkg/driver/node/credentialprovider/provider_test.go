@@ -112,15 +112,8 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		for _, authSource := range authenticationSourceVariants {
 			setEnvForContainerCredentials(t)
 
-			// TODO: Consider refactoring this section into helper function
 			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
+			provideCtx := provideCtx(t, writePath, authSource)
 
 			env, source, err := provider.Provide(context.Background(), provideCtx)
 			assert.NoError(t, err)
@@ -190,13 +183,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			setEnvForContainerCredentials(t)
 
 			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
+			provideCtx := provideCtx(t, writePath, authSource)
 
 			env, source, err := provider.Provide(context.Background(), provideCtx)
 			assert.NoError(t, err)
@@ -218,15 +205,8 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			setEnvForContainerCredentials(t)
 			setEnvForStsWebIdentityCredentials(t)
 
-			// TODO: Consider refactoring this section into helper function
 			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
+			provideCtx := provideCtx(t, writePath, authSource)
 
 			env, source, err := provider.Provide(context.Background(), provideCtx)
 			assert.NoError(t, err)
@@ -306,16 +286,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		// Only set container credentials full URI without token file
 		t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
 
-		// TODO: Consider refactoring this section into helper function
 		provider := credentialprovider.New(nil, dummyRegionProvider)
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			PodID:                testPodID,
-			VolumeID:             testVolumeID,
-		}
+
+		provideCtx := provideCtx(t, t.TempDir(), credentialprovider.AuthenticationSourceDriver)
 
 		env, source, err := provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
@@ -935,6 +908,16 @@ func TestCleanup(t *testing.T) {
 }
 
 //-- Utilities for tests
+
+func provideCtx(t *testing.T, writePath string, authSource string) credentialprovider.ProvideContext {
+	return credentialprovider.ProvideContext{
+		AuthenticationSource: authSource,
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		PodID:                testPodID,
+		VolumeID:             testVolumeID,
+	}
+}
 
 func setEnvForLongTermCredentials(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
