@@ -23,6 +23,7 @@ func init() {
 
 	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
+	flag.StringVar(&ClusterName, "cluster-name", "", "name of the cluster")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
@@ -30,6 +31,7 @@ func init() {
 
 	s3client.DefaultRegion = BucketRegion
 	custom_testsuites.DefaultRegion = BucketRegion
+	custom_testsuites.ClusterName = ClusterName
 	custom_testsuites.IMDSAvailable = IMDSAvailable
 }
 

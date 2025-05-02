@@ -50,6 +50,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 	webIdentityTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
 	roleARN := os.Getenv(envprovider.EnvRoleARN)
 	if webIdentityTokenFile != "" && roleARN != "" {
+		klog.Info("STS Web Identity provider (IRSA)")
 		stsWebIdentityCredsEnv, err := provideStsWebIdentityCredentialsFromDriver(provideCtx)
 		if err != nil {
 			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide STS Web Identity credentials from driver")
@@ -63,6 +64,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 	containerAuthorizationTokenFile := os.Getenv(envprovider.EnvContainerAuthorizationTokenFile)
 	containerCredentialsFullURI := os.Getenv(envprovider.EnvContainerCredentialsFullURI)
 	if containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
+		klog.Info("Container credential provider (EKS Pod Identity)")
 		containerCredsEnv, err := provideContainerCredentialsFromDriver(provideCtx, containerAuthorizationTokenFile, containerCredentialsFullURI)
 		if err != nil {
 			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide container credentials from driver")
