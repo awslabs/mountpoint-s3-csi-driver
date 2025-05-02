@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	driverLevelServiceAccountTokenName = "token"
+	driverLevelServiceAccountTokenName = "token" // TODO: Consider improving name now that we have two
+	eksPodIdentityServiceAccountToken  = "eks-pod-identity-token"
 )
 
 // provideFromDriver provides driver-level AWS credentials.
@@ -101,15 +102,15 @@ func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envp
 // provideContainerCredentialsFromDriver provides Container credentials from the driver's service account.
 // It basically copies driver's injected service account token to [provideCtx.WritePath].
 func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerAuthorizationTokenFile string, containerCredentialsFullURI string) (envprovider.Environment, error) {
-	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
+	tokenFile := filepath.Join(provideCtx.WritePath, eksPodIdentityServiceAccountToken)
 	err := util.ReplaceFile(tokenFile, containerAuthorizationTokenFile, CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: container: failed to copy driver's service account token: %w", err)
 	}
 
 	return envprovider.Environment{
-		envprovider.EnvContainerAuthorizationTokenFile: containerCredentialsFullURI,
-		envprovider.EnvContainerCredentialsFullURI:     filepath.Join(provideCtx.EnvPath, driverLevelServiceAccountTokenName),
+		envprovider.EnvContainerAuthorizationTokenFile: filepath.Join(provideCtx.EnvPath, eksPodIdentityServiceAccountToken),
+		envprovider.EnvContainerCredentialsFullURI:     containerCredentialsFullURI,
 	}, nil
 }
 
