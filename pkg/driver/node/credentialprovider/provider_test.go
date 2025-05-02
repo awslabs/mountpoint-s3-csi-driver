@@ -296,7 +296,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		assert.Equals(t, envprovider.Environment{}, env)
 
 		// Only set token file without role ARN
-		tokenPath := filepath.Join(t.TempDir(), "token") // TODO: Validate if this is correct
+		tokenPath := filepath.Join(t.TempDir(), "token")
 		assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
 		t.Setenv("AWS_ROLE_ARN", "")
 		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
@@ -953,7 +953,7 @@ func setEnvForStsWebIdentityCredentials(t *testing.T) {
 func setEnvForContainerCredentials(t *testing.T) {
 	t.Helper()
 
-	tokenPath := filepath.Join(t.TempDir(), "token") // TODO: Validate if this is correct
+	tokenPath := filepath.Join(t.TempDir(), "token")
 	assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
 
 	t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", tokenPath)

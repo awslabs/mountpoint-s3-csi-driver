@@ -855,27 +855,12 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](ctx context.Context, ass
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
-	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 400, RequestID: b94b423b-2011-460f-8dd7-712343ee3ece, AccessDeniedException: Unauthorized Exception! EKS does not have permissions to assume the associated role.
+
 	framework.ExpectNoError(err)
 	gomega.Expect(output).ToNot(gomega.BeNil())
 
 	return output
 }
-
-// func waitUntilRoleIsAssumableBoth[Input any, Output any, Options sts.Options | eksauth.Options](ctx context.Context, assumeFunc func(context.Context, *Input, ...func(*Options)) (*Output, error), input *Input) *Output {
-// 	ctx, cancel := context.WithTimeout(ctx, stsAssumeRoleTimeout)
-// 	defer cancel()
-
-// 	output, err := assumeFunc(ctx, input, func(o *sts.Options | eksauth.Options) {
-// 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
-// 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
-// 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
-// 	})
-// 	framework.ExpectNoError(err)
-// 	gomega.Expect(output).ToNot(gomega.BeNil())
-
-// 	return output
-// }
 
 func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
 	roleARN := sa.Annotations[roleARNAnnotation]
