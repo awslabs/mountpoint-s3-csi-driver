@@ -24,6 +24,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -119,7 +120,7 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mount, mountSyscall, testK8sVersion)
+	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mpmounter.NewWithMount(mount), mountSyscall, testK8sVersion)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
