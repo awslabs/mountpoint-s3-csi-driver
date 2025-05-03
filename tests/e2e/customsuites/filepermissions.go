@@ -61,7 +61,6 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 	f := framework.NewFrameworkWithCustomTimeouts("filepermissions", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
 
-	// Safe cleanup function that doesn't fail tests on PV/PVC deletion errors
 	cleanup := func() {
 		for i := range l.resources {
 			resource := l.resources[i]
@@ -97,8 +96,8 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 	//    [S3 Bucket]
 	//
 	// Expected results:
-	// - Files: 0644 permissions
-	// - Directories: 0755 permissions
+	// - Files: 0644 (-rw-r--r--) permissions
+	// - Directories: 0755 (drwxr-xr-x) permissions
 	// - Ownership: matches specified uid/gid
 	ginkgo.It("should have default permissions of 0644 for files when no mount options specified", func(ctx context.Context) {
 		// Create volume with mount options required for non-root access
@@ -145,26 +144,109 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 			testFile, DefaultNonRootUser, DefaultNonRootGroup))
 	})
 
-	// TODO: Implement remaining test cases:
+	// Test 2: Custom File Permissions Test
 	//
-	// 2. Custom file permissions test:
-	//    Set file-mode=0600, verify files get 0600 permissions
+	// This test verifies that custom file permissions are applied when
+	// the file-mode mount option is specified:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//    [S3 Bucket]
+	//
+	// Expected results:
+	// - Files: 0600 (-rw-------) permissions (from file-mode option)
+	// - Directories: 0755 (drwxr-xr-x) permissions (default, unaffected by file-mode)
+	// - Ownership: matches specified uid/gid
+	ginkgo.It("should apply custom permissions of 0600 for files when file-mode mount option specified", func(ctx context.Context) {
+		// Create volume with custom file-mode mount option
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0600", // Custom file permissions
+		})
+		l.resources = append(l.resources, resource)
+
+		// Create a pod with the volume
+		ginkgo.By("Creating pod with a volume that has file-mode=0600")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod)
+
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		// Create a test file and directory
+		volPath := "/mnt/volume1"
+		testFile := fmt.Sprintf("%s/testfile.txt", volPath)
+		testDir := fmt.Sprintf("%s/testdir", volPath)
+
+		ginkgo.By("Creating a test file")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", testFile))
+
+		ginkgo.By("Creating a test directory")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", testDir))
+
+		// Verify permissions
+		ginkgo.By("Verifying file has custom permissions (0600)")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^600$'", testFile))
+
+		ginkgo.By("Verifying directory maintains default permissions (0755)")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
+
+		ginkgo.By("Verifying file ownership")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			testFile, DefaultNonRootUser, DefaultNonRootGroup))
+
+		// Debug logging to display file and directory permissions
+		ginkgo.By("Debug: Displaying file permissions")
+		stdout, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", testFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("File permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying directory permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", testDir))
+		framework.ExpectNoError(err, "failed to ls directory: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Directory permissions: %s", stdout)
+	})
+
+	// TODO: Implement remaining test cases:
 	//
 	// 3. Dual volume permissions test:
 	//    Mount two volumes with different file-mode values in one pod
+	//    - Volume 1: 0600 (-rw-------) file permissions
+	//    - Volume 2: 0666 (-rw-rw-rw-) file permissions
+	//    - Directories: Always 0755 (drwxr-xr-x)
 	//
 	// 4. Remounting permissions test:
 	//    Change file-mode on existing volume, remount and verify
+	//    - Before remount: 0644 (-rw-r--r--) file permissions
+	//    - After remount: 0444 (-r--r--r--) file permissions
 	//
 	// 5. Subdirectory inheritance test:
 	//    Verify files in subdirectories inherit the mount option permissions
+	//    - All files (at any depth): 0640 (-rw-r-----) permissions
+	//    - All directories: 0755 (drwxr-xr-x) permissions
 	//
 	// 6. Multi-pod permissions test:
 	//    Mount same bucket with different permissions in different pods
+	//    - Pod 1 sees files with: 0600 (-rw-------) permissions
+	//    - Pod 2 sees files with: 0644 (-rw-r--r--) permissions
 	//
 	// 7. File move/rename test:
 	//    Verify permissions are preserved during file operations
+	//    - Files maintain 0640 (-rw-r-----) permissions when moved/renamed
 	//
 	// 8. Security context test:
 	//    Test interaction between file-mode and pod security contexts
+	//    - Files: 0640 (-rw-r-----) permissions
+	//    - Check ownership varies based on pod security context
 }
