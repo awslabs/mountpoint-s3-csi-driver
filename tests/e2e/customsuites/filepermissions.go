@@ -1263,5 +1263,101 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		gomega.Expect(strings.TrimSpace(finalPerms)).To(gomega.Equal(strings.TrimSpace(initialPerms)))
 	})
 
+	// --------------------------------------------------------------------
+	// 16. Pod umask + fsGroup: should override umask & apply fsGroup ownership
+	//
+	// This test verifies that Mountpoint‑S3 enforces **file-mode** via its
+	// mount options (ignoring pod-level umask), and that **ownership** is
+	// updated by Kubernetes when a pod sets an fsGroup.
+	//
+	// Expectations:
+	// - The created file’s permissions come **from the CSI driver** mount options
+	//   (e.g., file-mode=0600) and NOT from the pod’s umask.
+	// - The file’s group ownership is set to the pod’s fsGroup value (K8s behavior).
+	//
+	// Diagram:
+	//
+	//      [Pod]
+	//        |
+	//        ├─ SecurityContext:
+	//        │      fsGroup: 4000
+	//        │      runAsUser: 1001
+	//        │      umask: 077 (inside container)
+	//        ↓
+	//   [S3 Volume]
+	//        |
+	//        ↓
+	//   [File]
+	//       - Mode: enforced by driver (e.g., 0600)
+	//       - Owner: runAsUser (1001)
+	//       - Group: fsGroup (4000)
+	//
+	// This confirms two things:
+	// 1 The pod's **umask is ignored** (driver-enforced perms win)
+	// 2 The pod’s **fsGroup** is respected (ownership updated by K8s)
+	ginkgo.It("should override umask & apply fsGroup ownership", func(ctx context.Context) {
+		fsG := int64(5555)
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, fsG, "0644")
+		pod, _ := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, fsG)
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		fpath := "/mnt/volume1/conflict"
+		e2evolume.VerifyExecInPodSucceed(f, pod,
+			fmt.Sprintf(`sh -c 'umask 077; echo hi > %s'`, fpath))
+
+		out, _, _ := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a %%u %%g' %s", fpath))
+		gomega.Expect(strings.TrimSpace(out)).To(gomega.Equal("644 1001 5555"))
+	})
+
+	// --------------------------------------------------------------------
+	// 17. Filename edge cases: Non-ASCII, long names, special chars
+	//
+	// Mountpoint‑S3 must comply with S3 naming constraints but also handle
+	// local filesystem edge cases gracefully. This test covers:
+	// - Unicode filenames (e.g., emoji 🐟.txt)
+	// - Very long filenames (up to ~255 bytes)
+	// - Special characters (@, +, %, etc.)
+	//
+	// Diagram:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume]
+	//        |
+	//        ↓
+	//   ├── 🍣.txt
+	//   ├── llllllllll... (long name)
+	//   └── special@+%.txt
+	//
+	// Expected results:
+	// - All files are created successfully inside the volume
+	// - File permissions match the expected file-mode (e.g., 0600)
+	// - Ownership matches uid/gid (e.g., 1001/2000)
+	// - stat and access through these filenames behave normally
+	//
+	// This ensures Mountpoint-S3 enforces correct semantics for valid
+	// edge-case filenames without breaking POSIX expectations.
+	ginkgo.It("should handle edge‑case filenames correctly", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, _ := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		long := strings.Repeat("l", 255)
+		files := []string{
+			"/mnt/volume1/🍣.txt",
+			fmt.Sprintf("/mnt/volume1/%s", long),
+			"/mnt/volume1/special@+%.txt",
+		}
+
+		for _, p := range files {
+			CreateFileInPod(f, pod, p, "edge")
+			verifyFilePermissions(f, pod, p, "600", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		}
+	})
+
 	
 }
