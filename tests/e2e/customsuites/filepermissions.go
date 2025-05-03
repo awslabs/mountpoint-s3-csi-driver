@@ -1,12 +1,23 @@
-// This file implements the file permissions test suite for the S3 CSI driver,
-// verifying correct application of file permission settings via mount options.
+/*
+This suite tests Mountpoint-S3's behavior regarding file metadata immutability.
+Covered behaviors:
+
+- file-mode: Ensures the mounted file gets the correct mode at creation time.
+- chmod: Verifies that chmod operations fail (EPERM/ENOTSUP) and don’t change mode.
+- chown: Verifies that ownership changes fail post-creation.
+- umask: Ensures umask does not alter driver-enforced permissions on new files.
+
+These behaviors align with Mountpoint-S3’s design: metadata is immutable after mount.
+*/
 package customsuites
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -631,7 +642,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		verifyPathsPermissions(f, pod, filePaths, dirPaths, "640", "755", uidPtr, gidPtr)
 	})
 
-	// Test 8: File Copy/Delete Permissions Test
+	// Test 7: File Copy/Delete Permissions Test
 	//
 	// This test verifies that file permissions are preserved
 	// when files are copied between directories in S3 volumes:
@@ -726,7 +737,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		}
 	})
 
-	// Test 9: Pod Security Context Test
+	// Test 8: Pod Security Context Test
 	// This test verifies how pod security contexts interact
 	// with the S3 CSI driver file permissions:
 	//
@@ -809,5 +820,65 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		ginkgo.By("Verifying chmod doesn't override driver-enforced file-mode")
 		// The file should still have 0640 (the mount option) regardless of chmod
 		verifyFilePermissions(f, pod, explicitFile, "640", uidPtr, gidPtr)
+	})
+
+	// --------------------------------------------------------------------
+	// 9. Chmod operation disallowed (file)
+	//
+	// This test verifies that file permissions on the S3 volume cannot be
+	// changed after mount. Mountpoint-S3 enforces a behavior where the
+	// file-mode is set (either via user-specified option or a default like
+	// 0600) at mount time and remains immutable.
+	//
+	// Test scenario:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//    [File]
+	//
+	// Expected results:
+	// - The file is created with the initial file-mode and correct UID/GID
+	// - An attempt to change file permissions using `chmod` fails
+	// - The error message from `chmod` may vary by kernel/implementation:
+	//     - "Operation not permitted" (EPERM)
+	//     - Or "Operation not supported" (ENOTSUP)
+	// - The file permissions remain unchanged after the failed attempt
+	//
+	// This validates Mountpoint-S3’s behavior where file metadata is fixed
+	// at mount time (even when using defaults) and cannot be modified later,
+	// consistent with S3's object store semantics.
+	ginkgo.It("should not allow chmod to change file permissions (no-op)", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		filePath := "/mnt/volume1/chmod-test-file"
+
+		// Create the test file
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf(`sh -c 'echo aGVsbG8gd29ybGQ= | base64 -d > %s'`, filePath))
+		framework.ExpectNoError(err)
+
+		// Check initial permissions
+		initialPerms, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", filePath))
+		framework.ExpectNoError(err)
+
+		// Attempt chmod
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("chmod 0755 %s", filePath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+
+		expectErr := gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+		)
+		gomega.Expect(stderr).To(expectErr)
+
+		// Confirm permissions unchanged
+		afterPerms, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(afterPerms)).To(gomega.Equal(strings.TrimSpace(initialPerms)))
 	})
 }
