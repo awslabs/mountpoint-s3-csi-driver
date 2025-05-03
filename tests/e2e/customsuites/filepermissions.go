@@ -624,12 +624,129 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.Logf("Pod2's file permissions from pod2: %s", stdout)
 	})
 
-	// TODO: Implement remaining test cases:
+	// Test 6: Subdirectory Inheritance Test
 	//
-	// 6. Subdirectory inheritance test:
-	//    Verify files in subdirectories inherit the mount option permissions
-	//    - All files (at any depth): 0640 (-rw-r-----) permissions
-	//    - All directories: 0755 (drwxr-xr-x) permissions
+	// This test verifies that files in subdirectories inherit the
+	// specified file mode mount option:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0640]
+	//        |
+	//        ↓
+	//   [Root Directory]
+	//      /    \
+	//     /      \
+	//  [subdir1] [subdir2]
+	//     |          \
+	//     ↓           ↓
+	//  [subdir1/    [subdir2/
+	//   subdir3]     file2.txt]
+	//     |
+	//     ↓
+	//  [subdir1/
+	//   subdir3/
+	//   file3.txt]
+	//
+	// Expected results:
+	// - All files at all levels have 0640 (-rw-r-----) permissions
+	// - All directories maintain 0755 (drwxr-xr-x) permissions
+	ginkgo.It("should apply the same file permissions to files in subdirectories", func(ctx context.Context) {
+		// Step 1: Create volume with custom file-mode=0640 mount option
+		ginkgo.By("Creating volume with file-mode=0640")
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0640", // Custom file permissions
+		})
+		l.resources = append(l.resources, resource)
+
+		// Step 2: Create a pod with the volume
+		ginkgo.By("Creating pod with the volume")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod)
+		// Set container name explicitly
+		pod.Spec.Containers[0].Name = "write-pod"
+
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		// Step 3: Create nested directory structure
+		volPath := "/mnt/volume1"
+		subdir1 := fmt.Sprintf("%s/subdir1", volPath)
+		subdir2 := fmt.Sprintf("%s/subdir2", volPath)
+		subdir3 := fmt.Sprintf("%s/subdir1/subdir3", volPath)
+
+		ginkgo.By("Creating nested directory structure")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s %s %s", subdir1, subdir2, subdir3))
+
+		// Step 4: Create files at different directory levels
+		rootFile := fmt.Sprintf("%s/root.txt", volPath)
+		file1 := fmt.Sprintf("%s/file1.txt", subdir1)
+		file2 := fmt.Sprintf("%s/file2.txt", subdir2)
+		file3 := fmt.Sprintf("%s/file3.txt", subdir3)
+
+		ginkgo.By("Creating files at different directory levels")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'root' > %s", rootFile))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level1' > %s", file1))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level2' > %s", file2))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level3' > %s", file3))
+
+		// Step 5: Verify file permissions at all levels
+		ginkgo.By("Verifying root file has 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", rootFile))
+
+		ginkgo.By("Verifying level 1 file has 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", file1))
+
+		ginkgo.By("Verifying level 2 file has 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", file2))
+
+		ginkgo.By("Verifying level 3 file has 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", file3))
+
+		// Step 6: Verify directory permissions
+		ginkgo.By("Verifying all directories have 0755 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", volPath))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", subdir1))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", subdir2))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", subdir3))
+
+		// Step 7: Debug logging
+		ginkgo.By("Debug: Displaying root file permissions")
+		stdout, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", rootFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Root file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying level 1 file permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", file1))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Level 1 file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying level 2 file permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", file2))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Level 2 file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying level 3 file permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", file3))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Level 3 file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying directory structure and permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("find %s -type d -exec ls -ld {} \\;", volPath))
+		framework.ExpectNoError(err, "failed to ls directories: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Directory permissions: %s", stdout)
+	})
+
+	// TODO: Implement remaining test cases:
 	//
 	// 7. Multi-pod permissions test:
 	//    Mount same bucket with different permissions in different pods
