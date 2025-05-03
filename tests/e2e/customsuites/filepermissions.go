@@ -881,4 +881,105 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.ExpectNoError(err)
 		gomega.Expect(strings.TrimSpace(afterPerms)).To(gomega.Equal(strings.TrimSpace(initialPerms)))
 	})
+
+	// --------------------------------------------------------------------
+	// 10. Chown operation disallowed (file)
+	//
+	// This test verifies that file ownership on the S3 volume cannot be
+	// changed after mount. Mountpoint-S3 enforces a behavior where the
+	// ownership (UID/GID) is set (via user-specified option or defaults)
+	// at mount time and remains immutable.
+	//
+	// Test scenario:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with uid/gid = 1001/2000]
+	//        |
+	//        ↓
+	//    [File]
+	//
+	// Expected results:
+	// - The file is created with the initial UID/GID
+	// - An attempt to change file ownership using `chown` fails
+	// - The error message may vary by kernel/implementation:
+	//     - "Operation not permitted" (EPERM)
+	//     - Or "Operation not supported" (ENOTSUP)
+	// - The file ownership remains unchanged after the failed attempt
+	//
+	// This validates that Mountpoint-S3 enforces immutability of ownership
+	// metadata after mount, consistent with S3’s object store semantics.
+	ginkgo.It("should not allow chown to change file ownership (no-op)", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		filePath := "/mnt/volume1/chown-test-file"
+
+		// Create the test file
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf(`sh -c 'echo testcontent > %s'`, filePath))
+		framework.ExpectNoError(err)
+
+		// Check initial ownership
+		initialOwner, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%u:%%g' %s", filePath))
+		framework.ExpectNoError(err)
+
+		// Attempt chown
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("chown 0:0 %s", filePath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+
+		expectErr := gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+		)
+		gomega.Expect(stderr).To(expectErr)
+
+		// Confirm ownership unchanged
+		afterOwner, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%u:%%g' %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(afterOwner)).To(gomega.Equal(strings.TrimSpace(initialOwner)))
+	})
+
+	// --------------------------------------------------------------------
+	// 11. Umask enforcement (file)
+	//
+	// This test verifies that a pod-level umask does not interfere with
+	// Mountpoint-S3’s enforcement of the file-mode. Even if a pod sets
+	// a restrictive umask, the driver-enforced file-mode takes precedence.
+	//
+	// Test scenario:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0666]
+	//        |
+	//        ↓
+	//    [File (created with umask 077)]
+	//
+	// Expected results:
+	// - The file is created with the driver-enforced mode (0666)
+	//   regardless of the pod's umask
+	// - Ownership: UID/GID matches what was specified at mount
+	//
+	// This validates that Mountpoint-S3 enforces permissions based on
+	// mount options and ignores the process's umask when creating files.
+	ginkgo.It("should enforce file-mode regardless of pod umask", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0666")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		filePath := "/mnt/volume1/umask-test-file"
+
+		// Create the file using umask 077 (which would normally restrict perms)
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf(
+			`sh -c 'umask 077; echo testcontent > %s'`, filePath))
+		framework.ExpectNoError(err)
+
+		// Verify permissions: expect driver-enforced 0666, NOT affected by umask
+		perms, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(perms)).To(gomega.Equal("666"))
+	})
 }
