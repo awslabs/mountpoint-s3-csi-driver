@@ -132,83 +132,14 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		}
 	}
 
-	// createTestFileAndDir creates a test file and directory at the given base path
-	// and returns their paths
-	createTestFileAndDir := func(f *framework.Framework, pod *v1.Pod, basePath string, fileNamePrefix string) (string, string) {
-		testFile := fmt.Sprintf("%s/%s.txt", basePath, fileNamePrefix)
-		testDir := fmt.Sprintf("%s/%s-dir", basePath, fileNamePrefix)
-
-		ginkgo.By(fmt.Sprintf("Creating test file %s", testFile))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", testFile))
-
-		ginkgo.By(fmt.Sprintf("Creating test directory %s", testDir))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", testDir))
-
-		return testFile, testDir
-	}
-
-	// createVolumeResourceWithMountOptions creates a volume resource with specified mount options.
-	// This function extends the standard Kubernetes storage framework volume creation by:
-	// 1. Creating an S3 bucket via the driver's CreateVolume method
-	// 2. Setting up a PV with the specified mount options (crucial for S3 CSI testing)
-	// 3. Creating a matching PVC that binds to this PV
-	// 4. Waiting for the binding to complete
-	//
-	// The mount options parameter is key for testing various S3-specific mount behaviors,
-	// allowing tests to validate permissions, caching, and other mount parameters.
-	//
-	// This function is a critical extension point as the standard storage framework
-	// does not support mount options out of the box.
+	// createVolumeWithOptions is a thin wrapper around BuildVolumeWithOptions that also tracks
+	// the created resource in the local resources slice for cleanup.
 	createVolumeWithOptions := func(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern,
 		uid, gid int64, fileModeOption string, extraOptions ...string) *storageframework.VolumeResource {
 
-		// Start with required options
-		options := []string{
-			fmt.Sprintf("uid=%d", uid),
-			fmt.Sprintf("gid=%d", gid),
-			"allow-other", // Required for non-root access
-		}
-
-		// Add file mode if specified
-		if fileModeOption != "" {
-			options = append(options, fmt.Sprintf("file-mode=%s", fileModeOption))
-		}
-
-		// Add any extra options
-		options = append(options, extraOptions...)
-
-		resource := createVolumeResourceWithMountOptions(ctx, config, pattern, options)
+		resource := BuildVolumeWithOptions(ctx, config, pattern, uid, gid, fileModeOption, extraOptions...)
 		l.resources = append(l.resources, resource)
 		return resource
-	}
-
-	// createPodWithVolume creates a pod with the specified volume and applies non-root security context
-	createPodWithVolume := func(ctx context.Context, f *framework.Framework, volume *v1.PersistentVolumeClaim,
-		containerName string, uid, gid int64) (*v1.Pod, error) {
-
-		// Create pod spec
-		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{volume}, admissionapi.LevelRestricted, "")
-
-		// Apply security context
-		if pod.Spec.SecurityContext == nil {
-			pod.Spec.SecurityContext = &v1.PodSecurityContext{}
-		}
-		pod.Spec.SecurityContext.RunAsUser = ptr.To(uid)
-		pod.Spec.SecurityContext.RunAsGroup = ptr.To(gid)
-		pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
-
-		// Set container name if specified
-		if containerName != "" {
-			pod.Spec.Containers[0].Name = containerName
-		}
-
-		// Create the pod
-		pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
-		if err != nil {
-			return nil, err
-		}
-
-		return pod, nil
 	}
 
 	// setupTestPaths creates a nested directory structure for testing
@@ -226,17 +157,16 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		paths["file2"] = fmt.Sprintf("%s/file2.txt", paths["subdir2"])
 		paths["file3"] = fmt.Sprintf("%s/file3.txt", paths["subdir3"])
 
-		// Create directories
+		// Create directories using the helper function
 		ginkgo.By("Creating nested directory structure")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s %s %s",
-			paths["subdir1"], paths["subdir2"], paths["subdir3"]))
+		CreateMultipleDirsInPod(f, pod, paths["subdir1"], paths["subdir2"], paths["subdir3"])
 
-		// Create files
+		// Create files using the helper function
 		ginkgo.By("Creating files at different directory levels")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'root' > %s", paths["rootFile"]))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level1' > %s", paths["file1"]))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level2' > %s", paths["file2"]))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'level3' > %s", paths["file3"]))
+		CreateFileInPod(f, pod, paths["rootFile"], "root")
+		CreateFileInPod(f, pod, paths["file1"], "level1")
+		CreateFileInPod(f, pod, paths["file2"], "level2")
+		CreateFileInPod(f, pod, paths["file3"], "level3")
 
 		return paths
 	}
@@ -270,7 +200,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Create a pod with the volume
 		ginkgo.By("Creating pod with a volume")
-		pod, err := createPodWithVolume(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
 
 		defer func() {
@@ -279,7 +209,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Create a test file and directory
 		volPath := "/mnt/volume1"
-		testFile, testDir := createTestFileAndDir(f, pod, volPath, "testfile")
+		testFile, testDir := CreateTestFileAndDir(f, pod, volPath, "testfile")
 
 		// Convert the UID/GID constants to pointers for the verification functions.
 		// This is necessary because verifyFilePermissions and verifyDirPermissions
@@ -313,7 +243,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Create a pod with the volume
 		ginkgo.By("Creating pod with a volume that has file-mode=0600")
-		pod, err := createPodWithVolume(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
 
 		defer func() {
@@ -322,7 +252,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Create a test file and directory
 		volPath := "/mnt/volume1"
-		testFile, testDir := createTestFileAndDir(f, pod, volPath, "testfile")
+		testFile, testDir := CreateTestFileAndDir(f, pod, volPath, "testfile")
 
 		// Convert the UID/GID constants to pointers for the verification functions.
 		// This is necessary because verifyFilePermissions and verifyDirPermissions
@@ -366,8 +296,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		// Create a pod with both volumes
 		ginkgo.By("Creating pod with both volumes mounted")
 		claims := []*v1.PersistentVolumeClaim{resource1.Pvc, resource2.Pvc}
-		pod := e2epod.MakePod(f.Namespace.Name, nil, claims, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod)
+		pod := MakeNonRootPodWithVolume(f.Namespace.Name, claims, "")
 
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
@@ -386,30 +315,23 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Create test files and directories in both volumes
 		ginkgo.By("Creating test files and directories in both volumes")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'volume 1 content' > %s", vol1TestFile))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'volume 2 content' > %s", vol2TestFile))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", vol1TestDir))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", vol2TestDir))
+		CreateFileInPod(f, pod, vol1TestFile, "volume 1 content")
+		CreateFileInPod(f, pod, vol2TestFile, "volume 2 content")
+		CreateDirInPod(f, pod, vol1TestDir)
+		CreateDirInPod(f, pod, vol2TestDir)
 
-		// Verify first volume file permissions (0600)
-		ginkgo.By("Verifying first volume file has permissions 0600")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^600$'", vol1TestFile))
+		// Verify permissions for both volumes using helper functions
+		ginkgo.By("Verifying permissions for volume 1 (file-mode=0600)")
+		uidPtr := ptr.To(DefaultNonRootUser)
+		gidPtr := ptr.To(DefaultNonRootGroup)
 
-		// Verify second volume file permissions (0666)
-		ginkgo.By("Verifying second volume file has permissions 0666")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^666$'", vol2TestFile))
+		// Verify first volume (file-mode=0600)
+		verifyFilePermissions(f, pod, vol1TestFile, "600", uidPtr, gidPtr)
+		verifyDirPermissions(f, pod, vol1TestDir, "755", uidPtr, gidPtr)
 
-		// Verify directory permissions remain at 0755 for both volumes
-		ginkgo.By("Verifying directories in both volumes maintain default permissions (0755)")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", vol1TestDir))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", vol2TestDir))
-
-		// Verify ownership for both volumes
-		ginkgo.By("Verifying file ownership in both volumes")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			vol1TestFile, DefaultNonRootUser, DefaultNonRootGroup))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			vol2TestFile, DefaultNonRootUser, DefaultNonRootGroup))
+		// Verify second volume (file-mode=0666)
+		verifyFilePermissions(f, pod, vol2TestFile, "666", uidPtr, gidPtr)
+		verifyDirPermissions(f, pod, vol2TestDir, "755", uidPtr, gidPtr)
 	})
 
 	// Test 4: Remounting Permissions Test
@@ -444,10 +366,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 2: Create first pod with the volume
 		ginkgo.By("Creating first pod with volume using default permissions")
-		pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod1)
-		// Set container name explicitly
-		pod1.Spec.Containers[0].Name = "write-pod"
+		pod1 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "write-pod")
 
 		var err error
 		pod1, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
@@ -462,17 +381,16 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		testDir := fmt.Sprintf("%s/testdir", volPath)
 
 		ginkgo.By("Creating a test file with default permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("echo 'test content' > %s", testFile))
+		CreateFileInPod(f, pod1, testFile, "test content")
 
 		ginkgo.By("Creating a test directory")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("mkdir -p %s", testDir))
+		CreateDirInPod(f, pod1, testDir)
 
-		// Verify initial permissions
-		ginkgo.By("Verifying file has default permissions (0644)")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", testFile))
-
-		ginkgo.By("Verifying directory has default permissions (0755)")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
+		// Verify initial permissions using helper function
+		ginkgo.By("Verifying initial file and directory permissions")
+		uidPtr := ptr.To(DefaultNonRootUser)
+		gidPtr := ptr.To(DefaultNonRootGroup)
+		verifyPermissions(f, pod1, testFile, testDir, "644", "755", uidPtr, gidPtr)
 
 		// Step 3: Delete the pod
 		ginkgo.By("Deleting the first pod")
@@ -501,10 +419,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 5: Create a new pod with the updated volume
 		ginkgo.By("Creating second pod with updated volume permissions")
-		pod2 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod2)
-		// Set container name explicitly
-		pod2.Spec.Containers[0].Name = "read-pod"
+		pod2 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "read-pod")
 
 		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
 		framework.ExpectNoError(err)
@@ -512,20 +427,14 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2))
 		}()
 
-		// Step 6: Verify new permissions
-		ginkgo.By("Verifying file now has read-only permissions (0444)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", testFile))
-
 		// Creating a new test directory in the second pod since it doesn't persist between pods
 		ginkgo.By("Creating a new test directory in the second pod")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("mkdir -p %s", testDir))
+		CreateDirInPod(f, pod2, testDir)
 
-		ginkgo.By("Verifying directory still has default permissions (0755)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
-
-		ginkgo.By("Verifying file ownership is maintained")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			testFile, DefaultNonRootUser, DefaultNonRootGroup))
+		// Step 6: Verify new permissions using helper function
+		ginkgo.By("Verifying updated file and directory permissions")
+		// Reuse the same uid/gid pointers
+		verifyPermissions(f, pod2, testFile, testDir, "444", "755", uidPtr, gidPtr)
 
 		// Try to write to the file (should fail with read-only permissions)
 		ginkgo.By("Verifying file is now read-only")
@@ -568,10 +477,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 2: Create first pod with the volume
 		ginkgo.By("Creating first pod with volume using default permissions")
-		pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod1)
-		// Set container name explicitly
-		pod1.Spec.Containers[0].Name = "write-pod"
+		pod1 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "write-pod")
 
 		var err error
 		pod1, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
@@ -586,17 +492,16 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		testDir := fmt.Sprintf("%s/testdir", volPath)
 
 		ginkgo.By("Creating a test file with default permissions from pod1")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("echo 'test content from pod1' > %s", testFile))
+		CreateFileInPod(f, pod1, testFile, "test content from pod1")
 
 		ginkgo.By("Creating a test directory from pod1")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("mkdir -p %s", testDir))
+		CreateDirInPod(f, pod1, testDir)
 
-		// Verify initial permissions
-		ginkgo.By("Verifying file has default permissions (0644) in pod1")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", testFile))
-
-		ginkgo.By("Verifying directory has default permissions (0755) in pod1")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
+		// Verify initial permissions using helper function
+		ginkgo.By("Verifying initial file and directory permissions in pod1")
+		uidPtr := ptr.To(DefaultNonRootUser)
+		gidPtr := ptr.To(DefaultNonRootGroup)
+		verifyPermissions(f, pod1, testFile, testDir, "644", "755", uidPtr, gidPtr)
 
 		// Step 3: Update the PV to use file-mode=0444 without deleting the first pod
 		ginkgo.By("Updating volume to use file-mode=0444 without deleting the first pod")
@@ -621,10 +526,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 4: Create a second pod that mounts the same volume with updated mount options
 		ginkgo.By("Creating second pod with the same volume using updated permissions")
-		pod2 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod2)
-		// Set container name explicitly
-		pod2.Spec.Containers[0].Name = "read-pod"
+		pod2 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "read-pod")
 
 		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
 		framework.ExpectNoError(err)
@@ -634,34 +536,31 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 5: Verify that pod1 still sees the original permissions
 		ginkgo.By("Verifying pod1 still sees file with original permissions (0644)")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", testFile))
+		verifyFilePermissions(f, pod1, testFile, "644", uidPtr, gidPtr)
 
 		// Step 6: Verify that pod2 sees the new permissions
 		ginkgo.By("Verifying pod2 sees file with updated permissions (0444)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", testFile))
+		verifyFilePermissions(f, pod2, testFile, "444", uidPtr, gidPtr)
 
 		// Step 7: Create new files from both pods
 		pod1File := fmt.Sprintf("%s/pod1file.txt", volPath)
 		pod2File := fmt.Sprintf("%s/pod2file.txt", volPath)
 
 		ginkgo.By("Creating a new file from pod1")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("echo 'content from pod1' > %s", pod1File))
+		CreateFileInPod(f, pod1, pod1File, "content from pod1")
 
 		ginkgo.By("Creating a new file from pod2")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("echo 'content from pod2' > %s", pod2File))
+		CreateFileInPod(f, pod2, pod2File, "content from pod2")
 
 		// Step 8: Verify permissions for the new files as seen from each pod
-		ginkgo.By("Verifying pod1 sees its file with original permissions (0644)")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", pod1File))
+		ginkgo.By("Verifying file permissions from both pods' perspectives")
+		// Check all files from pod1's perspective
+		pod1Files := []string{pod1File, pod2File}
+		verifyPathsPermissions(f, pod1, pod1Files, []string{}, "644", "", uidPtr, gidPtr)
 
-		ginkgo.By("Verifying pod1 sees pod2's file with original permissions (0644)")
-		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", pod2File))
-
-		ginkgo.By("Verifying pod2 sees its file with updated permissions (0444)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", pod2File))
-
-		ginkgo.By("Verifying pod2 sees pod1's file with updated permissions (0444)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", pod1File))
+		// Check all files from pod2's perspective
+		pod2Files := []string{pod1File, pod2File}
+		verifyPathsPermissions(f, pod2, pod2Files, []string{}, "444", "", uidPtr, gidPtr)
 	})
 
 	// Test 6: Subdirectory Inheritance Test
@@ -700,7 +599,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 2: Create a pod with the volume
 		ginkgo.By("Creating pod with the volume")
-		pod, err := createPodWithVolume(ctx, f, resource.Pvc, "write-pod", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, resource.Pvc, "write-pod", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
@@ -761,7 +660,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 2: Create a pod with the volume
 		ginkgo.By("Creating pod with the volume")
-		pod, err := createPodWithVolume(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, resource.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
@@ -773,49 +672,46 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		targetDir := fmt.Sprintf("%s/target-dir", volPath)
 
 		ginkgo.By("Creating source and target directories")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s %s", sourceDir, targetDir))
+		CreateMultipleDirsInPod(f, pod, sourceDir, targetDir)
 
 		// Step 4: Create a test file in the source directory
 		sourceFile := fmt.Sprintf("%s/test-file.txt", sourceDir)
 		ginkgo.By("Creating a test file in the source directory")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", sourceFile))
+		CreateFileInPod(f, pod, sourceFile, "test content")
 
 		// Step 5: Verify initial file permissions
 		ginkgo.By("Verifying initial file has 0640 permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", sourceFile))
+		uidPtr := ptr.To(DefaultNonRootUser)
+		gidPtr := ptr.To(DefaultNonRootGroup)
+		verifyFilePermissions(f, pod, sourceFile, "640", uidPtr, gidPtr)
 
 		// Step 6: Copy the file to the target directory
 		targetFile := fmt.Sprintf("%s/copied-file.txt", targetDir)
 		ginkgo.By("Copying file to target directory")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %s %s", sourceFile, targetFile))
+		CopyFileInPod(f, pod, sourceFile, targetFile)
 
 		// Step 7: Verify permissions after copy
 		ginkgo.By("Verifying copied file maintains 0640 permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", targetFile))
+		verifyFilePermissions(f, pod, targetFile, "640", uidPtr, gidPtr)
 
 		// Step 8: Create another file with a different name in source directory
 		// Move (mv) is not supported by mountpoint-S3, so we are using copy+delete to simulate it.
 		newSourceFile := fmt.Sprintf("%s/another-test-file.txt", sourceDir)
 		ginkgo.By("Creating another test file for rename simulation")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'content for rename test' > %s", newSourceFile))
+		CreateFileInPod(f, pod, newSourceFile, "content for rename test")
 
 		// Step 9: Copy the file to target directory with a different name (simulating rename)
 		renamedFile := fmt.Sprintf("%s/renamed-file.txt", targetDir)
 		ginkgo.By("Copying file to target directory with new name (simulating rename)")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %s %s", newSourceFile, renamedFile))
+		CopyFileInPod(f, pod, newSourceFile, renamedFile)
 
 		// Step 10: Delete the source file (completing the rename simulation)
 		ginkgo.By("Deleting source file to complete rename simulation")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm %s", newSourceFile))
+		DeleteFileInPod(f, pod, newSourceFile)
 
 		// Step 11: Verify permissions after simulated rename
-		ginkgo.By("Verifying renamed file maintains 0640 permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", renamedFile))
-
-		// Step 12: Verify ownership remains consistent
-		ginkgo.By("Verifying file ownership is maintained throughout operations")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			renamedFile, DefaultNonRootUser, DefaultNonRootGroup))
+		ginkgo.By("Verifying renamed file maintains 0640 permissions and proper ownership")
+		verifyFilePermissions(f, pod, renamedFile, "640", uidPtr, gidPtr)
 
 		// Step 13: Compare permissions between original and copied files
 		ginkgo.By("Comparing permissions between source and copied files")
@@ -862,6 +758,7 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 
 		// Step 2: Create a pod with specific security context settings
 		ginkgo.By("Creating pod with specific runAsUser and fsGroup security context")
+		// Note: We don't use MakeNonRootPodWithVolume here because we're setting custom UIDs
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
 
 		// Set the pod's security context to use specific user and group IDs
@@ -887,31 +784,19 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		testDir := fmt.Sprintf("%s/test-dir", volPath)
 
 		ginkgo.By("Creating test file and directory from the pod")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", testFile))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", testDir))
+		CreateFileInPod(f, pod, testFile, "test content")
+		CreateDirInPod(f, pod, testDir)
 
-		// Step 4: Verify file permissions match the specified file-mode
-		ginkgo.By("Verifying file has the specified file-mode=0640 permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", testFile))
-
-		// Step 5: Verify file ownership corresponds to the pod's security context
-		ginkgo.By("Verifying file ownership matches pod's security context")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			testFile, customUID, customGID))
-
-		// Step 6: Verify directory permissions remain at default 0755
-		ginkgo.By("Verifying directory has default permissions (0755)")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
-
-		// Step 7: Verify directory ownership corresponds to the pod's security context
-		ginkgo.By("Verifying directory ownership matches pod's security context")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
-			testDir, customUID, customGID))
+		// Steps 4-7: Verify file and directory permissions and ownership using helper functions
+		ginkgo.By("Verifying file and directory permissions with custom security context")
+		uidPtr := ptr.To(customUID)
+		gidPtr := ptr.To(customGID)
+		verifyPermissions(f, pod, testFile, testDir, "640", "755", uidPtr, gidPtr)
 
 		// Step 8: Create a file with specific permissions using chmod (to verify interaction)
 		explicitFile := fmt.Sprintf("%s/explicit-perm-file.txt", volPath)
 		ginkgo.By("Creating a file with explicitly set permissions")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'explicit perm test' > %s", explicitFile))
+		CreateFileInPod(f, pod, explicitFile, "explicit perm test")
 
 		// Try to change permissions (this is expected to fail with S3 CSI driver)
 		ginkgo.By("Verifying chmod operation is not permitted (expected behavior)")
@@ -923,6 +808,6 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		// Step 9: Verify that chmod doesn't actually change permissions (driver-enforced file-mode)
 		ginkgo.By("Verifying chmod doesn't override driver-enforced file-mode")
 		// The file should still have 0640 (the mount option) regardless of chmod
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", explicitFile))
+		verifyFilePermissions(f, pod, explicitFile, "640", uidPtr, gidPtr)
 	})
 }

@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +23,7 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
+	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
 )
 
@@ -208,9 +211,190 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 	return &r
 }
 
+// BuildVolumeWithOptions creates a volume with specified UID, GID, file mode, and optional extra options.
+// This function builds a slice of mount options and then creates a volume resource with those options.
+//
+// Parameters:
+// - ctx: Context for the API calls
+// - config: Per-test configuration
+// - pattern: Test pattern to use
+// - uid: User ID to set for the mounted volume
+// - gid: Group ID to set for the mounted volume
+// - fileModeOption: Optional file mode to set (e.g., "0600") - if empty, default permissions are used
+// - extraOptions: Additional mount options to include
+//
+// Returns a volume resource ready for use in tests.
+func BuildVolumeWithOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern,
+	uid, gid int64, fileModeOption string, extraOptions ...string) *storageframework.VolumeResource {
+
+	// Start with required options
+	options := []string{
+		fmt.Sprintf("uid=%d", uid),
+		fmt.Sprintf("gid=%d", gid),
+		"allow-other", // Required for non-root access
+	}
+
+	// Add file mode if specified
+	if fileModeOption != "" {
+		options = append(options, fmt.Sprintf("file-mode=%s", fileModeOption))
+	}
+
+	// Add any extra options
+	options = append(options, extraOptions...)
+
+	return createVolumeResourceWithMountOptions(ctx, config, pattern, options)
+}
+
+// CreatePodWithVolumeAndSecurity creates a pod with the specified volume and security context settings.
+// This function handles common pod creation operations for test cases:
+// 1. Creates a pod specification with the provided PVC mounted
+// 2. Applies the specified UID and GID to the pod's security context
+// 3. Sets an optional container name if provided
+// 4. Creates the pod and waits for it to reach Running state
+//
+// Parameters:
+// - ctx: Context for the API calls
+// - f: Framework for the test case
+// - volume: PersistentVolumeClaim to mount in the pod
+// - containerName: Optional name for the main container (empty string for default)
+// - uid: User ID to set in the pod's security context
+// - gid: Group ID to set in the pod's security context
+//
+// Returns the created pod and any error that occurred.
+func CreatePodWithVolumeAndSecurity(ctx context.Context, f *framework.Framework, volume *v1.PersistentVolumeClaim,
+	containerName string, uid, gid int64) (*v1.Pod, error) {
+
+	// Create pod spec
+	pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{volume}, admissionapi.LevelRestricted, "")
+
+	// Apply security context
+	if pod.Spec.SecurityContext == nil {
+		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
+	}
+	pod.Spec.SecurityContext.RunAsUser = ptr.To(uid)
+	pod.Spec.SecurityContext.RunAsGroup = ptr.To(gid)
+	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
+
+	// Set container name if specified
+	if containerName != "" {
+		pod.Spec.Containers[0].Name = containerName
+	}
+
+	// Create the pod
+	return createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+}
+
+// MakeNonRootPodWithVolume creates a pod specification with the given PVCs,
+// applying the DefaultNonRootUser/Group security context, and setting an optional container name.
+//
+// This is a helper function to create consistent pod specs without having to repeatedly call
+// e2epod.MakePod followed by podModifierNonRoot and container name setting.
+//
+// Parameters:
+// - namespace: The namespace for the pod
+// - pvcs: The PVCs to mount in the pod
+// - containerName: Optional name for the main container (empty string for default)
+//
+// Returns the created pod specification (not yet submitted to the API).
+func MakeNonRootPodWithVolume(namespace string, pvcs []*v1.PersistentVolumeClaim, containerName string) *v1.Pod {
+	// Create pod spec
+	pod := e2epod.MakePod(namespace, nil, pvcs, admissionapi.LevelRestricted, "")
+
+	// Apply nonroot security context
+	podModifierNonRoot(pod)
+
+	// Set container name if specified
+	if containerName != "" {
+		pod.Spec.Containers[0].Name = containerName
+	}
+
+	return pod
+}
+
 // copySmallFileToPod copies a small file from host to pod
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, srcFile, destFile string) {
 	content, err := os.ReadFile(srcFile)
 	framework.ExpectNoError(err)
 	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", destFile, string(content)))
+}
+
+// CreateTestFileAndDir creates a test file and directory at the given base path.
+// This function is a helper for test cases that need to verify file/directory operations.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the file and directory will be created
+// - basePath: Base directory path where test file and directory will be created
+// - fileNamePrefix: Prefix for the test file and directory names
+//
+// Returns the paths to the created file and directory.
+func CreateTestFileAndDir(f *framework.Framework, pod *v1.Pod, basePath string, fileNamePrefix string) (string, string) {
+	testFile := fmt.Sprintf("%s/%s.txt", basePath, fileNamePrefix)
+	testDir := fmt.Sprintf("%s/%s-dir", basePath, fileNamePrefix)
+
+	ginkgo.By(fmt.Sprintf("Creating test file %s", testFile))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", testFile))
+
+	ginkgo.By(fmt.Sprintf("Creating test directory %s", testDir))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", testDir))
+
+	return testFile, testDir
+}
+
+// CreateFileInPod creates a file with the given content in a pod.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the file will be created
+// - path: Full path to the file to create
+// - content: Content to write to the file
+func CreateFileInPod(f *framework.Framework, pod *v1.Pod, path, content string) {
+	ginkgo.By(fmt.Sprintf("Creating file at %s", path))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo '%s' > %s", content, path))
+}
+
+// CreateDirInPod creates a directory (and parent directories as needed) in a pod.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the directory will be created
+// - path: Full path to the directory to create
+func CreateDirInPod(f *framework.Framework, pod *v1.Pod, path string) {
+	ginkgo.By(fmt.Sprintf("Creating directory at %s", path))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", path))
+}
+
+// CreateMultipleDirsInPod creates multiple directories in a pod with a single command.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the directories will be created
+// - paths: Array of full paths to create
+func CreateMultipleDirsInPod(f *framework.Framework, pod *v1.Pod, paths ...string) {
+	ginkgo.By(fmt.Sprintf("Creating multiple directories: %v", paths))
+	dirsArg := strings.Join(paths, " ")
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", dirsArg))
+}
+
+// CopyFileInPod copies a file within a pod.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the file copy operation will occur
+// - sourcePath: Path to the source file
+// - targetPath: Path to the target file
+func CopyFileInPod(f *framework.Framework, pod *v1.Pod, sourcePath, targetPath string) {
+	ginkgo.By(fmt.Sprintf("Copying file from %s to %s", sourcePath, targetPath))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %s %s", sourcePath, targetPath))
+}
+
+// DeleteFileInPod deletes a file in a pod.
+//
+// Parameters:
+// - f: Framework for the test case
+// - pod: Pod where the file deletion will occur
+// - path: Path to the file to delete
+func DeleteFileInPod(f *framework.Framework, pod *v1.Pod, path string) {
+	ginkgo.By(fmt.Sprintf("Deleting file at %s", path))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm %s", path))
 }
