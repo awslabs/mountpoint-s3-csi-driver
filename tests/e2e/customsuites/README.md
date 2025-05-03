@@ -12,6 +12,17 @@ The mount options test suite (`mountoptions.go`) verifies that the S3 CSI driver
 - Proper enforcement of permissions when mount options are absent
 - File and directory ownership when mounting with specific uid/gid
 
+### File Permissions Test Suite
+
+The file permissions test suite (`filepermissions.go`) tests file permission functionality for the S3 CSI driver when mounting S3 buckets. It includes tests for:
+
+- Default file permissions (0644) when no mount options are specified
+- Custom file permissions applied via the `file-mode` mount option
+- Permission inheritance in subdirectories
+- Permission behavior during remounts with changed options
+- Multi-pod access with different permissions
+- Permission preservation during file operations
+
 ### Multi-Volume Test Suite
 
 The multi-volume test suite (`multivolume.go`) validates scenarios involving multiple volumes and pods to ensure the S3 CSI driver properly handles concurrent access and volume isolation. It includes tests for:
