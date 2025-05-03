@@ -1359,5 +1359,43 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		}
 	})
 
-	
+	// --------------------------------------------------------------------
+	// 18. access() syscall: Consistency with stat() permissions
+	//
+	// The access() syscall checks file accessibility based on real UID/GID
+	// and is subtly different from stat(). This test ensures Mountpoint‑S3
+	// reports consistent permission results.
+	//
+	// Diagram:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//    test-file.txt
+	//
+	// Expected behavior:
+	// - stat shows 0600 permissions
+	// - access -r: succeeds (read allowed)
+	// - access -w: succeeds (write allowed)
+	// - access -x: fails (no exec bit)
+	//
+	// This validates that access() enforces the same file-mode as stat(),
+	// confirming no surprises in POSIX permission checks (important for apps
+	// that rely on access() before opening files).
+	ginkgo.It("should have consistent access() and stat", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, _ := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		fpath := "/mnt/volume1/access-file"
+		CreateFileInPod(f, pod, fpath, "acc")
+
+		// Should be readable+writeable by owner, not executable
+		_, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("test -r %[1]s && test -w %[1]s && ! test -x %[1]s", fpath))
+		framework.ExpectNoError(err, "access() bits disagree with stat permissions")
+	})
 }
