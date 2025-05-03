@@ -654,13 +654,15 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 	// - All directories maintain 0755 (drwxr-xr-x) permissions
 	ginkgo.It("should apply the same file permissions to files in subdirectories", func(ctx context.Context) {
 		// Step 1: Create volume with custom file-mode=0640 mount option
-		ginkgo.By("Creating volume with file-mode=0640")
+		ginkgo.By("Creating volume with file-mode=0640 and additional operations permissions")
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
 			fmt.Sprintf("uid=%d", DefaultNonRootUser),
 			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 			"allow-other", // Required for non-root access
 			"debug",
-			"file-mode=0640", // Custom file permissions
+			"file-mode=0640",  // Custom file permissions
+			"allow-delete",    // Allow delete operations
+			"allow-overwrite", // Allow overwrite operations
 		})
 		l.resources = append(l.resources, resource)
 
@@ -746,19 +748,140 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.Logf("Directory permissions: %s", stdout)
 	})
 
-	// TODO: Implement remaining test cases:
+	// Test 8: File Copy/Delete Permissions Test
 	//
-	// 7. Multi-pod permissions test:
-	//    Mount same bucket with different permissions in different pods
-	//    - Pod 1 sees files with: 0600 (-rw-------) permissions
-	//    - Pod 2 sees files with: 0644 (-rw-r--r--) permissions
+	// This test verifies that file permissions are preserved
+	// when files are copied between directories in S3 volumes:
 	//
-	// 8. File move/rename test:
-	//    Verify permissions are preserved during file operations
-	//    - Files maintain 0640 (-rw-r-----) permissions when moved/renamed
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0640]
+	//        |
+	//       / \
+	//      /   \
+	// [Dir1]   [Dir2]
+	//   |         ↑
+	//   |         |
+	//  [File] -> Copy -> [File]
 	//
-	// 9. Security context test:
-	//    Test interaction between file-mode and pod security contexts
-	//    - Files: 0640 (-rw-r-----) permissions
-	//    - Check ownership varies based on pod security context
+	// Expected results:
+	// - Initial file has 0640 (-rw-r-----) permissions
+	// - File maintains 0640 permissions after being copied
+	// - File ownership remains consistent throughout operations
+	ginkgo.It("should preserve file permissions during copy operations", func(ctx context.Context) {
+		// Step 1: Create volume with custom file-mode=0640 mount option
+		ginkgo.By("Creating volume with file-mode=0640 and additional operations permissions")
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0640",  // Custom file permissions
+			"allow-delete",    // Allow delete operations
+			"allow-overwrite", // Allow overwrite operations
+		})
+		l.resources = append(l.resources, resource)
+
+		// Step 2: Create a pod with the volume
+		ginkgo.By("Creating pod with the volume")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod)
+
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		// Step 3: Create directories for testing file operations
+		volPath := "/mnt/volume1"
+		sourceDir := fmt.Sprintf("%s/source-dir", volPath)
+		targetDir := fmt.Sprintf("%s/target-dir", volPath)
+
+		ginkgo.By("Creating source and target directories")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s %s", sourceDir, targetDir))
+
+		// Step 4: Create a test file in the source directory
+		sourceFile := fmt.Sprintf("%s/test-file.txt", sourceDir)
+		ginkgo.By("Creating a test file in the source directory")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", sourceFile))
+
+		// Step 5: Verify initial file permissions
+		ginkgo.By("Verifying initial file has 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", sourceFile))
+
+		// Debug logging for initial permissions
+		ginkgo.By("Debug: Displaying initial file permissions")
+		stdout, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", sourceFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Initial file permissions: %s", stdout)
+
+		// Step 6: Copy the file to the target directory
+		targetFile := fmt.Sprintf("%s/copied-file.txt", targetDir)
+		ginkgo.By("Copying file to target directory")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %s %s", sourceFile, targetFile))
+
+		// Step 7: Verify permissions after copy
+		ginkgo.By("Verifying copied file maintains 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", targetFile))
+
+		// Debug logging for copied file permissions
+		ginkgo.By("Debug: Displaying permissions after copy")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", targetFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Permissions after copy: %s", stdout)
+
+		// Step 8: Create another file with a different name in source directory
+		// Move (mv) is not supported by mountpoint-S3, so we are using copy+delete to simulate it.
+		newSourceFile := fmt.Sprintf("%s/another-test-file.txt", sourceDir)
+		ginkgo.By("Creating another test file for rename simulation")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'content for rename test' > %s", newSourceFile))
+
+		// Step 9: Copy the file to target directory with a different name (simulating rename)
+		renamedFile := fmt.Sprintf("%s/renamed-file.txt", targetDir)
+		ginkgo.By("Copying file to target directory with new name (simulating rename)")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %s %s", newSourceFile, renamedFile))
+
+		// Step 10: Delete the source file (completing the rename simulation)
+		ginkgo.By("Deleting source file to complete rename simulation")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm %s", newSourceFile))
+
+		// Step 11: Verify permissions after simulated rename
+		ginkgo.By("Verifying renamed file maintains 0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", renamedFile))
+
+		// Debug logging for renamed file permissions
+		ginkgo.By("Debug: Displaying permissions after simulated rename")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", renamedFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Permissions after simulated rename: %s", stdout)
+
+		// Step 12: Verify ownership remains consistent
+		ginkgo.By("Verifying file ownership is maintained throughout operations")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			renamedFile, DefaultNonRootUser, DefaultNonRootGroup))
+
+		// Step 13: Compare permissions between original and copied files
+		ginkgo.By("Comparing permissions between source and copied files")
+		sourcePerms, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", sourceFile))
+		framework.ExpectNoError(err, "failed to get source permissions: %s", stderr)
+
+		copyPerms, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", targetFile))
+		framework.ExpectNoError(err, "failed to get copied permissions: %s", stderr)
+
+		if sourcePerms != copyPerms {
+			framework.Failf("Permission mismatch after copy: source=%s, copy=%s", sourcePerms, copyPerms)
+		} else {
+			framework.Logf("Permission consistency verified: source=%s, copy=%s", sourcePerms, copyPerms)
+		}
+	})
 }
+
+// TODO: Implement remaining test cases:
+//
+// 9. Security context test:
+//    Test interaction between file-mode and pod security contexts
+//    - Files: 0640 (-rw-r-----) permissions
+//    - Check ownership varies based on pod security context
