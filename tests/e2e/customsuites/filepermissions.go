@@ -367,10 +367,15 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		ginkgo.By("Creating first pod with volume using default permissions")
 		pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
 		podModifierNonRoot(pod1)
+		// Set container name explicitly
+		pod1.Spec.Containers[0].Name = "write-pod"
 
 		var err error
 		pod1, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
 		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1))
+		}()
 
 		// Create a test file and directory
 		volPath := "/mnt/volume1"
@@ -425,6 +430,8 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		ginkgo.By("Creating second pod with updated volume permissions")
 		pod2 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
 		podModifierNonRoot(pod2)
+		// Set container name explicitly
+		pod2.Spec.Containers[0].Name = "read-pod"
 
 		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
 		framework.ExpectNoError(err)
@@ -435,13 +442,6 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		// Step 6: Verify new permissions
 		ginkgo.By("Verifying file now has read-only permissions (0444)")
 		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", testFile))
-
-		// Creating a new test directory in the second pod since directories don't persist between pods
-		ginkgo.By("Creating a new test directory in the second pod")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("mkdir -p %s", testDir))
-
-		ginkgo.By("Verifying directory still has default permissions (0755)")
-		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
 
 		// Creating a new test directory in the second pod since it doesn't persist between pods
 		ginkgo.By("Creating a new test directory in the second pod")
@@ -469,23 +469,178 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.Logf("As expected, writing to read-only file failed")
 	})
 
+	// Test 5: Concurrent Mount Permissions Test
+	//
+	// This test verifies that pods already mounting a volume see the original
+	// permissions, while new pods mounting after an update see new permissions:
+	//
+	//      [Pod 1] ────────────────────────────────── [Pod 1]
+	//        |          Continue running                 |
+	//        ↓                                           |
+	//   [S3 Volume]  →  1. Update PV mount options  →  [S3 Volume]
+	//   Default perms    without deleting Pod 1       file-mode=0444
+	//        |                                           ↑
+	//        ↓                                           |
+	//    [S3 Bucket] ── Same bucket with updated PV ─ [Pod 2]
+	//
+	// Expected results:
+	// - Pod 1 continues to see files with original 0644 (-rw-r--r--) permissions
+	// - Pod 2 sees files with updated 0444 (-r--r--r--) permissions
+	// - New files created by Pod 1 have 0644 permissions (seen as 0444 by Pod 2)
+	// - New files created by Pod 2 have 0444 permissions (seen as 0644 by Pod 1)
+	ginkgo.It("should maintain different file permissions in concurrent pods with updated mount options", func(ctx context.Context) {
+		// Step 1: Create initial volume with default permissions
+		ginkgo.By("Creating volume with default permissions")
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+		})
+		l.resources = append(l.resources, resource)
+
+		// Step 2: Create first pod with the volume
+		ginkgo.By("Creating first pod with volume using default permissions")
+		pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod1)
+		// Set container name explicitly
+		pod1.Spec.Containers[0].Name = "write-pod"
+
+		var err error
+		pod1, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1))
+		}()
+
+		// Create a test file and directory
+		volPath := "/mnt/volume1"
+		testFile := fmt.Sprintf("%s/testfile.txt", volPath)
+		testDir := fmt.Sprintf("%s/testdir", volPath)
+
+		ginkgo.By("Creating a test file with default permissions from pod1")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("echo 'test content from pod1' > %s", testFile))
+
+		ginkgo.By("Creating a test directory from pod1")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("mkdir -p %s", testDir))
+
+		// Verify initial permissions
+		ginkgo.By("Verifying file has default permissions (0644) in pod1")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", testFile))
+
+		ginkgo.By("Verifying directory has default permissions (0755) in pod1")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
+
+		// Add debug logging
+		ginkgo.By("Debug: Displaying initial file permissions in pod1")
+		stdout, stderr, err := e2evolume.PodExec(f, pod1, fmt.Sprintf("ls -la %s", testFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Initial file permissions in pod1: %s", stdout)
+
+		// Step 3: Update the PV to use file-mode=0444 without deleting the first pod
+		ginkgo.By("Updating volume to use file-mode=0444 without deleting the first pod")
+
+		// Get the PV object
+		pv, err := f.ClientSet.CoreV1().PersistentVolumes().Get(ctx, resource.Pv.Name, metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to get PV")
+
+		// Update the mount options to include file-mode=0444
+		newMountOptions := []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0444", // Add read-only file permissions
+		}
+		pv.Spec.MountOptions = newMountOptions
+
+		// Update the PV
+		_, err = f.ClientSet.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
+		framework.ExpectNoError(err, "failed to update PV with new mount options")
+
+		// Step 4: Create a second pod that mounts the same volume with updated mount options
+		ginkgo.By("Creating second pod with the same volume using updated permissions")
+		pod2 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod2)
+		// Set container name explicitly
+		pod2.Spec.Containers[0].Name = "read-pod"
+
+		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2))
+		}()
+
+		// Step 5: Verify that pod1 still sees the original permissions
+		ginkgo.By("Verifying pod1 still sees file with original permissions (0644)")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", testFile))
+
+		// Step 6: Verify that pod2 sees the new permissions
+		ginkgo.By("Verifying pod2 sees file with updated permissions (0444)")
+		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", testFile))
+
+		// Step 7: Create new files from both pods
+		pod1File := fmt.Sprintf("%s/pod1file.txt", volPath)
+		pod2File := fmt.Sprintf("%s/pod2file.txt", volPath)
+
+		ginkgo.By("Creating a new file from pod1")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("echo 'content from pod1' > %s", pod1File))
+
+		ginkgo.By("Creating a new file from pod2")
+		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("echo 'content from pod2' > %s", pod2File))
+
+		// Step 8: Verify permissions for the new files as seen from each pod
+		ginkgo.By("Verifying pod1 sees its file with original permissions (0644)")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", pod1File))
+
+		ginkgo.By("Verifying pod1 sees pod2's file with original permissions (0644)")
+		e2evolume.VerifyExecInPodSucceed(f, pod1, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", pod2File))
+
+		ginkgo.By("Verifying pod2 sees its file with updated permissions (0444)")
+		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", pod2File))
+
+		ginkgo.By("Verifying pod2 sees pod1's file with updated permissions (0444)")
+		e2evolume.VerifyExecInPodSucceed(f, pod2, fmt.Sprintf("stat -c '%%a' %s | grep -q '^444$'", pod1File))
+
+		// Debug logging for permissions
+		ginkgo.By("Debug: Displaying file permissions for pod1's file from pod1")
+		stdout, stderr, err = e2evolume.PodExec(f, pod1, fmt.Sprintf("ls -la %s", pod1File))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Pod1's file permissions from pod1: %s", stdout)
+
+		ginkgo.By("Debug: Displaying file permissions for pod2's file from pod1")
+		stdout, stderr, err = e2evolume.PodExec(f, pod1, fmt.Sprintf("ls -la %s", pod2File))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Pod2's file permissions from pod1: %s", stdout)
+
+		ginkgo.By("Debug: Displaying file permissions for pod1's file from pod2")
+		stdout, stderr, err = e2evolume.PodExec(f, pod2, fmt.Sprintf("ls -la %s", pod1File))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Pod1's file permissions from pod2: %s", stdout)
+
+		ginkgo.By("Debug: Displaying file permissions for pod2's file from pod2")
+		stdout, stderr, err = e2evolume.PodExec(f, pod2, fmt.Sprintf("ls -la %s", pod2File))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Pod2's file permissions from pod2: %s", stdout)
+	})
+
 	// TODO: Implement remaining test cases:
 	//
-	// 5. Subdirectory inheritance test: Let's come at
+	// 6. Subdirectory inheritance test:
 	//    Verify files in subdirectories inherit the mount option permissions
 	//    - All files (at any depth): 0640 (-rw-r-----) permissions
 	//    - All directories: 0755 (drwxr-xr-x) permissions
 	//
-	// 6. Multi-pod permissions test:
+	// 7. Multi-pod permissions test:
 	//    Mount same bucket with different permissions in different pods
 	//    - Pod 1 sees files with: 0600 (-rw-------) permissions
 	//    - Pod 2 sees files with: 0644 (-rw-r--r--) permissions
 	//
-	// 7. File move/rename test:
+	// 8. File move/rename test:
 	//    Verify permissions are preserved during file operations
 	//    - Files maintain 0640 (-rw-r-----) permissions when moved/renamed
 	//
-	// 8. Security context test:
+	// 9. Security context test:
 	//    Test interaction between file-mode and pod security contexts
 	//    - Files: 0640 (-rw-r-----) permissions
 	//    - Check ownership varies based on pod security context
