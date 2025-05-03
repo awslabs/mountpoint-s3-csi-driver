@@ -1045,4 +1045,223 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		gomega.Expect(chErr).To(gomega.HaveOccurred())
 		gomega.Expect(chErrStr).To(gomega.ContainSubstring("No such file"))
 	})
+
+	// --------------------------------------------------------------------
+	// 13. File truncation behavior (immutability validation)
+	//
+	// Mountpoint-S3 disallows in-place truncation of existing files because S3
+	// does not support partial updates of objects. Even though truncation
+	// targets the file size (not its mode/ownership), the driver enforces
+	// full immutability.
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//   ┌────────────────────────────────────────────┐
+	//   │ Step 1: Create /mnt/volume1/trunc-file     │
+	//   │         Content: "data"                    │
+	//   │                                            │
+	//   │ Step 2: Attempt to truncate the file:      │
+	//   │         sh -c ': > /mnt/volume1/trunc-file'│
+	//   └────────────────────────────────────────────┘
+	//
+	// Expected results:
+	// - The truncate attempt fails (EPERM / ENOTSUP)
+	// - The error message matches "Operation not permitted" or
+	//   "Operation not supported"
+	// - File content remains unchanged ("data")
+	// - File metadata remains unchanged:
+	//     - Mode: 0600 (from mount option)
+	//     - UID:GID: matches mount config
+	//
+	// This confirms Mountpoint-S3 enforces S3 semantics: no in-place
+	// file size changes are permitted post-creation.
+	//
+	ginkgo.It("should reject truncation and preserve file metadata/content", func(ctx context.Context) {
+		// Set up a volume with file-mode=0600
+		res := createVolumeWithOptions(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		filePath := "/mnt/volume1/trunc-file"
+
+		// Step 1: Create the file with content
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf(`sh -c 'echo data > %s'`, filePath))
+		framework.ExpectNoError(err)
+
+		// Check initial permissions and content
+		permsBefore, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", filePath))
+		framework.ExpectNoError(err)
+		ownerBefore, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%u:%%g' %s", filePath))
+		framework.ExpectNoError(err)
+		contentBefore, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("cat %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(contentBefore)).To(gomega.Equal("data"))
+
+		// Step 2: Attempt to truncate the file
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf(`sh -c ': > %s'`, filePath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+
+		expectErr := gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+		)
+		gomega.Expect(stderr).To(expectErr)
+
+		// Confirm permissions unchanged
+		permsAfter, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(permsAfter)).To(gomega.Equal(strings.TrimSpace(permsBefore)))
+
+		// Confirm ownership unchanged
+		ownerAfter, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%u:%%g' %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(ownerAfter)).To(gomega.Equal(strings.TrimSpace(ownerBefore)))
+
+		// Confirm content unchanged
+		contentAfter, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("cat %s", filePath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(contentAfter)).To(gomega.Equal(strings.TrimSpace(contentBefore)))
+	})
+
+	// --------------------------------------------------------------------
+	// 14. Extended attributes (xattr) unsupported behavior
+	//
+	// Mountpoint‑S3 does not persist extended attributes (xattrs) because
+	// S3 itself has no equivalent metadata model. The kernel's xattr API
+	// (setfattr/getfattr) will typically fail with EPERM or ENOTSUP,
+	// and no xattrs are ever stored.
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//   ┌─────────────────────────────────────────────┐
+	//   │ Step 1: Create /mnt/volume1/xattr-file      │
+	//   │                                             │
+	//   │ Step 2: Try to set an xattr:                │
+	//   │         setfattr -n user.test -v abc <file> │
+	//   │                                             │
+	//   │ Step 3: Check existing xattrs:              │
+	//   │         getfattr -d <file>                  │
+	//   └─────────────────────────────────────────────┘
+	//
+	// Expected results:
+	// - setfattr fails with an error containing "Operation not permitted"
+	//   or "Operation not supported" (EPERM/ENOTSUP)
+	// - getfattr returns empty (no xattrs stored)
+	//
+	// This confirms Mountpoint‑S3 does not fake or store any extended
+	// attributes and aligns with S3's object semantics.
+	//
+	ginkgo.It("should reject setxattr and return no xattrs", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, _ := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		fpath := "/mnt/volume1/xattr-file"
+		CreateFileInPod(f, pod, fpath, "xattr")
+
+		_, stderr, err := e2evolume.PodExec(f, pod,
+			fmt.Sprintf(`setfattr -n user.test -v abc %s`, fpath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(stderr).To(gomega.ContainSubstring("Operation"))
+
+		out, _, _ := e2evolume.PodExec(f, pod,
+			fmt.Sprintf(`getfattr -d %s || true`, fpath))
+		gomega.Expect(strings.TrimSpace(out)).To(gomega.Equal(""))
+	})
+
+	// --------------------------------------------------------------------
+	// 15. Atomic rename (mv) behavior & metadata preservation
+	//
+	// Mountpoint‑S3 generally does not implement atomic renames (the
+	// rename(2) syscall) because S3's API lacks native support for it.
+	//
+	// This test verifies:
+	// - mv (rename) fails gracefully with an expected error:
+	//   - "Operation not permitted"
+	//   - OR "Operation not supported"
+	//   - OR "Function not implemented"
+	// - Metadata remains intact (no unexpected permission/ownership changes)
+	// - No partial rename artifacts exist after failure
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with file-mode=0600]
+	//        |
+	//        ↓
+	//   ┌─────────────────────────────────────────────┐
+	//   │ Step 1: Create /mnt/volume1/oldname         │
+	//   │                                             │
+	//   │ Step 2: mv oldname newname                  │
+	//   │                                             │
+	//   │ Step 3: Check that:                         │
+	//   │   - mv fails with known error (see above)   │
+	//   │   - oldname still exists & is unchanged     │
+	//   │   - newname does not exist                  │
+	//   └─────────────────────────────────────────────┘
+	//
+	// This ensures Mountpoint‑S3 either implements rename fully OR
+	// rejects it safely in alignment with S3’s semantics.
+	//
+	ginkgo.It("should handle mv correctly (metadata intact or ENOTSUP)", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, _ := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		oldPath := "/mnt/volume1/oldname"
+		newPath := "/mnt/volume1/newname"
+
+		// Create the original file
+		CreateFileInPod(f, pod, oldPath, "original content")
+
+		// Capture initial permissions
+		initialPerms, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", oldPath))
+		framework.ExpectNoError(err)
+
+		// Attempt the rename (mv)
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("mv %s %s", oldPath, newPath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+
+		// Accept a range of possible errors (EPERM, ENOTSUP, ENOSYS)
+		expectErr := gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+			gomega.ContainSubstring("Function not implemented"),
+		)
+		gomega.Expect(stderr).To(expectErr)
+
+		// Confirm the old file still exists and is intact
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf("test -f %s", oldPath))
+		framework.ExpectNoError(err)
+
+		// Confirm new file does not exist
+		_, _, err = e2evolume.PodExec(f, pod, fmt.Sprintf("test -f %s", newPath))
+		gomega.Expect(err).To(gomega.HaveOccurred())
+
+		// Confirm permissions are unchanged
+		finalPerms, _, err := e2evolume.PodExec(f, pod, fmt.Sprintf("stat -c '%%a' %s", oldPath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(finalPerms)).To(gomega.Equal(strings.TrimSpace(initialPerms)))
+	})
+
+	
 }
