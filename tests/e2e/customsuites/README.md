@@ -38,6 +38,34 @@ The file permissions test suite (`filepermissions.go`) validates file permission
 - Edge-case filename support (Unicode, long names, special chars)
 - Pod umask + fsGroup conflict handling
 
+### Directory Permissions Test Suite
+
+The directory permissions test suite (`directorypermissions.go`) validates directory permission behavior for the S3 CSI driver, focusing on the `dir-mode` mount option. It complements the file permissions tests by ensuring correct application, consistency, and immutability of directory permissions under various scenarios.
+
+**Directory Permission Tests:**
+
+- Default directory permissions (`0755`) when no mount options are specified
+- Custom directory permissions via the `dir-mode` mount option
+- Distinct directory permissions for multiple volumes in the same pod
+- Directory permission updates after PV mount option changes (remount behavior)
+- Recursive application of directory permissions to nested subdirectories
+- Directory permission preservation during file operations (e.g., copy, recursive copy)
+- Multi-pod mounts showing different permissions based on mount timing
+- FSGroup and security context ownership verification
+
+**Contrarian & Edge-Case Behavior Tests:**
+
+- `chmod` on directories succeeds but has no effect; permissions remain unchanged (noop)
+- `chown` operations fail (EPERM/ENOTSUP); ownership is immutable post-mount
+- Umask has no effect; driver-enforced directory permissions always apply
+- `mkdir -m` explicit mode bits are ignored; `dir-mode` is always enforced
+- Directory `mv`/rename operations fail cleanly (ENOTSUP or equivalent)
+- `access()` syscall reports consistent permissions matching `stat()`
+- Edge-case directory name support (Unicode, long names, special characters)
+- Pod umask + security context conflict handling (dir-mode remains authoritative)
+
+This suite ensures that directory permissions are correctly applied and maintained across various usage scenarios, providing proper access control for directory structures within S3 volumes.
+
 ### Multi-Volume Test Suite
 
 The multi-volume test suite (`multivolume.go`) validates scenarios involving multiple volumes and pods to ensure the S3 CSI driver properly handles concurrent access and volume isolation. It includes tests for:
