@@ -24,6 +24,12 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// Constants for non-root user/group IDs used in pod security contexts
+const (
+	DefaultNonRootUser  = int64(1001)
+	DefaultNonRootGroup = int64(2000)
+)
+
 // genBinDataFromSeed generates binary data with random seed for testing file operations.
 // This is useful for creating consistent test data that can be verified after read operations.
 //
@@ -86,16 +92,16 @@ func podModifierNonRoot(pod *v1.Pod) {
 	if pod.Spec.SecurityContext == nil {
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	pod.Spec.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-	pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+	pod.Spec.SecurityContext.RunAsUser = ptr.To(DefaultNonRootUser)
+	pod.Spec.SecurityContext.RunAsGroup = ptr.To(DefaultNonRootGroup)
 	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
 
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].SecurityContext == nil {
 			pod.Spec.Containers[i].SecurityContext = &v1.SecurityContext{}
 		}
-		pod.Spec.Containers[i].SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-		pod.Spec.Containers[i].SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+		pod.Spec.Containers[i].SecurityContext.RunAsUser = ptr.To(DefaultNonRootUser)
+		pod.Spec.Containers[i].SecurityContext.RunAsGroup = ptr.To(DefaultNonRootGroup)
 		pod.Spec.Containers[i].SecurityContext.RunAsNonRoot = ptr.To(true)
 	}
 }

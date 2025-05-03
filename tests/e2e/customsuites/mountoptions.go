@@ -19,14 +19,6 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
-// Constants for user/group IDs used in non-root access tests.
-// These values must be different from root (0) and must match what's expected
-// by the test infrastructure.
-const (
-	defaultNonRootUser  = int64(1001)
-	defaultNonRootGroup = int64(2000)
-)
-
 // s3CSIMountOptionsTestSuite implements the Kubernetes storage framework TestSuite interface.
 // It validates that the S3 CSI driver properly handles various mount options, particularly
 // those related to file ownership, permissions, and access control.
@@ -113,8 +105,8 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// - allow-other to permit access by users other than the mounter
 		// - debug flags for better logging in case of issues
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
-			fmt.Sprintf("uid=%d", defaultNonRootUser),
-			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 			"allow-other",
 			"debug",
 		})
@@ -137,11 +129,11 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		ginkgo.By("Checking read from a volume")
 		checkReadFromPath(f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking file group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, DefaultNonRootGroup, DefaultNonRootUser))
 		ginkgo.By("Checking dir group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, DefaultNonRootGroup, DefaultNonRootUser))
 		ginkgo.By("Checking pod identity")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", DefaultNonRootUser, DefaultNonRootGroup, DefaultNonRootGroup))
 	}
 	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
 		validateWriteToVolume(ctx)
