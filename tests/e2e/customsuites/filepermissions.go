@@ -982,4 +982,67 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.ExpectNoError(err)
 		gomega.Expect(strings.TrimSpace(perms)).To(gomega.Equal("666"))
 	})
+
+	// --------------------------------------------------------------------
+	// 12. Symlink creation & permission enforcement
+	//
+	// Mountpoint-S3 does NOT support symlinks: any attempt to create one
+	// (ln -s) fails (EPERM/ENOTSUP), reflecting S3's lack of symlink semantics.
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume]
+	//        |
+	//        ↓
+	//  Attempt:
+	//   ln -s /mnt/volume1/real-file -> /mnt/volume1/link-to-real
+	//
+	// Expected results:
+	// - Symlink creation fails with "Operation not permitted" (EPERM) or similar
+	// - The target file (/mnt/volume1/real-file) remains intact (no metadata change)
+	// - The symlink (/mnt/volume1/link-to-real) does not exist (no artifact left)
+	// - chmod/chown on the failed symlink path fail (ENOENT)
+	// - stat on the target file shows the original 0600 mode and correct UID/GID
+	//
+	// This verifies that Mountpoint-S3 enforces S3 semantics: no symlinks,
+	// and attempts to create or manipulate them are rejected gracefully.
+	ginkgo.It("should reject symlink creation and leave target intact", func(ctx context.Context) {
+		res := createVolumeWithOptions(ctx, l.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0600")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+
+		target := "/mnt/volume1/real-file"
+		link := "/mnt/volume1/link-to-real"
+
+		// create target
+		CreateFileInPod(f, pod, target, "symlink test")
+
+		// try to create symlink → must FAIL
+		_, lnStderr, lnErr := e2evolume.PodExec(f, pod,
+			fmt.Sprintf("ln -s %s %s", target, link))
+		gomega.Expect(lnErr).To(gomega.HaveOccurred())
+		gomega.Expect(lnStderr).To(gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+		))
+
+		// verify target file metadata unchanged
+		verifyFilePermissions(f, pod, target, "600",
+			ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+
+		// ensure link really does NOT exist
+		_, _, statErr := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -l %s", link))
+		gomega.Expect(statErr).To(gomega.HaveOccurred())
+
+		// chmod on would‑be‑link must also fail
+		_, chErrStr, chErr := e2evolume.PodExec(f, pod, fmt.Sprintf("chmod 777 %s", link))
+		gomega.Expect(chErr).To(gomega.HaveOccurred())
+		gomega.Expect(chErrStr).To(gomega.ContainSubstring("No such file"))
+	})
 }
