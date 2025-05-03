@@ -120,7 +120,8 @@ wait_for_pods() {
   local attempt=1
   local all_namespaces=false
 
-  if [ "$2" = "all-namespaces" ]; then
+  # Check if second parameter exists and equals "all-namespaces"
+  if [ -n "${2:-}" ] && [ "$2" = "all-namespaces" ]; then
     all_namespaces=true
   fi
 
