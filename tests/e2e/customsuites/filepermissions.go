@@ -218,20 +218,128 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 		framework.Logf("Directory permissions: %s", stdout)
 	})
 
-	// TODO: Implement remaining test cases:
+	// Test 3: Dual Volume Permissions Test
 	//
-	// 3. Dual volume permissions test:
-	//    Mount two volumes with different file-mode values in one pod
-	//    - Volume 1: 0600 (-rw-------) file permissions
-	//    - Volume 2: 0666 (-rw-rw-rw-) file permissions
-	//    - Directories: Always 0755 (drwxr-xr-x)
+	// This test verifies that different volumes in the same pod
+	// can have different file permission settings:
+	//
+	//      [Pod]
+	//        |
+	//       / \
+	//      /   \
+	//  [Vol 1]  [Vol 2]
+	// file-mode  file-mode
+	//  =0600     =0666
+	//     |         |
+	//     ↓         ↓
+	// [S3 Bucket] [S3 Bucket]
+	//
+	// Expected results:
+	// - Volume 1 Files: 0600 (-rw-------) permissions
+	// - Volume 2 Files: 0666 (-rw-rw-rw-) permissions
+	// - Directories: Always 0755 (drwxr-xr-x) permissions
+	// - Ownership: matches specified uid/gid on both volumes
+	ginkgo.It("should maintain distinct file permissions for multiple volumes in the same pod", func(ctx context.Context) {
+		// Create first volume with file-mode=0600
+		ginkgo.By("Creating first volume with file-mode=0600")
+		resource1 := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0600", // First volume uses 0600 permissions
+		})
+		l.resources = append(l.resources, resource1)
+
+		// Create second volume with file-mode=0666
+		ginkgo.By("Creating second volume with file-mode=0666")
+		resource2 := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", DefaultNonRootUser),
+			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
+			"allow-other", // Required for non-root access
+			"debug",
+			"file-mode=0666", // Second volume uses 0666 permissions
+		})
+		l.resources = append(l.resources, resource2)
+
+		// Create a pod with both volumes
+		ginkgo.By("Creating pod with both volumes mounted")
+		claims := []*v1.PersistentVolumeClaim{resource1.Pvc, resource2.Pvc}
+		pod := e2epod.MakePod(f.Namespace.Name, nil, claims, admissionapi.LevelRestricted, "")
+		podModifierNonRoot(pod)
+
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		// Define paths for both volumes
+		vol1Path := "/mnt/volume1"
+		vol2Path := "/mnt/volume2"
+		vol1TestFile := fmt.Sprintf("%s/testfile-vol1.txt", vol1Path)
+		vol2TestFile := fmt.Sprintf("%s/testfile-vol2.txt", vol2Path)
+		vol1TestDir := fmt.Sprintf("%s/testdir-vol1", vol1Path)
+		vol2TestDir := fmt.Sprintf("%s/testdir-vol2", vol2Path)
+
+		// Create test files and directories in both volumes
+		ginkgo.By("Creating test files and directories in both volumes")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'volume 1 content' > %s", vol1TestFile))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'volume 2 content' > %s", vol2TestFile))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", vol1TestDir))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", vol2TestDir))
+
+		// Verify first volume file permissions (0600)
+		ginkgo.By("Verifying first volume file has permissions 0600")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^600$'", vol1TestFile))
+
+		// Verify second volume file permissions (0666)
+		ginkgo.By("Verifying second volume file has permissions 0666")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^666$'", vol2TestFile))
+
+		// Verify directory permissions remain at 0755 for both volumes
+		ginkgo.By("Verifying directories in both volumes maintain default permissions (0755)")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", vol1TestDir))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", vol2TestDir))
+
+		// Verify ownership for both volumes
+		ginkgo.By("Verifying file ownership in both volumes")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			vol1TestFile, DefaultNonRootUser, DefaultNonRootGroup))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			vol2TestFile, DefaultNonRootUser, DefaultNonRootGroup))
+
+		// Debug logging to display file and directory permissions for both volumes
+		ginkgo.By("Debug: Displaying first volume file permissions")
+		stdout, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", vol1TestFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("First volume file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying second volume file permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", vol2TestFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Second volume file permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying first volume directory permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", vol1TestDir))
+		framework.ExpectNoError(err, "failed to ls directory: %s, stderr: %s", stdout, stderr)
+		framework.Logf("First volume directory permissions: %s", stdout)
+
+		ginkgo.By("Debug: Displaying second volume directory permissions")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", vol2TestDir))
+		framework.ExpectNoError(err, "failed to ls directory: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Second volume directory permissions: %s", stdout)
+	})
+
+	// TODO: Implement remaining test cases:
 	//
 	// 4. Remounting permissions test:
 	//    Change file-mode on existing volume, remount and verify
 	//    - Before remount: 0644 (-rw-r--r--) file permissions
 	//    - After remount: 0444 (-r--r--r--) file permissions
 	//
-	// 5. Subdirectory inheritance test:
+	// 5. Subdirectory inheritance test: Let's come at
 	//    Verify files in subdirectories inherit the mount option permissions
 	//    - All files (at any depth): 0640 (-rw-r-----) permissions
 	//    - All directories: 0755 (drwxr-xr-x) permissions
