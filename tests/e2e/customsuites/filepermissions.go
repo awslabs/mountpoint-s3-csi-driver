@@ -877,11 +877,134 @@ func (t *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.Test
 			framework.Logf("Permission consistency verified: source=%s, copy=%s", sourcePerms, copyPerms)
 		}
 	})
-}
 
-// TODO: Implement remaining test cases:
-//
-// 9. Security context test:
-//    Test interaction between file-mode and pod security contexts
-//    - Files: 0640 (-rw-r-----) permissions
-//    - Check ownership varies based on pod security context
+	// Test 9: Pod Security Context Test
+	// This test verifies how pod security contexts interact
+	// with the S3 CSI driver file permissions:
+	//
+	//	   [Pod with SecurityContext]
+	//	     |    runAsUser: 3000
+	//	     |    fsGroup: 4000
+	//	     |
+	//	     ↓
+	//	[S3 Volume with file-mode=0640]
+	//	     |
+	//	     ↓
+	//	[Files & Directories]
+	//
+	// Expected results:
+	// - Files have the specified file mode (0640) regardless of security context
+	// - File ownership is affected by the pod security context settings
+	// - Pod's runAsUser determines the user ownership of created files
+	// - Pod's fsGroup determines the group ownership of created files
+	ginkgo.It("should properly apply permissions with pod security context settings", func(ctx context.Context) {
+		// Define specific security context settings for the pod
+		customUID := int64(3000)
+		customGID := int64(4000)
+		runAsNonRoot := true
+
+		// Step 1: Create volume with custom file-mode=0640 mount option
+		// Use the same UID/GID in mount options as in the security context
+		ginkgo.By("Creating volume with file-mode=0640")
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
+			fmt.Sprintf("uid=%d", customUID), // Use the same UID as pod's security context
+			fmt.Sprintf("gid=%d", customGID), // Use the same GID as pod's security context
+			"allow-other",                    // Required for non-root access
+			"debug",
+			"file-mode=0640", // Custom file permissions
+		})
+		l.resources = append(l.resources, resource)
+
+		// Step 2: Create a pod with specific security context settings
+		ginkgo.By("Creating pod with specific runAsUser and fsGroup security context")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
+
+		// Set the pod's security context to use specific user and group IDs
+		pod.Spec.SecurityContext = &v1.PodSecurityContext{
+			RunAsUser:    &customUID,
+			FSGroup:      &customGID,
+			RunAsNonRoot: &runAsNonRoot,
+			SeccompProfile: &v1.SeccompProfile{
+				Type: v1.SeccompProfileTypeRuntimeDefault,
+			},
+		}
+
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		// Step 3: Create test files in the volume
+		volPath := "/mnt/volume1"
+		testFile := fmt.Sprintf("%s/test-file.txt", volPath)
+		testDir := fmt.Sprintf("%s/test-dir", volPath)
+
+		ginkgo.By("Creating test file and directory from the pod")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'test content' > %s", testFile))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", testDir))
+
+		// Step 4: Verify file permissions match the specified file-mode
+		ginkgo.By("Verifying file has the specified file-mode=0640 permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", testFile))
+
+		// Step 5: Verify file ownership corresponds to the pod's security context
+		ginkgo.By("Verifying file ownership matches pod's security context")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			testFile, customUID, customGID))
+
+		// Step 6: Verify directory permissions remain at default 0755
+		ginkgo.By("Verifying directory has default permissions (0755)")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^755$'", testDir))
+
+		// Step 7: Verify directory ownership corresponds to the pod's security context
+		ginkgo.By("Verifying directory ownership matches pod's security context")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'",
+			testDir, customUID, customGID))
+
+		// Debug logging for file permissions and ownership
+		ginkgo.By("Debug: Displaying file permissions and ownership")
+		stdout, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", testFile))
+		framework.ExpectNoError(err, "failed to ls file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("File permissions and ownership: %s", stdout)
+
+		// Debug logging for directory permissions and ownership
+		ginkgo.By("Debug: Displaying directory permissions and ownership")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -ld %s", testDir))
+		framework.ExpectNoError(err, "failed to ls directory: %s, stderr: %s", stdout, stderr)
+		framework.Logf("Directory permissions and ownership: %s", stdout)
+
+		// Step 8: Create a file with specific permissions using chmod (to verify interaction)
+		explicitFile := fmt.Sprintf("%s/explicit-perm-file.txt", volPath)
+		ginkgo.By("Creating a file with explicitly set permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo 'explicit perm test' > %s", explicitFile))
+
+		// Try to change permissions (this is expected to fail with S3 CSI driver)
+		ginkgo.By("Verifying chmod operation is not permitted (expected behavior)")
+		_, chmodErr, chmodExecErr := e2evolume.PodExec(f, pod, fmt.Sprintf("chmod 600 %s", explicitFile))
+		if chmodExecErr == nil {
+			framework.Failf("Expected chmod to fail, but it succeeded")
+		}
+		framework.Logf("chmod failed as expected with error: %s", chmodErr)
+
+		// Step 9: Verify that chmod doesn't actually change permissions (driver-enforced file-mode)
+		ginkgo.By("Verifying chmod doesn't override driver-enforced file-mode")
+		// The file should still have 0640 (the mount option) regardless of chmod
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^640$'", explicitFile))
+
+		// Debug logging for post-chmod file
+		ginkgo.By("Debug: Displaying permissions after chmod attempt")
+		stdout, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("ls -la %s", explicitFile))
+		framework.ExpectNoError(err, "failed to ls post-chmod file: %s, stderr: %s", stdout, stderr)
+		framework.Logf("File permissions after chmod (should still be 0640): %s", stdout)
+	})
+
+	// TODO: Implement remaining test cases:
+	//
+	// 11. Finalize tests for production:
+	//    - Remove all debug print statements
+	//    - Final code cleanup and formatting
+	//    - Ensure all tests have proper comments and documentation
+	//    - Refactor common code in the tests
+}
