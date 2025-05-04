@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/onsi/ginkgo/v2"
@@ -326,6 +327,134 @@ func MakeNonRootPodWithVolume(namespace string, pvcs []*v1.PersistentVolumeClaim
 	}
 	return pod
 }
+
+// writeAndVerifyFile writes a file to the specified path and verifies it exists
+func WriteAndVerifyFile(f *framework.Framework, pod *v1.Pod, filePath, content string) {
+	ginkgo.By(fmt.Sprintf("Writing file %s in pod", filePath))
+	CreateFileInPod(f, pod, filePath, content)
+
+	// Verify file was written successfully by reading it back
+	ginkgo.By("Verifying file was successfully written")
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q '%s'", filePath, content))
+}
+
+/*──────────────────────────────
+  Pod error-waiting & cleanup helpers
+  ──────────────────────────────*/
+
+// WaitForPodError waits until the given pod surfaces an event or a status
+// condition whose message contains `expectedPattern`. It returns nil on
+// success or an error if the pattern is not found before `timeout` expires.
+func WaitForPodError(
+	ctx context.Context,
+	f *framework.Framework,
+	podName string,
+	expectedPattern string,
+	timeout time.Duration,
+) error {
+	framework.Logf("Waiting up to %v for pod %s to surface error: %q", timeout, podName, expectedPattern)
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// ① Check events for the pod
+			events, err := f.ClientSet.CoreV1().Events(f.Namespace.Name).List(ctx, metav1.ListOptions{
+				FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Pod", podName),
+			})
+			if err != nil {
+				return err
+			}
+			for _, ev := range events.Items {
+				if strings.Contains(ev.Message, expectedPattern) {
+					framework.Logf("Found expected error in event: %s", ev.Message)
+					return nil
+				}
+			}
+
+			// ② Check pod status conditions
+			pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			for _, cond := range pod.Status.Conditions {
+				if strings.Contains(cond.Message, expectedPattern) {
+					framework.Logf("Found expected error in pod condition: %s", cond.Message)
+					return nil
+				}
+			}
+
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timed out after %v waiting for error pattern %q on pod %s", timeout, expectedPattern, podName)
+			}
+		}
+	}
+}
+
+// CleanupPodInErrorState force-deletes the given pod (grace-period=0, foreground).
+// Useful at the end of tests that purposely leave a pod in a Failed/CrashLoop state.
+func CleanupPodInErrorState(ctx context.Context, f *framework.Framework, podName string) error {
+	deletePolicy := metav1.DeletePropagationForeground
+	return f.ClientSet.CoreV1().Pods(f.Namespace.Name).Delete(ctx, podName, metav1.DeleteOptions{
+		PropagationPolicy:  &deletePolicy,
+		GracePeriodSeconds: ptr.To(int64(0)),
+	})
+}
+
+/*──────────────────────────────
+  Credential testing helpers
+  ──────────────────────────────*/
+
+// CreateCredentialSecret creates a Secret with S3 credentials and returns its name.
+func CreateCredentialSecret(
+	ctx context.Context,
+	f *framework.Framework,
+	namePrefix, accessKey, secretKey string,
+) (string, error) {
+	secretName := namePrefix + "-" + uuid.NewString()[:8]
+	_, err := f.ClientSet.CoreV1().Secrets(f.Namespace.Name).Create(ctx, &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: f.Namespace.Name,
+		},
+		Type: v1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"key_id":     accessKey,
+			"access_key": secretKey,
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return "", err
+	}
+	return secretName, nil
+}
+
+// BuildSecretVolume creates a volume using a secret reference for authentication.
+func BuildSecretVolume(
+	ctx context.Context,
+	f *framework.Framework,
+	driver storageframework.TestDriver,
+	pattern storageframework.TestPattern,
+	secretName, bucketName string,
+) (*storageframework.VolumeResource, error) {
+	cfg := driver.PrepareTest(ctx, f)
+
+	// Use exported function from credentials.go
+	return CreateVolumeWithSecretReference(
+		ctx,
+		cfg,
+		pattern,
+		secretName,
+		f.Namespace.Name,
+		bucketName,
+	), nil
+}
+
+// NegativeCredTestSpec and RunNegativeCredentialsTest are moved to credentials.go
 
 /*──────────────────────────────
   Misc small helpers
