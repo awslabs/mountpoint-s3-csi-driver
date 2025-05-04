@@ -66,6 +66,20 @@ The directory permissions test suite (`directorypermissions.go`) validates direc
 
 This suite ensures that directory permissions are correctly applied and maintained across various usage scenarios, providing proper access control for directory structures within S3 volumes.
 
+### Credentials Test Suite
+
+The credentials test suite (`credentials.go`) validates authentication and authorization behavior for the S3 CSI driver, covering both successful mounts (default and secret‐mounted credentials) and expected failure modes.
+
+**Credentials Tests:**
+
+- Default driver credentials Usage: Mount with the built-in access key/secret → write an object → verify owner ID matches the driver’s canonical ID (Bart)  
+- Secret-mounted volume credentials: Provide access key/secret via a Kubernetes Secret (`authenticationSource=secret`) → mount → write an object → verify owner ID matches the Secret’s canonical ID (Lisa)  
+
+**Error & Negative Tests:**
+
+- Invalid access key: Mount with a non-existent key → expect “access key Id does not exist” error  
+- Unauthorized credentials: Mount with valid key but no bucket permissions → expect “Access Denied Error: Failed to create mount process” failure  
+
 ### Multi-Volume Test Suite
 
 The multi-volume test suite (`multivolume.go`) validates scenarios involving multiple volumes and pods to ensure the S3 CSI driver properly handles concurrent access and volume isolation. It includes tests for:
