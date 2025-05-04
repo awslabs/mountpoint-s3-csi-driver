@@ -5,6 +5,7 @@ package customsuites
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -56,18 +57,18 @@ func (t *s3CSIDirectoryPermissionsTestSuite) SkipUnsupportedTests(_ storageframe
 
 // DefineTests implements all cases.
 func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
-	type local struct {
+	type TestResourceRegistry struct {
 		resources []*storageframework.VolumeResource
 		config    *storageframework.PerTestConfig
 	}
-	var l local
+	var testRegistry TestResourceRegistry
 
-	f := framework.NewFrameworkWithCustomTimeouts("directorypermissions", storageframework.GetDriverTimeouts(driver))
-	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
+	testFramework := framework.NewFrameworkWithCustomTimeouts("directorypermissions", storageframework.GetDriverTimeouts(driver))
+	testFramework.NamespacePodSecurityLevel = admissionapi.LevelRestricted
 
 	// ------------- helper wrappers -------------
 	cleanup := func() {
-		for _, r := range l.resources {
+		for _, r := range testRegistry.resources {
 			func() {
 				defer ginkgo.GinkgoRecover()
 				_ = r.CleanupResource(context.Background())
@@ -79,26 +80,30 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 		uid, gid int64, dirMode string, extra ...string) *storageframework.VolumeResource {
 
 		res := BuildVolumeWithOptions(ctx, cfg, pat, uid, gid, "", append([]string{fmt.Sprintf("dir-mode=%s", dirMode)}, extra...)...)
-		l.resources = append(l.resources, res)
+		testRegistry.resources = append(testRegistry.resources, res)
 		return res
 	}
 
-	verifyDir := func(fr *framework.Framework, pod *v1.Pod, path, mode string, uid, gid *int64) {
-		ginkgo.By(fmt.Sprintf("verify dir %s mode=%s", path, mode))
-		e2evolume.VerifyExecInPodSucceed(fr, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^%s$'", path, mode))
+	// assertDirPerms verifies that a directory at dirPath has the expected
+	// permission bits *and*, when uid/gid are provided, the expected owner.
+	assertDirPerms := func(framework *framework.Framework, pod *v1.Pod, dirPath, expectedMode string, uid, gid *int64) {
+		ginkgo.By(fmt.Sprintf("asserting %s has mode=%s", dirPath, expectedMode))
+		e2evolume.VerifyExecInPodSucceed(framework, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^%s$'", dirPath, expectedMode))
 		if uid != nil && gid != nil {
-			e2evolume.VerifyExecInPodSucceed(fr, pod,
-				fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'", path, *uid, *gid))
+			e2evolume.VerifyExecInPodSucceed(framework, pod,
+				fmt.Sprintf("stat -c '%%u %%g' %s | grep '%d %d'", dirPath, *uid, *gid))
 		}
 	}
 
-	verifyFile := func(fr *framework.Framework, pod *v1.Pod, path string) {
-		e2evolume.VerifyExecInPodSucceed(fr, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", path))
+	// assertFilePerms verifies that a regular file has 0644 permissions – the
+	// default enforced by Mountpoint-S3 irrespective of dir-mode settings.
+	assertFilePerms := func(framework *framework.Framework, pod *v1.Pod, filePath string) {
+		e2evolume.VerifyExecInPodSucceed(framework, pod, fmt.Sprintf("stat -c '%%a' %s | grep -q '^644$'", filePath))
 	}
 
 	ginkgo.BeforeEach(func(ctx context.Context) {
-		l = local{}
-		l.config = driver.PrepareTest(ctx, f)
+		testRegistry = TestResourceRegistry{}
+		testRegistry.config = driver.PrepareTest(ctx, testFramework)
 		ginkgo.DeferCleanup(cleanup)
 	})
 
@@ -121,21 +126,21 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Files: 0644 (`-rw-r--r--`) permissions (unaffected by dir-mode)
 	// - Ownership: matches specified uid/gid
 	ginkgo.It("should default directories to 0755 when dir‑mode not set", func(ctx context.Context) {
-		res := BuildVolumeWithOptions(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "")
-		l.resources = append(l.resources, res)
+		res := BuildVolumeWithOptions(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "")
+		testRegistry.resources = append(testRegistry.resources, res)
 
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		dir := "/mnt/volume1/testdir"
-		CreateDirInPod(f, pod, dir)
+		CreateDirInPod(testFramework, pod, dir)
 		file := fmt.Sprintf("%s/file.txt", dir)
-		CreateFileInPod(f, pod, file, "content")
+		CreateFileInPod(testFramework, pod, file, "content")
 
 		uid, gid := ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup)
-		verifyDir(f, pod, dir, "755", uid, gid)
-		verifyFile(f, pod, file)
+		assertDirPerms(testFramework, pod, dir, "755", uid, gid)
+		assertFilePerms(testFramework, pod, file)
 	})
 
 	// --------------------------------------------------------------------
@@ -157,18 +162,18 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Files: 0644 (`-rw-r--r--`) permissions (unaffected by dir-mode)
 	// - Ownership: matches specified uid/gid
 	ginkgo.It("should apply custom dir‑mode=0700", func(ctx context.Context) {
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0700")
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0700")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		dir := "/mnt/volume1/private"
-		CreateDirInPod(f, pod, dir)
+		CreateDirInPod(testFramework, pod, dir)
 		file := fmt.Sprintf("%s/f.txt", dir)
-		CreateFileInPod(f, pod, file, "x")
+		CreateFileInPod(testFramework, pod, file, "x")
 
-		verifyDir(f, pod, dir, "700", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyFile(f, pod, file) // files remain 0644
+		assertDirPerms(testFramework, pod, dir, "700", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertFilePerms(testFramework, pod, file) // files remain 0644
 	})
 
 	// --------------------------------------------------------------------
@@ -194,21 +199,21 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Files: 0644 (`-rw-r--r--`) permissions on both volumes
 	// - Ownership: matches specified uid/gid on both volumes
 	ginkgo.It("should keep distinct dir‑mode per volume", func(ctx context.Context) {
-		v1Res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0700")
-		v2Res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777")
+		v1Res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0700")
+		v2Res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777")
 
-		pod := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{v1Res.Pvc, v2Res.Pvc}, "")
-		pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		pod := MakeNonRootPodWithVolume(testFramework.Namespace.Name, []*v1.PersistentVolumeClaim{v1Res.Pvc, v2Res.Pvc}, "")
+		pod, err := createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		dir1 := "/mnt/volume1/dir"
 		dir2 := "/mnt/volume2/dir"
-		CreateDirInPod(f, pod, dir1)
-		CreateDirInPod(f, pod, dir2)
+		CreateDirInPod(testFramework, pod, dir1)
+		CreateDirInPod(testFramework, pod, dir2)
 
-		verifyDir(f, pod, dir1, "700", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod, dir2, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, dir1, "700", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, dir2, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 	})
 
 	// --------------------------------------------------------------------
@@ -233,41 +238,41 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Ownership: matches specified uid/gid in both cases
 	ginkgo.It("should update dir permissions after PV mountOptions change", func(ctx context.Context) {
 		// initial PV default
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
 		// first pod
-		pod1 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "writer")
-		pod1, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
+		pod1 := MakeNonRootPodWithVolume(testFramework.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "writer")
+		pod1, err := createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod1)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod1)
 
 		dir := "/mnt/volume1/target"
-		CreateDirInPod(f, pod1, dir)
+		CreateDirInPod(testFramework, pod1, dir)
 
 		// persist the directory for future mounts
 		dummy := fmt.Sprintf("%s/.keep", dir)
-		CreateFileInPod(f, pod1, dummy, "marker")
+		CreateFileInPod(testFramework, pod1, dummy, "marker")
 
-		verifyDir(f, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
 		// update PV -> 0555
-		pv, _ := f.ClientSet.CoreV1().PersistentVolumes().Get(ctx, res.Pv.Name, metav1.GetOptions{})
+		pv, _ := testFramework.ClientSet.CoreV1().PersistentVolumes().Get(ctx, res.Pv.Name, metav1.GetOptions{})
 		pv.Spec.MountOptions = []string{
 			fmt.Sprintf("uid=%d", DefaultNonRootUser),
 			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 			"allow-other",
 			"dir-mode=0555",
 		}
-		_, err = f.ClientSet.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
+		_, err = testFramework.ClientSet.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
 		framework.ExpectNoError(err)
 
 		// second pod
-		pod2 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "reader")
-		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+		pod2 := MakeNonRootPodWithVolume(testFramework.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "reader")
+		pod2, err = createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod2)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod2)
 
-		verifyDir(f, pod2, dir, "555", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod2, dir, "555", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 	})
 
 	// --------------------------------------------------------------------
@@ -295,20 +300,20 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Directory permissions are consistent regardless of nesting level
 	// - Ownership: matches specified uid/gid for all directories
 	ginkgo.It("should apply dir‑mode recursively to new subdirectories", func(ctx context.Context) {
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0711")
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0711")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		paths := []string{
 			"/mnt/volume1/a",
 			"/mnt/volume1/a/b",
 			"/mnt/volume1/a/b/c",
 		}
-		CreateMultipleDirsInPod(f, pod, paths...)
+		CreateMultipleDirsInPod(testFramework, pod, paths...)
 
-		for _, p := range paths {
-			verifyDir(f, pod, p, "711", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		for _, pathItem := range paths {
+			assertDirPerms(testFramework, pod, pathItem, "711", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 		}
 	})
 
@@ -336,22 +341,22 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Permissions remain consistent throughout file operations
 	// - Ownership: matches specified uid/gid throughout
 	ginkgo.It("should preserve dir permissions during copy operations", func(ctx context.Context) {
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777",
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777",
 			"allow-delete", "allow-overwrite")
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		srcDir := "/mnt/volume1/src"
 		dstDir := "/mnt/volume1/dst"
-		CreateMultipleDirsInPod(f, pod, srcDir, dstDir)
+		CreateMultipleDirsInPod(testFramework, pod, srcDir, dstDir)
 
 		file := fmt.Sprintf("%s/f.txt", srcDir)
-		CreateFileInPod(f, pod, file, "data")
-		CopyFileInPod(f, pod, file, fmt.Sprintf("%s/copy.txt", dstDir))
+		CreateFileInPod(testFramework, pod, file, "data")
+		CopyFileInPod(testFramework, pod, file, fmt.Sprintf("%s/copy.txt", dstDir))
 
-		verifyDir(f, pod, srcDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod, dstDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, srcDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, dstDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 	})
 
 	// --------------------------------------------------------------------
@@ -378,11 +383,11 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - Files remain 0644 (`-rw-r--r--`) (driver default for files)
 	// - Ownership: matches specified uid/gid throughout
 	ginkgo.It("should preserve directory permissions during recursive copy operations", func(ctx context.Context) {
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777",
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0777",
 			"allow-delete", "allow-overwrite")
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		// Setup source structure
 		srcDir := "/mnt/volume1/src"
@@ -390,15 +395,15 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 		dstDir := "/mnt/volume1/dst"
 
 		ginkgo.By("Creating source and nested directories")
-		CreateMultipleDirsInPod(f, pod, srcDir, nestedDir, dstDir)
+		CreateMultipleDirsInPod(testFramework, pod, srcDir, nestedDir, dstDir)
 
 		// Add a file in the nested directory
 		nestedFile := fmt.Sprintf("%s/file.txt", nestedDir)
-		CreateFileInPod(f, pod, nestedFile, "nested content")
+		CreateFileInPod(testFramework, pod, nestedFile, "nested content")
 
 		// Perform recursive copy: cp -r src/* dst/
 		ginkgo.By("Recursively copying src to dst")
-		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("cp -r %s/* %s/", srcDir, dstDir))
+		_, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("cp -r %s/* %s/", srcDir, dstDir))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed cp -r: %s", stderr)
 
 		// Paths to verify
@@ -406,13 +411,13 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 		copiedNestedFile := fmt.Sprintf("%s/file.txt", copiedNestedDir)
 
 		// Verify permissions for source and destination dirs
-		verifyDir(f, pod, srcDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod, nestedDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod, dstDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
-		verifyDir(f, pod, copiedNestedDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, srcDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, nestedDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, dstDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, copiedNestedDir, "777", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
 		// Verify the copied file permissions (should be 0644)
-		verifyFile(f, pod, copiedNestedFile)
+		assertFilePerms(testFramework, pod, copiedNestedFile)
 	})
 
 	// --------------------------------------------------------------------
@@ -438,48 +443,48 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	//   the underlying volume is the same and the PV was updated
 	ginkgo.It("should show different dir permissions in concurrent pods based on mount timing", func(ctx context.Context) {
 		// Step 1: Create volume with dir-mode=0755
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
 
 		// Step 2: Start Pod 1
-		pod1 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "early")
-		pod1, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
+		pod1 := MakeNonRootPodWithVolume(testFramework.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "early")
+		pod1, err := createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod1)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod1)
 
 		// Step 3: Pod 1 creates a directory and a marker file
 		dir := "/mnt/volume1/shared"
-		CreateDirInPod(f, pod1, dir)
+		CreateDirInPod(testFramework, pod1, dir)
 		marker := fmt.Sprintf("%s/.marker", dir)
-		CreateFileInPod(f, pod1, marker, "exists")
+		CreateFileInPod(testFramework, pod1, marker, "exists")
 
 		// Verify initial permissions in Pod 1
 		ginkgo.By("Pod 1 sees dir as 0755")
-		verifyDir(f, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
 		// Step 4: Update the PV to dir-mode=0555
-		pv, _ := f.ClientSet.CoreV1().PersistentVolumes().Get(ctx, res.Pv.Name, metav1.GetOptions{})
+		pv, _ := testFramework.ClientSet.CoreV1().PersistentVolumes().Get(ctx, res.Pv.Name, metav1.GetOptions{})
 		pv.Spec.MountOptions = []string{
 			fmt.Sprintf("uid=%d", DefaultNonRootUser),
 			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 			"allow-other",
 			"dir-mode=0555",
 		}
-		_, err = f.ClientSet.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
+		_, err = testFramework.ClientSet.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
 		framework.ExpectNoError(err)
 
 		// Step 5: Start Pod 2 (after PV update)
-		pod2 := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "late")
-		pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+		pod2 := MakeNonRootPodWithVolume(testFramework.Namespace.Name, []*v1.PersistentVolumeClaim{res.Pvc}, "late")
+		pod2, err = createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod2)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod2)
 
 		// Verify permissions in Pod 2
 		ginkgo.By("Pod 2 sees dir as 0555")
-		verifyDir(f, pod2, dir, "555", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod2, dir, "555", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
 		// Re-check Pod 1 to confirm its view did NOT change
 		ginkgo.By("Pod 1 still sees dir as 0755")
-		verifyDir(f, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod1, dir, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 	})
 
 	// --------------------------------------------------------------------
@@ -487,7 +492,7 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	//
 	// This test verifies that directory permissions and ownership are governed
 	// solely by the mount options (dir-mode + uid/gid), and *not* overridden by
-	// the pod’s security context:
+	// the pod's security context:
 	//
 	//      [Pod with SecurityContext]
 	//        |    runAsUser: 3000
@@ -503,17 +508,17 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	// - The created directory has permissions 0700 (`drwx------`) as specified by dir-mode
 	// - The ownership matches the uid/gid from the mount options (3000:4000)
 	// - Confirms that even with a pod security context (runAsUser, fsGroup),
-	//   the ownership and permissions are *fixed* by Mountpoint’s settings
+	//   the ownership and permissions are *fixed* by Mountpoint's settings
 	ginkgo.It("should apply dir-mode consistently with pod security context settings", func(ctx context.Context) {
 		customUID := int64(3000)
 		customGID := int64(4000)
 		runAsNonRoot := true
 
 		// Step 1 Create volume with dir-mode=0700 and matching UID/GID
-		res := createVolume(ctx, l.config, pattern, customUID, customGID, "0700")
+		res := createVolume(ctx, testRegistry.config, pattern, customUID, customGID, "0700")
 
 		// Step 2 Create pod with SecurityContext (runAsUser + fsGroup)
-		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{res.Pvc}, admissionapi.LevelRestricted, "")
+		pod := e2epod.MakePod(testFramework.Namespace.Name, nil, []*v1.PersistentVolumeClaim{res.Pvc}, admissionapi.LevelRestricted, "")
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{
 			RunAsUser:    &customUID,
 			FSGroup:      &customGID,
@@ -523,23 +528,23 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 			},
 		}
 
-		pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		pod, err := createPod(ctx, testFramework.ClientSet, testFramework.Namespace.Name, pod)
 		framework.ExpectNoError(err)
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		// Step 3 Create a directory
 		dirPath := "/mnt/volume1/test-secdir"
-		CreateDirInPod(f, pod, dirPath)
+		CreateDirInPod(testFramework, pod, dirPath)
 
 		// Step 4 Verify directory has 0700 and matches UID/GID
-		verifyDir(f, pod, dirPath, "700", ptr.To(customUID), ptr.To(customGID))
+		assertDirPerms(testFramework, pod, dirPath, "700", ptr.To(customUID), ptr.To(customGID))
 	})
 
 	// --------------------------------------------------------------------
 	// 10. Chown operation disallowed
 	//
 	// This test verifies that directory ownership cannot be changed after mount,
-	// consistent with Mountpoint-S3’s design where UID/GID are fixed at mount time
+	// consistent with Mountpoint-S3's design where UID/GID are fixed at mount time
 	// and not mutable by tools like `chown`.
 	//
 	//      [Pod]
@@ -558,24 +563,24 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	//     - Or "Operation not supported" (ENOTSUP)
 	// - The directory ownership remains unchanged after the failed attempt
 	//
-	// Note: This aligns with Mountpoint-S3’s documented behavior that metadata like
+	// Note: This aligns with Mountpoint-S3's documented behavior that metadata like
 	// ownership cannot be altered post-mount via filesystem commands
 	ginkgo.It("should not allow chown to change directory ownership", func(ctx context.Context) {
-		res := createVolume(ctx, l.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0755")
 
-		pod, err := CreatePodWithVolumeAndSecurity(ctx, f, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
 		// Create a test directory
 		dirPath := "/mnt/volume1/chown-test-dir"
-		CreateDirInPod(f, pod, dirPath)
+		CreateDirInPod(testFramework, pod, dirPath)
 
 		// Verify initial ownership
-		verifyDir(f, pod, dirPath, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+		assertDirPerms(testFramework, pod, dirPath, "755", ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
 		ginkgo.By("Attempting chown to 9999:9999 (should fail)")
-		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("chown 9999:9999 %s", dirPath))
+		_, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("chown 9999:9999 %s", dirPath))
 
 		// We expect chown to fail (Mountpoint does not support changing ownership)
 		gomega.Expect(err).To(gomega.HaveOccurred())
@@ -586,4 +591,348 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 			gomega.ContainSubstring("Operation not supported"),
 		), fmt.Sprintf("unexpected chown error message: %s", stderr))
 	})
+
+	// 11. Chmod operation (directory)
+	//
+	// This test verifies that chmod on a directory inside the S3 volume
+	// appears to succeed but is a no-op: the mode bits remain unchanged.
+	//
+	// This mirrors the behavior seen with files, except:
+	// - For files: chmod fails (EPERM / ENOTSUP)
+	// - For directories: chmod succeeds but has no effect
+	//
+	// Test scenario:
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with dir-mode=0700]
+	//        |
+	//        ↓
+	//    [Directory]
+	//
+	// Expected results:
+	// - The directory is created with initial mode 0700
+	// - chmod 0777 runs without error (no EPERM / ENOTSUP)
+	// - stat shows the mode is still 0700 (no change)
+	//
+	// This confirms Mountpoint-S3 enforces directory permission immutability
+	// in the same way as file immutability but differs in syscall response:
+	// it accepts chmod for dirs but freezes the actual metadata.
+	ginkgo.It("should silently ignore chmod on directories (no-op)", func(ctx context.Context) {
+		res := createVolume(ctx, testRegistry.config, pattern, DefaultNonRootUser, DefaultNonRootGroup, "0700")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "", DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		dirPath := "/mnt/volume1/chmod-test-dir"
+		CreateDirInPod(testFramework, pod, dirPath)
+
+		// Check initial permissions
+		initialPerms, _, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("stat -c '%%a' %s", dirPath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(initialPerms)).To(gomega.Equal("700"))
+
+		// Attempt chmod to change perms (should succeed but not take effect)
+		_, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("chmod 0777 %s", dirPath))
+		framework.ExpectNoError(err, "chmod failed unexpectedly: %s", stderr)
+
+		// Confirm permissions remain unchanged
+		afterPerms, _, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("stat -c '%%a' %s", dirPath))
+		framework.ExpectNoError(err)
+		gomega.Expect(strings.TrimSpace(afterPerms)).To(gomega.Equal("700"),
+			"chmod succeeded but did not actually change directory mode")
+	})
+
+	// --------------------------------------------------------------------
+	// 12. Pod umask MUST NOT override dir‑mode
+	//
+	// Mountpoint‑S3 applies the dir‑mode given at mount time and ignores
+	// the process umask when creating new directories.
+	//
+	// Test scenario:
+	//
+	//     [Pod] umask 077
+	//         │
+	//         ▼
+	//    mkdir /mnt/volume1/umask‑dir
+	//         │
+	//         ▼
+	//  [S3 Volume] (dir‑mode = 0755)
+	//
+	// Expectations:
+	// - mkdir succeeds inside the volume even with a restrictive umask
+	// - stat shows permissions 0755 (driver‑enforced), not 0700
+	// - UID/GID match the mount options (1001/2000 by default)
+	//
+	// This mirrors the file‑side umask test and proves the driver's
+	// directory‑permission logic is immune to container umask settings.
+	ginkgo.It("should override pod umask and honour dir‑mode", func(ctx context.Context) {
+		// Build volume with dir‑mode=0755
+		res := createVolume(ctx, testRegistry.config, pattern,
+			DefaultNonRootUser,  // uid
+			DefaultNonRootGroup, // gid
+			"0755")              // dir‑mode
+
+		// Pod runs as the same non‑root UID/GID
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		framework.ExpectNoError(err)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		dir := "/mnt/volume1/umask-dir"
+
+		// Inside the container, set a *restrictive* umask then mkdir
+		_, _, err = e2evolume.PodExec(testFramework, pod,
+			fmt.Sprintf(`sh -c 'umask 077; mkdir %s'`, dir))
+		framework.ExpectNoError(err, "mkdir with umask 077 failed")
+
+		// Verify the directory got the mount‑option mode (0755), not 0700
+		assertDirPerms(testFramework, pod, dir, "755",
+			ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+	})
+
+	// --------------------------------------------------------------------
+	// 13. mkdir -m mode flag is ignored, dir-mode prevails
+	//
+	// Applications may use `mkdir -m MODE` to try setting specific bits,
+	// but Mountpoint-S3 enforces that only the mount option's dir-mode
+	// controls permissions, ignoring explicit chmod requests.
+	//
+	// Test scenario:
+	//
+	//     dir-mode = 0700 (mount option)
+	//          │
+	//     mkdir -m 0777 /mnt/volume1/app-dir
+	//          │
+	//          ▼
+	//     stat shows 0700, NOT 0777
+	//
+	// Expectations:
+	// - mkdir succeeds (no error)
+	// - The actual permissions are 0700 (from dir-mode mount option)
+	// - The explicitly requested 0777 is silently ignored
+	//
+	// Why this matters:
+	// Applications expecting to control permissions via mkdir -m
+	// must adapt to S3's storage model where permissions are
+	// set at mount time and immutable afterward.
+	ginkgo.It("should ignore mkdir -m requested mode and apply dir‑mode", func(ctx context.Context) {
+		// 1. Provision volume with a *restrictive* dir‑mode
+		res := createVolume(ctx, testRegistry.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0700")
+
+		// 2. Run as the same non‑root user
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		framework.ExpectNoError(err)
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		appDir := "/mnt/volume1/app-dir"
+
+		// 3. Application tries to create directory with explicit 0777 bits
+		_, _, err = e2evolume.PodExec(testFramework, pod,
+			fmt.Sprintf(`mkdir -m 0777 %s`, appDir))
+		framework.ExpectNoError(err, "mkdir -m 0777 failed")
+
+		// 4. Verify driver stamped the configured 0700, *not* 0777
+		assertDirPerms(testFramework, pod, appDir, "700",
+			ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
+	})
+
+	// --------------------------------------------------------------------
+	// 14. mv/rename MUST fail (directories)
+	//
+	// S3 has no native support for directory renames. Mountpoint‑S3 must
+	// reject mv/rename operations on directories, returning a clear error
+	// (e.g., EXDEV / EPERM / ENOTSUP).
+	//
+	// Test scenario:
+	//
+	//     mkdir /mnt/volume1/srcdir
+	//          │
+	//     mv /mnt/volume1/srcdir /mnt/volume1/dstdir
+	//          │
+	//          ▼
+	//     FAILS with:
+	//       - "Operation not permitted"
+	//       - "Operation not supported"
+	//       - "Function not implemented"
+	//
+	// Expectations:
+	// - mv/rename fails (exit code != 0)
+	// - Error message matches expected patterns (see above)
+	// - srcdir still exists (directory untouched)
+	// - dstdir does NOT exist (rename did not partially succeed)
+	// - Metadata (permissions, ownership) of srcdir unchanged
+	//
+	// Why this matters:
+	// This ensures the driver does not silently emulate rename via copy+delete
+	// or perform partial / broken renames, preserving S3's semantics and
+	// avoiding dangerous race conditions.
+	ginkgo.It("should fail mv/rename of directory with ENOTSUP or equivalent", func(ctx context.Context) {
+		// Set up volume + pod as before...
+		res := createVolume(ctx, testRegistry.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0700")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		src := "/mnt/volume1/srcdir"
+		dst := "/mnt/volume1/dstdir"
+
+		// 1: create the source directory
+		CreateDirInPod(testFramework, pod, src)
+
+		// 2: try the mv and expect failure
+		_, stderr, mvErr := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("mv %s %s", src, dst))
+
+		// The mv MUST fail
+		gomega.Expect(mvErr).To(gomega.HaveOccurred(), "mv/rename unexpectedly succeeded")
+
+		// It must fail for the *correct reason*
+		expectErr := gomega.Or(
+			gomega.ContainSubstring("Operation not permitted"),
+			gomega.ContainSubstring("Operation not supported"),
+			gomega.ContainSubstring("Function not implemented"),
+		)
+		gomega.Expect(stderr).To(expectErr)
+
+		// Validate that srcdir is still there and unchanged
+		_, _, err = e2evolume.PodExec(testFramework, pod, fmt.Sprintf("test -d %s", src))
+		framework.ExpectNoError(err, "srcdir vanished after failed mv")
+
+		// Confirm dst dir does NOT exist
+		_, _, err = e2evolume.PodExec(testFramework, pod, fmt.Sprintf("test -d %s", dst))
+		gomega.Expect(err).To(gomega.HaveOccurred(), "dstdir unexpectedly created after failed mv")
+	})
+
+	// --------------------------------------------------------------------
+	// 15. access() syscall: Consistency with stat() permissions
+	//
+	// The access() syscall checks file accessibility based on real UID/GID
+	// and is subtly different from stat(). This test ensures Mountpoint‑S3
+	// reports consistent permission results between both syscalls.
+	//
+	// Test scenario:
+	//
+	//     dir‑mode = 0700
+	//          │
+	//     mkdir /mnt/volume1/permsdir
+	//          │
+	//          ▼
+	//     1. stat shows 0700 permissions
+	//     2. test -r: succeeds (read allowed)
+	//     3. test -w: succeeds (write allowed)
+	//     4. test -x: succeeds (exec allowed)
+	//
+	// Expectations:
+	// - stat correctly reports 0700 permissions for the directory
+	// - access() permissions via test -r/-w/-x match what stat reports
+	// - No inconsistencies between syscalls' permission handling
+	//
+	// Why this matters:
+	// Applications rely on both syscalls for permission checks;
+	// they must be consistent or applications could malfunction.
+	ginkgo.It("should report consistent permissions via access() and stat() syscalls", func(ctx context.Context) {
+		// Set up volume + pod as before...
+		res := createVolume(ctx, testRegistry.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0700")
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		dir := "/mnt/volume1/permsdir"
+
+		// Create the directory
+		CreateDirInPod(testFramework, pod, dir)
+
+		// Get mode using stat()
+		statMode, _, _ := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("stat -c '%%a' %s", dir))
+
+		// Now test access() permissions: check readability (R_OK), writability (W_OK), executability (X_OK)
+		_, _, errR := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("sh -c 'test -r %s'", dir))
+		_, _, errW := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("sh -c 'test -w %s'", dir))
+		_, _, errX := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("sh -c 'test -x %s'", dir))
+
+		// Convert the numeric mode into the expected permission bits
+		// For 0700, expect R/W/X succeed for owner; fail for others
+		expectedMode := strings.TrimSpace(statMode)
+		gomega.Expect(expectedMode).To(gomega.Equal("700"))
+
+		// Confirm access() matches: we expect R/W/X to succeed
+		gomega.Expect(errR).NotTo(gomega.HaveOccurred(), "access(R_OK) failed unexpectedly")
+		gomega.Expect(errW).NotTo(gomega.HaveOccurred(), "access(W_OK) failed unexpectedly")
+		gomega.Expect(errX).NotTo(gomega.HaveOccurred(), "access(X_OK) failed unexpectedly")
+	})
+
+	// --------------------------------------------------------------------
+	// 16. Directory Name Edge Cases (Full Path Test)
+	//
+	// This test ensures that Mountpoint-S3 can handle directories with
+	// complex names (Unicode, long names, special characters) and that
+	// full read/write functionality inside these directories works.
+	//
+	// Why? S3 key encoding applies to directory paths just like files,
+	// and we must ensure the driver isn't mishandling edge cases.
+	//
+	// Test steps for each case:
+	//
+	// ┌─────────────────────────────────────────────────────────────┐
+	// │ 1. mkdir <dir>                                              │
+	// │ 2. stat <dir>                                               │
+	// │ 3. touch <dir>/.marker  (store 'ok' text in the file)       │
+	// │ 4. cat <dir>/.marker    (read it back to confirm)           │
+	// │                                                             │
+	// │ Directory cases:                                            │
+	// │  - unicode-🚀🌟                                             │
+	// │  - long-(200 chars)                                         │
+	// │  - special-!@#$%^&()[]{}=+,~                                │
+	// └─────────────────────────────────────────────────────────────┘
+	//
+	// Expected:
+	// - mkdir, stat, write, and read all succeed.
+	// - Marker file content is correct ("ok").
+	// - No path encoding errors.
+	//
+	// This tests full end-to-end path handling, not just directory creation.
+	//
+	ginkgo.It("should support unicode / long / special‑char directory names with file storage", func(ctx context.Context) {
+		res := createVolume(ctx, testRegistry.config, pattern,
+			DefaultNonRootUser, DefaultNonRootGroup, "0700")
+
+		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
+			DefaultNonRootUser, DefaultNonRootGroup)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
+
+		dirs := []string{
+			"/mnt/volume1/unicode-🚀🌟",
+			"/mnt/volume1/long-" + strings.Repeat("x", 200),
+			"/mnt/volume1/special-!@#$%^&()[]{}=+,~",
+		}
+
+		for _, dir := range dirs {
+			ginkgo.By(fmt.Sprintf("Creating and testing directory: %s", dir))
+
+			// 1: Create directory
+			CreateDirInPod(testFramework, pod, dir)
+
+			// 2: Stat the directory
+			_, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("stat '%s'", dir))
+			framework.ExpectNoError(err, fmt.Sprintf("stat failed for %s: %s", dir, stderr))
+
+			// 3: Create marker file inside
+			marker := fmt.Sprintf("%s/.marker", dir)
+			CreateFileInPod(testFramework, pod, marker, "ok")
+
+			// 4: Confirm file exists and content is correct
+			out, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("cat '%s'", marker))
+			framework.ExpectNoError(err, fmt.Sprintf("reading .marker failed in %s: %s", dir, stderr))
+			gomega.Expect(strings.TrimSpace(out)).To(gomega.Equal("ok"), fmt.Sprintf("unexpected marker content in %s", dir))
+		}
+	})
+
+	// TODO(S3CSI-72): Add attr test adter changing image to alpine
 }
