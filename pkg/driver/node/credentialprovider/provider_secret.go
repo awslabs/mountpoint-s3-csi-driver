@@ -32,7 +32,8 @@ Validation rules (loosened for cloudserver test credentials):
 The patterns are supersets of AWS IAM and permit shorter dummy keys.
 */
 var (
-	accessKeyIDRe     = regexp.MustCompile(`^[A-Z0-9]{1,` + strconv.Itoa(maxAccessKeyIDLen) + `}$`)
+	// accept upper‑ or lower‑case letters so test keys like "accessKey2" pass
+	accessKeyIDRe     = regexp.MustCompile(`^[A-Za-z0-9]{1,` + strconv.Itoa(maxAccessKeyIDLen) + `}$`)
 	secretAccessKeyRe = regexp.MustCompile(`^[A-Za-z0-9/+=]{1,` + strconv.Itoa(maxSecretAccessKeyLen) + `}$`)
 )
 
@@ -54,7 +55,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 	if okID {
 		id = strings.TrimSpace(id)
 		if !accessKeyIDRe.MatchString(id) {
-			klog.Warningf("credentialprovider: key_id %q is not uppercase alphanumeric or exceeds %d chars",
+			klog.Warningf("credentialprovider: key_id %q is not alphanumeric or exceeds %d chars",
 				id, maxAccessKeyIDLen)
 			okID = false
 		}
