@@ -21,6 +21,28 @@ var (
 	mpPodLocksMutex sync.Mutex
 )
 
+// lockMountpointPod acquires a lock for the specified pod UID and returns an unlock function.
+// The returned function must be called to release the lock and cleanup resources.
+//
+// Parameters:
+//   - uid: The unique identifier of the Mountpoint Pod to lock
+//
+// Returns:
+//   - func(): A function that when called will unlock the pod and release associated resources
+//
+// Usage:
+//
+//	unlock := lockMountpointPod(podUID)
+//	defer unlock()
+func lockMountpointPod(uid string) func() {
+	mpPodLock := getMPPodLock(uid)
+	mpPodLock.mutex.Lock()
+	return func() {
+		mpPodLock.mutex.Unlock()
+		releaseMPPodLock(uid)
+	}
+}
+
 // getMPPodLock retrieves or creates a lock for the specified pod UID.
 // It increments the reference count for existing locks.
 // The caller is responsible for calling releaseMPPodLock when the lock is no longer needed.

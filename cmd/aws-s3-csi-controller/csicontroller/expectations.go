@@ -63,9 +63,9 @@ func deriveExpectationKeyFromFilters(fieldFilters client.MatchingFields) string 
 	var sb strings.Builder
 	for _, k := range keys {
 		sb.WriteString(k)
-		sb.WriteString("=")
+		sb.WriteRune('=')
 		sb.WriteString(fieldFilters[k])
-		sb.WriteString(";")
+		sb.WriteRune(';')
 	}
 	return sb.String()
 }

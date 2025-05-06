@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/go-logr/logr"
@@ -253,7 +254,7 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 		crdv1beta.FieldAuthenticationSource: authSource,
 	}
 
-	if authSource == "pod" {
+	if authSource == credentialprovider.AuthenticationSourcePod {
 		fieldFilters[crdv1beta.FieldWorkloadNamespace] = workloadPod.Namespace
 		fieldFilters[crdv1beta.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
 		fieldFilters[crdv1beta.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
@@ -267,8 +268,8 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 func (r *Reconciler) getAuthSource(pv *corev1.PersistentVolume) string {
 	volumeAttributes := mppod.ExtractVolumeAttributes(pv)
 	authSource := volumeAttributes[volumecontext.AuthenticationSource]
-	if authSource == "" {
-		return "driver"
+	if authSource == credentialprovider.AuthenticationSourceUnspecified {
+		return credentialprovider.AuthenticationSourceDriver
 	}
 	return authSource
 }
@@ -329,7 +330,7 @@ func (r *Reconciler) handleExistingS3PodAttachment(ctx context.Context, s3pa *cr
 }
 
 // addWorkloadToS3PodAttachment adds workload UID to the first Mountpoint Pod in the map
-// TODO: We will later add extra logic for selecting/creating MPPod if existing MP Pods are using old CSI Driver version or have some "no-new-attachments" annotation
+// TODO: We will later add extra logic for selecting/creating MPPod if existing MP Pods are using old CSI Driver version or have some "no-new-attachments" or "needs-unmount" annotation
 func (r *Reconciler) addWorkloadToS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
 

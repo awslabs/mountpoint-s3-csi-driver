@@ -2,7 +2,6 @@ package csicontroller
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
@@ -18,7 +17,6 @@ const (
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
 type StaleAttachmentCleaner struct {
 	reconciler *Reconciler
-	mutex      sync.Mutex
 }
 
 // NewStaleAttachmentCleaner creates a new StaleAttachmentCleaner
@@ -48,12 +46,6 @@ func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
 
 // runCleanup performs cleanup operation
 func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
-	// Ensure only one cleanup runs at a time
-	if !cm.mutex.TryLock() {
-		return nil
-	}
-	defer cm.mutex.Unlock()
-
 	log := logf.FromContext(ctx)
 
 	// Get all pods in the cluster

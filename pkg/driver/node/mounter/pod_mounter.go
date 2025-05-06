@@ -109,12 +109,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		mpPodUID := filepath.Base(source)
 		podPath := pm.podPath(mpPodUID)
 
-		mpPodLock := getMPPodLock(mpPodUID)
-		mpPodLock.mutex.Lock()
-		defer func() {
-			mpPodLock.mutex.Unlock()
-			releaseMPPodLock(mpPodUID)
-		}()
+		unlockMountpointPod := lockMountpointPod(mpPodUID)
+		defer unlockMountpointPod()
 
 		pm.provideCredentials(ctx, podPath, credentialCtx)
 
@@ -139,12 +135,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
 	mpPodUID := string(pod.UID)
-	mpPodLock := getMPPodLock(mpPodUID)
-	mpPodLock.mutex.Lock()
-	defer func() {
-		mpPodLock.mutex.Unlock()
-		releaseMPPodLock(mpPodUID)
-	}()
+	unlockMountpointPod := lockMountpointPod(mpPodUID)
+	defer unlockMountpointPod()
 
 	source := filepath.Join(pm.sourceMountDir, mpPodUID)
 

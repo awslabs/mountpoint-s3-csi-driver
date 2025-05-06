@@ -265,7 +265,7 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 	}
 
 	authSource := credentialprovider.AuthenticationSourceDriver
-	if volumeCtx[volumecontext.AuthenticationSource] != "" {
+	if volumeCtx[volumecontext.AuthenticationSource] != credentialprovider.AuthenticationSourceUnspecified {
 		authSource = volumeCtx[volumecontext.AuthenticationSource]
 	}
 

@@ -15,7 +15,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const cleanupInterval = 10 * time.Second
+const cleanupInterval = 2 * time.Minute
 
 // PodUnmounter handles unmounting of Mountpoint Pods and cleanup of associated resources
 type PodUnmounter struct {
@@ -64,12 +64,8 @@ func (u *PodUnmounter) HandleMountpointPodUpdate(old, new any) {
 // mpPod: The Mountpoint Pod to unmount
 func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	mpPodUID := string(mpPod.UID)
-	mpPodLock := getMPPodLock(mpPodUID)
-	mpPodLock.mutex.Lock()
-	defer func() {
-		mpPodLock.mutex.Unlock()
-		releaseMPPodLock(mpPodUID)
-	}()
+	unlockMountpointPod := lockMountpointPod(mpPodUID)
+	defer unlockMountpointPod()
 
 	klog.Infof("Found Mountpoint Pod %s (UID: %s) with %s annotation, unmounting it", mpPod.Name, mpPodUID, mppod.AnnotationNeedsUnmount)
 
