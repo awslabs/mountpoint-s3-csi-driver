@@ -1,6 +1,8 @@
 package mounter
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -160,7 +162,12 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 
 	entries, err := os.ReadDir(u.sourceMountDir)
 	if err != nil {
-		klog.Errorf("Failed to read source mount directory (`%s`): %v", u.sourceMountDir, err)
+		// Source mount dir does not exists, meaning there aren't any mounts
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+
+		klog.Errorf("Failed to read source mount directory %q: %v", u.sourceMountDir, err)
 		return err
 	}
 
