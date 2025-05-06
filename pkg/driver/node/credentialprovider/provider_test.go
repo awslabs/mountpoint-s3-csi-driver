@@ -28,12 +28,16 @@ const testSessionToken = "test-session-token"
 const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
 const testWebIdentityToken = "test-web-identity-token"
 
+const testContainerAuthorizationToken = "test-container-authorization-token"
+const testContainerCredentialsFullURI = "http://169.254.170.23/v1/credentials"
+
 const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
 const testVolumeID = "test-vol"
 const testProfilePrefix = testPodID + "-" + testVolumeID + "-"
 
 const testPodLevelServiceAccountToken = testPodID + "-" + testVolumeID + ".token"
-const testDriverLevelServiceAccountToken = "token"
+const testWebIdentityServiceAccountToken = "token"
+const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
 
 const testPodServiceAccount = "test-sa"
 const testPodNamespace = "test-ns"
@@ -98,9 +102,27 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
 				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
+				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 			}, env)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+		}
+	})
+
+	t.Run("only container credentials", func(t *testing.T) {
+		for _, authSource := range authenticationSourceVariants {
+			setEnvForContainerCredentials(t)
+
+			writePath := t.TempDir()
+			provideCtx := provideCtx(t, writePath, authSource)
+
+			env, source, err := provider.Provide(context.Background(), provideCtx)
+			assert.NoError(t, err)
+			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+			assert.Equals(t, envprovider.Environment{
+				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+			}, env)
+			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
 		}
 	})
 
@@ -148,10 +170,55 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				"AWS_CONFIG_FILE":             "/test-env/" + testProfilePrefix + "s3-csi-config",
 				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testProfilePrefix + "s3-csi-credentials",
 				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
+				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 			}, env)
 			assertLongTermCredentials(t, writePath)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+		}
+	})
+
+	t.Run("long-term and container credentials", func(t *testing.T) {
+		for _, authSource := range authenticationSourceVariants {
+			setEnvForLongTermCredentials(t)
+			setEnvForContainerCredentials(t)
+
+			writePath := t.TempDir()
+			provideCtx := provideCtx(t, writePath, authSource)
+
+			env, source, err := provider.Provide(context.Background(), provideCtx)
+			assert.NoError(t, err)
+			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+			assert.Equals(t, envprovider.Environment{
+				"AWS_PROFILE":                            testProfilePrefix + "s3-csi",
+				"AWS_CONFIG_FILE":                        "/test-env/" + testProfilePrefix + "s3-csi-config",
+				"AWS_SHARED_CREDENTIALS_FILE":            "/test-env/" + testProfilePrefix + "s3-csi-credentials",
+				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+			}, env)
+			assertLongTermCredentials(t, writePath)
+			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+		}
+	})
+
+	t.Run("sts web identity credentials and containter credentials", func(t *testing.T) {
+		for _, authSource := range authenticationSourceVariants {
+			setEnvForContainerCredentials(t)
+			setEnvForStsWebIdentityCredentials(t)
+
+			writePath := t.TempDir()
+			provideCtx := provideCtx(t, writePath, authSource)
+
+			env, source, err := provider.Provide(context.Background(), provideCtx)
+			assert.NoError(t, err)
+			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+			assert.Equals(t, envprovider.Environment{
+				"AWS_ROLE_ARN":                           testRoleARN,
+				"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+			}, env)
+			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
 	})
 
@@ -206,6 +273,31 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		// Only set token file without role ARN
 		tokenPath := filepath.Join(t.TempDir(), "token")
 		assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
+		t.Setenv("AWS_ROLE_ARN", "")
+		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
+
+		env, source, err = provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+		assert.Equals(t, envprovider.Environment{}, env)
+	})
+
+	t.Run("incomplete container credentials", func(t *testing.T) {
+		// Only set container credentials full URI without token file
+		t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
+
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		provideCtx := provideCtx(t, t.TempDir(), credentialprovider.AuthenticationSourceDriver)
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+		assert.Equals(t, envprovider.Environment{}, env)
+
+		// Only set token file without role ARN
+		tokenPath := filepath.Join(t.TempDir(), "token")
+		assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
 		t.Setenv("AWS_ROLE_ARN", "")
 		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
 
@@ -817,6 +909,16 @@ func TestCleanup(t *testing.T) {
 
 //-- Utilities for tests
 
+func provideCtx(t *testing.T, writePath string, authSource string) credentialprovider.ProvideContext {
+	return credentialprovider.ProvideContext{
+		AuthenticationSource: authSource,
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		PodID:                testPodID,
+		VolumeID:             testVolumeID,
+	}
+}
+
 func setEnvForLongTermCredentials(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
 	t.Setenv("AWS_SECRET_ACCESS_KEY", testSecretAccessKey)
@@ -848,12 +950,32 @@ func setEnvForStsWebIdentityCredentials(t *testing.T) {
 	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
 }
 
+func setEnvForContainerCredentials(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("MOUNTER_KIND", "pod")
+
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
+
+	t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", tokenPath)
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
+}
+
 func assertWebIdentityTokenFile(t *testing.T, path string) {
 	t.Helper()
 
 	got, err := os.ReadFile(path)
 	assert.NoError(t, err)
 	assert.Equals(t, []byte(testWebIdentityToken), got)
+}
+
+func assertContainerTokenFile(t *testing.T, path string) {
+	t.Helper()
+
+	got, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Equals(t, []byte(testContainerAuthorizationToken), got)
 }
 
 type tokens = map[string]struct {
