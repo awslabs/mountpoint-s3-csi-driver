@@ -10,6 +10,7 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
@@ -149,7 +150,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				return dummyIMDSRegion, nil
 			})
 
-			unmounter := mounter.NewPodUnmounter(tt.nodeID, fakeMounter, podWatcher, credProvider, sourceMountDir)
+			unmounter := mounter.NewPodUnmounter(tt.nodeID, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider, sourceMountDir)
 			unmounter.HandleMountpointPodUpdate(nil, tt.pod)
 
 			unmountCalls := countUnmountCalls(fakeMounter)
@@ -261,7 +262,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				return dummyIMDSRegion, nil
 			})
 
-			unmounter := mounter.NewPodUnmounter(nodeName, fakeMounter, podWatcher, credProvider, sourceMountDir)
+			unmounter := mounter.NewPodUnmounter(nodeName, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider, sourceMountDir)
 			err := unmounter.CleanupDanglingMounts()
 			assert.NoError(t, err)
 

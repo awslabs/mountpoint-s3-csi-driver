@@ -7,19 +7,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -36,16 +35,16 @@ const targetDirPerm = fs.FileMode(0755)
 
 // mountSyscall is the function that performs `mount` operation for given `target` with given Mountpoint `args`.
 // It returns mounted FUSE file descriptor as a result.
-// This is mainly exposed for testing, in production platform-native function (`mountSyscallDefault`) will be used.
+// This is mainly exposed for testing, in production platform-native function (`mpmounter.Mount`) will be used.
 type mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
 type bindMountSyscall func(source, target string) (err error)
-type sourceMountPointFinder func(mounter mount.Interface, target, sourceMountDir string) (string, error)
+type sourceMountPointFinder func(target, sourceMountDir string) (string, error)
 
 // A PodMounter is a [Mounter] that mounts Mountpoint on pre-created Kubernetes Pod running in the same node.
 type PodMounter struct {
 	podWatcher             *watcher.Watcher
 	s3paCache              cache.Cache
-	mount                  mount.Interface
+	mount                  *mpmounter.Mounter
 	kubeletPath            string
 	sourceMountDir         string
 	mountSyscall           mountSyscall
@@ -57,7 +56,7 @@ type PodMounter struct {
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount mount.Interface,
+func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount *mpmounter.Mounter,
 	mountSyscall mountSyscall, bindMountSyscall bindMountSyscall, sourceMountPointFinder sourceMountPointFinder, kubernetesVersion, nodeID,
 	sourceMountDir string) (*PodMounter, error) {
 	return &PodMounter{
@@ -92,14 +91,12 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
 	}
 
-	err = pm.verifyOrSetupMountTarget(target)
-	if err != nil {
-		return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
-	}
-
 	isTargetMountPoint, err := pm.IsMountPoint(target)
 	if err != nil {
-		return fmt.Errorf("Could not check if %q is already a mount point: %w", target, err)
+		err = pm.verifyOrSetupMountTarget(target, err)
+		if err != nil {
+			return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
+		}
 	}
 
 	if isTargetMountPoint {
@@ -150,14 +147,13 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	}()
 
 	source := filepath.Join(pm.sourceMountDir, mpPodUID)
-	err = pm.verifyOrSetupMountTarget(source)
-	if err != nil {
-		return fmt.Errorf("Failed to verify source path can be used as a mount point %q: %w", source, err)
-	}
 
 	isSourceMountPoint, err := pm.IsMountPoint(source)
 	if err != nil {
-		return fmt.Errorf("Could not check if %q is already a mount point: %w", source, err)
+		err = pm.verifyOrSetupMountTarget(source, err)
+		if err != nil {
+			return fmt.Errorf("Failed to verify source path can be used as a mount point %q: %w", source, err)
+		}
 	}
 
 	// Note that this part happens before `isMountPoint` check, as we want to update credentials even though
@@ -293,17 +289,16 @@ func (pm *PodMounter) Unmount(_ context.Context, target string, _ credentialprov
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
-	// TODO: Can we just use regular `IsMountPoint` check from `mounter` with containerization?
-	return isMountPoint(pm.mount, target)
+	return pm.mount.CheckMountPoint(target)
 }
 
-// findSourceMountPointWithDefault calls `findSourceMountPoint` on `target`.
+// findSourceMountPointWithDefault calls `FindSourceMountPoint` on `target`.
 func (pm *PodMounter) findSourceMountPointWithDefault(target string) (string, error) {
 	if pm.sourceMountPointFinder != nil {
-		return pm.sourceMountPointFinder(pm.mount, target, pm.sourceMountDir)
+		return pm.sourceMountPointFinder(target, pm.sourceMountDir)
 	}
 
-	return findSourceMountPoint(pm.mount, target, pm.sourceMountDir)
+	return pm.mount.FindSourceMountPoint(target, pm.sourceMountDir)
 }
 
 // waitForMountpointPod waits until Mountpoint Pod for given `podName` is in `Running` state.
@@ -368,7 +363,7 @@ func (pm *PodMounter) waitForMount(parentCtx context.Context, target, podName, p
 
 // closeFUSEDevFD closes given FUSE file descriptor.
 func (pm *PodMounter) closeFUSEDevFD(fd int) {
-	err := syscall.Close(fd)
+	err := mpmounter.CloseFD(fd)
 	if err != nil {
 		klog.V(4).Infof("Mount: Failed to close /dev/fuse file descriptor %d: %v\n", fd, err)
 	}
@@ -377,12 +372,7 @@ func (pm *PodMounter) closeFUSEDevFD(fd int) {
 // verifyOrSetupMountTarget checks target path for existence and corrupted mount error.
 // If the target dir does not exists it tries to create it.
 // If the target dir is corrupted (decided with `mount.IsCorruptedMnt`) it tries to unmount it to have a clean mount.
-func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
-	err := verifyMountPointStatx(target)
-	if err == nil {
-		return nil
-	}
-
+func (pm *PodMounter) verifyOrSetupMountTarget(target string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		klog.V(5).Infof("Target path does not exists %s, trying to create", target)
 		if err := os.MkdirAll(target, targetDirPerm); err != nil {
@@ -390,7 +380,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 		}
 
 		return nil
-	} else if mount.IsCorruptedMnt(err) {
+	} else if pm.mount.IsMountPointCorrupted(err) {
 		klog.V(4).Infof("Target path %q is a corrupted mount. Trying to unmount", target)
 		if unmountErr := pm.unmountTarget(target); unmountErr != nil {
 			klog.V(4).Infof("Failed to unmount target path %q: %v, original failure of stat: %v", target, unmountErr, err)
@@ -400,6 +390,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string) error {
 		return nil
 	}
 
+	// Some other error that we cannot recover from, just propagate it.
 	return err
 }
 
@@ -439,22 +430,26 @@ func (pm *PodMounter) podPath(podUID string) string {
 	return filepath.Join(pm.kubeletPath, "pods", podUID)
 }
 
-// mountSyscallWithDefault delegates to `mountSyscall` if set, or fallbacks to platform-native `mountSyscallDefault`.
+// mountSyscallWithDefault delegates to `mountSyscall` if set, or fallbacks to platform-native `mpmounter.Mount`.
 func (pm *PodMounter) mountSyscallWithDefault(target string, args mountpoint.Args) (int, error) {
 	if pm.mountSyscall != nil {
 		return pm.mountSyscall(target, args)
 	}
 
-	return pm.mountSyscallDefault(target, args)
+	opts := mpmounter.MountOptions{
+		ReadOnly:   args.Has(mountpoint.ArgReadOnly),
+		AllowOther: args.Has(mountpoint.ArgAllowOther) || args.Has(mountpoint.ArgAllowRoot),
+	}
+	return pm.mount.Mount(target, opts)
 }
 
-// bindMountWithDefault delegates to `bindMountSyscall` if set, or fallbacks to platform-native `bindMountSyscallDefault`.
+// bindMountWithDefault delegates to `bindMountSyscall` if set, or fallbacks to platform-native `mpmounter.BindMount`.
 func (pm *PodMounter) bindMountSyscallWithDefault(source, target string) error {
 	if pm.bindMountSyscall != nil {
 		return pm.bindMountSyscall(source, target)
 	}
 
-	return pm.bindMountSyscallDefault(source, target)
+	return pm.mount.BindMount(source, target)
 }
 
 // unmountTarget calls `unmount` syscall on `target`.

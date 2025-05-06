@@ -41,10 +41,11 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 )
 
 const (
@@ -107,8 +108,8 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var mounterImpl mounter.Mounter
+	mpMounter := mpmounter.New()
 	if util.UsePodMounter() {
-		mountUtil := mount.New("")
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
 		err = podWatcher.Start(stopCh)
 		if err != nil {
@@ -117,20 +118,20 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
 
-		unmounter := mounter.NewPodUnmounter(nodeID, mountUtil, podWatcher, credProvider, mounter.SourceMountDir)
+		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider, mounter.SourceMountDir)
 
 		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
 
 		go unmounter.StartPeriodicCleanup(stopCh)
 
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mountUtil, nil, nil, nil,
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil, nil,
 			kubernetesVersion, nodeID, mounter.SourceMountDir)
 		if err != nil {
 			klog.Fatalln(err)
 		}
 		klog.Infoln("Using pod mounter")
 	} else {
-		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
+		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpMounter, mpVersion, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)
 		}

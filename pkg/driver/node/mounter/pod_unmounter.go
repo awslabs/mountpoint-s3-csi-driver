@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
 )
 
 const cleanupInterval = 10 * time.Second
@@ -20,7 +20,7 @@ const cleanupInterval = 10 * time.Second
 // PodUnmounter handles unmounting of Mountpoint Pods and cleanup of associated resources
 type PodUnmounter struct {
 	nodeID         string
-	mountUtil      mount.Interface
+	mount          *mpmounter.Mounter
 	kubeletPath    string
 	sourceMountDir string
 	podWatcher     *watcher.Watcher
@@ -31,14 +31,14 @@ type PodUnmounter struct {
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
 func NewPodUnmounter(
 	nodeID string,
-	mountUtil mount.Interface,
+	mount *mpmounter.Mounter,
 	podWatcher *watcher.Watcher,
 	credProvider *credentialprovider.Provider,
 	sourceMountDir string,
 ) *PodUnmounter {
 	return &PodUnmounter{
 		nodeID:         nodeID,
-		mountUtil:      mountUtil,
+		mount:          mount,
 		kubeletPath:    util.KubeletPath(),
 		sourceMountDir: sourceMountDir,
 		podWatcher:     podWatcher,
@@ -108,7 +108,7 @@ func (u *PodUnmounter) writeExitFile(podPath string) error {
 // source: Path to the source directory to unmount
 // Returns error if unmounting or cleanup fails
 func (u *PodUnmounter) unmountAndCleanup(source string) error {
-	if err := u.mountUtil.Unmount(source); err != nil {
+	if err := u.mount.Unmount(source); err != nil {
 		klog.Errorf("Failed to unmount source %q: %v", source, err)
 		return err
 	}

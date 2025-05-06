@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -157,8 +158,7 @@ func setup(t *testing.T) *testCtx {
 		return nil
 	}
 
-	findSourceMountPoint := func(mounter mount.Interface, target, sourceMountDir string) (string, error) {
-		fakeMounter := mounter.(*mount.FakeMounter)
+	findSourceMountPoint := func(target, sourceMountDir string) (string, error) {
 		mountPoints, err := fakeMounter.List()
 		if err != nil {
 			return "", fmt.Errorf("failed to list mount points: %w", err)
@@ -187,7 +187,7 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, fakeMounter, mountSyscall,
+	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
 		mountBindSyscall, findSourceMountPoint, testK8sVersion, nodeName, sourceMountDir)
 	assert.NoError(t, err)
 

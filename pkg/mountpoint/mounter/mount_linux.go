@@ -8,15 +8,12 @@ import (
 
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
-
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
 
-// mountSyscallDefault creates a FUSE file descriptor and performs a `mount` syscall with given `target` and mount arguments.
-func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (int, error) {
-	fd, err := syscall.Open("/dev/fuse", os.O_RDWR, 0)
+func mount(target Target, opts MountOptions) (int, error) {
+	fd, err := openFD()
 	if err != nil {
-		return 0, fmt.Errorf("failed to open /dev/fuse: %w", err)
+		return 0, err
 	}
 
 	// This will set false on a success condition and will stay true
@@ -25,7 +22,10 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	closeFd := true
 	defer func() {
 		if closeFd {
-			pm.closeFUSEDevFD(fd)
+			err := CloseFD(fd)
+			if err != nil {
+				klog.ErrorS(err, "failed to close file descriptor", "fd", fd)
+			}
 		}
 	}()
 
@@ -37,25 +37,35 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 
 	options := []string{
 		fmt.Sprintf("fd=%d", fd),
+		// We only keep file type bits from the file mode of the target,
+		// this is also how libfuse decides on `rootmode`.
+		// Mountpoint has `--file-mode` and `--dir-mode` for permission bits on the files and directories,
+		// and that will be effective once Mountpoint is mounted.
 		fmt.Sprintf("rootmode=%o", stat.Mode&syscall.S_IFMT),
+		// Set `uid`/`gid` of the mount owner as this process
 		fmt.Sprintf("user_id=%d", os.Geteuid()),
 		fmt.Sprintf("group_id=%d", os.Getegid()),
+		// Instruct kernel to do its own permissions checks
 		"default_permissions",
 	}
 
-	var flags uintptr = uintptr(syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOATIME)
+	// These flags matches with Mountpoint's and `fuser`s defaults
+	var flags uintptr = uintptr(
+		syscall.MS_NODEV | // Do not allow access to devices
+			syscall.MS_NOSUID | // Do not honor set-user-ID and set-group-ID bits or file capabilities when executing programs
+			syscall.MS_NOATIME) // Do not update access times
 
-	if args.Has(mountpoint.ArgReadOnly) {
+	if opts.ReadOnly {
 		flags |= syscall.MS_RDONLY
 	}
 
-	if args.Has(mountpoint.ArgAllowOther) || args.Has(mountpoint.ArgAllowRoot) {
+	if opts.AllowOther {
 		options = append(options, "allow_other")
 	}
 
 	optionsJoined := strings.Join(options, ",")
-	klog.V(4).Infof("Mounting %s with options %s", target, optionsJoined)
-	err = syscall.Mount(mountpointDeviceName, target, "fuse", flags, optionsJoined)
+	klog.Infof("Mounting %s with options %s", target, optionsJoined)
+	err = syscall.Mount(fsName, target, "fuse", flags, optionsJoined)
 	if err != nil {
 		return 0, fmt.Errorf("failed to mount %s: %w", target, err)
 	}
@@ -65,15 +75,15 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 	return fd, nil
 }
 
-// bindMountSyscallDefault performs a bind mount syscall from `source` to `target`.
-func (pm *PodMounter) bindMountSyscallDefault(source, target string) error {
+// bindMount performs a bind mount syscall from `source` to `target`.
+func bindMount(source, target string) error {
 	if err := unix.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("failed to bind mount from %s to %s: %v", source, target, err)
 	}
 	return nil
 }
 
-func verifyMountPointStatx(path string) error {
+func statx(path string) error {
 	var stat unix.Statx_t
 	if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_FORCE_SYNC, 0, &stat); err != nil {
 		if err == unix.ENOSYS {
