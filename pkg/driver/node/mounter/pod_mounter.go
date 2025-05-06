@@ -362,7 +362,6 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string, err error) error {
 func (pm *PodMounter) provideCredentials(ctx context.Context, podPath, serviceAccountEKSRoleARN string, credentialCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
 	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
 	if err != nil {
-		klog.Errorf("Failed to create credentials directory: %v", err)
 		return nil, "", fmt.Errorf("Failed to create credentials directory: %w", err)
 	}
 
