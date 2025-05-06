@@ -9,20 +9,22 @@ import (
 )
 
 const (
-	EnvRegion                = "AWS_REGION"
-	EnvDefaultRegion         = "AWS_DEFAULT_REGION"
-	EnvSTSRegionalEndpoints  = "AWS_STS_REGIONAL_ENDPOINTS"
-	EnvMaxAttempts           = "AWS_MAX_ATTEMPTS"
-	EnvProfile               = "AWS_PROFILE"
-	EnvConfigFile            = "AWS_CONFIG_FILE"
-	EnvSharedCredentialsFile = "AWS_SHARED_CREDENTIALS_FILE"
-	EnvRoleARN               = "AWS_ROLE_ARN"
-	EnvWebIdentityTokenFile  = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	EnvEC2MetadataDisabled   = "AWS_EC2_METADATA_DISABLED"
-	EnvAccessKeyID           = "AWS_ACCESS_KEY_ID"
-	EnvSecretAccessKey       = "AWS_SECRET_ACCESS_KEY"
-	EnvSessionToken          = "AWS_SESSION_TOKEN"
-	EnvMountpointCacheKey    = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
+	EnvRegion                          = "AWS_REGION"
+	EnvDefaultRegion                   = "AWS_DEFAULT_REGION"
+	EnvSTSRegionalEndpoints            = "AWS_STS_REGIONAL_ENDPOINTS"
+	EnvMaxAttempts                     = "AWS_MAX_ATTEMPTS"
+	EnvProfile                         = "AWS_PROFILE"
+	EnvConfigFile                      = "AWS_CONFIG_FILE"
+	EnvSharedCredentialsFile           = "AWS_SHARED_CREDENTIALS_FILE"
+	EnvRoleARN                         = "AWS_ROLE_ARN"
+	EnvWebIdentityTokenFile            = "AWS_WEB_IDENTITY_TOKEN_FILE"
+	EnvContainerAuthorizationTokenFile = "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
+	EnvContainerCredentialsFullURI     = "AWS_CONTAINER_CREDENTIALS_FULL_URI"
+	EnvEC2MetadataDisabled             = "AWS_EC2_METADATA_DISABLED"
+	EnvAccessKeyID                     = "AWS_ACCESS_KEY_ID"
+	EnvSecretAccessKey                 = "AWS_SECRET_ACCESS_KEY"
+	EnvSessionToken                    = "AWS_SESSION_TOKEN"
+	EnvMountpointCacheKey              = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
 )
 
 // Key represents an environment variable name.
