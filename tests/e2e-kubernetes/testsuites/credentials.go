@@ -71,6 +71,7 @@ const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
 var ClusterName string
+var IsPodMounter bool
 
 // IMDSAvailable indicates whether the Instance Metadata Service is accessible.
 // When true, it enables a test that rely on automatic detection of the STS region.
@@ -293,7 +294,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			sa := csiDriverServiceAccount(ctx, f)
 			overrideServiceAccountRole(ctx, f, sa, "")
 
-			deletePodIdentityAssociations(ctx, sa)
+			if eksPodIdentityAgentDaemonSetForCluster(ctx, f) != nil {
+				deletePodIdentityAssociations(ctx, sa)
+			}
 
 			framework.ExpectNoError(deleteCredentialSecret(ctx, f))
 
@@ -441,6 +444,9 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 			Context("EKS Pod Identity", Ordered, func() {
 				BeforeAll(func(ctx context.Context) {
+					if !IsPodMounter {
+						Skip("Pod Mounter is not enabled, skipping EKS Pod Identity tests")
+					}
 					if eksPodIdentityAgentDaemonSet == nil {
 						Skip("EKS Pod Identity Agent is not configured, skipping EKS Pod Identity tests")
 					}
