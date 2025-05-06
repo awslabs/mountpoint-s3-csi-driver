@@ -197,8 +197,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				"allow-delete",
 				"allow-other",
 				fmt.Sprintf("cache %s", cacheDir),
-				fmt.Sprintf("uid=%d", defaultNonRootUser),
-				fmt.Sprintf("gid=%d", defaultNonRootGroup),
+				fmt.Sprintf("uid=%d", DefaultNonRootUser),
+				fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 			}
 			podModifiers := []func(*v1.Pod){
 				podModifierNonRoot,

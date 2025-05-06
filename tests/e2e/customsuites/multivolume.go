@@ -89,8 +89,8 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 
 	// Common mount options needed for write access by non-root user
 	mountOptions := []string{
-		fmt.Sprintf("uid=%d", defaultNonRootUser),
-		fmt.Sprintf("gid=%d", defaultNonRootGroup),
+		fmt.Sprintf("uid=%d", DefaultNonRootUser),
+		fmt.Sprintf("gid=%d", DefaultNonRootGroup),
 		"allow-other",
 		"debug",
 		"debug-crt",

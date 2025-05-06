@@ -12,6 +12,32 @@ The mount options test suite (`mountoptions.go`) verifies that the S3 CSI driver
 - Proper enforcement of permissions when mount options are absent
 - File and directory ownership when mounting with specific uid/gid
 
+### File Permissions Test Suite
+
+The file permissions test suite (`filepermissions.go`) validates file permission behavior for the S3 CSI driver, focusing on the file-mode mount option and ensuring correct, consistent enforcement of file metadata semantics across a range of scenarios.
+
+**File Permission Tests:**
+
+- Default file permissions (0644) when no mount options are specified
+- Custom file permissions via the `file-mode` mount option
+- Permission inheritance in subdirectories
+- Remount behavior with updated mount options
+- Multi-pod access with different permissions
+- Permission preservation during standard file operations
+- FSGroup and security context ownership verification
+
+**Contrarian & Edge-Case Behavior Tests:**
+
+- `chmod` operations fail (EPERM/ENOTSUP) and permissions remain unchanged
+- `chown` operations fail post-creation (immutability enforced)
+- Umask has no effect; driver-enforced permissions always apply
+- Symlink creation is blocked (EPERM)
+- Truncation of existing files is blocked
+- Extended attributes (xattr) are unsupported (EPERM/ENOTSUP)
+- `access()` syscall consistency with `stat()`
+- Edge-case filename support (Unicode, long names, special chars)
+- Pod umask + fsGroup conflict handling
+
 ### Multi-Volume Test Suite
 
 The multi-volume test suite (`multivolume.go`) validates scenarios involving multiple volumes and pods to ensure the S3 CSI driver properly handles concurrent access and volume isolation. It includes tests for:
@@ -75,6 +101,7 @@ The FIO benchmarks are configured with these parameters:
 - Results are saved to a JSON file in the `test-results/` directory for further analysis
 
 This test suite is particularly valuable for:
+
 - Establishing performance baselines for the S3 CSI driver
 - Validating that multiple pods can concurrently access the same S3 volume with acceptable throughput
 - Detecting performance regressions in driver updates
@@ -104,13 +131,13 @@ When adding new test suites to this package, follow these guidelines:
 
 Tests in this package are automatically executed as part of the [E2E test suite](../e2e_test.go) when running:
 
-```
+```sh
 go test -v ./tests/e2e/...
 ```
 
 For performance tests, use the `--performance` flag:
 
-```
+```sh
 go test -v --performance ./tests/e2e/...
 ```
 

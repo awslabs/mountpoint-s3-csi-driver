@@ -1,6 +1,4 @@
-// This file contains utility functions that support the mount options test suite.
-// It provides helpers for file operations, pod configuration, and PV/PVC creation
-// needed for testing S3 CSI driver mount functionality.
+// utils.go — shared helpers for the S3‑CSI mount‑option e2e suites.
 package customsuites
 
 import (
@@ -10,8 +8,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,150 +23,220 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
+	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
 )
 
-// genBinDataFromSeed generates binary data with random seed for testing file operations.
-// This is useful for creating consistent test data that can be verified after read operations.
-//
-// Parameters:
-// - len: size of the data to generate in bytes
-// - seed: random seed to ensure reproducibility across test operations
-//
-// Returns a byte slice containing the generated data.
-func genBinDataFromSeed(len int, seed int64) []byte {
-	binData := make([]byte, len)
-	randLocal := rand.New(rand.NewSource(seed))
+/*──────────────────────────────
+  Constants
+  ──────────────────────────────*/
 
-	_, err := randLocal.Read(binData)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+const (
+	DefaultNonRootUser  = int64(1001)
+	DefaultNonRootGroup = int64(2000)
+)
+
+/*──────────────────────────────
+  Batched creation primitives
+  ──────────────────────────────*/
+
+// PathSpec describes a file or directory to materialise inside a pod.
+// If Content is empty, the path is treated as a directory.
+type PathSpec struct {
+	Path     string // absolute path
+	Content  string // file content (optional)
+	IsBinary bool   // if true, Content is base64-encoded and will be decoded
+	Mode     string // octal string (e.g. "0640"), optional
+	OwnerUID *int64 // nil → leave unchanged
+	OwnerGID *int64 // nil → leave unchanged
+}
+
+// MaterialisePaths batches creation of many files/dirs in one exec.
+func MaterialisePaths(f *framework.Framework, pod *v1.Pod, specs []PathSpec) error {
+	if len(specs) == 0 {
+		return nil
 	}
 
-	return binData
+	var sb strings.Builder
+	sb.WriteString("set -euo pipefail\n")
+
+	for _, s := range specs {
+		sb.WriteString(fmt.Sprintf("mkdir -p %q\n", filepath.Dir(s.Path)))
+
+		if s.Content == "" {
+			// Directory
+			sb.WriteString(fmt.Sprintf("mkdir -p %q\n", s.Path))
+		} else if s.IsBinary {
+			// Binary content (base64-encoded)
+			sb.WriteString(fmt.Sprintf("echo %s | base64 -d > %q\n", s.Content, s.Path))
+		} else {
+			// Text content (write directly)
+			sb.WriteString(fmt.Sprintf("cat > %q << 'EOF'\n%s\nEOF\n", s.Path, s.Content))
+		}
+
+		if s.Mode != "" {
+			sb.WriteString(fmt.Sprintf("chmod %s %q\n", s.Mode, s.Path))
+		}
+		if s.OwnerUID != nil || s.OwnerGID != nil {
+			uid := "-"
+			gid := "-"
+			if s.OwnerUID != nil {
+				uid = strconv.FormatInt(*s.OwnerUID, 10)
+			}
+			if s.OwnerGID != nil {
+				gid = strconv.FormatInt(*s.OwnerGID, 10)
+			}
+			sb.WriteString(fmt.Sprintf("chown %s:%s %q || true\n", uid, gid, s.Path))
+		}
+	}
+
+	_, stderr, err := e2evolume.PodExec(f, pod, sb.String())
+	if err != nil {
+		return fmt.Errorf("materialise paths failed: %v — stderr: %s", err, stderr)
+	}
+	return nil
 }
 
-// checkWriteToPath writes data to a file in the pod and verifies it succeeded.
-// This function:
-// 1. Generates random data using the provided seed
-// 2. Encodes it to base64 for safe transmission to the pod
-// 3. Executes commands in the pod to write the data to the specified path
-// 4. Verifies the operation succeeded
-//
-// This is a core test utility for validating write access to mounted volumes.
+/*──────────────────────────────
+  Thin wrapper helpers
+  ──────────────────────────────*/
+
+// CreateFileInPod writes a small text file at `path`.
+func CreateFileInPod(f *framework.Framework, pod *v1.Pod, path, content string) {
+	err := MaterialisePaths(f, pod, []PathSpec{{Path: path, Content: content, IsBinary: false}})
+	framework.ExpectNoError(err)
+}
+
+// CreateBinaryFileInPod writes a binary file at `path` using base64-encoded `content`.
+func CreateBinaryFileInPod(f *framework.Framework, pod *v1.Pod, path, base64Content string) {
+	err := MaterialisePaths(f, pod, []PathSpec{{Path: path, Content: base64Content, IsBinary: true}})
+	framework.ExpectNoError(err)
+}
+
+// CreateDirInPod ensures a directory exists.
+func CreateDirInPod(f *framework.Framework, pod *v1.Pod, path string) {
+	err := MaterialisePaths(f, pod, []PathSpec{{Path: path}})
+	framework.ExpectNoError(err)
+}
+
+// CreateMultipleDirsInPod creates many directories in one shot.
+func CreateMultipleDirsInPod(f *framework.Framework, pod *v1.Pod, paths ...string) {
+	specs := make([]PathSpec, len(paths))
+	for i, p := range paths {
+		specs[i] = PathSpec{Path: p}
+	}
+	err := MaterialisePaths(f, pod, specs)
+	framework.ExpectNoError(err)
+}
+
+// CopyFileInPod copies a file within the same pod.
+func CopyFileInPod(f *framework.Framework, pod *v1.Pod, sourcePath, targetPath string) {
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cp %q %q", sourcePath, targetPath))
+}
+
+// DeleteFileInPod deletes a file in the pod.
+func DeleteFileInPod(f *framework.Framework, pod *v1.Pod, path string) {
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm -f %q", path))
+}
+
+/*──────────────────────────────
+  Data‑integrity helpers
+  ──────────────────────────────*/
+
+func genBinDataFromSeed(length int, seed int64) []byte {
+	buf := make([]byte, length)
+	rnd := rand.New(rand.NewSource(seed))
+	_, _ = rnd.Read(buf)
+	return buf
+}
+
 func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
-	encoded := base64.StdEncoding.EncodeToString(data)
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite))
-	framework.Logf("written data with sha: %x", sha256.Sum256(data))
+	enc := base64.StdEncoding.EncodeToString(data)
+
+	// Calculate checksum for logging
+	framework.Logf("writing data sha256: %x", sha256.Sum256(data))
+
+	// Use our MaterialisePaths API for binary content
+	err := MaterialisePaths(f, pod, []PathSpec{{
+		Path:     path,
+		Content:  enc,
+		IsBinary: true,
+	}})
+	framework.ExpectNoError(err)
 }
 
-// checkReadFromPath reads data from a file in the pod and verifies its content.
-// This function:
-// 1. Calculates the expected SHA256 hash based on the same seed used for writing
-// 2. Reads the file content in the pod
-// 3. Computes a hash of the content
-// 4. Verifies the hash matches the expected value
-//
-// This ensures that data integrity is maintained throughout volume operations.
 func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum", path, toWrite))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
+	e2evolume.VerifyExecInPodSucceed(f, pod,
+		fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
 }
 
-// podModifierNonRoot modifies a pod to run as a non-root user.
-// This utility function:
-// 1. Configures the pod's security context to use non-root user/group IDs
-// 2. Sets the RunAsNonRoot flag to enforce non-root execution
-// 3. Applies the same settings to all containers in the pod
-//
-// This is essential for testing permission boundaries and security aspects
-// of volume mounts, ensuring they respect proper access controls.
+/*──────────────────────────────
+  Security‑context & pod helpers
+  ──────────────────────────────*/
+
 func podModifierNonRoot(pod *v1.Pod) {
 	if pod.Spec.SecurityContext == nil {
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	pod.Spec.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-	pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+	pod.Spec.SecurityContext.RunAsUser = ptr.To(DefaultNonRootUser)
+	pod.Spec.SecurityContext.RunAsGroup = ptr.To(DefaultNonRootGroup)
 	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
 
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].SecurityContext == nil {
 			pod.Spec.Containers[i].SecurityContext = &v1.SecurityContext{}
 		}
-		pod.Spec.Containers[i].SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-		pod.Spec.Containers[i].SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
+		pod.Spec.Containers[i].SecurityContext.RunAsUser = ptr.To(DefaultNonRootUser)
+		pod.Spec.Containers[i].SecurityContext.RunAsGroup = ptr.To(DefaultNonRootGroup)
 		pod.Spec.Containers[i].SecurityContext.RunAsNonRoot = ptr.To(true)
 	}
 }
 
-// createPod creates a pod with PVC mounts and waits for it to be running.
-// This function:
-// 1. Submits the pod creation request to the Kubernetes API
-// 2. Waits for the pod to reach Running state
-// 3. Fetches the latest pod information after it's running
-//
-// This utility handles common pod creation patterns needed for volume testing,
-// ensuring pods are fully ready before tests proceed to volume operations.
-func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
-	framework.Logf("Creating Pod %s in %s", pod.Name, namespace)
-	pod, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+// createPod creates a pod and waits until it's running.
+func createPod(ctx context.Context, client clientset.Interface, ns string, pod *v1.Pod) (*v1.Pod, error) {
+	framework.Logf("Creating Pod %s in %s", pod.Name, ns)
+	pod, err := client.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %w", err)
 	}
-	// Waiting for pod to be running
-	err = e2epod.WaitForPodNameRunningInNamespace(ctx, client, pod.Name, namespace)
-	if err != nil {
-		return pod, fmt.Errorf("pod %q is not Running: %w", pod.Name, err)
+	if err := e2epod.WaitForPodNameRunningInNamespace(ctx, client, pod.Name, ns); err != nil {
+		return pod, fmt.Errorf("pod %q not Running: %w", pod.Name, err)
 	}
-	// get fresh pod info
-	pod, err = client.CoreV1().Pods(namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-	if err != nil {
-		return pod, fmt.Errorf("pod Get API error: %w", err)
-	}
-	return pod, nil
+	return client.CoreV1().Pods(ns).Get(ctx, pod.Name, metav1.GetOptions{})
 }
 
-// createVolumeResourceWithMountOptions creates a volume resource with specified mount options.
-// This function extends the standard Kubernetes storage framework volume creation by:
-// 1. Creating an S3 bucket via the driver's CreateVolume method
-// 2. Setting up a PV with the specified mount options (crucial for S3 CSI testing)
-// 3. Creating a matching PVC that binds to this PV
-// 4. Waiting for the binding to complete
-//
-// The mount options parameter is key for testing various S3-specific mount behaviors,
-// allowing tests to validate permissions, caching, and other mount parameters.
-//
-// This function is a critical extension point as the standard storage framework
-// does not support mount options out of the box.
-func createVolumeResourceWithMountOptions(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern, mountOptions []string) *storageframework.VolumeResource {
+/*──────────────────────────────
+  Volume‑creation helpers
+  ──────────────────────────────*/
+
+func createVolumeResourceWithMountOptions(
+	ctx context.Context,
+	config *storageframework.PerTestConfig,
+	pattern storageframework.TestPattern,
+	mountOptions []string,
+) *storageframework.VolumeResource {
+
 	f := config.Framework
-	r := storageframework.VolumeResource{
-		Config:  config,
-		Pattern: pattern,
-	}
+	r := storageframework.VolumeResource{Config: config, Pattern: pattern}
+
 	pDriver, _ := config.Driver.(storageframework.PreprovisionedPVTestDriver)
 	r.Volume = pDriver.CreateVolume(ctx, config, storageframework.PreprovisionedPV)
-	pvSource, volumeNodeAffinity := pDriver.GetPersistentVolumeSource(false, "", r.Volume)
+	pvSource, nodeAffinity := pDriver.GetPersistentVolumeSource(false, "", r.Volume)
 
-	pvName := fmt.Sprintf("s3-e2e-pv-%s", uuid.New().String())
-	pvcName := fmt.Sprintf("s3-e2e-pvc-%s", uuid.New().String())
+	pvName := fmt.Sprintf("s3-e2e-pv-%s", uuid.NewString())
+	pvcName := fmt.Sprintf("s3-e2e-pvc-%s", uuid.NewString())
 
 	pv := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: pvName},
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: *pvSource,
-			StorageClassName:       "", // for static provisioning
-			NodeAffinity:           volumeNodeAffinity,
-			MountOptions:           mountOptions, // this is not set by kubernetes storageframework.CreateVolumeResource, which is why we need this function
+			StorageClassName:       "",
+			NodeAffinity:           nodeAffinity,
+			MountOptions:           mountOptions,
 			AccessModes:            []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
-			Capacity: v1.ResourceList{
-				v1.ResourceStorage: resource.MustParse("1200Gi"),
-			},
+			Capacity:               v1.ResourceList{v1.ResourceStorage: resource.MustParse("1200Gi")},
 			ClaimRef: &v1.ObjectReference{
 				Name:      pvcName,
 				Namespace: f.Namespace.Name,
@@ -177,34 +249,106 @@ func createVolumeResourceWithMountOptions(ctx context.Context, config *storagefr
 			Namespace: f.Namespace.Name,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""), // for static provisioning
+			StorageClassName: ptr.To(""),
 			VolumeName:       pvName,
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
 			Resources: v1.VolumeResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceStorage: resource.MustParse("1200Gi"),
-				},
+				Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1200Gi")},
 			},
 		},
 	}
 
-	framework.Logf("Creating PVC and PV")
+	framework.Logf("Creating PV %s and PVC %s", pvName, pvcName)
 	var err error
-
 	r.Pv, err = f.ClientSet.CoreV1().PersistentVolumes().Create(ctx, pv, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "PV creation failed")
-
+	framework.ExpectNoError(err)
 	r.Pvc, err = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Create(ctx, pvc, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "PVC creation failed")
+	framework.ExpectNoError(err)
 
 	err = e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, r.Pv, r.Pvc)
-	framework.ExpectNoError(err, "PVC, PV failed to bind")
+	framework.ExpectNoError(err)
 	return &r
 }
 
-// copySmallFileToPod copies a small file from host to pod
+// BuildVolumeWithOptions assembles mountOptions and calls createVolumeResourceWithMountOptions.
+func BuildVolumeWithOptions(
+	ctx context.Context,
+	config *storageframework.PerTestConfig,
+	pattern storageframework.TestPattern,
+	uid, gid int64,
+	fileModeOption string,
+	extraOptions ...string,
+) *storageframework.VolumeResource {
+
+	opts := []string{
+		fmt.Sprintf("uid=%d", uid),
+		fmt.Sprintf("gid=%d", gid),
+		"allow-other",
+	}
+	if fileModeOption != "" {
+		opts = append(opts, fmt.Sprintf("file-mode=%s", fileModeOption))
+	}
+	opts = append(opts, extraOptions...)
+	return createVolumeResourceWithMountOptions(ctx, config, pattern, opts)
+}
+
+/*──────────────────────────────
+  Pod‑construction helpers
+  ──────────────────────────────*/
+
+func CreatePodWithVolumeAndSecurity(
+	ctx context.Context,
+	f *framework.Framework,
+	volume *v1.PersistentVolumeClaim,
+	containerName string,
+	uid, gid int64,
+) (*v1.Pod, error) {
+
+	pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{volume}, admissionapi.LevelRestricted, "")
+	if pod.Spec.SecurityContext == nil {
+		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
+	}
+	pod.Spec.SecurityContext.RunAsUser = ptr.To(uid)
+	pod.Spec.SecurityContext.RunAsGroup = ptr.To(gid)
+	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
+
+	if containerName != "" {
+		pod.Spec.Containers[0].Name = containerName
+	}
+	return createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+}
+
+func MakeNonRootPodWithVolume(namespace string, pvcs []*v1.PersistentVolumeClaim, containerName string) *v1.Pod {
+	pod := e2epod.MakePod(namespace, nil, pvcs, admissionapi.LevelRestricted, "")
+	podModifierNonRoot(pod)
+	if containerName != "" {
+		pod.Spec.Containers[0].Name = containerName
+	}
+	return pod
+}
+
+/*──────────────────────────────
+  Misc small helpers
+  ──────────────────────────────*/
+
+// copySmallFileToPod copies a file from the test host into a pod (for tiny files only).
 func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, srcFile, destFile string) {
 	content, err := os.ReadFile(srcFile)
 	framework.ExpectNoError(err)
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", destFile, string(content)))
+	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf(
+		"cat > %s <<'EOF'\n%s\nEOF", destFile, string(content)))
+}
+
+// CreateTestFileAndDir makes one file + one dir (handy for quick tests).
+func CreateTestFileAndDir(f *framework.Framework, pod *v1.Pod, basePath, prefix string) (string, string) {
+	file := fmt.Sprintf("%s/%s.txt", basePath, prefix)
+	dir := fmt.Sprintf("%s/%s-dir", basePath, prefix)
+
+	ginkgo.By(fmt.Sprintf("Creating test file %s", file))
+	CreateFileInPod(f, pod, file, "test content")
+
+	ginkgo.By(fmt.Sprintf("Creating test directory %s", dir))
+	CreateDirInPod(f, pod, dir)
+
+	return file, dir
 }
