@@ -41,14 +41,14 @@ const (
   ──────────────────────────────*/
 
 // PathSpec describes a file or directory to materialise inside a pod.
-// If both Content and ContentB64 are empty, the path is treated as a directory.
+// If Content is empty, the path is treated as a directory.
 type PathSpec struct {
-	Path       string // absolute path
-	Content    string // plain‑text content (optional)
-	ContentB64 string // base64 content (optional, overrides Content)
-	Mode       string // octal string (e.g. "0640"), optional
-	OwnerUID   *int64 // nil → leave unchanged
-	OwnerGID   *int64 // nil → leave unchanged
+	Path     string // absolute path
+	Content  string // file content (optional)
+	IsBinary bool   // if true, Content is base64-encoded and will be decoded
+	Mode     string // octal string (e.g. "0640"), optional
+	OwnerUID *int64 // nil → leave unchanged
+	OwnerGID *int64 // nil → leave unchanged
 }
 
 // MaterialisePaths batches creation of many files/dirs in one exec.
@@ -63,15 +63,15 @@ func MaterialisePaths(f *framework.Framework, pod *v1.Pod, specs []PathSpec) err
 	for _, s := range specs {
 		sb.WriteString(fmt.Sprintf("mkdir -p %q\n", filepath.Dir(s.Path)))
 
-		if s.Content == "" && s.ContentB64 == "" {
+		if s.Content == "" {
 			// Directory
 			sb.WriteString(fmt.Sprintf("mkdir -p %q\n", s.Path))
+		} else if s.IsBinary {
+			// Binary content (base64-encoded)
+			sb.WriteString(fmt.Sprintf("echo %s | base64 -d > %q\n", s.Content, s.Path))
 		} else {
-			b64 := s.ContentB64
-			if b64 == "" {
-				b64 = base64.StdEncoding.EncodeToString([]byte(s.Content))
-			}
-			sb.WriteString(fmt.Sprintf("echo %s | base64 -d > %q\n", b64, s.Path))
+			// Text content (write directly)
+			sb.WriteString(fmt.Sprintf("cat > %q << 'EOF'\n%s\nEOF\n", s.Path, s.Content))
 		}
 
 		if s.Mode != "" {
@@ -103,7 +103,13 @@ func MaterialisePaths(f *framework.Framework, pod *v1.Pod, specs []PathSpec) err
 
 // CreateFileInPod writes a small text file at `path`.
 func CreateFileInPod(f *framework.Framework, pod *v1.Pod, path, content string) {
-	err := MaterialisePaths(f, pod, []PathSpec{{Path: path, Content: content}})
+	err := MaterialisePaths(f, pod, []PathSpec{{Path: path, Content: content, IsBinary: false}})
+	framework.ExpectNoError(err)
+}
+
+// CreateBinaryFileInPod writes a binary file at `path` using base64-encoded `content`.
+func CreateBinaryFileInPod(f *framework.Framework, pod *v1.Pod, path, base64Content string) {
+	err := MaterialisePaths(f, pod, []PathSpec{{Path: path, Content: base64Content, IsBinary: true}})
 	framework.ExpectNoError(err)
 }
 
@@ -148,9 +154,16 @@ func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite 
 	data := genBinDataFromSeed(toWrite, seed)
 	enc := base64.StdEncoding.EncodeToString(data)
 
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", enc))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", enc, path, toWrite))
-	framework.Logf("written data sha256: %x", sha256.Sum256(data))
+	// Calculate checksum for logging
+	framework.Logf("writing data sha256: %x", sha256.Sum256(data))
+
+	// Use our MaterialisePaths API for binary content
+	err := MaterialisePaths(f, pod, []PathSpec{{
+		Path:     path,
+		Content:  enc,
+		IsBinary: true,
+	}})
+	framework.ExpectNoError(err)
 }
 
 func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
