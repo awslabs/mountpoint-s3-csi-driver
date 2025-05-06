@@ -164,7 +164,7 @@ fmt:
 # Run controller tests with envtest.
 .PHONY: e2e-controller
 e2e-controller: envtest
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TOOLS_BIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
 
 .PHONY: e2e
 e2e: e2e-controller
@@ -196,9 +196,9 @@ TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments
 HELM_POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/mountpoints3podattachments-crd.yaml"
 TEST_POD_ATTACHMENT_CRD_FILE ?= "./tests/crd/mountpoints3podattachments-crd.yaml"
 .PHONY: generate
-generate:
-	controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
-	controller-gen crd paths="./pkg/api/..." output:crd:dir=./hack/
+generate: controller-gen
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
+	$(CONTROLLER_GEN) crd paths="./pkg/api/..." output:crd:dir=./hack/
 	echo '# Auto-generated file via `make generate`. Do not edit.' > $(HELM_POD_ATTACHMENT_CRD_FILE)
 	echo '{{- if .Values.experimental.podMounter -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
 	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(HELM_POD_ATTACHMENT_CRD_FILE)
@@ -207,18 +207,26 @@ generate:
 	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(TEST_POD_ATTACHMENT_CRD_FILE)
 	rm $(TMP_POD_ATTACHMENT_CRD_FILE)
 
-## Binaries used in tests.
+## Tool Binaries
 
-TESTBIN ?= $(shell pwd)/tests/bin
-$(TESTBIN):
-	mkdir -p $(TESTBIN)
+TOOLS_BIN ?= $(shell pwd)/tools/bin
+$(TOOLS_BIN):
+	mkdir -p $(TOOLS_BIN)
 
-ENVTEST ?= $(TESTBIN)/setup-envtest
+CONTROLLER_GEN ?= $(TOOLS_BIN)/controller-gen
+ENVTEST ?= $(TOOLS_BIN)/setup-envtest
+
+CONTROLLER_GEN_VERSION ?= v0.17.3
 ENVTEST_VERSION ?= release-0.19
+
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN)
+$(CONTROLLER_GEN): $(TOOLS_BIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_GEN_VERSION))
 
 .PHONY: envtest
 envtest: $(ENVTEST)
-$(ENVTEST): $(TESTBIN)
+$(ENVTEST): $(TOOLS_BIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 # Copied from https://github.com/kubernetes-sigs/kubebuilder/blob/c32f9714456f7e5e7cc6c790bb87c7e5956e710b/pkg/plugins/golang/v4/scaffolds/internal/templates/makefile.go#L275-L289.
@@ -232,7 +240,7 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 rm -f $(1) || true ;\
-GOBIN=$(TESTBIN) go install $${package} ;\
+GOBIN=$(TOOLS_BIN) go install $${package} ;\
 mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)

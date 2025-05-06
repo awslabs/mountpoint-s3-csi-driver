@@ -3,7 +3,6 @@ package mounter
 import (
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -25,7 +24,6 @@ type PodUnmounter struct {
 	sourceMountDir string
 	podWatcher     *watcher.Watcher
 	credProvider   *credentialprovider.Provider
-	mutex          sync.Mutex
 }
 
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
@@ -74,6 +72,7 @@ func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	volumeId := mpPod.Labels[mppod.LabelVolumeId]
 
 	if err := u.writeExitFile(podPath); err != nil {
+		klog.Errorf("Failed to write exit file for Mountpoint Pod (UID: %s): %v", mpPodUID, err)
 		return
 	}
 
@@ -152,12 +151,6 @@ func (u *PodUnmounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
 // CleanupDanglingMounts scans the source mount directory for potential dangling mounts
 // and cleans them up. It also unmounts any Mountpoint Pods marked for unmounting.
 func (u *PodUnmounter) CleanupDanglingMounts() error {
-	// Ensure only one cleanup runs at a time
-	if !u.mutex.TryLock() {
-		return nil
-	}
-	defer u.mutex.Unlock()
-
 	entries, err := os.ReadDir(u.sourceMountDir)
 	if err != nil {
 		klog.Errorf("Failed to read source mount directory (`%s`): %v", u.sourceMountDir, err)

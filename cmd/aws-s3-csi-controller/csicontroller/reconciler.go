@@ -483,7 +483,7 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 			},
 		},
 	}
-	if authSource == "pod" {
+	if authSource == credentialprovider.AuthenticationSourcePod {
 		s3pa.Spec.WorkloadNamespace = workloadPod.Namespace
 		s3pa.Spec.WorkloadServiceAccountName = getServiceAccountName(workloadPod)
 		s3pa.Spec.WorkloadServiceAccountIAMRoleARN = roleArn
@@ -610,6 +610,9 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 		return "", fmt.Errorf("Failed to find workload pod's service account %s", getServiceAccountName(pod))
 	}
 
+	if sa.Annotations == nil {
+		return "", nil
+	}
 	return sa.Annotations[AnnotationServiceAccountRole], nil
 }
 

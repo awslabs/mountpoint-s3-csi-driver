@@ -124,7 +124,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 		go unmounter.StartPeriodicCleanup(stopCh)
 
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil, nil,
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
 			kubernetesVersion, nodeID, mounter.SourceMountDir)
 		if err != nil {
 			klog.Fatalln(err)

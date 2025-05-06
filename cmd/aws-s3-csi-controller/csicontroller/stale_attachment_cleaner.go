@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	cleanupInterval          = 10 * time.Second
-	staleAttachmentThreshold = 10 * time.Second
+	cleanupInterval          = 2 * time.Minute
+	staleAttachmentThreshold = 2 * time.Minute
 )
 
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
