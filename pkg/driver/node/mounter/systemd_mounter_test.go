@@ -154,7 +154,7 @@ func TestS3MounterMount(t *testing.T) {
 				testCase.before(t, env)
 			}
 			err := env.mounter.Mount(env.ctx, testCase.bucketName, testCase.targetPath,
-				testCase.provideCtx, mountpoint.ParseArgs(testCase.options))
+				testCase.provideCtx, mountpoint.ParseArgs(testCase.options), "", "")
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)

@@ -108,7 +108,7 @@ func TestGettingPodsConcurrently(t *testing.T) {
 }
 
 func createAndStartWatcher(t *testing.T, client kubernetes.Interface) *watcher.Watcher {
-	mpPodWatcher := watcher.New(client, testMountpointPodNamespace, 10*time.Second)
+	mpPodWatcher := watcher.New(client, testMountpointPodNamespace, "test-node", 10*time.Second)
 
 	stopCh := make(chan struct{})
 	t.Cleanup(func() {

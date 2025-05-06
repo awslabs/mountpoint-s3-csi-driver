@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -52,4 +53,18 @@ func (c Variant) MountpointPodUserID() *int64 {
 	}
 
 	return defaultMountpointUID
+}
+
+// Helper function to check availability of selectableFields on CustomResourceDefinitions feature in K8s cluster
+func IsSelectableFieldsSupported(serverVersion string) (bool, error) {
+	currentVersion, err := version.ParseGeneric(serverVersion)
+	if err != nil {
+		return false, err
+	}
+
+	// Selectable fields are supported from 1.32
+	// https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#crd-selectable-fields
+	selectableFieldsVersion := version.MustParseGeneric("v1.32.0")
+
+	return !currentVersion.LessThan(selectableFieldsVersion), nil
 }

@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/mount-utils"
 
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
@@ -41,16 +42,24 @@ type testCtx struct {
 
 	podMounter *mounter.PodMounter
 
-	client       *fake.Clientset
-	mount        *mount.FakeMounter
-	mountSyscall func(target string, args mountpoint.Args) (fd int, err error)
+	client           *fake.Clientset
+	mount            *mount.FakeMounter
+	s3paCache        *mounter.FakeCache
+	mountSyscall     func(target string, args mountpoint.Args) (fd int, err error)
+	mountBindSyscall func(source, target string) (err error)
 
-	bucketName  string
-	kubeletPath string
-	targetPath  string
-	podUID      string
-	volumeID    string
-	pvName      string
+	bucketName     string
+	kubeletPath    string
+	sourcePath     string
+	targetPath     string
+	podUID         string
+	volumeID       string
+	pvName         string
+	nodeName       string
+	fsGroup        string
+	pvMountOptions string
+	mpPodName      string
+	mpPodUID       string
 }
 
 func setup(t *testing.T) *testCtx {
@@ -64,10 +73,18 @@ func setup(t *testing.T) *testCtx {
 	// to overcome `bind: invalid argument`.
 	t.Chdir(kubeletPath)
 
+	sourceMountDir := t.TempDir()
+
 	bucketName := "test-bucket"
 	podUID := uuid.New().String()
+	mpPodName := "test-mppod"
+	mpPodUID := uuid.New().String()
 	volumeID := "s3-csi-driver-volume"
 	pvName := "s3-csi-driver-pv"
+	nodeName := "test-node"
+	fsGroup := "1000"
+	pvMountOptions := "--fake-mountoption"
+	s3paCache := &mounter.FakeCache{}
 	targetPath := filepath.Join(
 		kubeletPath,
 		fmt.Sprintf("pods/%s/volumes/kubernetes.io~csi/%s/mount", podUID, pvName),
@@ -82,37 +99,87 @@ func setup(t *testing.T) *testCtx {
 	parentDir, err := filepath.EvalSymlinks(filepath.Dir(targetPath))
 	assert.NoError(t, err)
 	targetPath = filepath.Join(parentDir, filepath.Base(targetPath))
+	parentDir, err = filepath.EvalSymlinks(filepath.Dir(sourceMountDir))
+	assert.NoError(t, err)
+	sourceMountDir = filepath.Join(parentDir, filepath.Base(sourceMountDir))
 
 	client := fake.NewClientset()
-	mount := mount.NewFakeMounter(nil)
+	fakeMounter := mount.NewFakeMounter(nil)
 
 	testCtx := &testCtx{
-		t:           t,
-		ctx:         ctx,
-		client:      client,
-		mount:       mount,
-		bucketName:  bucketName,
-		kubeletPath: kubeletPath,
-		targetPath:  targetPath,
-		podUID:      podUID,
-		volumeID:    volumeID,
-		pvName:      pvName,
+		t:              t,
+		ctx:            ctx,
+		client:         client,
+		mount:          fakeMounter,
+		bucketName:     bucketName,
+		kubeletPath:    kubeletPath,
+		targetPath:     targetPath,
+		podUID:         podUID,
+		volumeID:       volumeID,
+		pvName:         pvName,
+		nodeName:       nodeName,
+		fsGroup:        fsGroup,
+		s3paCache:      s3paCache,
+		pvMountOptions: pvMountOptions,
+		mpPodName:      mpPodName,
+		mpPodUID:       mpPodUID,
+		sourcePath:     filepath.Join(sourceMountDir, mpPodUID),
 	}
+
+	testCrd := crdv1beta.MountpointS3PodAttachment{
+		Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+			NodeName:             testCtx.nodeName,
+			PersistentVolumeName: testCtx.pvName,
+			VolumeID:             testCtx.volumeID,
+			WorkloadFSGroup:      testCtx.fsGroup,
+			MountOptions:         testCtx.pvMountOptions,
+			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+				testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
+			},
+		},
+	}
+	testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd}
 
 	mountSyscall := func(target string, args mountpoint.Args) (fd int, err error) {
 		if testCtx.mountSyscall != nil {
 			return testCtx.mountSyscall(target, args)
 		}
 
-		mount.Mount("mountpoint-s3", target, "fuse", nil)
+		fakeMounter.Mount("mountpoint-s3", target, "fuse", nil)
 		return int(mountertest.OpenDevNull(t).Fd()), nil
+	}
+
+	mountBindSyscall := func(source, target string) (err error) {
+		if testCtx.mountBindSyscall != nil {
+			return testCtx.mountBindSyscall(source, target)
+		}
+
+		fakeMounter.Mount(source, target, "fuse", []string{"bind"})
+		return nil
+	}
+
+	findSourceMountPoint := func(target, sourceMountDir string) (string, error) {
+		mountPoints, err := fakeMounter.List()
+		if err != nil {
+			return "", fmt.Errorf("failed to list mount points: %w", err)
+		}
+
+		for _, mp := range mountPoints {
+			if mp.Device == "mountpoint-s3" &&
+				strings.HasPrefix(mp.Path, sourceMountDir) &&
+				mp.Path != target {
+				return mp.Path, nil
+			}
+		}
+
+		return "", fmt.Errorf("no source mount point found for target %q", target)
 	}
 
 	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 		return dummyIMDSRegion, nil
 	})
 
-	podWatcher := watcher.New(client, mountpointPodNamespace, 10*time.Second)
+	podWatcher := watcher.New(client, mountpointPodNamespace, nodeName, 10*time.Second)
 	stopCh := make(chan struct{})
 	t.Cleanup(func() {
 		close(stopCh)
@@ -120,7 +187,8 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, credProvider, mpmounter.NewWithMount(mount), mountSyscall, testK8sVersion)
+	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
+		mountBindSyscall, findSourceMountPoint, testK8sVersion, nodeName, sourceMountDir)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
@@ -155,7 +223,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					PodID:                testCtx.podUID,
-				}, args)
+				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -201,7 +269,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID: testCtx.volumeID,
 				PodID:    testCtx.podUID,
-			}, mountpoint.ParseArgs(nil))
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 			assert.NoError(t, err)
 		})
 
@@ -215,7 +283,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					PodID:                testCtx.podUID,
-				}, args)
+				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -233,16 +301,22 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, true, credDirInfo.IsDir())
 			assert.Equals(t, credentialprovider.CredentialDirPerm, credDirInfo.Mode().Perm())
 		})
-
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {
 			testCtx := setup(t)
 
 			var mountCount atomic.Int32
+			var bindMountCount atomic.Int32
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
 				mountCount.Add(1)
 				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				return int(mountertest.OpenDevNull(t).Fd()), nil
+			}
+
+			testCtx.mountBindSyscall = func(source, target string) (err error) {
+				bindMountCount.Add(1)
+				testCtx.mount.Mount(source, target, "fuse", []string{"bind"})
+				return nil
 			}
 
 			go func() {
@@ -252,17 +326,99 @@ func TestPodMounter(t *testing.T) {
 			}()
 
 			for range 5 {
-				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
-					VolumeID: testCtx.volumeID,
-					PodID:    testCtx.podUID,
-				}, mountpoint.ParseArgs(nil))
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath,
+					credentialprovider.ProvideContext{
+						VolumeID: testCtx.volumeID,
+						PodID:    testCtx.podUID,
+					}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 				assert.NoError(t, err)
 			}
 
 			assert.Equals(t, int32(1), mountCount.Load())
+			assert.Equals(t, int32(1), bindMountCount.Load())
 		})
 
-		t.Run("Unmounts target if Mountpoint Pod does not receive mount options", func(t *testing.T) {
+		t.Run("Re-uses the same source mount for different targets if they share same Mountpoint Pod", func(t *testing.T) {
+			// First Pod
+			testCtx := setup(t)
+
+			ok, _ := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+			assert.Equals(t, false, ok)
+
+			var mountCount atomic.Int32
+			var bindMountCount atomic.Int32
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				mountCount.Add(1)
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				return int(mountertest.OpenDevNull(t).Fd()), nil
+			}
+			testCtx.mountBindSyscall = func(source, target string) (err error) {
+				bindMountCount.Add(1)
+				testCtx.mount.Mount(source, target, "fuse", []string{"bind"})
+				return nil
+			}
+
+			go func() {
+				mpPod := createMountpointPod(testCtx)
+				mpPod.run()
+				mpPod.receiveMountOptions(testCtx.ctx)
+			}()
+
+			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+				VolumeID: testCtx.volumeID,
+				PodID:    testCtx.podUID,
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			assert.NoError(t, err)
+
+			ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
+			assert.NoError(t, err)
+			assert.Equals(t, true, ok)
+			ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			assert.Equals(t, true, ok)
+
+			// Second Pod
+			testCtx.podUID = uuid.New().String()
+			targetPath2 := filepath.Join(
+				testCtx.kubeletPath,
+				fmt.Sprintf("pods/%s/volumes/kubernetes.io~csi/%s/mount", testCtx.podUID, testCtx.pvName),
+			)
+			err = os.MkdirAll(filepath.Dir(targetPath2), 0750)
+			assert.NoError(t, err)
+			parentDir, err := filepath.EvalSymlinks(filepath.Dir(targetPath2))
+			assert.NoError(t, err)
+			targetPath2 = filepath.Join(parentDir, filepath.Base(targetPath2))
+			testCtx.targetPath = targetPath2
+			testCrd2 := crdv1beta.MountpointS3PodAttachment{
+				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+					NodeName:             testCtx.nodeName,
+					PersistentVolumeName: testCtx.pvName,
+					VolumeID:             testCtx.volumeID,
+					WorkloadFSGroup:      testCtx.fsGroup,
+					MountOptions:         testCtx.pvMountOptions,
+					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+						testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
+					},
+				},
+			}
+			testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd2}
+
+			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+				VolumeID: testCtx.volumeID,
+				PodID:    testCtx.podUID,
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			assert.NoError(t, err)
+
+			ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			assert.Equals(t, true, ok)
+
+			assert.Equals(t, int32(1), mountCount.Load())
+			assert.Equals(t, int32(2), bindMountCount.Load())
+		})
+
+		t.Run("Unmounts source if Mountpoint Pod does not receive mount options", func(t *testing.T) {
 			testCtx := setup(t)
 
 			go func() {
@@ -278,19 +434,24 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID: testCtx.volumeID,
 				PodID:    testCtx.podUID,
-			}, mountpoint.ParseArgs(nil))
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint does not receive the mount options")
 			}
 
-			ok, err := testCtx.mount.IsMountPoint(testCtx.targetPath)
+			ok, err := testCtx.mount.IsMountPoint(testCtx.sourcePath)
 			assert.NoError(t, err)
 			if ok {
-				t.Errorf("it should unmount the target path if Mountpoint does not receive the mount options")
+				t.Errorf("it should unmount the source path if Mountpoint does not receive the mount options")
+			}
+			ok, err = testCtx.mount.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			if ok {
+				t.Errorf("it should not bind mount the target path if Mountpoint does not receive the mount options")
 			}
 		})
 
-		t.Run("Unmounts target if Mountpoint Pod fails to start", func(t *testing.T) {
+		t.Run("Unmounts source if Mountpoint Pod fails to start", func(t *testing.T) {
 			testCtx := setup(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
@@ -312,15 +473,20 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID: testCtx.volumeID,
 				PodID:    testCtx.podUID,
-			}, mountpoint.ParseArgs(nil))
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
 
-			ok, err := testCtx.mount.IsMountPoint(testCtx.targetPath)
+			ok, err := testCtx.mount.IsMountPoint(testCtx.sourcePath)
 			assert.NoError(t, err)
 			if ok {
-				t.Errorf("it should unmount the target path if Mountpoint fails to start")
+				t.Errorf("it should unmount the source path if Mountpoint fails to start")
+			}
+			ok, err = testCtx.mount.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			if ok {
+				t.Errorf("it should not bind mount the target path if Mountpoint fails to start")
 			}
 		})
 
@@ -347,7 +513,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID: testCtx.volumeID,
 				PodID:    testCtx.podUID,
-			}, mountpoint.ParseArgs(nil))
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
@@ -380,9 +546,12 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID: testCtx.volumeID,
 			PodID:    testCtx.podUID,
-		}, mountpoint.ParseArgs(nil))
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 		assert.NoError(t, err)
 
+		ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
+		assert.NoError(t, err)
+		assert.Equals(t, true, ok)
 		ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
 		assert.NoError(t, err)
 		assert.Equals(t, true, ok)
@@ -400,7 +569,7 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID: testCtx.volumeID,
 			PodID:    testCtx.podUID,
-		}, mountpoint.ParseArgs(nil))
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
 		assert.NoError(t, err)
 
 		ok, err := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
@@ -431,8 +600,8 @@ func createMountpointPod(testCtx *testCtx) *mountpointPod {
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			UID:  types.UID(uuid.New().String()),
-			Name: mppod.MountpointPodNameFor(testCtx.podUID, testCtx.pvName),
+			UID:  types.UID(testCtx.mpPodUID),
+			Name: testCtx.mpPodName,
 		},
 	}
 	pod, err := testCtx.client.CoreV1().Pods(mountpointPodNamespace).Create(context.TODO(), pod, metav1.CreateOptions{})

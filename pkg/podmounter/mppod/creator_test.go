@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
@@ -25,6 +24,7 @@ const (
 	testNode          = "test-node"
 	testPodUID        = "test-pod-uid"
 	testVolName       = "test-vol"
+	testVolID         = "test-vol-id"
 	csiDriverVersion  = "1.12.0"
 )
 
@@ -47,14 +47,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	creator := mppod.NewCreator(createTestConfig(clusterVariant))
 
 	verifyDefaultValues := func(mpPod *corev1.Pod) {
-		// This is a hash of `testPodUID` + `testVolName`
-		assert.Equals(t, "mp-8ef7856a0c7f1d5706bd6af93fdc4bc90b33cf2ceb6769b4afd62586", mpPod.Name)
+		assert.Equals(t, "mp-", mpPod.GenerateName)
+		assert.Equals(t, "", mpPod.Name)
 		assert.Equals(t, namespace, mpPod.Namespace)
 		assert.Equals(t, map[string]string{
 			mppod.LabelMountpointVersion: mountpointVersion,
-			mppod.LabelPodUID:            testPodUID,
-			mppod.LabelVolumeName:        testVolName,
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
+			mppod.LabelVolumeName:        testVolName,
+			mppod.LabelVolumeId:          testVolID,
 		}, mpPod.Labels)
 
 		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
@@ -111,16 +111,16 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	}
 
 	t.Run("Empty PV", func(t *testing.T) {
-		mpPod, err := creator.Create(&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				UID: types.UID(testPodUID),
-			},
-			Spec: corev1.PodSpec{
-				NodeName: testNode,
-			},
-		}, &corev1.PersistentVolume{
+		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
+			},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
+					},
+				},
 			},
 		})
 
@@ -129,20 +129,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	})
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
-		mpPod, err := creator.Create(&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				UID: types.UID(testPodUID),
-			},
-			Spec: corev1.PodSpec{
-				NodeName: testNode,
-			},
-		}, &corev1.PersistentVolume{
+		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
 						VolumeAttributes: map[string]string{
 							"mountpointPodServiceAccountName": "mount-s3-sa",
 						},
@@ -158,20 +152,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 	t.Run("With Container Resources specified in PV", func(t *testing.T) {
 		t.Run("With valid requests and limits", func(t *testing.T) {
-			mpPod, err := creator.Create(&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: types.UID(testPodUID),
-				},
-				Spec: corev1.PodSpec{
-					NodeName: testNode,
-				},
-			}, &corev1.PersistentVolume{
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
 							VolumeAttributes: map[string]string{
 								"mountpointContainerResourcesRequestsCpu":    "1",
 								"mountpointContainerResourcesRequestsMemory": "100Mi",
@@ -197,20 +185,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With valid requests only", func(t *testing.T) {
-			mpPod, err := creator.Create(&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: types.UID(testPodUID),
-				},
-				Spec: corev1.PodSpec{
-					NodeName: testNode,
-				},
-			}, &corev1.PersistentVolume{
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
 							VolumeAttributes: map[string]string{
 								"mountpointContainerResourcesRequestsCpu":    "1",
 								"mountpointContainerResourcesRequestsMemory": "100Mi",
@@ -232,20 +214,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With valid limits only", func(t *testing.T) {
-			mpPod, err := creator.Create(&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: types.UID(testPodUID),
-				},
-				Spec: corev1.PodSpec{
-					NodeName: testNode,
-				},
-			}, &corev1.PersistentVolume{
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
 							VolumeAttributes: map[string]string{
 								"mountpointContainerResourcesLimitsCpu":    "2",
 								"mountpointContainerResourcesLimitsMemory": "200Mi",
@@ -294,14 +270,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 				},
 			} {
 				t.Run(name, func(t *testing.T) {
-					_, err := creator.Create(&corev1.Pod{
-						ObjectMeta: metav1.ObjectMeta{
-							UID: types.UID(testPodUID),
-						},
-						Spec: corev1.PodSpec{
-							NodeName: testNode,
-						},
-					}, &corev1.PersistentVolume{
+					_, err := creator.Create(testNode, &corev1.PersistentVolume{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: testVolName,
 						},

@@ -10,6 +10,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerv1 "k8s.io/client-go/listers/core/v1"
@@ -33,8 +36,15 @@ type Watcher struct {
 }
 
 // New creates a new [Watcher] with the given Kubernetes client, Mountpoint Pod namespace, and resync duration.
-func New(client kubernetes.Interface, namespace string, defaultResync time.Duration) *Watcher {
-	factory := informers.NewSharedInformerFactoryWithOptions(client, defaultResync, informers.WithNamespace(namespace))
+func New(client kubernetes.Interface, namespace, nodeName string, defaultResync time.Duration) *Watcher {
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		client,
+		defaultResync,
+		informers.WithNamespace(namespace),
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
+		}),
+	)
 	informer := factory.Core().V1().Pods().Informer()
 	lister := factory.Core().V1().Pods().Lister().Pods(namespace)
 	return &Watcher{informer, lister}
@@ -49,6 +59,21 @@ func (w *Watcher) Start(stopCh <-chan struct{}) error {
 		return ErrCacheDesync
 	}
 	return nil
+}
+
+// Get returns pod from watcher's cache.
+func (w *Watcher) Get(name string) (*corev1.Pod, error) {
+	return w.lister.Get(name)
+}
+
+// List returns all pods from watcher's cache.
+func (w *Watcher) List() ([]*corev1.Pod, error) {
+	return w.lister.List(labels.Everything())
+}
+
+// AddEventHandler adds pod event handler.
+func (w *Watcher) AddEventHandler(handler cache.ResourceEventHandler) (cache.ResourceEventHandlerRegistration, error) {
+	return w.informer.AddEventHandler(handler)
 }
 
 // Wait blocks until the specified Mountpoint Pod is found and ready, or until the context is cancelled.

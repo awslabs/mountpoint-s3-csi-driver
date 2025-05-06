@@ -190,6 +190,23 @@ generate_licenses: download_go_deps
 clean:
 	rm -rf bin/ && docker system prune
 
+# Generate files for Custom Resources (`zz_generated.deepcopy.go` and CustomResourceDefinition YAML file).
+TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments.yaml"
+# Helm CRD file needs extra `{{- if .Values.experimental.podMounter -}}` wrapper, while we don't need it for tests.
+HELM_POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/mountpoints3podattachments-crd.yaml"
+TEST_POD_ATTACHMENT_CRD_FILE ?= "./tests/crd/mountpoints3podattachments-crd.yaml"
+.PHONY: generate
+generate:
+	controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
+	controller-gen crd paths="./pkg/api/..." output:crd:dir=./hack/
+	echo '# Auto-generated file via `make generate`. Do not edit.' > $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '{{- if .Values.experimental.podMounter -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '{{- end -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '# Auto-generated file via `make generate`. Do not edit.' > $(TEST_POD_ATTACHMENT_CRD_FILE)
+	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(TEST_POD_ATTACHMENT_CRD_FILE)
+	rm $(TMP_POD_ATTACHMENT_CRD_FILE)
+
 ## Binaries used in tests.
 
 TESTBIN ?= $(shell pwd)/tests/bin
