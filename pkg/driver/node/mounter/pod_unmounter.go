@@ -81,7 +81,7 @@ func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	}
 	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPod.Name)
 
-	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source, mpPod); err != nil {
+	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source); err != nil {
 		return
 	}
 }
@@ -116,11 +116,11 @@ func (u *PodUnmounter) unmountAndCleanup(source string) error {
 }
 
 // cleanupCredentials removes credentials associated with the Mountpoint Pod
-func (u *PodUnmounter) cleanupCredentials(volumeId, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
+func (u *PodUnmounter) cleanupCredentials(volumeId, mpPodUID, podPath, source string) error {
 	err := u.credProvider.Cleanup(credentialprovider.CleanupContext{
 		VolumeID:  volumeId,
 		PodID:     mpPodUID,
-		WritePath: filepath.Join(u.kubeletPath, "pods", mpPodUID),
+		WritePath: mppod.PathOnHost(podPath, mppod.KnownPathCredentials),
 	})
 	if err != nil {
 		klog.Errorf("Failed to clean up credentials for %s: %v", source, err)
