@@ -106,17 +106,17 @@ func (mr *MockMounterMockRecorder) IsMountPoint(target interface{}) *gomock.Call
 }
 
 // Mount mocks base method.
-func (m *MockMounter) Mount(ctx context.Context, bucketName, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
+func (m *MockMounter) Mount(ctx context.Context, bucketName, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup, pvMountOptions string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Mount", ctx, bucketName, target, credentialCtx, args)
+	ret := m.ctrl.Call(m, "Mount", ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Mount indicates an expected call of Mount.
-func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx, args interface{}) *gomock.Call {
+func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), ctx, bucketName, target, credentialCtx, args)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions)
 }
 
 // Unmount mocks base method.

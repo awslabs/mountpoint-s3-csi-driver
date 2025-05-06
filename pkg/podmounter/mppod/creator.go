@@ -16,9 +16,13 @@ import (
 // Labels populated on spawned Mountpoint Pods.
 const (
 	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
-	LabelPodUID            = "s3.csi.aws.com/pod-uid"
 	LabelVolumeName        = "s3.csi.aws.com/volume-name"
+	LabelVolumeId          = "s3.csi.aws.com/volume-id"
 	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
+)
+
+const (
+	AnnotationNeedsUnmount = "s3.csi.aws.com/needs-unmount"
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
@@ -50,22 +54,16 @@ func NewCreator(config Config) *Creator {
 	return &Creator{config: config}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pv`.
-//
-// It automatically assigns Mountpoint Pod to `pod`'s node.
-// The name of the Mountpoint Pod is consistently generated from `pod` and `pv` using `MountpointPodNameFor` function.
-func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
-	node := pod.Spec.NodeName
-	name := MountpointPodNameFor(string(pod.UID), pv.Name)
-
+// Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
+func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: c.config.Namespace,
+			GenerateName: "mp-",
+			Namespace:    c.config.Namespace,
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelPodUID:            string(pod.UID),
 				LabelVolumeName:        pv.Name,
+				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 		},
@@ -140,7 +138,7 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.
 		},
 	}
 
-	volumeAttributes := extractVolumeAttributes(pv)
+	volumeAttributes := ExtractVolumeAttributes(pv)
 
 	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
 		mpPod.Spec.ServiceAccountName = saName
@@ -201,9 +199,9 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.
 	return mpPod, nil
 }
 
-// extractVolumeAttributes extracts volume attributes from given `pv`.
+// ExtractVolumeAttributes extracts volume attributes from given `pv`.
 // It always returns a non-nil map, and it's safe to use even though `pv` doesn't contain any volume attributes.
-func extractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
+func ExtractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
 	csiSpec := pv.Spec.CSI
 	if csiSpec == nil {
 		return map[string]string{}

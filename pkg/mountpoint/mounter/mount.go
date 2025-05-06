@@ -4,6 +4,9 @@ package mounter
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
+	"syscall"
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
@@ -52,6 +55,14 @@ func (m *Mounter) Mount(target Target, opts MountOptions) (int, error) {
 		return 0, ErrMissingTarget
 	}
 	return mount(target, opts)
+}
+
+// BindMount performs a bind mount syscall from `source` to `target`.
+func (m *Mounter) BindMount(source, target Target) error {
+	if target == "" {
+		return ErrMissingTarget
+	}
+	return bindMount(source, target)
 }
 
 // Unmount unmounts Mountpoint at `target`.
@@ -104,4 +115,64 @@ func (m *Mounter) CheckMountPoint(target Target) (bool, error) {
 // If its corrupted, the mount point should be re-mounted.
 func (m *Mounter) IsMountPointCorrupted(err error) bool {
 	return mountutils.IsCorruptedMnt(err)
+}
+
+// findSourceMountPoint locates the source S3 mount point for a given target path by comparing
+// device IDs and inodes with all S3 mount points at driver source directory `sourceMountDir`.
+//
+// Parameters:
+//   - target: The target path whose source mount point needs to be found
+//   - sourceMountDir: directory where to find source mount points
+//
+// Returns:
+//   - string: The path of the source mount point if found
+//   - error: An error if the operation fails
+//
+// The function works by:
+// 1. Getting the device ID and inode of the target path
+// 2. Listing all mount points in the system that has "mountpoint-s3" as device name and prefix `sourceMountDir`
+// 3. Finding a mount point that matches both the device ID and inode of the target
+func (m *Mounter) FindSourceMountPoint(target, sourceMountDir string) (string, error) {
+	targetFileInfo, err := os.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat %q: %w", target, err)
+	}
+
+	targetSysInfo, ok := targetFileInfo.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("failed to get system info for target %q", target)
+	}
+
+	targetDevID := targetSysInfo.Dev
+	targetInodeID := targetSysInfo.Ino
+
+	mountPoints, err := m.mount.List()
+	if err != nil {
+		return "", fmt.Errorf("failed to list mount points: %w", err)
+	}
+
+	for _, mountPoint := range mountPoints {
+		if mountPoint.Device != fsName || !strings.HasPrefix(mountPoint.Path, sourceMountDir) {
+			continue
+		}
+
+		mountPathInfo, err := os.Stat(mountPoint.Path)
+		if err != nil {
+			klog.V(4).Infof("Skipping mount point %q: unable to stat %v", mountPoint.Path, err)
+			continue
+		}
+
+		mountSysInfo, ok := mountPathInfo.Sys().(*syscall.Stat_t)
+		if !ok {
+			klog.V(4).Infof("Skipping mount point %q: unable to get system info", mountPoint.Path)
+			continue
+		}
+
+		if targetDevID == mountSysInfo.Dev && targetInodeID == mountSysInfo.Ino {
+			return mountPoint.Path, nil
+		}
+	}
+
+	return "", fmt.Errorf("no source mount point found for path %q (device: %d, inode: %d)",
+		target, targetDevID, targetInodeID)
 }

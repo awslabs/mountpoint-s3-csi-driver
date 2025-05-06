@@ -11,6 +11,9 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -18,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
@@ -30,21 +34,37 @@ var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAG
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 
+var (
+	scheme = runtime.NewScheme()
+)
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(crdv1beta.AddToScheme(scheme))
+}
+
 func main() {
 	flag.Parse()
 
 	logf.SetLogger(zap.New())
 
 	log := logf.Log.WithName(csicontroller.Name)
-	client := config.GetConfigOrDie()
+	conf := config.GetConfigOrDie()
 
-	mgr, err := manager.New(client, manager.Options{})
+	mgr, err := manager.New(conf, manager.Options{
+		Scheme: scheme,
+	})
 	if err != nil {
 		log.Error(err, "Failed to create a new manager")
 		os.Exit(1)
 	}
 
-	err = csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
+	if err := crdv1beta.SetupManagerIndices(mgr); err != nil {
+		log.Error(err, "Failed to setup field indexers")
+		os.Exit(1)
+	}
+
+	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:         *mountpointNamespace,
 		MountpointVersion: *mountpointVersion,
 		PriorityClassName: *mountpointPriorityClassName,
@@ -54,10 +74,16 @@ func main() {
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
-		ClusterVariant:   cluster.DetectVariant(client, log),
-	}).SetupWithManager(mgr)
-	if err != nil {
+		ClusterVariant:   cluster.DetectVariant(conf, log),
+	})
+
+	if err := reconciler.SetupWithManager(mgr); err != nil {
 		log.Error(err, "Failed to create controller")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(csicontroller.NewStaleAttachmentCleaner(reconciler)); err != nil {
+		log.Error(err, "Failed to add stale attachment cleaner to manager")
 		os.Exit(1)
 	}
 
