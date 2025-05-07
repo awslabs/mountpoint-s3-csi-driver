@@ -12,6 +12,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -23,8 +25,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Internal S3 CSI Driver directory for source mount points
@@ -54,9 +54,17 @@ type PodMounter struct {
 }
 
 // NewPodMounter creates a new [PodMounter] with given Kubernetes client.
-func NewPodMounter(podWatcher *watcher.Watcher, s3paCache cache.Cache, credProvider *credentialprovider.Provider, mount *mpmounter.Mounter,
-	mountSyscall mountSyscall, bindMountSyscall bindMountSyscall, kubernetesVersion, nodeID,
-	sourceMountDir string) (*PodMounter, error) {
+func NewPodMounter(
+	podWatcher *watcher.Watcher,
+	s3paCache cache.Cache,
+	credProvider *credentialprovider.Provider,
+	mount *mpmounter.Mounter,
+	mountSyscall mountSyscall,
+	bindMountSyscall bindMountSyscall,
+	kubernetesVersion,
+	nodeID,
+	sourceMountDir string,
+) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
 		s3paCache:         s3paCache,
@@ -262,7 +270,7 @@ func (pm *PodMounter) Unmount(_ context.Context, target string, _ credentialprov
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
-	return pm.mount.CheckMountPoint(target)
+	return pm.mount.CheckMountpoint(target)
 }
 
 // waitForMountpointPod waits until Mountpoint Pod for given `podName` is in `Running` state.
@@ -344,7 +352,7 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string, err error) error {
 		}
 
 		return nil
-	} else if pm.mount.IsMountPointCorrupted(err) {
+	} else if pm.mount.IsMountpointCorrupted(err) {
 		klog.V(4).Infof("Target path %q is a corrupted mount. Trying to unmount", target)
 		if unmountErr := pm.unmountTarget(target); unmountErr != nil {
 			klog.V(4).Infof("Failed to unmount target path %q: %v, original failure of stat: %v", target, unmountErr, err)

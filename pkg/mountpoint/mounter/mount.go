@@ -56,7 +56,7 @@ func (m *Mounter) Mount(target Target, opts MountOptions) (int, error) {
 
 // BindMount performs a bind mount syscall from `source` to `target`.
 func (m *Mounter) BindMount(source, target Target) error {
-	if target == "" {
+	if target == "" || source == "" {
 		return ErrMissingTarget
 	}
 	return bindMount(source, target)
@@ -69,7 +69,7 @@ func (m *Mounter) Unmount(target Target) error {
 	return m.mount.Unmount(target)
 }
 
-// CheckMountPoint checks whether `target` is a healthy Mountpoint mount.
+// CheckMountpoint checks whether `target` is a healthy Mountpoint mount.
 //
 // If the `target` is a:
 //   - Healthy Mountpoint mount, it returns "true, nil"
@@ -78,12 +78,12 @@ func (m *Mounter) Unmount(target Target) error {
 //
 // Some notable errors that requires callers to perform some operations are:
 //   - If `errors.Is(err, fs.ErrNotExist)` - it means the `target` does not exists, and the caller should create the target folder
-//   - If `mounter.IsMountPointCorrupted(err)` - it means the `target` is corrupted, and the caller should `Unmount` and `Mount` the file system
+//   - If `mounter.IsMountpointCorrupted(err)` - it means the `target` is corrupted, and the caller should `Unmount` and `Mount` the file system
 //
 // We implement additional check on top of `mountutils.IsMountPoint()` because we need
 // to verify not only that the target is a mount point but also that it is specifically a Mountpoint mount point.
 // This is achieved by calling the `mountutils.List()` method to enumerate all mount points.
-func (m *Mounter) CheckMountPoint(target Target) (bool, error) {
+func (m *Mounter) CheckMountpoint(target Target) (bool, error) {
 	if err := statx(target); err != nil {
 		return false, err
 	}
@@ -106,10 +106,10 @@ func (m *Mounter) CheckMountPoint(target Target) (bool, error) {
 	return false, nil
 }
 
-// IsMountPointCorrupted returns whether an error returned from `CheckMountPoint`
+// IsMountpointCorrupted returns whether an error returned from [Mounter.CheckMountpoint]
 // indicates the queried mount point is corrupted or not.
 //
 // If its corrupted, the mount point should be re-mounted.
-func (m *Mounter) IsMountPointCorrupted(err error) bool {
+func (m *Mounter) IsMountpointCorrupted(err error) bool {
 	return mountutils.IsCorruptedMnt(err)
 }

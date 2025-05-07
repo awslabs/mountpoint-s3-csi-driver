@@ -45,7 +45,7 @@ func NewSystemdMounter(credProvider *credentialprovider.Provider, mpMounter *mpm
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
-	return m.MpMounter.CheckMountPoint(target)
+	return m.MpMounter.CheckMountpoint(target)
 }
 
 // Mount mounts the given bucket at the target path using provided credentials.
@@ -89,7 +89,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				}
 			}()
 			// Corrupted mount, try unmounting
-		} else if m.MpMounter.IsMountPointCorrupted(err) {
+		} else if m.MpMounter.IsMountpointCorrupted(err) {
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
 			if mntErr := m.Unmount(ctx, target, credentialprovider.CleanupContext{
 				WritePath: credentialCtx.WritePath,

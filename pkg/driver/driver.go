@@ -23,14 +23,6 @@ import (
 	"os"
 	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/fields"
@@ -45,7 +37,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
 	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 const (
