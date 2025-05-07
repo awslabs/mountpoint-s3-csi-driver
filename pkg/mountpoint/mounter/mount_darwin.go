@@ -9,7 +9,7 @@ func mount(_ Target, _ MountOptions) (int, error) {
 	return 0, errors.New("Only supported on Linux")
 }
 
-func bindMount(source, target string) error {
+func bindMount(_, _ Target) error {
 	return errors.New("Only supported on Linux")
 }
 
