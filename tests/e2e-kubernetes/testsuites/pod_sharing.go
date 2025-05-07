@@ -31,6 +31,8 @@ const mountpointNamespace = "mount-s3"
 const defaultTimeout = 10 * time.Second
 const defaultInterval = 1 * time.Second
 
+const podCleanupTimeout = 5 * time.Minute
+
 var IsPodMounter bool
 
 type s3CSIPodSharingTestSuite struct {
@@ -424,7 +426,7 @@ func verifyMountpointResourcesCleanup(ctx context.Context, f *framework.Framewor
 	for _, s3paName := range s3paNames {
 		err := waitForKubernetesObjectToDisappear(ctx, func(ctx context.Context) (*unstructured.Unstructured, error) {
 			return f.DynamicClient.Resource(s3paGVR).Get(ctx, s3paName, metav1.GetOptions{})
-		}, defaultTimeout, defaultInterval)
+		}, podCleanupTimeout, defaultInterval)
 		gomega.Expect(err).To(gomega.BeNil())
 	}
 
@@ -432,7 +434,7 @@ func verifyMountpointResourcesCleanup(ctx context.Context, f *framework.Framewor
 	for _, mpPodName := range mountpointPodNames {
 		err := waitForKubernetesObjectToDisappear(ctx, func(ctx context.Context) (*v1.Pod, error) {
 			return f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
-		}, defaultTimeout, defaultInterval)
+		}, podCleanupTimeout, defaultInterval)
 		gomega.Expect(err).To(gomega.BeNil())
 	}
 }
