@@ -75,7 +75,13 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleanup resource")
 	}
 
-	ginkgo.Describe("Pod Sharing", func() {
+	ginkgo.Describe("Pod Sharing", ginkgo.Ordered, func() {
+		var oidcProvider string
+
+		ginkgo.BeforeAll(func(ctx context.Context) {
+			oidcProvider = oidcProviderForCluster(ctx, f)
+		})
+
 		ginkgo.BeforeEach(func(ctx context.Context) {
 			if !IsPodMounter {
 				ginkgo.Skip("Pod Mounter is not enabled, skipping pod sharing tests")
@@ -180,7 +186,11 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		})
 
 		ginkgo.It("should share Mountpoint Pod if pod namespaces and service accounts are the same (authenticationSource=pod)", func(ctx context.Context) {
-			idConfig, err := setupPodLevelIdentity(ctx, f)
+			if oidcProvider == "" {
+				ginkgo.Skip("OIDC provider is not configured, skipping PLI - IRSA tests")
+			}
+
+			idConfig, err := setupPodLevelIdentity(ctx, f, oidcProvider)
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(idConfig.Cleanup)
 
@@ -202,11 +212,15 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 		})
 
 		ginkgo.It("should not share Mountpoint Pod if pod service accounts are the different (authenticationSource=pod)", func(ctx context.Context) {
-			idConfig1, err := setupPodLevelIdentity(ctx, f)
+			if oidcProvider == "" {
+				ginkgo.Skip("OIDC provider is not configured, skipping PLI - IRSA tests")
+			}
+
+			idConfig1, err := setupPodLevelIdentity(ctx, f, oidcProvider)
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(idConfig1.Cleanup)
 
-			idConfig2, err := setupPodLevelIdentity(ctx, f)
+			idConfig2, err := setupPodLevelIdentity(ctx, f, oidcProvider)
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(idConfig2.Cleanup)
 
@@ -510,23 +524,16 @@ func checkPodWriteAndOtherPodRead(f *framework.Framework, writerPod, readerPod *
 	checkReadFromPath(f, readerPod, filePath, size, seed)
 }
 
-type PodLevelIdentityConfig struct {
-	OIDCProvider   string
+type podLevelIdentityConfig struct {
 	ServiceAccount *v1.ServiceAccount
 	IAMRole        string
 	Cleanup        func(context.Context) error
 }
 
 // setupPodLevelIdentity creates necessary resources for pod-level identity tests
-func setupPodLevelIdentity(ctx context.Context, f *framework.Framework) (*PodLevelIdentityConfig, error) {
-	config := &PodLevelIdentityConfig{}
+func setupPodLevelIdentity(ctx context.Context, f *framework.Framework, oidcProvider string) (*podLevelIdentityConfig, error) {
+	config := &podLevelIdentityConfig{}
 	var cleanupFuncs []func(context.Context) error
-
-	// Get OIDC Provider
-	config.OIDCProvider = oidcProviderForCluster(ctx, f)
-	if config.OIDCProvider == "" {
-		return nil, fmt.Errorf("OIDC provider is not configured")
-	}
 
 	// Create Service Account
 	sa, removeSA := createServiceAccount(ctx, f)
@@ -535,7 +542,7 @@ func setupPodLevelIdentity(ctx context.Context, f *framework.Framework) (*PodLev
 
 	// Create IAM Role with full access policy
 	role, removeRole := createRole(ctx, f,
-		assumeRoleWithWebIdentityPolicyDocument(ctx, config.OIDCProvider, sa),
+		assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa),
 		iamPolicyS3FullAccess)
 	config.IAMRole = *role.Arn
 	cleanupFuncs = append(cleanupFuncs, removeRole)
