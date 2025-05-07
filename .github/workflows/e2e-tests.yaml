@@ -182,6 +182,7 @@ jobs:
       - name: Run E2E Tests (PodMounter)
         env:
           ACTION: "run_tests"
+          MOUNTER_KIND: "pod"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup (PodMounter)

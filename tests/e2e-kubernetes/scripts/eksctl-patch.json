@@ -38,6 +38,13 @@
     }
   },
   {
+    "op": "add",
+    "path": "/addons/-",
+    "value": {
+      "name": "eks-pod-identity-agent"
+    }
+  },
+  {
     "op": "replace",
     "path": "/cloudWatch/clusterLogging",
     "value": {
