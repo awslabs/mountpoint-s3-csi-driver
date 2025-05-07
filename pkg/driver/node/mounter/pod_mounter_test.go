@@ -134,7 +134,7 @@ func setup(t *testing.T) *testCtx {
 			WorkloadFSGroup:      testCtx.fsGroup,
 			MountOptions:         testCtx.pvMountOptions,
 			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-				testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
+				testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 			},
 		},
 	}
@@ -158,23 +158,6 @@ func setup(t *testing.T) *testCtx {
 		return nil
 	}
 
-	findSourceMountPoint := func(target, sourceMountDir string) (string, error) {
-		mountPoints, err := fakeMounter.List()
-		if err != nil {
-			return "", fmt.Errorf("failed to list mount points: %w", err)
-		}
-
-		for _, mp := range mountPoints {
-			if mp.Device == "mountpoint-s3" &&
-				strings.HasPrefix(mp.Path, sourceMountDir) &&
-				mp.Path != target {
-				return mp.Path, nil
-			}
-		}
-
-		return "", fmt.Errorf("no source mount point found for target %q", target)
-	}
-
 	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 		return dummyIMDSRegion, nil
 	})
@@ -188,7 +171,7 @@ func setup(t *testing.T) *testCtx {
 	assert.NoError(t, err)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
-		mountBindSyscall, findSourceMountPoint, testK8sVersion, nodeName, sourceMountDir)
+		mountBindSyscall, testK8sVersion, nodeName, sourceMountDir)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
@@ -398,7 +381,7 @@ func TestPodMounter(t *testing.T) {
 					WorkloadFSGroup:      testCtx.fsGroup,
 					MountOptions:         testCtx.pvMountOptions,
 					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
-						testCtx.mpPodName: []crdv1beta.WorkloadAttachment{{WorkloadPodUID: testCtx.podUID}},
+						testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 					},
 				},
 			}

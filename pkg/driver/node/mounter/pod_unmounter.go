@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -27,7 +26,6 @@ type PodUnmounter struct {
 	sourceMountDir string
 	podWatcher     *watcher.Watcher
 	credProvider   *credentialprovider.Provider
-	mutex          sync.Mutex
 }
 
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
@@ -76,6 +74,7 @@ func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	volumeId := mpPod.Labels[mppod.LabelVolumeId]
 
 	if err := u.writeExitFile(podPath); err != nil {
+		klog.Errorf("Failed to write exit file for Mountpoint Pod (UID: %s): %v", mpPodUID, err)
 		return
 	}
 
@@ -84,7 +83,7 @@ func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	}
 	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPod.Name)
 
-	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source, mpPod); err != nil {
+	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source); err != nil {
 		return
 	}
 }
@@ -119,11 +118,11 @@ func (u *PodUnmounter) unmountAndCleanup(source string) error {
 }
 
 // cleanupCredentials removes credentials associated with the Mountpoint Pod
-func (u *PodUnmounter) cleanupCredentials(volumeId, mpPodUID, podPath, source string, mpPod *corev1.Pod) error {
+func (u *PodUnmounter) cleanupCredentials(volumeId, mpPodUID, podPath, source string) error {
 	err := u.credProvider.Cleanup(credentialprovider.CleanupContext{
 		VolumeID:  volumeId,
 		PodID:     mpPodUID,
-		WritePath: filepath.Join(u.kubeletPath, "pods", mpPodUID),
+		WritePath: mppod.PathOnHost(podPath, mppod.KnownPathCredentials),
 	})
 	if err != nil {
 		klog.Errorf("Failed to clean up credentials for %s: %v", source, err)
@@ -154,12 +153,6 @@ func (u *PodUnmounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
 // CleanupDanglingMounts scans the source mount directory for potential dangling mounts
 // and cleans them up. It also unmounts any Mountpoint Pods marked for unmounting.
 func (u *PodUnmounter) CleanupDanglingMounts() error {
-	// Ensure only one cleanup runs at a time
-	if !u.mutex.TryLock() {
-		return nil
-	}
-	defer u.mutex.Unlock()
-
 	entries, err := os.ReadDir(u.sourceMountDir)
 	if err != nil {
 		// Source mount dir does not exists, meaning there aren't any mounts
