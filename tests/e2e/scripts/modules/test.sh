@@ -53,7 +53,7 @@ run_go_tests() {
   # Convert go test flags to ginkgo flags: -v ./... becomes -v ./..., -ginkgo.v becomes -v
   # Pass credential flags after --
   # Add 15m timeout
-  local ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo --procs=12 -timeout=15m -v ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
+  local ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo --procs=8 -timeout=15m -v ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
 
   # Add JUnit report if specified
   if [ -n "$junit_report" ]; then
@@ -88,7 +88,7 @@ run_go_tests() {
 
     # Use the correct format for Ginkgo JUnit report (-junit-report=...)
     # Keep -v flag for verbosity and add 15m timeout
-    ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo --procs=12 -timeout=15m -v -junit-report='$junit_absolute_path' ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
+    ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo --procs=8 -timeout=15m -v -junit-report='$junit_absolute_path' ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
     log "Final JUnit report path: $junit_absolute_path"
   fi
 
