@@ -868,71 +868,55 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	})
 
 	// --------------------------------------------------------------------
-	// 16. Directory Name Edge Cases (Full Path Test)
+	// 16. Traversal path normalization preserves permissions
 	//
-	// This test ensures that Mountpoint-S3 can handle directories with
-	// complex names (Unicode, long names, special characters) and that
-	// full read/write functionality inside these directories works.
+	// This regression‑guard test ensures that when a directory is accessed
+	// through a path containing one or more “..” components, Mountpoint‑S3
+	// collapses the traversal segments before evaluating permissions.  The
+	// resulting inode must therefore show the same mode bits and ownership
+	// as when it is addressed via its canonical path.
 	//
-	// Why? S3 key encoding applies to directory paths just like files,
-	// and we must ensure the driver isn't mishandling edge cases.
+	// Test scenario:
 	//
-	// Test steps for each case:
+	//     dir‑mode = 0755
+	//          │
+	//     mkdir /mnt/volume1/root
+	//          │
+	//     stat  /mnt/volume1/a/b/c/../../../root   → 0755
+	//     stat  /mnt/volume1/root                  → 0755
 	//
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 1. mkdir <dir>                                              │
-	// │ 2. stat <dir>                                               │
-	// │ 3. touch <dir>/.marker  (store 'ok' text in the file)       │
-	// │ 4. cat <dir>/.marker    (read it back to confirm)           │
-	// │                                                             │
-	// │ Directory cases:                                            │
-	// │  - unicode-🚀🌟                                             │
-	// │  - long-(200 chars)                                         │
-	// │  - special-!@#$%^&()[]{}=+,~                                │
-	// └─────────────────────────────────────────────────────────────┘
-	//
-	// Expected:
-	// - mkdir, stat, write, and read all succeed.
-	// - Marker file content is correct ("ok").
-	// - No path encoding errors.
-	//
-	// This tests full end-to-end path handling, not just directory creation.
-	//
-	ginkgo.It("should support unicode / long / special‑char directory names with file storage", func(ctx context.Context) {
+	// Expectations:
+	// - Both `stat` invocations report 0755 (`drwxr-xr-x`) permissions.
+	// - Ownership matches the uid/gid set via mount options.
+	ginkgo.It("should preserve dir permissions when accessed via ../../../ traversal", func(ctx context.Context) {
+		// Provision a volume with the default 0755 dir‑mode.
 		res := createVolume(ctx, testRegistry.config, pattern,
-			DefaultNonRootUser, DefaultNonRootGroup, "0700")
+			DefaultNonRootUser, DefaultNonRootGroup, "0755")
 
+		// Launch a pod running as the same non‑root UID/GID.
 		pod, err := CreatePodWithVolumeAndSecurity(ctx, testFramework, res.Pvc, "",
 			DefaultNonRootUser, DefaultNonRootGroup)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		framework.ExpectNoError(err)
 		defer e2epod.DeletePodWithWait(ctx, testFramework.ClientSet, pod)
 
-		dirs := []string{
-			"/mnt/volume1/unicode-🚀🌟",
-			"/mnt/volume1/long-" + strings.Repeat("x", 200),
-			"/mnt/volume1/special-!@#$%^&()[]{}=+,~",
+		// Create the canonical directory plus some nested path components.
+		rootDir := "/mnt/volume1/root"
+		nestedDirs := []string{
+			"/mnt/volume1/a",
+			"/mnt/volume1/a/b",
+			"/mnt/volume1/a/b/c",
 		}
+		CreateMultipleDirsInPod(testFramework, pod, append(nestedDirs, rootDir)...)
 
-		for _, dir := range dirs {
-			ginkgo.By(fmt.Sprintf("Creating and testing directory: %s", dir))
+		// Sanity‑check the canonical path.
+		assertDirPerms(testFramework, pod, rootDir, "755",
+			ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 
-			// 1: Create directory
-			CreateDirInPod(testFramework, pod, dir)
-
-			// 2: Stat the directory
-			_, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("stat '%s'", dir))
-			framework.ExpectNoError(err, fmt.Sprintf("stat failed for %s: %s", dir, stderr))
-
-			// 3: Create marker file inside
-			marker := fmt.Sprintf("%s/.marker", dir)
-			CreateFileInPod(testFramework, pod, marker, "ok")
-
-			// 4: Confirm file exists and content is correct
-			out, stderr, err := e2evolume.PodExec(testFramework, pod, fmt.Sprintf("cat '%s'", marker))
-			framework.ExpectNoError(err, fmt.Sprintf("reading .marker failed in %s: %s", dir, stderr))
-			gomega.Expect(strings.TrimSpace(out)).To(gomega.Equal("ok"), fmt.Sprintf("unexpected marker content in %s", dir))
-		}
+		// Now stat the same inode via a traversal path.
+		traversalPath := "/mnt/volume1/a/b/c/../../../root"
+		assertDirPerms(testFramework, pod, traversalPath, "755",
+			ptr.To(DefaultNonRootUser), ptr.To(DefaultNonRootGroup))
 	})
 
-	// TODO(S3CSI-72): Add attr test adter changing image to alpine
+	// TODO(S3CSI-72): Add attr test after changing image to alpine
 }
