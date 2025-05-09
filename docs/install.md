@@ -3,7 +3,7 @@
 ## Prerequisites
 
 <!-- TODO(S3CSI-17) Add minimum supported kubernetes version -->
-* Kubernetes Version >= 
+* Kubernetes Version >=
 
 ## Installation
 
@@ -12,6 +12,7 @@
 ### Configure access to S3
 
 ### Deploy driver
+
 You may deploy the Mountpoint for Amazon S3 CSI driver via Kustomize, Helm.
 
 #### Kustomize
@@ -27,12 +28,26 @@ You may deploy the Mountpoint for Amazon S3 CSI driver via Kustomize, Helm.
 
 Review the [configuration values](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/charts/scality-mountpoint-s3-csi-driver/values.yaml) for the Helm chart.
 
-#### Once the driver has been deployed, verify the pods are running:
+> [!IMPORTANT]
+> The S3 endpoint URL (`node.s3EndpointUrl`) is a **required** parameter when installing the CSI driver via Helm.
+> The driver will not function without this parameter and the Helm installation will fail if it's not provided.
+
+Example installation with the required S3 endpoint URL:
+
+```sh
+helm install scality-mountpoint-s3-csi-driver ./charts/scality-mountpoint-s3-csi-driver \
+  --namespace kube-system \
+  --set node.s3EndpointUrl=https://s3.your-scality-cluster.com
+```
+
+#### Once the driver has been deployed, verify the pods are running
+
 ```sh
 kubectl get pods -n kube-system -l app.kubernetes.io/name=scality-mountpoint-s3-csi-driver
 ```
 
 ### Volume Configuration Example
+
 Follow the [README for examples](https://github.com/scality/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning) on using the driver.
 
 ### Uninstalling the driver
