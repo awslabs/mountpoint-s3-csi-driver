@@ -335,8 +335,8 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, log)
 }
 
-// addWorkloadToS3PodAttachment adds workload UID to the first Mountpoint Pod in the map
-// TODO: We will later add extra logic for selecting/creating MPPod if existing MP Pods are using old CSI Driver version or have some "no-new-attachments" annotation
+// addWorkloadToS3PodAttachment adds workload UID to the first suitable Mountpoint Pod in the map.
+// If there aren't any suitable Mountpoint Pods, it creates a new one and assign the workload UID to that Mountpoint Pod.
 func (r *Reconciler) addWorkloadToS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
@@ -652,6 +652,11 @@ func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, l
 	if mpPod.Annotations != nil {
 		if mpPod.Annotations[mppod.AnnotationNeedsUnmount] == "true" {
 			log.Info("Mountpoint Pod is annotated as 'needs-unmount' - not suitable for a new workload")
+			return false
+		}
+
+		if mpPod.Annotations[mppod.AnnotationNoNewWorkload] == "true" {
+			log.Info("Mountpoint Pod is annotated as 'no-new-workload' - not suitable for a new workload")
 			return false
 		}
 	}

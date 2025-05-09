@@ -670,7 +670,7 @@ var _ = Describe("Mountpoint Controller", func() {
 				})
 
 				Context("Mountpoint Pod Annotations", func() {
-					It("should schedule a new Mountpoint Pod if its annotated as 'needs-unmount'", func() {
+					It("should schedule a new Mountpoint Pod if existing Mountpoint Pod annotated as 'needs-unmount'", func() {
 						vol := createVolume()
 						vol.bind()
 
@@ -704,8 +704,15 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
+						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod1.UID))).NotTo(BeEmpty())
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod2.UID))).NotTo(BeEmpty())
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).NotTo(BeEmpty())
+
+						// Verify `pod3` has been assigned to a new Mountpoint Pod
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
+						Expect(mpPod2.Name).To(Equal(mpPod2.Name))
 					})
 
 					It("should schedule a new Mountpoint Pod if existing Mountpoint Pod has been created by a different CSI Driver version", func() {
@@ -729,6 +736,45 @@ var _ = Describe("Mountpoint Controller", func() {
 						// Now patch `mpPod1` as it was created with a different CSI Driver version
 						differentCSIDriverVersion := "1.0.0.different"
 						mpPod1.label(mppod.LabelCSIDriverVersion, differentCSIDriverVersion)
+
+						// Schedule `pod3` to the same node
+						pod3.schedule(testNode)
+
+						// Wait until `pod3` is assigned
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
+						})
+						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod1.UID))).NotTo(BeEmpty())
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod2.UID))).NotTo(BeEmpty())
+						Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).NotTo(BeEmpty())
+
+						// Verify `pod3` has been assigned to a new Mountpoint Pod
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
+						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
+						Expect(mpPod2.Name).To(Equal(mpPod2.Name))
+					})
+
+					It("should schedule a new Mountpoint Pod if existing Mountpoint Pod annotated as 'no-new-workload'", func() {
+						vol := createVolume()
+						vol.bind()
+
+						pod1 := createPod(withPVC(vol.pvc))
+						pod2 := createPod(withPVC(vol.pvc))
+						pod3 := createPod(withPVC(vol.pvc))
+						pod1.schedule(testNode)
+						pod2.schedule(testNode)
+
+						expectedFields := defaultExpectedFields(testNode, vol.pv)
+						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+
+						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol)
+						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
+
+						// Now annotate `mpPod1` with "no-new-workload"
+						mpPod1.annotate(mppod.AnnotationNoNewWorkload, "true")
 
 						// Schedule `pod3` to the same node
 						pod3.schedule(testNode)
@@ -975,6 +1021,20 @@ func (p *testPod) succeed() {
 
 	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
 		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
+	})
+}
+
+// annotate adds given `key` and `value` as a annotation to `testPod`.
+func (p *testPod) annotate(key, value string) {
+	patch := client.MergeFrom(p.DeepCopy())
+	if p.Annotations == nil {
+		p.Annotations = make(map[string]string)
+	}
+	p.Annotations[key] = value
+
+	Expect(k8sClient.Patch(ctx, p.Pod, patch)).To(Succeed())
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Annotations).To(HaveKeyWithValue(key, value))
 	})
 }
 

@@ -18,11 +18,24 @@ const (
 	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
 	LabelVolumeName        = "s3.csi.aws.com/volume-name"
 	LabelVolumeId          = "s3.csi.aws.com/volume-id"
-	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
+	// LabelCSIDriverVersion specifies the CSI Driver's version used during creation of the Mountpoint Pod.
+	// The controller checks this label against the current CSI Driver version before assigning a new workload to the Mountpoint Pod,
+	// if they differ, the controller won't send new workload to the Mountpoint Pod and instead creates a new one.
+	LabelCSIDriverVersion = "s3.csi.aws.com/mounted-by-csi-driver-version"
 )
 
+// Known list of annotations on Mountpoint Pods.
 const (
+	// AnnotationNeedsUnmount means the Mountpoint Pod scheduled for unmount.
+	// Its the controller's responsibility to annotate a Mountpoint Pod as "needs-unmount" once
+	// it has no workloads assigned to it. The controller ensures to not send new workload after the Mountpoint Pod
+	// annotated with this annotation.
+	// Its the node's responsibility to observe this annotation and perform unmount procedure for the Mountpoint Pod.
 	AnnotationNeedsUnmount = "s3.csi.aws.com/needs-unmount"
+	// AnnotationNoNewWorkload means the Mountpoint Pod shouldn't get a new workload assigned to it.
+	// The existing workloads won't affected with this annotation, and would keep running until termination as per their regular lifecycle.
+	// The controller ensures to not send new workload after the Mountpoint Pod annotated with this annotation.
+	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
