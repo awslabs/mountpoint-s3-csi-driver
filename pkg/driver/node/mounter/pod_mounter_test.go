@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -34,6 +35,10 @@ const mountpointPodNamespace = "mount-s3"
 const dummyIMDSRegion = "us-west-2"
 const testK8sVersion = "v1.28.0"
 
+// testCwdMu serialises process‑wide working‑directory changes across all tests
+// so they remain safe when “go test” runs packages in parallel (‑p flag).
+var testCwdMu sync.Mutex
+
 type testCtx struct {
 	t   *testing.T
 	ctx context.Context
@@ -59,9 +64,14 @@ func setup(t *testing.T) *testCtx {
 	kubeletPath := t.TempDir()
 	t.Setenv("KUBELET_PATH", kubeletPath)
 
-	// Chdir to `kubeletPath` so `mountoptions.{Recv, Send}` can use relative paths to Unix sockets
-	// to overcome `bind: invalid argument`.
-	t.Chdir(kubeletPath)
+	testCwdMu.Lock()
+	oldwd, err := os.Getwd()
+	assert.NoError(t, err)
+	assert.NoError(t, os.Chdir(kubeletPath))
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+		testCwdMu.Unlock()
+	})
 
 	bucketName := "test-bucket"
 	podUID := uuid.New().String()
@@ -73,7 +83,7 @@ func setup(t *testing.T) *testCtx {
 	)
 
 	// Same behaviour as Kubernetes, see https://github.com/kubernetes/kubernetes/blob/8f8c94a04d00e59d286fe4387197bc62c6a4f374/pkg/volume/csi/csi_mounter.go#L211-L215
-	err := os.MkdirAll(filepath.Dir(targetPath), 0750)
+	err = os.MkdirAll(filepath.Dir(targetPath), 0750)
 	assert.NoError(t, err)
 
 	// Eval symlinks on `targetPath` as `mount.NewFakeMounter` also does that and we rely on

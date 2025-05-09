@@ -24,7 +24,7 @@ jobs:
 
   e2e-tests:
     name: Execute E2E Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-8core
     needs: dev-image
     steps:
       - name: Check out repository
