@@ -14,7 +14,7 @@ run_go_tests() {
   local project_root=$(get_project_root)
   local e2e_tests_dir="${project_root}/tests/e2e"
   local namespace="${1:-$DEFAULT_NAMESPACE}"
-  local junit_report="$2"
+  local junit_report="${2:-}"
   local access_key_id="${ACCESS_KEY_ID:-}"
   local secret_access_key="${SECRET_ACCESS_KEY:-}"
   local s3_endpoint_url="${S3_ENDPOINT_URL:-}"
@@ -124,7 +124,6 @@ wait_for_pods() {
   local attempt=1
   local all_namespaces=false
 
-  # Check if second parameter exists and equals "all-namespaces"
   if [ -n "${2:-}" ] && [ "$2" = "all-namespaces" ]; then
     all_namespaces=true
   fi
