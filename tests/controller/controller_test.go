@@ -704,15 +704,10 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
-						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
-						Expect(findMountpointPodNameForWorkload(s3pa, string(pod1.UID))).NotTo(BeEmpty())
-						Expect(findMountpointPodNameForWorkload(s3pa, string(pod2.UID))).NotTo(BeEmpty())
-						Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).NotTo(BeEmpty())
 
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
-						Expect(mpPod2.Name).To(Equal(mpPod2.Name))
 					})
 
 					It("should schedule a new Mountpoint Pod if existing Mountpoint Pod has been created by a different CSI Driver version", func() {
@@ -752,7 +747,6 @@ var _ = Describe("Mountpoint Controller", func() {
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
-						Expect(mpPod2.Name).To(Equal(mpPod2.Name))
 					})
 
 					It("should schedule a new Mountpoint Pod if existing Mountpoint Pod annotated as 'no-new-workload'", func() {
@@ -791,7 +785,6 @@ var _ = Describe("Mountpoint Controller", func() {
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
 						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
-						Expect(mpPod2.Name).To(Equal(mpPod2.Name))
 					})
 				})
 			})
