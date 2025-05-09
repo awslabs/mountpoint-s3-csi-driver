@@ -17,7 +17,7 @@ jobs:
     needs: ["build_matrix"]
     strategy:
       matrix:
-        kubernetes-version: ${{ fromJson(needs.build_matrix.outputs.matrix).*.'kubernetes-version' }}
+        kubernetes-version: ${{ fromJson(needs.build_matrix.outputs.matrix).*.kubernetes-version }}
     runs-on: ubuntu-latest
     env:
       # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,
