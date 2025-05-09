@@ -6,14 +6,14 @@ on:
   pull_request:
     branches: ["main", "feature/*"]
   merge_group:
-    branches: ["main"]
+    types: ["checks_requested"]
 
 jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
 
-  test:
+  controller_test:
     needs: ["build_matrix"]
     strategy:
       matrix:
@@ -32,12 +32,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: "go.mod"
-
-      - name: Install tools
-        env:
-          ACTION: "install_tools"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
 
       - name: Run Controller Tests
         run: |
