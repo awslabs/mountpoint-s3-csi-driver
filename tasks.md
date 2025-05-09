@@ -21,9 +21,9 @@
 | 1     | 1.2  | Modify node.yaml to use required function | ✅ Done |            |
 | 2     | 2    | Go Code Changes | ✅ Done |            |
 | 2     | 2.1  | Add validation in driver.go | ✅ Done | 1.2        |
-| 3     | 3    | Testing | ⬜ To Do |            |
-| 3     | 3.1  | Add unit tests for Go validation | ⬜ To Do | 2.1        |
-| 3     | 3.2  | Add GitHub workflow for validation | ⬜ To Do | 2.1        |
+| 3     | 3    | Testing | ✅ Done |            |
+| 3     | 3.1  | Add unit tests for Go validation | ✅ Done | 2.1        |
+| 3     | 3.2  | Add GitHub workflow for validation | ✅ Done | 2.1        |
 | 4     | 4    | Documentation | ⬜ To Do |            |
 | 4     | 4.1  | Update README to note required S3 endpoint URL | ⬜ To Do | 1.1, 2.1  |
 
