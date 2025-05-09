@@ -2,6 +2,7 @@ package s3client
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -34,16 +35,21 @@ type Client struct {
 }
 
 // New returns a new client with "DefaultRegion".
-func New() *Client {
-	return NewWithRegion(DefaultRegion)
-}
-
-func NewWithRegion(region string) *Client {
+func New(region string, accessKey string, secretKey string) *Client {
+	if accessKey == "" {
+		accessKey = DefaultAccessKey
+	}
+	if secretKey == "" {
+		secretKey = DefaultSecretAccessKey
+	}
+	if region == "" {
+		region = DefaultRegion
+	}
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			DefaultAccessKey,
-			DefaultSecretAccessKey,
+			accessKey,
+			secretKey,
 			"",
 		)),
 		config.WithRetryer(func() aws.Retryer {
@@ -167,4 +173,45 @@ func (c *Client) delete(ctx context.Context, bucketName string) error {
 	framework.Logf("S3 Bucket %s deleted", bucketName)
 
 	return nil
+}
+
+// GetObjectOwnerID returns the canonical ID of the owner of a specific object.
+// It uses ListObjectsV2 with FetchOwner=true, requiring only list permission (no ACLs).
+func (c *Client) GetObjectOwnerID(ctx context.Context, bucket, key string) (string, error) {
+	// First, check if the object exists using HeadObject
+	_, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return "", fmt.Errorf("head object failed for %s/%s: %w", bucket, key, err)
+	}
+
+	out, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:     aws.String(bucket),
+		Prefix:     aws.String(key),
+		MaxKeys:    aws.Int32(1),
+		FetchOwner: aws.Bool(true),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(out.Contents) == 0 || out.Contents[0].Owner == nil || out.Contents[0].Owner.ID == nil {
+		return "", fmt.Errorf("owner not returned for %s/%s", bucket, key)
+	}
+	return *out.Contents[0].Owner.ID, nil
+}
+
+// ListObjects lists all objects in a bucket and returns the response
+func (c *Client) ListObjects(ctx context.Context, bucket string) (*s3.ListObjectsV2Output, error) {
+	out, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	framework.Logf("Found %d objects in bucket %s", len(out.Contents), bucket)
+	return out, nil
 }

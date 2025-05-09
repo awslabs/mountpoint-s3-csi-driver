@@ -269,7 +269,7 @@ func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
 // This is useful to create side-effects by bypassing Mountpoint to test cache behavior
 // when objects are removed from the underlying S3 storage.
 func deleteObjectFromS3(ctx context.Context, bucket string, key string) {
-	client := s3client.New()
+	client := s3client.New("", "", "")
 	err := client.DeleteObject(ctx, bucket, key)
 	framework.ExpectNoError(err)
 }

@@ -74,6 +74,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	customsuites.InitS3CSICacheTestSuite,
 	customsuites.InitS3FilePermissionsTestSuite,
 	customsuites.InitS3DirectoryPermissionsTestSuite,
+	customsuites.InitS3CredentialsTestSuite,
 }
 
 // initS3Driver initializes and returns an S3 CSI driver implementation for E2E testing.

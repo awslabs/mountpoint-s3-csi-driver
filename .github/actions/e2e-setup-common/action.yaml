@@ -26,6 +26,10 @@ runs:
         go-version-file: "tests/e2e/go.mod"
         cache: true
 
+    - name: Install Ginkgo CLI
+      shell: bash
+      run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+
     - name: Create Kind Cluster
       uses: helm/kind-action@v1.12.0
       with:

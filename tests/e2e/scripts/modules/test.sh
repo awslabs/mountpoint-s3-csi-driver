@@ -50,7 +50,10 @@ run_go_tests() {
   fi
 
   # Build the Go test command with required S3 credentials
-  local go_test_cmd="KUBECONFIG=${KUBECONFIG} go test --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url} -v ./... -ginkgo.v"
+  # Convert go test flags to ginkgo flags: -v ./... becomes -v ./..., -ginkgo.v becomes -v
+  # Pass credential flags after --
+  # Add 15m timeout
+  local ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo -timeout=15m -v ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
 
   # Add JUnit report if specified
   if [ -n "$junit_report" ]; then
@@ -83,17 +86,18 @@ run_go_tests() {
       mkdir -p "$junit_dir"
     fi
 
-    # Use the correct format for Ginkgo JUnit report
-    go_test_cmd="KUBECONFIG=${KUBECONFIG} go test --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url} -v ./... -ginkgo.v -ginkgo.junit-report=$junit_absolute_path"
+    # Use the correct format for Ginkgo JUnit report (-junit-report=...)
+    # Keep -v flag for verbosity and add 15m timeout
+    ginkgo_test_cmd="KUBECONFIG=${KUBECONFIG} ginkgo -timeout=15m -v -junit-report='$junit_absolute_path' ./... -- --access-key-id=${access_key_id} --secret-access-key=${secret_access_key} --s3-endpoint-url=${s3_endpoint_url}"
     log "Final JUnit report path: $junit_absolute_path"
   fi
 
-  # Run the Go tests
-  log "Executing Go tests in $e2e_tests_dir"
-  log "Test command: $go_test_cmd"
+  # Run the Go tests using Ginkgo
+  log "Executing Ginkgo tests in $e2e_tests_dir"
+  log "Test command: $ginkgo_test_cmd"
 
-  if ! (cd "$e2e_tests_dir" && eval "$go_test_cmd"); then
-    error "Go tests failed with exit code $?"
+  if ! (cd "$e2e_tests_dir" && eval "$ginkgo_test_cmd"); then
+    error "Ginkgo tests failed with exit code $?"
     # List any XML files that were created
     if [ -n "$junit_report" ]; then
       log "Checking for JUnit report files:"
@@ -108,7 +112,7 @@ run_go_tests() {
     (cd "$e2e_tests_dir" && find . -name "*.xml" -ls || true)
   fi
 
-  log "Go tests completed successfully."
+  log "Ginkgo tests completed successfully."
   return 0
 }
 
