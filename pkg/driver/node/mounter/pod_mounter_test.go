@@ -123,7 +123,7 @@ func setup(t *testing.T) *testCtx {
 		pvMountOptions: pvMountOptions,
 		mpPodName:      mpPodName,
 		mpPodUID:       mpPodUID,
-		sourcePath:     filepath.Join(sourceMountDir, mpPodUID),
+		sourcePath:     filepath.Join(sourceMountDir, mpPodName),
 	}
 
 	testCrd := crdv1beta.MountpointS3PodAttachment{

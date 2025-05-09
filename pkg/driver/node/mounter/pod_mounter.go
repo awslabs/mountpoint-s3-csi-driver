@@ -112,9 +112,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
-	mpPodUID := string(pod.UID)
-	source := filepath.Join(pm.sourceMountDir, mpPodUID)
-	unlockMountpointPod := lockMountpointPod(mpPodUID)
+	source := filepath.Join(pm.sourceMountDir, mpPodName)
+	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
 
 	isTargetMountPoint, err := pm.IsMountPoint(target)
