@@ -668,6 +668,46 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(mpPod1.Name).NotTo(Equal(mpPod2.Name), "Mountpoint Pods should not have the same name")
 					})
 				})
+
+				Context("Mountpoint Pod Annotations", func() {
+					It("should schedule a new Mountpoint Pod if its annotated as 'needs-unmount'", func() {
+						vol := createVolume()
+						vol.bind()
+
+						pod1 := createPod(withPVC(vol.pvc))
+						pod2 := createPod(withPVC(vol.pvc))
+						pod3 := createPod(withPVC(vol.pvc))
+						pod1.schedule(testNode)
+						pod2.schedule(testNode)
+
+						expectedFields := defaultExpectedFields(testNode, vol.pv)
+						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+
+						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol)
+						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
+
+						// Now terminate the workloads for `mpPod1` (which is the same as `mpPod2`)
+						pod1.terminate()
+						pod2.terminate()
+
+						// Wait until Mountpoint Pod annotated with "needs-unmount"
+						waitForObject(mpPod1.Pod, func(g Gomega, pod *corev1.Pod) {
+							g.Expect(pod.Annotations).To(HaveKeyWithValue(mppod.AnnotationNeedsUnmount, "true"))
+						})
+
+						// Schedule `pod3` to the same node
+						pod3.schedule(testNode)
+
+						// Wait until `pod3` is assigned
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
+						})
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
+						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
+					})
+				})
 			})
 
 			Context("Different Node", func() {
@@ -1104,13 +1144,8 @@ func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 
 // expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodAttachments map
 func expectNoPodUIDInS3PodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, podUID string) {
-	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
-		for _, attachment := range attachments {
-			if attachment.WorkloadPodUID == podUID {
-				Expect(false).To(BeTrue(), "Found pod UID %s in S3PodAttachment when none was expected: %#v", podUID, s3pa)
-			}
-		}
-	}
+	mpPodName := findMountpointPodNameForWorkload(s3pa, podUID)
+	Expect(mpPodName).To(BeEmpty(), "Found pod UID %s in S3PodAttachment when none was expected: %#v", podUID, s3pa)
 }
 
 // waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields waits and verifies that MountpointS3PodAttachment and Mountpoint Pod
@@ -1165,22 +1200,15 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
 func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
-	// Find the mpPodName where pod.UID exists in the value slice
-	var mpPodName string
+	GinkgoHelper()
+
 	podUID := string(pod.UID)
+	// Wait until workload is assigned to `s3pa`
+	waitForObject(s3pa, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+		g.Expect(findMountpointPodNameForWorkload(s3pa, podUID)).ToNot(BeEmpty())
+	})
 
-	for k, attachments := range s3pa.Spec.MountpointS3PodAttachments {
-		for _, attachment := range attachments {
-			if attachment.WorkloadPodUID == podUID {
-				mpPodName = k
-				break
-			}
-		}
-		if mpPodName != "" {
-			break
-		}
-	}
-
+	mpPodName := findMountpointPodNameForWorkload(s3pa, podUID)
 	Expect(mpPodName).NotTo(BeEmpty(), "No Mountpoint Pod found for pod UID %s in MountpointS3PodAttachment: %#v", podUID, s3pa)
 	Expect(s3pa.Spec.MountpointS3PodAttachments[mpPodName]).To(ContainElement(
 		MatchFields(IgnoreExtras, Fields{
@@ -1195,8 +1223,23 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3Pod
 	return mountpointPod
 }
 
+// findMountpointPodNameForWorkload tries to found Mountpoint Pod name that `workloadUID` is assigned to in given `s3pa`,
+// it returns an empty string if not.
+func findMountpointPodNameForWorkload(s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string) string {
+	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		for _, attachment := range attachments {
+			if attachment.WorkloadPodUID == workloadUID {
+				return mpPodName
+			}
+		}
+	}
+	return ""
+}
+
 // verifyMountpointPodFor verifies given `mountpointPod` for given `pod` and `vol`.
 func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPod) {
+	GinkgoHelper()
+
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelMountpointVersion, mountpointVersion))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVolumeName, vol.pvc.Spec.VolumeName))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelCSIDriverVersion, version.GetVersion().DriverVersion))
@@ -1226,6 +1269,8 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 
 // waitForObject waits until `obj` appears in the control plane.
 func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
+	GinkgoHelper()
+
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
 		g.Expect(k8sClient.Get(ctx, key, obj)).To(Succeed())
