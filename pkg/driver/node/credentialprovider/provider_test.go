@@ -332,6 +332,8 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 
 	t.Run("correct values for EKS Pod Identity", func(t *testing.T) {
+		t.Setenv("MOUNTER_KIND", "pod")
+
 		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
 		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
 

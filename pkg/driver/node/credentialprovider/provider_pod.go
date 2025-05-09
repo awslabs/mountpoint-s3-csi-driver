@@ -83,16 +83,9 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		envprovider.EnvSharedCredentialsFile: filepath.Join(provideCtx.EnvPath, "disable-credentials"),
 	}
 
-	// 3. Create IRSA and EKS Pod Identity environments
+	// 3. Provide credentials with IRSA. If not configured, provide credentials with EKS Pod Identity instead.
 	irsaCredentialsEnvironment, irsaCredentialsEnvironmentError := c.createIRSACredentialsEnvironment(ctx, provideCtx)
-	eksPodIdentityCredentialsEnvironment, eksPodIdentityCredentialsEnvironmentError := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
-
-	// 4. Include only the appropriate environment (IRSA or EKS Pod Identity) in the environment to be returned and copy only the appropriate token to WritePath
-	// (if both methods are configured, IRSA takes precedence)
-	if irsaCredentialsEnvironmentError != nil && eksPodIdentityCredentialsEnvironmentError != nil {
-		klog.Error("Error providing credentials using pod identity")
-		return nil, status.Errorf(codes.Internal, "IRSA and EKS Pod Identity failed: %v, %v", irsaCredentialsEnvironmentError, eksPodIdentityCredentialsEnvironmentError)
-	} else if irsaCredentialsEnvironmentError == nil {
+	if irsaCredentialsEnvironmentError == nil {
 		klog.V(4).Infof("Providing credentials from pod with STS Web Identity provider (IRSA)")
 
 		// Copy STS Token file to WritePath
@@ -103,24 +96,24 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		}
 
 		env.Merge(irsaCredentialsEnvironment)
-	} else {
-		klog.V(4).Infof("Error providing credentials from pod with STS Web Identity provider (IRSA)")
+		return env, nil
+	} else if util.UsePodMounter() && errors.Is(irsaCredentialsEnvironmentError, errMissingServiceAccountAnnotationForIRSA) {
+		klog.V(4).Infof("Providing credentials from pod with Container credential provider (EKS Pod Identity)")
+		eksPodIdentityCredentialsEnvironment := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
 
-		if util.UsePodMounter() {
-			klog.V(4).Infof("Providing credentials from pod with Container credential provider (EKS Pod Identity)")
-
-			// Copy EKS Token file to WritePath
-			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
-			err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
-			}
-
-			env.Merge(eksPodIdentityCredentialsEnvironment)
+		// Copy EKS Token file to WritePath
+		tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
+		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
 		}
+
+		env.Merge(eksPodIdentityCredentialsEnvironment)
+		return env, nil
 	}
 
-	return env, nil
+	klog.V(4).Infof("Error providing credentials from pod with STS Web Identity provider (IRSA)")
+	return nil, irsaCredentialsEnvironmentError
 }
 
 // cleanupFromPod removes any credential files that were created for pod-level authentication authentication via [Provider.provideFromPod].
@@ -150,6 +143,8 @@ func (c *Provider) cleanupFromPod(cleanupCtx CleanupContext) error {
 	return nil
 }
 
+var errMissingServiceAccountAnnotationForIRSA = status.Error(codes.InvalidArgument, "Missing role annotation on pod's service account")
+
 // findPodServiceAccountRole tries to provide associated AWS IAM role for service account specified in the volume context.
 func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx ProvideContext) (string, error) {
 	podNamespace := provideCtx.PodNamespace
@@ -160,7 +155,7 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 		if provideCtx.ServiceAccountEKSRoleARN != "" {
 			return provideCtx.ServiceAccountEKSRoleARN, nil
 		} else {
-			return "", status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
+			return "", errMissingServiceAccountAnnotationForIRSA
 		}
 	}
 
@@ -177,7 +172,7 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 	roleArn := response.Annotations[serviceAccountRoleAnnotation]
 	if roleArn == "" {
 		klog.Error("credentialprovider: `authenticationSource` configured to `pod` but pod's service account is not annotated with a role, see " + podLevelCredentialsDocsPage)
-		return "", status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
+		return "", errMissingServiceAccountAnnotationForIRSA
 	}
 
 	return roleArn, nil
@@ -226,12 +221,12 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 }
 
 // createEKSPodIdentityCredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with EKS Pod Identity
-func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) (envprovider.Environment, error) {
+func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) envprovider.Environment {
 	tokenName := podLevelEksPodIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
 	return envprovider.Environment{
 		envprovider.EnvContainerCredentialsFullURI:     podIdentityCredURI,
 		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
-	}, nil
+	}
 }
