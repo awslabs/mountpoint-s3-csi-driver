@@ -335,8 +335,8 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, log)
 }
 
-// addWorkloadToS3PodAttachment adds workload UID to the first Mountpoint Pod in the map
-// TODO: We will later add extra logic for selecting/creating MPPod if existing MP Pods are using old CSI Driver version or have some "no-new-attachments" annotation
+// addWorkloadToS3PodAttachment adds workload UID to the first suitable Mountpoint Pod in the map.
+// If there aren't any suitable Mountpoint Pods, it creates a new one and assign the workload UID to that Mountpoint Pod.
 func (r *Reconciler) addWorkloadToS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
@@ -401,17 +401,18 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 	found := false
 
 	for mpPodName := range s3pa.Spec.MountpointS3PodAttachments {
+		mpPodLog := log.WithValues("mountpointPodName", mpPodName)
 		mpPod, err := r.getMountpointPod(ctx, mpPodName)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				log.Info("Mountpoint Pod is not found - not suitable for assigning new workload", "mountpointPodName", mpPodName)
+				mpPodLog.Info("Mountpoint Pod is not found - not suitable for assigning new workload")
 				continue
 			}
 			return Requeue, err
 		}
 
-		if !r.shouldAssignNewWorkloadToMountpointPod(mpPod) {
-			log.Info("Mountpoint Pod is not suitable for assigning new workload", "mountpointPodName", mpPodName)
+		if !r.shouldAssignNewWorkloadToMountpointPod(mpPod, mpPodLog) {
+			mpPodLog.Info("Mountpoint Pod is not suitable for assigning new workload")
 			continue
 		}
 
@@ -420,7 +421,7 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
 		})
 		found = true
-		log.Info("Found a suitable Mountpoint Pod to assign new workload", "mountpointPodName", mpPodName)
+		mpPodLog.Info("Found a suitable Mountpoint Pod to assign new workload")
 		break
 	}
 
@@ -647,12 +648,29 @@ func (r *Reconciler) getMountpointPod(ctx context.Context, name string) (*corev1
 }
 
 // shouldAssignNewWorkloadToMountpointPod returns whether a new workload should be assigned to the Mountpoint Pod `mpPod`.
-func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod) bool {
-	if mpPod.Annotations == nil {
-		return true
+func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, log logr.Logger) bool {
+	if mpPod.Annotations != nil {
+		if mpPod.Annotations[mppod.AnnotationNeedsUnmount] == "true" {
+			log.Info("Mountpoint Pod is annotated as 'needs-unmount' - not suitable for a new workload")
+			return false
+		}
+
+		if mpPod.Annotations[mppod.AnnotationNoNewWorkload] == "true" {
+			log.Info("Mountpoint Pod is annotated as 'no-new-workload' - not suitable for a new workload")
+			return false
+		}
 	}
 
-	return mpPod.Annotations[mppod.AnnotationNeedsUnmount] != "true"
+	if mpPod.Labels != nil {
+		if mpPod.Labels[mppod.LabelCSIDriverVersion] != r.mountpointPodConfig.CSIDriverVersion {
+			log.Info("Mountpoint Pod is created with a different CSI Driver version - not suitable for a new workload",
+				"mountpointPodCreatedByCSIDriverVersion", mpPod.Labels[mppod.LabelCSIDriverVersion],
+				"currentCSIDriverVersion", r.mountpointPodConfig.CSIDriverVersion)
+			return false
+		}
+	}
+
+	return true
 }
 
 // errPVCIsNotBoundToAPV is returned when given PVC is not bound to a PV yet.
@@ -712,7 +730,7 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 	sa := &corev1.ServiceAccount{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: getServiceAccountName(pod)}, sa)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find workload pod's service account %s", getServiceAccountName(pod))
+		return "", fmt.Errorf("Failed to find workload pod's service account %s: %w", getServiceAccountName(pod), err)
 	}
 
 	if sa.Annotations == nil {
