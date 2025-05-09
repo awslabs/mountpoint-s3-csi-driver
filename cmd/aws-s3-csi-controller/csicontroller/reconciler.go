@@ -725,7 +725,7 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 	sa := &corev1.ServiceAccount{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: getServiceAccountName(pod)}, sa)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find workload pod's service account %s", getServiceAccountName(pod))
+		return "", fmt.Errorf("Failed to find workload pod's service account %s: %w", getServiceAccountName(pod), err)
 	}
 
 	if sa.Annotations == nil {
