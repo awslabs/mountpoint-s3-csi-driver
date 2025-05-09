@@ -135,7 +135,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				err := os.MkdirAll(commDir, 0750)
 				assert.NoError(t, err)
 
-				err = os.MkdirAll(filepath.Join(sourceMountDir, string(tt.pod.UID)), 0750)
+				err = os.MkdirAll(filepath.Join(sourceMountDir, string(tt.pod.Name)), 0750)
 				assert.NoError(t, err)
 			}
 
@@ -246,7 +246,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				err := os.MkdirAll(commDir, 0750)
 				assert.NoError(t, err)
 
-				err = os.MkdirAll(filepath.Join(sourceMountDir, string(pod.UID)), 0750)
+				err = os.MkdirAll(filepath.Join(sourceMountDir, string(pod.Name)), 0750)
 				assert.NoError(t, err)
 			}
 

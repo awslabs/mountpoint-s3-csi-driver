@@ -13,6 +13,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -64,13 +65,13 @@ func (u *PodUnmounter) HandleMountpointPodUpdate(old, new any) {
 // mpPod: The Mountpoint Pod to unmount
 func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	mpPodUID := string(mpPod.UID)
-	unlockMountpointPod := lockMountpointPod(mpPodUID)
+	unlockMountpointPod := lockMountpointPod(mpPod.Name)
 	defer unlockMountpointPod()
 
 	klog.Infof("Found Mountpoint Pod %s (UID: %s) with %s annotation, unmounting it", mpPod.Name, mpPodUID, mppod.AnnotationNeedsUnmount)
 
 	podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
-	source := filepath.Join(u.sourceMountDir, mpPodUID)
+	source := filepath.Join(u.sourceMountDir, mpPod.Name)
 	volumeId := mpPod.Labels[mppod.LabelVolumeId]
 
 	if err := u.writeExitFile(podPath); err != nil {
@@ -169,21 +170,20 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 			continue
 		}
 
-		mpPodUID := file.Name()
-		source := filepath.Join(u.sourceMountDir, mpPodUID)
-		// Try to find corresponding pod
-		mpPod, err := u.findPodByUID(mpPodUID)
+		mpPodName := file.Name()
+		source := filepath.Join(u.sourceMountDir, mpPodName)
+		mpPod, err := u.podWatcher.Get(mpPodName)
 		if err != nil {
-			klog.Errorf("Failed to check Mountpoint Pod (UID: %s) existence: %v", mpPodUID, err)
-			return err
-		}
-
-		if mpPod == nil {
-			klog.V(4).Infof("Mountpoint Pod not found for UID %s, will unmount and delete folder", mpPodUID)
-			if err := u.unmountAndCleanup(source); err != nil {
-				klog.Errorf("Failed to cleanup dangling mount for UID %s: %v", mpPodUID, err)
+			if apierrors.IsNotFound(err) {
+				klog.V(4).Infof("Mountpoint Pod %s not found, will unmount and delete source folder %s", mpPodName, source)
+				if err := u.unmountAndCleanup(source); err != nil {
+					klog.Errorf("Failed to cleanup dangling mount %s: %v", source, err)
+				}
+				continue
 			}
-			continue
+
+			klog.Errorf("Failed to check Mountpoint Pod %s existence: %v", mpPodName, err)
+			return err
 		}
 
 		// Unmount only if Mountpoint Pod is marked for unmounting
@@ -193,19 +193,4 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 	}
 
 	return nil
-}
-
-// findPodByUID finds Mountpoint Pod by UID in podWatcher's cache
-func (u *PodUnmounter) findPodByUID(mpPodUID string) (*corev1.Pod, error) {
-	pods, err := u.podWatcher.List()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pod := range pods {
-		if string(pod.UID) == mpPodUID {
-			return pod, nil
-		}
-	}
-	return nil, nil
 }
