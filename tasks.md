@@ -19,8 +19,8 @@
 | 1     | 1    | Helm Chart Changes | ✅ Done |            |
 | 1     | 1.1  | Update values.yaml comment to indicate S3 endpoint URL is required | ✅ Done |            |
 | 1     | 1.2  | Modify node.yaml to use required function | ✅ Done |            |
-| 2     | 2    | Go Code Changes | ⬜ To Do |            |
-| 2     | 2.1  | Add validation in driver.go | ⬜ To Do | 1.2        |
+| 2     | 2    | Go Code Changes | ✅ Done |            |
+| 2     | 2.1  | Add validation in driver.go | ✅ Done | 1.2        |
 | 3     | 3    | Testing | ⬜ To Do |            |
 | 3     | 3.1  | Add unit tests for Go validation | ⬜ To Do | 2.1        |
 | 3     | 3.2  | Add GitHub workflow for validation | ⬜ To Do | 2.1        |
