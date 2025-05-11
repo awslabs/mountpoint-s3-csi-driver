@@ -7,7 +7,7 @@
 ARG MOUNTPOINT_REPOSITORY="https://github.com/awslabs/mountpoint-s3"
 ARG MOUNTPOINT_BRANCH="main"
 ARG MOUNTPOINT_VERSION="unreleased"
-ARG MOUNTPOINT_BUILD_ARGS="" # e.g., --features express_cache
+ARG MOUNTPOINT_BUILD_ARGS="" # custom build arguments
 
 #
 # Build Mountpoint
