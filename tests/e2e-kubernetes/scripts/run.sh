@@ -5,6 +5,7 @@ set -euox pipefail
 ACTION=${ACTION:-}
 REGION=${AWS_REGION}
 
+AWS_PARTITION=$(aws sts get-caller-identity --query Arn --output text | cut -d: -f2)
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
