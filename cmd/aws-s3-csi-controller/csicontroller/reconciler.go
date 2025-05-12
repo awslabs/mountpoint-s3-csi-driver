@@ -44,7 +44,6 @@ type Reconciler struct {
 	mountpointPodConfig  mppod.Config
 	mountpointPodCreator *mppod.Creator
 	s3paExpectations     *expectations
-
 	client.Client
 }
 
@@ -202,7 +201,7 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 
 	if s3pa != nil {
-		return r.handleExistingS3PodAttachment(ctx, s3pa, workloadUID, fieldFilters, log)
+		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, log)
 	} else {
 		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, log)
 	}
@@ -315,31 +314,119 @@ func (r *Reconciler) handleInactivePod(ctx context.Context, s3pa *crdv1beta.Moun
 }
 
 // handleExistingS3PodAttachment handles existing S3 Pod Attachment.
-func (r *Reconciler) handleExistingS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, fieldFilters client.MatchingFields, log logr.Logger) (bool, error) {
+func (r *Reconciler) handleExistingS3PodAttachment(
+	ctx context.Context,
+	workloadPod *corev1.Pod,
+	pv *corev1.PersistentVolume,
+	s3pa *crdv1beta.MountpointS3PodAttachment,
+	fieldFilters client.MatchingFields,
+	log logr.Logger,
+) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
 		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
 		r.s3paExpectations.clear(fieldFilters)
 	}
 
-	if s3paContainsWorkload(s3pa, workloadUID) {
+	if s3paContainsWorkload(s3pa, string(workloadPod.UID)) {
 		log.Info("MountpointS3PodAttachment already has this workload UID")
 		return DontRequeue, nil
 	}
 
-	return r.addWorkloadToS3PodAttachment(ctx, s3pa, workloadUID, log)
+	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, log)
 }
 
-// addWorkloadToS3PodAttachment adds workload UID to the first Mountpoint Pod in the map
-// TODO: We will later add extra logic for selecting/creating MPPod if existing MP Pods are using old CSI Driver version or have some "no-new-attachments" or "needs-unmount" annotation
-func (r *Reconciler) addWorkloadToS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+// addWorkloadToS3PodAttachment adds workload UID to the first suitable Mountpoint Pod in the map.
+// If there aren't any suitable Mountpoint Pods, it creates a new one and assign the workload UID to that Mountpoint Pod.
+func (r *Reconciler) addWorkloadToS3PodAttachment(
+	ctx context.Context,
+	workloadPod *corev1.Pod,
+	pv *corev1.PersistentVolume,
+	s3pa *crdv1beta.MountpointS3PodAttachment,
+	log logr.Logger,
+) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
 
-	for key := range s3pa.Spec.MountpointS3PodAttachments {
-		s3pa.Spec.MountpointS3PodAttachments[key] = append(s3pa.Spec.MountpointS3PodAttachments[key], crdv1beta.WorkloadAttachment{
+	shouldRequeue, err := r.assignWorkloadToAnExistingMountpointPod(ctx, s3pa, string(workloadPod.UID), log)
+	if err == nil {
+		// Successfully assigned workload to an existing Mountpoint Pod
+		return shouldRequeue, nil
+	}
+
+	if !errors.Is(err, errNoSuitableMountpointPodForTheWorkload) {
+		// We got an error other than there is no suitable Mountpoint Pod for the workload, just propagate it
+		return Requeue, err
+	}
+
+	// There is no suitable Mountpoint Pod for the workload, we need to create a new one
+	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, log)
+	s3pa.Spec.MountpointS3PodAttachments[mpPod.Name] = []crdv1beta.WorkloadAttachment{
+		{
+			WorkloadPodUID: string(workloadPod.UID),
+			AttachmentTime: metav1.NewTime(time.Now().UTC()),
+		},
+	}
+	err = r.Update(ctx, s3pa)
+	if err != nil {
+		log.Error(err, "Failed to update MountpointS3PodAttachment, deleting spawned Mountpoint Pod", "mountpointPodName", mpPod.Name)
+
+		// Clean up spawned Mountpoint Pod
+		if deleteErr := r.Delete(ctx, mpPod); deleteErr != nil {
+			log.Error(deleteErr, "Failed to cleanup Mountpoint Pod after MountpointS3PodAttachment update failure", "mountpointPodName", mpPod.Name)
+		} else {
+			log.Info("Successfully cleaned up Mountpoint Pod after S3PodAttachment update failure", "mountpointPodName", mpPod.Name)
+		}
+
+		if apierrors.IsConflict(err) {
+			log.Info("Failed to update MountpointS3PodAttachment - resource conflict - requeue")
+			return Requeue, nil
+		}
+
+		return Requeue, err
+	}
+
+	log.Info("A new Mountpoint Pod is successfully created for the workload and MountpointS3PodAttachment is successfully updated", "mountpointPodName", mpPod.Name)
+
+	return DontRequeue, nil
+}
+
+// errNoSuitableMountpointPodForTheWorkload is returned when there isn't any suitable Mountpoint Pod to assign the workload
+// to indicate that a new Mountpoint Pod should be created to assign the workload for.
+var errNoSuitableMountpointPodForTheWorkload = errors.New("no suitable Mountpoint Pod found for the workload")
+
+// assignWorkloadToAnExistingMountpointPod tries to assign given `workloadUID` to an existing Mountpoint Pod.
+// It returns `errNoSuitableMountpointPodForTheWorkload` if there isn't any suitable Mountpoint Pod to assign this new workload.
+func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+	log.Info("Trying to assign workload to an existing Mountpoint Pod")
+
+	found := false
+
+	for mpPodName := range s3pa.Spec.MountpointS3PodAttachments {
+		mpPodLog := log.WithValues("mountpointPodName", mpPodName)
+		mpPod, err := r.getMountpointPod(ctx, mpPodName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				mpPodLog.Info("Mountpoint Pod is not found - not suitable for assigning new workload")
+				continue
+			}
+			return Requeue, err
+		}
+
+		if !r.shouldAssignNewWorkloadToMountpointPod(mpPod, mpPodLog) {
+			mpPodLog.Info("Mountpoint Pod is not suitable for assigning new workload")
+			continue
+		}
+
+		s3pa.Spec.MountpointS3PodAttachments[mpPodName] = append(s3pa.Spec.MountpointS3PodAttachments[mpPodName], crdv1beta.WorkloadAttachment{
 			WorkloadPodUID: workloadUID,
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
 		})
+		found = true
+		mpPodLog.Info("Found a suitable Mountpoint Pod to assign new workload")
 		break
+	}
+
+	if !found {
+		return DontRequeue, errNoSuitableMountpointPodForTheWorkload
 	}
 
 	err := r.Update(ctx, s3pa)
@@ -374,7 +461,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 			err := r.Update(ctx, s3pa)
 			if err != nil {
 				if apierrors.IsConflict(err) {
-					log.Info("Failed to remove workload pod UID from existing MountpointS3PodAttachment due to resource conflict, requeueing")
+					log.Info("Failed to remove workload pod UID from existing MountpointS3PodAttachment due to resource conflict, requeuing")
 					return Requeue, nil
 				}
 				log.Error(err, "Failed to update MountpointS3PodAttachment")
@@ -401,7 +488,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 			err = r.Update(ctx, s3pa)
 			if err != nil {
 				if apierrors.IsConflict(err) {
-					log.Info("Failed to remove Mountpoint pod from MountpointS3PodAttachment due to resource conflict, requeueing",
+					log.Info("Failed to remove Mountpoint pod from MountpointS3PodAttachment due to resource conflict, requeuing",
 						"mountpointPodName", mpPodName)
 					return Requeue, nil
 				}
@@ -417,7 +504,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 		err := r.Delete(ctx, s3pa)
 		if err != nil {
 			if apierrors.IsConflict(err) {
-				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeueing")
+				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
 			log.Error(err, "Failed to delete MountpointS3PodAttachment")
@@ -438,7 +525,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 	log logr.Logger,
 ) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
-		log.Info("MountpointS3PodAttachment creation is pending, requeueing")
+		log.Info("MountpointS3PodAttachment creation is pending, requeuing")
 		return Requeue, nil
 	}
 
@@ -550,6 +637,42 @@ func (r *Reconciler) deleteMountpointPod(ctx context.Context, mountpointPod *cor
 	return err
 }
 
+// getMountpointPod tries to find Mountpoint Pod with given `name`.
+func (r *Reconciler) getMountpointPod(ctx context.Context, name string) (*corev1.Pod, error) {
+	mpPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: name}, mpPod)
+	if err != nil {
+		return nil, err
+	}
+	return mpPod, nil
+}
+
+// shouldAssignNewWorkloadToMountpointPod returns whether a new workload should be assigned to the Mountpoint Pod `mpPod`.
+func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, log logr.Logger) bool {
+	if mpPod.Annotations != nil {
+		if mpPod.Annotations[mppod.AnnotationNeedsUnmount] == "true" {
+			log.Info("Mountpoint Pod is annotated as 'needs-unmount' - not suitable for a new workload")
+			return false
+		}
+
+		if mpPod.Annotations[mppod.AnnotationNoNewWorkload] == "true" {
+			log.Info("Mountpoint Pod is annotated as 'no-new-workload' - not suitable for a new workload")
+			return false
+		}
+	}
+
+	if mpPod.Labels != nil {
+		if mpPod.Labels[mppod.LabelCSIDriverVersion] != r.mountpointPodConfig.CSIDriverVersion {
+			log.Info("Mountpoint Pod is created with a different CSI Driver version - not suitable for a new workload",
+				"mountpointPodCreatedByCSIDriverVersion", mpPod.Labels[mppod.LabelCSIDriverVersion],
+				"currentCSIDriverVersion", r.mountpointPodConfig.CSIDriverVersion)
+			return false
+		}
+	}
+
+	return true
+}
+
 // errPVCIsNotBoundToAPV is returned when given PVC is not bound to a PV yet.
 // This is not a terminal error - as PVCs can be bound to PVs dynamically - and just a transient error
 // to be retried later.
@@ -607,7 +730,7 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 	sa := &corev1.ServiceAccount{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: getServiceAccountName(pod)}, sa)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find workload pod's service account %s", getServiceAccountName(pod))
+		return "", fmt.Errorf("Failed to find workload pod's service account %s: %w", getServiceAccountName(pod), err)
 	}
 
 	if sa.Annotations == nil {
@@ -620,8 +743,7 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 // This will trigger CSI Driver Node to cleanly unmount and Mountpoint Pod will become 'Succeeded'.
 func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName string, log logr.Logger) error {
 	// Get the pod
-	mpPod := &corev1.Pod{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: mpPodName}, mpPod)
+	mpPod, err := r.getMountpointPod(ctx, mpPodName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Failed to find Mountpoint Pod - ignoring")
@@ -637,7 +759,7 @@ func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName st
 	mpPod.Annotations[mppod.AnnotationNeedsUnmount] = "true"
 
 	// Update the pod
-	err = r.Update(ctx, mpPod)
+	err = r.Update(ctx, mpPod) // TODO: This probably needs to be a patch as we might've get a stale Mountpoint Pod.
 	if err != nil {
 		log.Error(err, "Failed to update Mountpoint Pod")
 		return err

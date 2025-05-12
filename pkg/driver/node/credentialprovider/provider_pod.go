@@ -41,7 +41,8 @@ type serviceAccountToken struct {
 func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext) (envprovider.Environment, error) {
 	klog.V(4).Infof("credentialprovider: Using pod identity")
 
-	if provideCtx.PodID == "" {
+	podID := provideCtx.GetCredentialPodID()
+	if podID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
 	}
 
@@ -89,7 +90,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		klog.V(4).Infof("Providing credentials from pod with STS Web Identity provider (IRSA)")
 
 		// Copy STS Token file to WritePath
-		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
+		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to write service account STS token: %v", err)
@@ -106,7 +107,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		eksPodIdentityCredentialsEnvironment := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
 
 		// Copy EKS Token file to WritePath
-		tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
+		tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
@@ -213,7 +214,8 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 		defaultRegion = region
 	}
 
-	tokenName := podLevelSTSWebIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
+	podID := provideCtx.GetCredentialPodID()
+	tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
 	return envprovider.Environment{
@@ -226,7 +228,8 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 
 // createEKSPodIdentityCredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with EKS Pod Identity
 func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) envprovider.Environment {
-	tokenName := podLevelEksPodIdentityServiceAccountTokenName(provideCtx.PodID, provideCtx.VolumeID)
+	podID := provideCtx.GetCredentialPodID()
+	tokenName := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
 	return envprovider.Environment{

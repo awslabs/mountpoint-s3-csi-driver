@@ -13,6 +13,7 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -20,12 +21,11 @@ const cleanupInterval = 2 * time.Minute
 
 // PodUnmounter handles unmounting of Mountpoint Pods and cleanup of associated resources
 type PodUnmounter struct {
-	nodeID         string
-	mount          *mpmounter.Mounter
-	kubeletPath    string
-	sourceMountDir string
-	podWatcher     *watcher.Watcher
-	credProvider   *credentialprovider.Provider
+	nodeID       string
+	mount        *mpmounter.Mounter
+	kubeletPath  string
+	podWatcher   *watcher.Watcher
+	credProvider *credentialprovider.Provider
 }
 
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
@@ -34,15 +34,13 @@ func NewPodUnmounter(
 	mount *mpmounter.Mounter,
 	podWatcher *watcher.Watcher,
 	credProvider *credentialprovider.Provider,
-	sourceMountDir string,
 ) *PodUnmounter {
 	return &PodUnmounter{
-		nodeID:         nodeID,
-		mount:          mount,
-		kubeletPath:    util.KubeletPath(),
-		sourceMountDir: sourceMountDir,
-		podWatcher:     podWatcher,
-		credProvider:   credProvider,
+		nodeID:       nodeID,
+		mount:        mount,
+		kubeletPath:  util.KubeletPath(),
+		podWatcher:   podWatcher,
+		credProvider: credProvider,
 	}
 }
 
@@ -64,28 +62,85 @@ func (u *PodUnmounter) HandleMountpointPodUpdate(old, new any) {
 // mpPod: The Mountpoint Pod to unmount
 func (u *PodUnmounter) unmountSourceForPod(mpPod *corev1.Pod) {
 	mpPodUID := string(mpPod.UID)
-	unlockMountpointPod := lockMountpointPod(mpPodUID)
+	unlockMountpointPod := lockMountpointPod(mpPod.Name)
 	defer unlockMountpointPod()
 
-	klog.Infof("Found Mountpoint Pod %s (UID: %s) with %s annotation, unmounting it", mpPod.Name, mpPodUID, mppod.AnnotationNeedsUnmount)
+	source := filepath.Join(SourceMountDir(u.kubeletPath), mpPod.Name)
 
+	// Check mountpoint status and handle special cases
+	isMountpoint, err := u.checkMountpointAndCleanup(source)
+	if err != nil {
+		klog.Errorf("Error during handling mountpoint check for %s: %v", source, err)
+		return
+	}
+	if !isMountpoint {
+		return
+	}
+
+	klog.Infof("Found Mountpoint Pod %s (UID: %s) with %s annotation, unmounting it", mpPod.Name, mpPodUID, mppod.AnnotationNeedsUnmount)
+	if err := u.unmountAndCleanupPod(mpPod, source); err != nil {
+		klog.Errorf("Failed to unmount and cleanup pod %s: %v", mpPod.Name, err)
+		return
+	}
+
+	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPod.Name)
+}
+
+// checkMountpointAndCleanup validates if the source path is a healthy mountpoint
+// and performs cleanup for invalid or corrupted mountpoints.
+//
+// Returns:
+//   - bool: true if the source is a valid mountpoint that needs unmounting,
+//     false if it's not a mountpoint or was cleaned up
+//   - error: any errors encountered during validation or cleanup
+//
+// The function will attempt cleanup in the following cases:
+//   - When the mountpoint is corrupted (will attempt unmount and directory removal)
+//   - When the path exists but is not a mountpoint (will remove the directory)
+func (u *PodUnmounter) checkMountpointAndCleanup(source string) (bool, error) {
+	isMountpoint, err := u.mount.CheckMountpoint(source)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if u.mount.IsMountpointCorrupted(err) {
+			klog.Warningf("Corrupted mountpoint - unmounting %s", source)
+			if err := u.unmountAndRemoveDir(source); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+		klog.Errorf("Failed to check if source %s is Mountpoint mount: %v", source, err)
+		return false, err
+	}
+
+	if !isMountpoint {
+		if err := os.Remove(source); err != nil {
+			klog.Errorf("Failed to remove source directory %q: %v", source, err)
+		}
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// unmountAndCleanupPod performs clean Mountpoint Pod unmount including exit file creation,
+// unmounting, and credential cleanup
+func (u *PodUnmounter) unmountAndCleanupPod(mpPod *corev1.Pod, source string) error {
+	mpPodUID := string(mpPod.UID)
 	podPath := filepath.Join(u.kubeletPath, "pods", mpPodUID)
-	source := filepath.Join(u.sourceMountDir, mpPodUID)
 	volumeId := mpPod.Labels[mppod.LabelVolumeId]
 
 	if err := u.writeExitFile(podPath); err != nil {
 		klog.Errorf("Failed to write exit file for Mountpoint Pod (UID: %s): %v", mpPodUID, err)
-		return
+		return err
 	}
 
-	if err := u.unmountAndCleanup(source); err != nil {
-		return
+	if err := u.unmountAndRemoveDir(source); err != nil {
+		return err
 	}
-	klog.Infof("Successfully unmounted Mountpoint Pod - %s", mpPod.Name)
 
-	if err := u.cleanupCredentials(volumeId, mpPodUID, podPath, source); err != nil {
-		return
-	}
+	return u.cleanupCredentials(volumeId, mpPodUID, podPath, source)
 }
 
 // writeExitFile creates an exit file in the pod's directory to signal Mountpoint Pod termination
@@ -101,10 +156,10 @@ func (u *PodUnmounter) writeExitFile(podPath string) error {
 	return nil
 }
 
-// unmountAndCleanup unmounts the source directory and removes it
+// unmountAndRemoveDir unmounts the source directory and removes it
 // source: Path to the source directory to unmount
 // Returns error if unmounting or cleanup fails
-func (u *PodUnmounter) unmountAndCleanup(source string) error {
+func (u *PodUnmounter) unmountAndRemoveDir(source string) error {
 	if err := u.mount.Unmount(source); err != nil {
 		klog.Errorf("Failed to unmount source %q: %v", source, err)
 		return err
@@ -153,14 +208,15 @@ func (u *PodUnmounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
 // CleanupDanglingMounts scans the source mount directory for potential dangling mounts
 // and cleans them up. It also unmounts any Mountpoint Pods marked for unmounting.
 func (u *PodUnmounter) CleanupDanglingMounts() error {
-	entries, err := os.ReadDir(u.sourceMountDir)
+	sourceMountDir := SourceMountDir(u.kubeletPath)
+	entries, err := os.ReadDir(sourceMountDir)
 	if err != nil {
 		// Source mount dir does not exists, meaning there aren't any mounts
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 
-		klog.Errorf("Failed to read source mount directory %q: %v", u.sourceMountDir, err)
+		klog.Errorf("Failed to read source mount directory %q: %v", sourceMountDir, err)
 		return err
 	}
 
@@ -169,21 +225,28 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 			continue
 		}
 
-		mpPodUID := file.Name()
-		source := filepath.Join(u.sourceMountDir, mpPodUID)
-		// Try to find corresponding pod
-		mpPod, err := u.findPodByUID(mpPodUID)
+		mpPodName := file.Name()
+		source := filepath.Join(sourceMountDir, mpPodName)
+		mpPod, err := u.podWatcher.Get(mpPodName)
 		if err != nil {
-			klog.Errorf("Failed to check Mountpoint Pod (UID: %s) existence: %v", mpPodUID, err)
-			return err
-		}
+			if apierrors.IsNotFound(err) {
+				klog.V(4).Infof("Mountpoint Pod %s not found, will unmount and delete source folder %s", mpPodName, source)
 
-		if mpPod == nil {
-			klog.V(4).Infof("Mountpoint Pod not found for UID %s, will unmount and delete folder", mpPodUID)
-			if err := u.unmountAndCleanup(source); err != nil {
-				klog.Errorf("Failed to cleanup dangling mount for UID %s: %v", mpPodUID, err)
+				// Check mountpoint status and handle special cases
+				isMountPoint, err := u.checkMountpointAndCleanup(source)
+				if !isMountPoint || err != nil {
+					continue
+				}
+
+				// Can only do unmount and remove directory as MP Pod does not exist.
+				if err := u.unmountAndRemoveDir(source); err != nil {
+					klog.Errorf("Failed to cleanup dangling mount %s: %v", source, err)
+				}
+				continue
 			}
-			continue
+
+			klog.Errorf("Failed to check Mountpoint Pod %s existence: %v", mpPodName, err)
+			return err
 		}
 
 		// Unmount only if Mountpoint Pod is marked for unmounting
@@ -193,19 +256,4 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 	}
 
 	return nil
-}
-
-// findPodByUID finds Mountpoint Pod by UID in podWatcher's cache
-func (u *PodUnmounter) findPodByUID(mpPodUID string) (*corev1.Pod, error) {
-	pods, err := u.podWatcher.List()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pod := range pods {
-		if string(pod.UID) == mpPodUID {
-			return pod, nil
-		}
-	}
-	return nil, nil
 }

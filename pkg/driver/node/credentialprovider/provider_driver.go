@@ -122,7 +122,7 @@ func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerA
 // These variables injected to driver's Pod from a configured Kubernetes secret if configured, here it basically
 // created a AWS Profile from these credentials in [provideCtx.WritePath].
 func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID, secretAccessKey, sessionToken string) (envprovider.Environment, error) {
-	prefix := driverLevelLongTermCredentialsProfilePrefix(provideCtx.PodID, provideCtx.VolumeID)
+	prefix := driverLevelLongTermCredentialsProfilePrefix(provideCtx.GetCredentialPodID(), provideCtx.VolumeID)
 	awsProfile, err := awsprofile.Create(awsprofile.Settings{
 		Basepath: provideCtx.WritePath,
 		Prefix:   prefix,

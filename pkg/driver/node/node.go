@@ -272,7 +272,7 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 	bucketRegion, _ := args.Value(mountpoint.ArgRegion)
 
 	return credentialprovider.ProvideContext{
-		PodID:                podID,
+		WorkloadPodID:        podID,
 		VolumeID:             req.GetVolumeId(),
 		AuthenticationSource: authSource,
 		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],

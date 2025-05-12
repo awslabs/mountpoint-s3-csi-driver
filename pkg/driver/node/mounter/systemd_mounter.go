@@ -93,7 +93,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
 			if mntErr := m.Unmount(ctx, target, credentialprovider.CleanupContext{
 				WritePath: credentialCtx.WritePath,
-				PodID:     credentialCtx.PodID,
+				PodID:     credentialCtx.WorkloadPodID,
 				VolumeID:  credentialCtx.VolumeID,
 			}); mntErr != nil {
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)

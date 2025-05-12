@@ -4,6 +4,7 @@ package mounter
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
@@ -31,4 +32,9 @@ func MountS3Path() string {
 		mountS3Path = defaultMountS3Path
 	}
 	return mountS3Path
+}
+
+// Internal S3 CSI Driver directory for source mount points
+func SourceMountDir(kubeletPath string) string {
+	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
 }

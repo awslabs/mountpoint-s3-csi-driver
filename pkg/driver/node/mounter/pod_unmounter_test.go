@@ -55,13 +55,26 @@ func countUnmountCalls(mounter *mount.FakeMounter) int {
 	return unmountCalls
 }
 
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+	}
+	return info.IsDir()
+}
+
 func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 	tests := []struct {
-		name          string
-		nodeID        string
-		pod           *corev1.Pod
-		unmountError  error
-		expectUnmount bool
+		name                  string
+		nodeID                string
+		pod                   *corev1.Pod
+		unmountError          error
+		createSourcePath      bool
+		isMountPoint          bool
+		expectUnmount         bool
+		expectSourcePathExist bool
 	}{
 		{
 			name:   "different node",
@@ -79,7 +92,10 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					NodeName: "different-node",
 				},
 			},
-			expectUnmount: false,
+			createSourcePath:      true,
+			isMountPoint:          true,
+			expectUnmount:         false,
+			expectSourcePathExist: true,
 		},
 		{
 			name:   "same node with unmount annotation",
@@ -100,7 +116,10 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					NodeName: nodeName,
 				},
 			},
-			expectUnmount: true,
+			createSourcePath:      true,
+			isMountPoint:          true,
+			expectUnmount:         true,
+			expectSourcePathExist: false,
 		},
 		{
 			name:   "same node without unmount annotation",
@@ -115,29 +134,73 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					NodeName: nodeName,
 				},
 			},
-			expectUnmount: false,
+			createSourcePath:      true,
+			isMountPoint:          true,
+			expectUnmount:         false,
+			expectSourcePathExist: true,
+		},
+		{
+			name:   "same node with unmount annotation, not mountpoint",
+			nodeID: nodeName,
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       "uid1",
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+					},
+					Labels: map[string]string{
+						mppod.LabelVolumeId: "vol1",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+				},
+			},
+			createSourcePath:      true,
+			isMountPoint:          false,
+			expectUnmount:         false,
+			expectSourcePathExist: false,
+		},
+		{
+			name:   "same node with unmount annotation, no source directory",
+			nodeID: nodeName,
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       "uid1",
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+					},
+					Labels: map[string]string{
+						mppod.LabelVolumeId: "vol1",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeName: nodeName,
+				},
+			},
+			createSourcePath:      false,
+			isMountPoint:          false,
+			expectUnmount:         false,
+			expectSourcePathExist: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kubeletPath := t.TempDir()
+			parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
+			assert.NoError(t, err)
+			kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
 			t.Setenv("KUBELET_PATH", kubeletPath)
 			t.Chdir(kubeletPath)
 
-			sourceMountDir := t.TempDir()
+			sourceMountDir := mounter.SourceMountDir(kubeletPath)
 
 			podWatcher, client := setupPodWatcher(t, tt.pod)
-
-			if tt.pod != nil {
-				podPath := filepath.Join(kubeletPath, "pods", string(tt.pod.UID))
-				commDir := mppod.PathOnHost(podPath)
-				err := os.MkdirAll(commDir, 0750)
-				assert.NoError(t, err)
-
-				err = os.MkdirAll(filepath.Join(sourceMountDir, string(tt.pod.UID)), 0750)
-				assert.NoError(t, err)
-			}
 
 			fakeMounter := mount.NewFakeMounter(nil)
 			if tt.unmountError != nil {
@@ -146,11 +209,28 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				}
 			}
 
+			if tt.pod != nil {
+				podPath := filepath.Join(kubeletPath, "pods", string(tt.pod.UID))
+				commDir := mppod.PathOnHost(podPath)
+				err := os.MkdirAll(commDir, 0750)
+				assert.NoError(t, err)
+
+				if tt.createSourcePath {
+					sourcePath := filepath.Join(sourceMountDir, string(tt.pod.Name))
+					err = os.MkdirAll(sourcePath, 0750)
+					assert.NoError(t, err)
+
+					if tt.isMountPoint {
+						fakeMounter.Mount("mountpoint-s3", sourcePath, "fuse", []string{})
+					}
+				}
+			}
+
 			credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 				return dummyIMDSRegion, nil
 			})
 
-			unmounter := mounter.NewPodUnmounter(tt.nodeID, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider, sourceMountDir)
+			unmounter := mounter.NewPodUnmounter(tt.nodeID, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider)
 			unmounter.HandleMountpointPodUpdate(nil, tt.pod)
 
 			unmountCalls := countUnmountCalls(fakeMounter)
@@ -159,6 +239,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				expectedUnmounts = 1
 			}
 			assert.Equals(t, expectedUnmounts, unmountCalls)
+			assert.Equals(t, tt.expectSourcePathExist, dirExists(filepath.Join(sourceMountDir, string(tt.pod.Name))))
 		})
 	}
 }
@@ -229,26 +310,20 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				},
 			},
 			unmountError:  errors.New("unmount error"),
-			expectedCalls: 1,
+			expectedCalls: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kubeletPath := t.TempDir()
+			parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
+			assert.NoError(t, err)
+			kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
 			t.Setenv("KUBELET_PATH", kubeletPath)
 			t.Chdir(kubeletPath)
-			sourceMountDir := t.TempDir()
 
-			for _, pod := range tt.pods {
-				podPath := filepath.Join(kubeletPath, "pods", string(pod.UID))
-				commDir := mppod.PathOnHost(podPath)
-				err := os.MkdirAll(commDir, 0750)
-				assert.NoError(t, err)
-
-				err = os.MkdirAll(filepath.Join(sourceMountDir, string(pod.UID)), 0750)
-				assert.NoError(t, err)
-			}
+			sourceMountDir := mounter.SourceMountDir(kubeletPath)
 
 			fakeMounter := mount.NewFakeMounter(nil)
 			if tt.unmountError != nil {
@@ -257,13 +332,26 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				}
 			}
 
+			for _, pod := range tt.pods {
+				podPath := filepath.Join(kubeletPath, "pods", string(pod.UID))
+				commDir := mppod.PathOnHost(podPath)
+				err := os.MkdirAll(commDir, 0750)
+				assert.NoError(t, err)
+
+				sourcePath := filepath.Join(sourceMountDir, string(pod.Name))
+				err = os.MkdirAll(sourcePath, 0750)
+				assert.NoError(t, err)
+
+				fakeMounter.Mount("mountpoint-s3", sourcePath, "fuse", []string{})
+			}
+
 			podWatcher, client := setupPodWatcher(t, tt.pods...)
 			credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
 				return dummyIMDSRegion, nil
 			})
 
-			unmounter := mounter.NewPodUnmounter(nodeName, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider, sourceMountDir)
-			err := unmounter.CleanupDanglingMounts()
+			unmounter := mounter.NewPodUnmounter(nodeName, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider)
+			err = unmounter.CleanupDanglingMounts()
 			assert.NoError(t, err)
 
 			unmountCalls := countUnmountCalls(fakeMounter)
