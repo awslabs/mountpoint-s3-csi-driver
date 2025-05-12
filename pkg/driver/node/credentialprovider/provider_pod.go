@@ -67,7 +67,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		defaultRegion = region
 	}
 
-	podID := provideCtx.PodID
+	podID := provideCtx.GetCredentialPodID()
 	volumeID := provideCtx.VolumeID
 	if podID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)

@@ -133,7 +133,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	// Note that this part happens before `isMountPoint` check, as we want to update credentials even though
 	// there is an existing mount point at `target`.
-	credEnv, authenticationSource, err := pm.provideCredentials(ctx, podPath, s3PodAttachment.Spec.WorkloadServiceAccountIAMRoleARN, credentialCtx)
+	credEnv, authenticationSource, err := pm.provideCredentials(ctx, podPath, string(pod.UID), s3PodAttachment.Spec.WorkloadServiceAccountIAMRoleARN, credentialCtx)
 	if err != nil {
 		klog.Errorf("Failed to provide credentials for %s: %v\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 		return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
@@ -366,7 +366,8 @@ func (pm *PodMounter) verifyOrSetupMountTarget(target string, err error) error {
 }
 
 // provideCredentials provides credentials
-func (pm *PodMounter) provideCredentials(ctx context.Context, podPath, serviceAccountEKSRoleARN string, credentialCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+func (pm *PodMounter) provideCredentials(ctx context.Context, podPath, mpPodUID, serviceAccountEKSRoleARN string,
+	credentialCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
 	podCredentialsPath, err := pm.ensureCredentialsDirExists(podPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("Failed to create credentials directory: %w", err)
@@ -374,6 +375,7 @@ func (pm *PodMounter) provideCredentials(ctx context.Context, podPath, serviceAc
 
 	credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
 	credentialCtx.SetServiceAccountEKSRoleARN(serviceAccountEKSRoleARN)
+	credentialCtx.SetMountpointPodID(mpPodUID)
 
 	return pm.credProvider.Provide(ctx, credentialCtx)
 }
@@ -476,7 +478,7 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		for _, s3pa := range s3paList.Items {
 			for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 				for _, attachment := range attachments {
-					if attachment.WorkloadPodUID == credentialCtx.PodID {
+					if attachment.WorkloadPodUID == credentialCtx.WorkloadPodID {
 						return &s3pa, mpPodName, nil
 					}
 				}
