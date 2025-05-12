@@ -790,13 +790,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
 				})
 
-				It("should fail to mount if pod's service account does not have an associated role", func(ctx context.Context) {
-					sa, removeSA := createServiceAccount(ctx, f)
-					deferCleanup(removeSA)
-
-					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
-				})
-
 				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
 					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
