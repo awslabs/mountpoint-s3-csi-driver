@@ -97,7 +97,11 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 		env.Merge(irsaCredentialsEnvironment)
 		return env, nil
-	} else if util.UsePodMounter() && errors.Is(irsaCredentialsEnvironmentError, errMissingServiceAccountAnnotationForIRSA) {
+	} else if errors.Is(irsaCredentialsEnvironmentError, errMissingServiceAccountAnnotationForIRSA) {
+		if !util.UsePodMounter() {
+			return nil, status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
+		}
+
 		klog.V(4).Infof("Providing credentials from pod with Container credential provider (EKS Pod Identity)")
 		eksPodIdentityCredentialsEnvironment := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
 
@@ -143,7 +147,7 @@ func (c *Provider) cleanupFromPod(cleanupCtx CleanupContext) error {
 	return nil
 }
 
-var errMissingServiceAccountAnnotationForIRSA = status.Error(codes.InvalidArgument, "Missing role annotation on pod's service account")
+var errMissingServiceAccountAnnotationForIRSA = errors.New("Missing role annotation on pod's service account")
 
 // findPodServiceAccountRole tries to provide associated AWS IAM role for service account specified in the volume context.
 func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx ProvideContext) (string, error) {
