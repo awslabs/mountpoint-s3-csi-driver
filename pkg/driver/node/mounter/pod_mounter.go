@@ -27,9 +27,6 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
-// Internal S3 CSI Driver directory for source mount points
-const SourceMountDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/"
-
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
 
@@ -45,7 +42,6 @@ type PodMounter struct {
 	s3paCache         cache.Cache
 	mount             *mpmounter.Mounter
 	kubeletPath       string
-	sourceMountDir    string
 	mountSyscall      mountSyscall
 	bindMountSyscall  bindMountSyscall
 	kubernetesVersion string
@@ -62,8 +58,7 @@ func NewPodMounter(
 	mountSyscall mountSyscall,
 	bindMountSyscall bindMountSyscall,
 	kubernetesVersion,
-	nodeID,
-	sourceMountDir string,
+	nodeID string,
 ) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
@@ -71,7 +66,6 @@ func NewPodMounter(
 		credProvider:      credProvider,
 		mount:             mount,
 		kubeletPath:       util.KubeletPath(),
-		sourceMountDir:    sourceMountDir,
 		mountSyscall:      mountSyscall,
 		bindMountSyscall:  bindMountSyscall,
 		kubernetesVersion: kubernetesVersion,
@@ -112,7 +106,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
 		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
 	}
-	source := filepath.Join(pm.sourceMountDir, mpPodName)
+	source := filepath.Join(SourceMountDir(pm.kubeletPath), mpPodName)
 	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
 

@@ -118,14 +118,14 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
 
-		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider, mounter.SourceMountDir)
+		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
 
 		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
 
 		go unmounter.StartPeriodicCleanup(stopCh)
 
 		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-			kubernetesVersion, nodeID, mounter.SourceMountDir)
+			kubernetesVersion, nodeID)
 		if err != nil {
 			klog.Fatalln(err)
 		}
