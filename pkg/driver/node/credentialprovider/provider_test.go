@@ -25,11 +25,11 @@ const testAccessKeyID = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
 
-const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
-const testWebIdentityToken = "test-web-identity-token"
-
-const testContainerAuthorizationToken = "test-container-authorization-token"
 const testContainerCredentialsFullURI = "http://169.254.170.23/v1/credentials"
+const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
+const testContainerAuthorizationToken = "test-container-authorization-token"
+const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
+const testPodLevelEksPodIdentityServiceAccountToken = testPodID + "-" + testVolumeID + "-eks-pod-identity.token"
 
 const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
 const testMountpointPodID = "6984d258-b0bc-4103-a104-3d7fc5440744"
@@ -37,10 +37,12 @@ const testVolumeID = "test-vol"
 const testSystemDProfilePrefix = testPodID + "-" + testVolumeID + "-"
 const testPodMounterProfilePrefix = testMountpointPodID + "-" + testVolumeID + "-"
 
+const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
+const testWebIdentityToken = "test-web-identity-token"
+const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const testSystemDPodLevelServiceAccountToken = testPodID + "-" + testVolumeID + ".token"
 const testPodMounterPodLevelServiceAccountToken = testMountpointPodID + "-" + testVolumeID + ".token"
 const testWebIdentityServiceAccountToken = "token"
-const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
 
 const testPodServiceAccount = "test-sa"
 const testPodNamespace = "test-ns"
@@ -358,6 +360,51 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 func TestProvidingPodLevelCredentials(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 
+	t.Run("correct values for EKS Pod Identity", func(t *testing.T) {
+		t.Setenv("MOUNTER_KIND", "pod")
+
+		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
+		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+
+		writePath := t.TempDir()
+		provideCtx := credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+			WritePath:            writePath,
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			PodNamespace:         testPodNamespace,
+			ServiceAccountName:   testPodServiceAccount,
+			ServiceAccountTokens: serviceAccountTokens(t, tokens{
+				serviceAccountTokenAudienceSTS: {
+					Token: testWebIdentityToken,
+				},
+				serviceAccountTokenAudienceEKS: {
+					Token: testContainerAuthorizationToken,
+				},
+			}),
+		}
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
+		assert.Equals(t, envprovider.Environment{
+			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testPodLevelEksPodIdentityServiceAccountToken),
+			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+
+			// Having a unique cache key for namespace/serviceaccount pair
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
+
+			// Disable long-term credentials
+			"AWS_CONFIG_FILE":             "/test-env/disable-config",
+			"AWS_SHARED_CREDENTIALS_FILE": "/test-env/disable-credentials",
+
+			// Disable EC2 credentials
+			"AWS_EC2_METADATA_DISABLED": "true",
+		}, env)
+		assertContainerTokenFile(t, filepath.Join(writePath, testPodLevelEksPodIdentityServiceAccountToken))
+	})
+
 	t.Run("correct values (SystemD)", func(t *testing.T) {
 		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
 			"eks.amazonaws.com/role-arn": testRoleARN,
@@ -374,8 +421,11 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 			PodNamespace:         testPodNamespace,
 			ServiceAccountName:   testPodServiceAccount,
 			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				"sts.amazonaws.com": {
+				serviceAccountTokenAudienceSTS: {
 					Token: testWebIdentityToken,
+				},
+				serviceAccountTokenAudienceEKS: {
+					Token: testContainerAuthorizationToken,
 				},
 			}),
 		}
@@ -467,7 +517,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				PodNamespace:         testPodNamespace,
 				ServiceAccountName:   "test-unknown-sa",
 				ServiceAccountTokens: serviceAccountTokens(t, tokens{
-					"sts.amazonaws.com": {
+					serviceAccountTokenAudienceSTS: {
 						Token: testWebIdentityToken,
 					},
 				}),
@@ -481,7 +531,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				PodNamespace:         testPodNamespace,
 				ServiceAccountName:   "test-sa-missing-role",
 				ServiceAccountTokens: serviceAccountTokens(t, tokens{
-					"sts.amazonaws.com": {
+					serviceAccountTokenAudienceSTS: {
 						Token: testWebIdentityToken,
 					},
 				}),
@@ -517,7 +567,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				VolumeID:             testVolumeID,
 				PodNamespace:         testPodNamespace,
 				ServiceAccountTokens: serviceAccountTokens(t, tokens{
-					"sts.amazonaws.com": {
+					serviceAccountTokenAudienceSTS: {
 						Token: testWebIdentityToken,
 					},
 				}),
@@ -530,7 +580,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				VolumeID:             testVolumeID,
 				ServiceAccountName:   testPodServiceAccount,
 				ServiceAccountTokens: serviceAccountTokens(t, tokens{
-					"sts.amazonaws.com": {
+					serviceAccountTokenAudienceSTS: {
 						Token: testWebIdentityToken,
 					},
 				}),
@@ -563,7 +613,7 @@ func TestDetectingRegionToUseForPodLevelCredentials(t *testing.T) {
 		PodNamespace:         testPodNamespace,
 		ServiceAccountName:   testPodServiceAccount,
 		ServiceAccountTokens: serviceAccountTokens(t, tokens{
-			"sts.amazonaws.com": {
+			serviceAccountTokenAudienceSTS: {
 				Token: testWebIdentityToken,
 			},
 		}),
@@ -758,14 +808,14 @@ func TestProvidingPodLevelCredentialsForDifferentPods(t *testing.T) {
 	provideCtxOne.WorkloadPodID = "pod1"
 	provideCtxOne.ServiceAccountName = "test-sa-1"
 	provideCtxOne.ServiceAccountTokens = serviceAccountTokens(t, tokens{
-		"sts.amazonaws.com": {Token: "token1"},
+		serviceAccountTokenAudienceSTS: {Token: "token1"},
 	})
 
 	provideCtxTwo := baseProvideCtx
 	provideCtxTwo.WorkloadPodID = "pod2"
 	provideCtxTwo.ServiceAccountName = "test-sa-2"
 	provideCtxTwo.ServiceAccountTokens = serviceAccountTokens(t, tokens{
-		"sts.amazonaws.com": {Token: "token2"},
+		serviceAccountTokenAudienceSTS: {Token: "token2"},
 	})
 
 	envOne, sourceOne, err := provider.Provide(context.Background(), provideCtxOne)
@@ -822,7 +872,7 @@ func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
 		PodNamespace:         testPodNamespace,
 		ServiceAccountName:   testPodServiceAccount,
 		ServiceAccountTokens: serviceAccountTokens(t, tokens{
-			"sts.amazonaws.com": {Token: testWebIdentityToken},
+			serviceAccountTokenAudienceSTS: {Token: testWebIdentityToken},
 		}),
 	}
 
@@ -939,7 +989,7 @@ func TestCleanup(t *testing.T) {
 			PodNamespace:         testPodNamespace,
 			ServiceAccountName:   testPodServiceAccount,
 			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				"sts.amazonaws.com": {
+				serviceAccountTokenAudienceSTS: {
 					Token: testWebIdentityToken,
 				},
 			}),

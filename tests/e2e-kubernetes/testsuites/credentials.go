@@ -365,7 +365,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			role, removeRole := createRole(ctx, f, eksPodIdentityRoleTrustPolicyDocument(), policyName, iamPolicyEKSClusterPolicy)
 			deferCleanup(removeRole)
 
-			removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
+			_, removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
 			deferCleanup(removeAssociation)
 
 			pod := csiDriverPod(ctx, f)
@@ -510,59 +510,113 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				return contextWithAuthenticationSource(ctx, "driver")
 			}
 
+			// Helper functions related to IAM Roles for Service Accounts (IRSA)
+
+			assignPolicyToServiceAccount := func(ctx context.Context, sa *v1.ServiceAccount, policyName string) *v1.ServiceAccount {
+				role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
+				deferCleanup(removeRole)
+
+				sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
+				waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+				return sa
+			}
+
+			createServiceAccountWithPolicy := func(ctx context.Context, policyName string) *v1.ServiceAccount {
+				sa, removeSA := createServiceAccount(ctx, f)
+				deferCleanup(removeSA)
+
+				return assignPolicyToServiceAccount(ctx, sa, policyName)
+			}
+
+			createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyName string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
+				By("Creating Pod with ServiceAccount")
+
+				mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
+				if allowDelete {
+					mountOptions = append(mountOptions, "allow-delete")
+				}
+				if asNonRoot {
+					mountOptions = append(mountOptions,
+						"allow-other",
+						fmt.Sprintf("uid=%d", defaultNonRootUser),
+						fmt.Sprintf("gid=%d", defaultNonRootGroup))
+				}
+				vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+				deferCleanup(vol.CleanupResource)
+
+				sa := createServiceAccountWithPolicy(ctx, policyName)
+
+				var podModifiers []func(*v1.Pod)
+				podModifiers = append(podModifiers, func(pod *v1.Pod) {
+					pod.Spec.ServiceAccountName = sa.Name
+				})
+				if asNonRoot {
+					podModifiers = append(podModifiers, podModifierNonRoot)
+				}
+
+				pod := createPod(ctx, vol, podModifiers...)
+
+				return pod, sa
+			}
+
+			// Helper functions related to EKS Pod Identity
+
+			assignPolicyToServiceAccountEKS := func(ctx context.Context, sa *v1.ServiceAccount, policyName string) (*v1.ServiceAccount, *types.PodIdentityAssociation) {
+				role, removeRole := createRole(ctx, f, eksPodIdentityRoleTrustPolicyDocument(), policyName, iamPolicyEKSClusterPolicy)
+				deferCleanup(removeRole)
+
+				association, removeAssociation := createPodIdentityAssociation(ctx, f, sa, *role.Arn)
+				deferCleanup(removeAssociation)
+
+				return sa, association
+			}
+
+			createServiceAccountWithPolicyEKS := func(ctx context.Context, policyName string) (*v1.ServiceAccount, *types.PodIdentityAssociation) {
+				sa, removeSA := createServiceAccount(ctx, f)
+				deferCleanup(removeSA)
+
+				return assignPolicyToServiceAccountEKS(ctx, sa, policyName)
+			}
+
+			createPodWithServiceAccountAndPolicyEKS := func(ctx context.Context, policyName string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
+				By("Creating Pod with ServiceAccount")
+
+				mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
+				if allowDelete {
+					mountOptions = append(mountOptions, "allow-delete")
+				}
+				if asNonRoot {
+					mountOptions = append(mountOptions,
+						"allow-other",
+						fmt.Sprintf("uid=%d", defaultNonRootUser),
+						fmt.Sprintf("gid=%d", defaultNonRootGroup))
+				}
+				vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+				deferCleanup(vol.CleanupResource)
+
+				sa, _ := createServiceAccountWithPolicyEKS(ctx, policyName)
+
+				var podModifiers []func(*v1.Pod)
+				podModifiers = append(podModifiers, func(pod *v1.Pod) {
+					pod.Spec.ServiceAccountName = sa.Name
+				})
+				if asNonRoot {
+					podModifiers = append(podModifiers, podModifierNonRoot)
+				}
+
+				pod := createPod(ctx, vol, podModifiers...)
+
+				waitUntilRoleIsAssumableWithEKS(ctx, f, sa, pod)
+
+				return pod, sa
+			}
+
 			Context("IAM Roles for Service Accounts (IRSA)", Ordered, func() {
 				BeforeEach(func(ctx context.Context) {
 					if oidcProvider == "" {
 						Skip("OIDC provider is not configured, skipping IRSA tests")
 					}
 				})
-
-				assignPolicyToServiceAccount := func(ctx context.Context, sa *v1.ServiceAccount, policyName string) *v1.ServiceAccount {
-					role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
-					deferCleanup(removeRole)
-
-					sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
-					waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
-					return sa
-				}
-
-				createServiceAccountWithPolicy := func(ctx context.Context, policyName string) *v1.ServiceAccount {
-					sa, removeSA := createServiceAccount(ctx, f)
-					deferCleanup(removeSA)
-
-					return assignPolicyToServiceAccount(ctx, sa, policyName)
-				}
-
-				createPodWithServiceAccountAndPolicy := func(ctx context.Context, policyName string, allowDelete bool, asNonRoot bool) (*v1.Pod, *v1.ServiceAccount) {
-					By("Creating Pod with ServiceAccount")
-
-					mountOptions := []string{fmt.Sprintf("region %s", DefaultRegion)}
-					if allowDelete {
-						mountOptions = append(mountOptions, "allow-delete")
-					}
-					if asNonRoot {
-						mountOptions = append(mountOptions,
-							"allow-other",
-							fmt.Sprintf("uid=%d", defaultNonRootUser),
-							fmt.Sprintf("gid=%d", defaultNonRootGroup))
-					}
-					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
-					deferCleanup(vol.CleanupResource)
-
-					sa := createServiceAccountWithPolicy(ctx, policyName)
-
-					var podModifiers []func(*v1.Pod)
-					podModifiers = append(podModifiers, func(pod *v1.Pod) {
-						pod.Spec.ServiceAccountName = sa.Name
-					})
-					if asNonRoot {
-						podModifiers = append(podModifiers, podModifierNonRoot)
-					}
-
-					pod := createPod(ctx, vol, podModifiers...)
-
-					return pod, sa
-				}
 
 				It("should use pod's service account's read-only role", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, false, false)
@@ -595,6 +649,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					// TODO:
 					// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
 					// 2. Assert new token file is written to the Pod
+					// TODO: Also implement for pod-level EKS Pod Identity
 				})
 
 				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
@@ -625,8 +680,15 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectReadOnly(pod)
 				})
 
-				It("should not use csi driver's service account tokens", func(ctx context.Context) {
+				It("should not use csi driver's service account STS tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
+
+					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
+					expectReadOnly(pod)
+				})
+
+				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
+					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
 					expectReadOnly(pod)
@@ -695,6 +757,173 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(err)
 
 					expectFullAccess(pod)
+				})
+			})
+
+			Context("EKS Pod Identity", Ordered, func() {
+				BeforeEach(func(ctx context.Context) {
+					if !IsPodMounter {
+						Skip("Pod Mounter is not enabled, skipping EKS Pod Identity tests")
+					}
+					if eksPodIdentityAgentDaemonSet == nil {
+						Skip("EKS Pod Identity Agent is not configured, skipping EKS Pod Identity tests")
+					}
+				})
+
+				It("should use pod's service account's read-only role", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, false, false)
+					expectReadOnly(pod)
+				})
+
+				It("should use pod's service account's full access role", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3FullAccess, true, false)
+					expectFullAccess(pod)
+				})
+
+				It("should use pod's service account's full access role as non-root", func(ctx context.Context) {
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3FullAccess, true, true)
+					expectFullAccess(pod)
+				})
+
+				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
+					sa, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3NoAccess)
+					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
+				})
+
+				It("should use up to date role associated with pod's service account", func(ctx context.Context) {
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+					deferCleanup(vol.CleanupResource)
+
+					// Create a SA with full access role
+					sa, association := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3FullAccess)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+
+					expectFullAccess(pod)
+
+					// Delete association
+					deletePodIdentityAssociation(ctx, sa, association.AssociationId)
+
+					// Associate SA with read-only access role
+					sa, _ = assignPolicyToServiceAccountEKS(ctx, sa, iamPolicyS3ReadOnlyAccess)
+
+					// Re-create the pod
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+					pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					defer func() {
+						framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+					}()
+
+					// The pod should only have a read-only access now
+					expectReadOnly(pod)
+				})
+
+				It("should not use csi driver's service account STS tokens", func(ctx context.Context) {
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
+
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
+					expectReadOnly(pod)
+				})
+
+				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
+					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
+
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
+					expectReadOnly(pod)
+				})
+
+				It("should not use driver-level kubernetes secrets", func(ctx context.Context) {
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
+
+					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
+					expectReadOnly(pod)
+				})
+
+				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+					deferCleanup(vol.CleanupResource)
+
+					saFullAccess, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3FullAccess)
+					saReadOnlyAccess, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess)
+
+					podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saFullAccess.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess) })
+
+					podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saReadOnlyAccess.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
+
+					expectReadOnly(podReadOnlyAccess)
+					expectFullAccess(podFullAccess)
+
+					// Write a file on full-access pod and expect it to be readable by read-only pod,
+					// but writes from read-only pod should still fail.
+					writtenFile := expectWriteToSucceed(podFullAccess)
+					expectReadToSucceed(podReadOnlyAccess, writtenFile)
+					expectWriteToFail(podReadOnlyAccess)
+				})
+
+				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
+
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
+					vol := createVolumeResourceWithMountOptions(enableDriverLevelIdentity(ctx), l.config, pattern, mountOptions)
+					deferCleanup(vol.CleanupResource)
+
+					sa, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3FullAccess)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+
+					expectReadOnly(pod)
+				})
+			})
+
+			Context("IAM Roles for Service Accounts (IRSA) and EKS Pod Identity in combination", Ordered, func() {
+				BeforeEach(func(ctx context.Context) {
+					if oidcProvider == "" {
+						Skip("OIDC provider is not configured, skipping tests of IRSA and EKS Pod Identity in combination")
+					}
+					if !IsPodMounter {
+						Skip("Pod Mounter is not enabled, skipping tests of IRSA and EKS Pod Identity in combination")
+					}
+					if eksPodIdentityAgentDaemonSet == nil {
+						Skip("EKS Pod Identity Agent is not configured, skipping tests of IRSA and EKS Pod Identity in combination")
+					}
+				})
+
+				It("should prioritise IAM Roles for Service Accounts (IRSA) over EKS Pod Identity", func(ctx context.Context) {
+					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
+					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
+					deferCleanup(vol.CleanupResource)
+
+					// Create a SA with full access role using EKS Pod Identity
+					sa, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3FullAccess)
+
+					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+
+					expectFullAccess(pod)
+
+					// Associate SA with read-only access role using IRSA
+					sa = assignPolicyToServiceAccount(ctx, sa, iamPolicyS3ReadOnlyAccess)
+
+					// Re-create the pod
+					framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+					pod, err = createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
+					framework.ExpectNoError(err)
+					defer func() {
+						framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+					}()
+
+					// The pod should only have a read-only access now
+					expectReadOnly(pod)
 				})
 			})
 		})
@@ -1015,7 +1244,7 @@ func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa 
 	}
 }
 
-func createPodIdentityAssociation(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleArn string) func(context.Context) error {
+func createPodIdentityAssociation(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleArn string) (*types.PodIdentityAssociation, func(context.Context) error) {
 	framework.Logf("Creating Pod Identity Association for ServiceAccount %s with role %s", sa.Name, roleArn)
 
 	client := eks.NewFromConfig(awsConfig(ctx))
@@ -1030,19 +1259,25 @@ func createPodIdentityAssociation(ctx context.Context, f *framework.Framework, s
 	output, err := client.CreatePodIdentityAssociation(ctx, input)
 	framework.ExpectNoError(err)
 
-	return func(ctx context.Context) error {
-		framework.Logf("Deleting Pod Identity Association for ServiceAccount %s", sa.Name)
-		_, err := client.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
-			AssociationId: output.Association.AssociationId,
-			ClusterName:   &ClusterName,
-		})
-
-		var rsf *types.ResourceNotFoundException
-		if goerrors.As(err, &rsf) {
-			return nil
-		}
-		return err
+	return output.Association, func(ctx context.Context) error {
+		return deletePodIdentityAssociation(ctx, sa, output.Association.AssociationId)
 	}
+}
+
+func deletePodIdentityAssociation(ctx context.Context, sa *v1.ServiceAccount, associationId *string) error {
+	client := eks.NewFromConfig(awsConfig(ctx))
+
+	framework.Logf("Deleting Pod Identity Association for ServiceAccount %s", sa.Name)
+	_, err := client.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
+		AssociationId: associationId,
+		ClusterName:   &ClusterName,
+	})
+
+	var rsf *types.ResourceNotFoundException
+	if goerrors.As(err, &rsf) {
+		return nil
+	}
+	return err
 }
 
 //-- OIDC utils
