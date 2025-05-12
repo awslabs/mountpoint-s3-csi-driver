@@ -54,9 +54,9 @@ func TestS3MounterMount(t *testing.T) {
 	testBucketName := "test-bucket"
 	testTargetPath := filepath.Join(t.TempDir(), "mount")
 	testProvideCtx := credentialprovider.ProvideContext{
-		PodID:     "test-pod",
-		VolumeID:  "test-volume",
-		WritePath: t.TempDir(),
+		WorkloadPodID: "test-pod",
+		VolumeID:      "test-volume",
+		WritePath:     t.TempDir(),
 	}
 
 	testCases := []struct {
