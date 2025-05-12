@@ -106,6 +106,12 @@ function eksctl_create_cluster() {
       --arn ${CI_ROLE_ARN} --username admin --group system:masters \
       --no-duplicate-arns
   fi
+
+  # Add read only cluster access to ReadOnly IAM Role
+  READ_ONLY_ARN="arn:${AWS_PARTITION}:iam::${AWS_ACCOUNT_ID}:role/ReadOnly"
+  ${BIN} create accessentry --cluster ${CLUSTER_NAME} --region ${REGION} --principal-arn ${READ_ONLY_ARN} --type STANDARD
+  aws eks associate-access-policy --region ${REGION} --cluster-name ${CLUSTER_NAME} --principal-arn ${READ_ONLY_ARN} \
+    --policy-arn arn:${AWS_PARTITION}:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy --access-scope type=cluster
 }
 
 function eksctl_delete_cluster() {
