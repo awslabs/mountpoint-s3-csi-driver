@@ -67,13 +67,16 @@ func setup(t *testing.T) *testCtx {
 	t.Cleanup(cancel)
 
 	kubeletPath := t.TempDir()
+	// Eval symlinks on `kubeletPath` as `mount.NewFakeMounter` also does that and we rely on
+	// `mount.List()` to compare mount points and they need to be the same.
+	parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
+	assert.NoError(t, err)
+	kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
 	t.Setenv("KUBELET_PATH", kubeletPath)
 
 	// Chdir to `kubeletPath` so `mountoptions.{Recv, Send}` can use relative paths to Unix sockets
 	// to overcome `bind: invalid argument`.
 	t.Chdir(kubeletPath)
-
-	sourceMountDir := t.TempDir()
 
 	bucketName := "test-bucket"
 	podUID := uuid.New().String()
@@ -89,19 +92,12 @@ func setup(t *testing.T) *testCtx {
 		kubeletPath,
 		fmt.Sprintf("pods/%s/volumes/kubernetes.io~csi/%s/mount", podUID, pvName),
 	)
+	sourceMountDir := mounter.SourceMountDir(kubeletPath)
+	sourcePath := filepath.Join(sourceMountDir, mpPodName)
 
 	// Same behaviour as Kubernetes, see https://github.com/kubernetes/kubernetes/blob/8f8c94a04d00e59d286fe4387197bc62c6a4f374/pkg/volume/csi/csi_mounter.go#L211-L215
-	err := os.MkdirAll(filepath.Dir(targetPath), 0750)
+	err = os.MkdirAll(filepath.Dir(targetPath), 0750)
 	assert.NoError(t, err)
-
-	// Eval symlinks on `targetPath` as `mount.NewFakeMounter` also does that and we rely on
-	// `mount.List()` to compare mount points and they need to be the same.
-	parentDir, err := filepath.EvalSymlinks(filepath.Dir(targetPath))
-	assert.NoError(t, err)
-	targetPath = filepath.Join(parentDir, filepath.Base(targetPath))
-	parentDir, err = filepath.EvalSymlinks(filepath.Dir(sourceMountDir))
-	assert.NoError(t, err)
-	sourceMountDir = filepath.Join(parentDir, filepath.Base(sourceMountDir))
 
 	client := fake.NewClientset()
 	fakeMounter := mount.NewFakeMounter(nil)
@@ -123,7 +119,7 @@ func setup(t *testing.T) *testCtx {
 		pvMountOptions: pvMountOptions,
 		mpPodName:      mpPodName,
 		mpPodUID:       mpPodUID,
-		sourcePath:     filepath.Join(sourceMountDir, mpPodName),
+		sourcePath:     sourcePath,
 	}
 
 	testCrd := crdv1beta.MountpointS3PodAttachment{
@@ -171,7 +167,7 @@ func setup(t *testing.T) *testCtx {
 	assert.NoError(t, err)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
-		mountBindSyscall, testK8sVersion, nodeName, sourceMountDir)
+		mountBindSyscall, testK8sVersion, nodeName)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
