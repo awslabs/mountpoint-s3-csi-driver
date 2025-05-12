@@ -106,6 +106,8 @@ spec:
               value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
             - name: KUBELET_PATH
               value: {{ .Values.node.kubeletPath }}
+            - name: EKS_POD_IDENTITY_AGENT_IPV4_TARGET_HOST
+              value: {{ .Values.eksPodIdentityAgent.ipv4TargetHost }}
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:

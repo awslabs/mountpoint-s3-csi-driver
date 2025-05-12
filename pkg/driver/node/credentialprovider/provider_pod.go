@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -23,10 +24,6 @@ const (
 	serviceAccountTokenAudienceSTS         = "sts.amazonaws.com"
 	serviceAccountTokenAudiencePodIdentity = "pods.eks.amazonaws.com"
 	serviceAccountRoleAnnotation           = "eks.amazonaws.com/role-arn"
-	// TODO: Add a driver configuration flag to handle custom values of podIdentityCredURI. Currently we are assuming the default IPv4 address as determined in the references below:
-	// Doc: https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html
-	// Source code: https://github.com/aws/eks-pod-identity-agent/blob/8bd71a236522993f02427083e485c83f6ae4fe31/configuration/config.go
-	podIdentityCredURI = "http://169.254.170.23/v1/credentials"
 )
 
 const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
@@ -232,8 +229,25 @@ func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx Provide
 	tokenName := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
+	podIdentityCredURI := fmt.Sprintf("http://%s/v1/credentials", EksPodIdentityAgentIPV4TargetHost())
+
 	return envprovider.Environment{
 		envprovider.EnvContainerCredentialsFullURI:     podIdentityCredURI,
 		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
 	}
+}
+
+// EksPodIdentityAgentIPV4TargetHost returns the value of `EKS_POD_IDENTITY_AGENT_IPV4_TARGET_HOST` variable.
+// It looks for `EKS_POD_IDENTITY_AGENT_IPV4_TARGET_HOST` variable, and returns a default value if its not defined.
+func EksPodIdentityAgentIPV4TargetHost() string {
+	// The default IPv4 address is in accordance to the references below:
+	// Doc: https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html
+	// Source code: https://github.com/aws/eks-pod-identity-agent/blob/8bd71a236522993f02427083e485c83f6ae4fe31/configuration/config.go
+	const defaultEksPodIdentityAgentIPV4TargetHost = "169.254.170.23"
+
+	eksPodIdentityAgentIPV4TargetHost := os.Getenv("EKS_POD_IDENTITY_AGENT_IPV4_TARGET_HOST")
+	if eksPodIdentityAgentIPV4TargetHost == "" {
+		return defaultEksPodIdentityAgentIPV4TargetHost
+	}
+	return eksPodIdentityAgentIPV4TargetHost
 }

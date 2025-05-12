@@ -103,5 +103,8 @@ awsAccessSecret:
   accessKey: access_key
   sessionToken: session_token
 
+eksPodIdentityAgent:
+  ipv4TargetHost: "169.254.170.23"
+
 experimental:
   podMounter: false
