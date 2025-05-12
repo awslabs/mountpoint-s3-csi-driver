@@ -87,6 +87,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		resource := createVolumeResource(ctx, l.config, pattern, v1.ReadWriteMany, []string{
 			"allow-other",
 		})
+		l.resources = append(l.resources, resource)
 		expectedMountOptions := []string{
 			"--allow-other",
 			"--debug",
@@ -99,6 +100,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			"--debug",
 			"--debug-crt",
 		})
+		l.resources = append(l.resources, resource)
 		expectedMountOptions = []string{
 			"--allow-other",
 			"--debug",
@@ -111,6 +113,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			"debug",
 			"debug-crt",
 		})
+		l.resources = append(l.resources, resource)
 		expectedMountOptions = []string{
 			"--allow-other",
 			"--debug",
