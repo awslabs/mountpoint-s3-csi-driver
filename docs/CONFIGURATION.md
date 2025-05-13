@@ -3,9 +3,43 @@
 See [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) for
 Mountpoint specific configuration.
 
+## Dynamic Provisioning
+
+The driver supports dynamic provisioning using StorageClass, which allows you to specify the S3 bucket to use for all PVs created with that StorageClass.
+
+To use dynamic provisioning, create a StorageClass that specifies the S3 bucket name:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: s3-bucket-storage
+provisioner: s3.csi.aws.com
+parameters:
+  bucketName: my-custom-bucket
+```
+
+Then create a PVC that references this StorageClass:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-claim
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: s3-bucket-storage
+```
+
+The CSI driver will automatically create a PV using the bucket specified in the StorageClass.
+
 ## Static Provisioning
 
-The driver only supports Static Provisioning as of today, and you need an existing S3 Bucket to use.
+The driver also supports static provisioning, and you need an existing S3 Bucket to use.
 
 To use Static Provisioning, you should set `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (empty string).
 Also, in order to make sure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
