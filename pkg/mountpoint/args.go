@@ -9,18 +9,21 @@ import (
 )
 
 const (
-	ArgForeground      = "--foreground"
-	ArgReadOnly        = "--read-only"
-	ArgAllowOther      = "--allow-other"
-	ArgAllowRoot       = "--allow-root"
-	ArgRegion          = "--region"
-	ArgCache           = "--cache"
-	ArgUserAgentPrefix = "--user-agent-prefix"
-	ArgAWSMaxAttempts  = "--aws-max-attempts"
-	ArgEndpointURL     = "--endpoint-url"
-	ArgGid             = "--gid"
-	ArgDirMode         = "--dir-mode"
-	ArgFileMode        = "--file-mode"
+	ArgForeground                      = "--foreground"
+	ArgReadOnly                        = "--read-only"
+	ArgAllowOther                      = "--allow-other"
+	ArgAllowRoot                       = "--allow-root"
+	ArgRegion                          = "--region"
+	ArgCache                           = "--cache"
+	ArgUserAgentPrefix                 = "--user-agent-prefix"
+	ArgAWSMaxAttempts                  = "--aws-max-attempts"
+	ArgGid                             = "--gid"
+	ArgDirMode                         = "--dir-mode"
+	ArgFileMode                        = "--file-mode"
+	ArgEndpointURL                     = "--endpoint-url"       // stripped – cluster‑admin controls S3 endpoints
+	ArgStorageClass                    = "--storage-class"      // stripped – driver forces bucket default (STANDARD)
+	ArgExpressOneZoneCache             = "--cache-xz"           // stripped – Express One Zone shared cache
+	ArgExpressOneZoneIncrementalUpload = "--incremental-upload" // stripped – Express One Zone incremental upload
 )
 
 // An ArgKey represents the key of an argument.

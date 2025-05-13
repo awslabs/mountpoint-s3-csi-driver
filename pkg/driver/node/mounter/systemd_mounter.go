@@ -123,11 +123,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
 	}
 
-	// Always remove `--endpoint-url` from args if provided
-	// This ensures PV-level endpoint configuration is always ignored
-	if _, ok := args.Remove(mountpoint.ArgEndpointURL); ok {
-		klog.Warningf("The --endpoint-url flag was provided but will be ignored to ensure PV-level S3 endpoint configuration is not used")
-	}
+	enforceCSIDriverMountArgPolicy(&args)
 
 	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, m.kubernetesVersion))
 
