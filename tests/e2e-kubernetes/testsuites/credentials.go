@@ -62,6 +62,11 @@ const (
 	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
+const (
+	iamListAttachedRolePoliciesTimeout = 1 * time.Minute
+	iamListAttachedRolePoliciesPolling = 5 * time.Second
+)
+
 const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
@@ -1038,6 +1043,28 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		})
 		framework.ExpectNoError(err)
 	}
+
+	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
+		policies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
+			RoleName: ptr.To(roleName),
+		})
+		if err != nil {
+			return false, err
+		}
+
+		attachedPolicyNames := []string{}
+		for _, policy := range policies.AttachedPolicies {
+			attachedPolicyNames = append(attachedPolicyNames, *policy.PolicyName)
+		}
+
+		for _, policyName := range policyNames {
+			if !slices.Contains(attachedPolicyNames, policyName) {
+				return false, fmt.Errorf("Policy %q not found in role %q", policyName, roleName)
+			}
+		}
+
+		return true, nil
+	})).WithTimeout(iamListAttachedRolePoliciesTimeout).WithPolling(iamListAttachedRolePoliciesPolling).Should(gomega.BeTrue())
 
 	return role.Role, func(ctx context.Context) error {
 		var errs []error
