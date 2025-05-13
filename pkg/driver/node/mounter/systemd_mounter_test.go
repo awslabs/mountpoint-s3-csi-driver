@@ -269,6 +269,80 @@ func TestS3MounterMount(t *testing.T) {
 				})
 			},
 		},
+		{
+			name:       "Mount arg policy: strips --cache-xz flag",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--cache-xz"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the cache-xz option is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--cache-xz") {
+							t.Fatal("cache-xz should be removed from mount options due to policy")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
+			name:       "Mount arg policy: strips --incremental-upload flag",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--incremental-upload"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the incremental-upload option is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--incremental-upload") {
+							t.Fatal("incremental-upload should be removed from mount options due to policy")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
+			name:       "Mount arg policy: strips --storage-class flag",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--storage-class=REDUCED_REDUNDANCY"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the storage-class option is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--storage-class") {
+							t.Fatal("storage-class should be removed from mount options due to policy")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
+			name:       "Mount arg policy: strips multiple disallowed flags",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--cache-xz", "--incremental-upload", "--storage-class=STANDARD"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify none of the policy-disallowed options are in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--cache-xz") ||
+							strings.Contains(arg, "--incremental-upload") ||
+							strings.Contains(arg, "--storage-class") {
+							t.Fatal("policy-disallowed options should be removed from mount options")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
