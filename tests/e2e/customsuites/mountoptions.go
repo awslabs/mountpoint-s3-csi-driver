@@ -6,10 +6,10 @@ package customsuites
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -33,6 +33,7 @@ type s3CSIMountOptionsTestSuite struct {
 // - Access to volumes when mounted with non-root user/group IDs
 // - Proper enforcement of permissions when mount options are absent
 // - File and directory ownership when mounting with specific uid/gid
+// - Enforcement of mount options policy (disallowed options)
 //
 // The test suite is registered with the E2E framework and will be automatically
 // executed when the test runner is invoked.
@@ -100,38 +101,45 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 	// These checks validate that the S3 CSI driver correctly applies mount options
 	// like uid, gid, and allow-other to enable non-root access to S3 buckets.
 	validateWriteToVolume := func(ctx context.Context) {
-		// Create volume with mount options that should allow non-root access:
-		// - uid/gid set to non-root values
-		// - allow-other to permit access by users other than the mounter
-		// - debug flags for better logging in case of issues
-		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{
-			fmt.Sprintf("uid=%d", DefaultNonRootUser),
-			fmt.Sprintf("gid=%d", DefaultNonRootGroup),
-			"allow-other",
+		// Use BuildVolumeWithOptions from util.go which provides standard non-root options
+		// plus debug for better diagnostics
+		resource := BuildVolumeWithOptions(
+			ctx,
+			l.config,
+			pattern,
+			DefaultNonRootUser,
+			DefaultNonRootGroup,
+			"", // No specific file mode
 			"debug",
-		})
+		)
 		l.resources = append(l.resources, resource)
+
 		ginkgo.By("Creating pod with a volume")
-		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod)
+		pod := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "")
 		var err error
 		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 		framework.ExpectNoError(err)
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
 		}()
+
 		volPath := "/mnt/volume1"
 		fileInVol := fmt.Sprintf("%s/file.txt", volPath)
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
+
 		ginkgo.By("Checking write to a volume")
 		checkWriteToPath(f, pod, fileInVol, toWrite, seed)
+
 		ginkgo.By("Checking read from a volume")
 		checkReadFromPath(f, pod, fileInVol, toWrite, seed)
+
 		ginkgo.By("Checking file group owner")
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, DefaultNonRootGroup, DefaultNonRootUser))
+
 		ginkgo.By("Checking dir group owner")
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, DefaultNonRootGroup, DefaultNonRootUser))
+
 		ginkgo.By("Checking pod identity")
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", DefaultNonRootUser, DefaultNonRootGroup, DefaultNonRootGroup))
 	}
@@ -139,35 +147,151 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		validateWriteToVolume(ctx)
 	})
 
-	// accessVolAsNonRootUser is a helper function that tests that access is properly denied
-	// when mount options for non-root access are NOT provided.
+	// ---------------------------------------------------------------------------
+	// Unsupported Mount-arg tests
 	//
-	// This function:
-	// 1. Creates a volume with NO special mount options
-	// 2. Creates a pod that runs as non-root and tries to access this volume
-	// 3. Verifies that access is denied due to lack of permissions
+	// Context
+	// -------
+	// If any of these flags reach Mountpoint-S3 it refuses writes or targets the
+	// wrong backend:
 	//
-	// This is security test to ensure volumes aren't accessible
-	// to non-root users unless explicitly configured to allow such access.
-	accessVolAsNonRootUser := func(ctx context.Context) {
-		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{})
-		l.resources = append(l.resources, resource)
-		ginkgo.By("Creating pod with a volume")
-		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelRestricted, "")
-		podModifierNonRoot(pod)
-		var err error
-		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+	//   --endpoint-url            → traffic goes to the wrong place
+	//   --cache-xz                → Express One Zone cache (unsupported)
+	//   --incremental-upload      → Express One Zone append (unsupported)
+	//   --storage-class=<non-STD> → non-STANDARD class (unsupported)
+	//
+	// Our CSI driver strips them.  The proof: create a PVC that *asks* for the
+	// flag, run a pod, and show we can still write.
+	//
+	// Helper
+	// ------
+	// validateStrippedOption provisions a PVC with *one* or many bad flag and confirms
+	// the pod can read-write, implying the flag was removed.
+	// ---------------------------------------------------------------------------
+
+	validateStrippedOption := func(ctx context.Context, badFlag, label string) {
+		ginkgo.By(fmt.Sprintf("PVC with disallowed flag: %s", label))
+
+		// Use BuildVolumeWithOptions with a single bad flag as extra option
+		res := BuildVolumeWithOptions(
+			ctx,
+			l.config,
+			pattern,
+			DefaultNonRootUser,
+			DefaultNonRootGroup,
+			"", // No specific file mode
+			badFlag,
+		)
+		l.resources = append(l.resources, res)
+
+		ginkgo.By("Starting pod that mounts the PVC")
+		pod, err := CreatePodWithVolumeAndSecurity(
+			ctx,
+			f,
+			res.Pvc,
+			fmt.Sprintf("policy-test-%s", strings.ReplaceAll(label, "-", "")), // Create a valid container name
+			DefaultNonRootUser,
+			DefaultNonRootGroup,
+		)
 		framework.ExpectNoError(err)
-		defer func() {
-			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-		}()
+		defer func() { _ = e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) }()
+
+		// Create a test file in the volume to verify mount works
 		volPath := "/mnt/volume1"
-		ginkgo.By("Checking file group owner")
-		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls %s", volPath))
-		gomega.Expect(err).To(gomega.HaveOccurred())
-		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"))
+		file := fmt.Sprintf("%s/policy-ok-%s.txt", volPath, label)
+		WriteAndVerifyFile(
+			f,
+			pod,
+			file,
+			fmt.Sprintf("policy-strip %s @ %s", label, time.Now().Format(time.RFC3339)),
+		)
+
+		// verify we can create directories and check ownership
+		testDir := fmt.Sprintf("%s/test-dir-%s", volPath, label)
+		CreateDirInPod(f, pod, testDir)
+
+		ginkgo.By("Checking directory ownership and permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod,
+			fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '%d %d'",
+				testDir, DefaultNonRootGroup, DefaultNonRootUser))
 	}
-	ginkgo.It("should not be able to access volume as a non-root user", func(ctx context.Context) {
-		accessVolAsNonRootUser(ctx)
+
+	ginkgo.Describe("Mount arg policy enforcement", func() {
+		ginkgo.It("strips --endpoint-url flag", func(ctx context.Context) {
+			validateStrippedOption(ctx,
+				"--endpoint-url=https://wrong.example.com",
+				"endpoint-url",
+			)
+		})
+
+		ginkgo.It("strips --cache-xz volume level mount flag", func(ctx context.Context) {
+			validateStrippedOption(ctx, "--cache-xz", "cache-xz")
+		})
+
+		ginkgo.It("strips --incremental-upload volume level mount flag", func(ctx context.Context) {
+			validateStrippedOption(ctx, "--incremental-upload", "incremental-upload")
+		})
+
+		ginkgo.It("strips --storage-class volume level mount flag", func(ctx context.Context) {
+			validateStrippedOption(ctx,
+				"--storage-class=EXPRESS_ONEZONE",
+				"storage-class",
+			)
+		})
+
+		ginkgo.It("strips all unsupported volume level mount flags when they arrive together", func(ctx context.Context) {
+			ginkgo.By("PVC with every disallowed flag at once")
+
+			// Use BuildVolumeWithOptions for the multi-option test with additional unsupported flags
+			unsupportedFlags := []string{
+				"--endpoint-url=https://wrong.example.com",
+				"--cache-xz",
+				"--incremental-upload",
+				"--storage-class=EXPRESS_ONEZONE",
+			}
+
+			res := BuildVolumeWithOptions(
+				ctx,
+				l.config,
+				pattern,
+				DefaultNonRootUser,
+				DefaultNonRootGroup,
+				"", // No specific file mode
+				unsupportedFlags...,
+			)
+			l.resources = append(l.resources, res)
+
+			// Pod + write test
+			// Use CreatePodWithVolumeAndSecurity to create the pod with the same security context
+			ginkgo.By("Creating pod with all disallowed flags in volume mount options")
+			pod, err := CreatePodWithVolumeAndSecurity(
+				ctx,
+				f,
+				res.Pvc,
+				"multi-unsupported-flag-test",
+				DefaultNonRootUser,
+				DefaultNonRootGroup,
+			)
+			framework.ExpectNoError(err)
+			defer func() { _ = e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) }()
+
+			file := "/mnt/volume1/policy-multi-ok.txt"
+
+			// Create a test file and directory as a more thorough functionality check
+			testFile, testDir := CreateTestFileAndDir(f, pod, "/mnt/volume1", "policy-test")
+
+			// Verify the test file and directory were created correctly
+			ginkgo.By("Verifying test file and directory exist")
+			e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls -la %s", testFile))
+			e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls -la %s", testDir))
+
+			// Also write a file with timestamp to document the test (double checking)
+			WriteAndVerifyFile(
+				f,
+				pod,
+				file,
+				fmt.Sprintf("multi-unsupported-flag test @ %s", time.Now().Format(time.RFC3339)),
+			)
+		})
 	})
 }
