@@ -4,6 +4,10 @@ inputs:
   ref:
     description: "Git ref to checkout"
     required: true
+  skip_container_pulls:
+    description: "Set to 'true' to skip parallel container pulls for smoke tests"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -40,6 +44,7 @@ runs:
       uses: azure/setup-helm@v4.3.0
 
     - name: Pull Container Images and Download GO Dependencies in Parallel
+      if: inputs.skip_container_pulls != 'true'
       shell: bash
       run: |
         # Start Docker pulls in parallel
@@ -58,7 +63,15 @@ runs:
         wait $CLOUDSERVER_PID || { echo "❌ CloudServer image pull failed"; exit 1; }
         wait $GO_DEPS_PID || { echo "❌ Go dependencies download failed"; exit 1; }
 
+    # For smoke tests, just download Go dependencies without container pulls
+    - name: Download Go Dependencies (Smoke Tests)
+      if: inputs.skip_container_pulls == 'true'
+      shell: bash
+      run: |
+        (cd tests/e2e && go mod download) || { echo "❌ Go dependencies download failed"; exit 1; }
+
     - name: Load CSI Driver into KIND and Deploy Cloudserver (S3)
+      if: inputs.skip_container_pulls != 'true'
       shell: bash
       run: |-
         kind load docker-image ghcr.io/${{ github.repository }}:${{ github.sha }} --name helm-test-cluster

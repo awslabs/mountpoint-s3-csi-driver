@@ -8,6 +8,7 @@ This guide explains how to use the Scality S3 CSI Driver with Kubernetes, allowi
 - `kubectl` configured to access your cluster
 - Helm 3
 - Access credentials for your Scality S3 service
+- **S3 endpoint URL** (REQUIRED)
 
 ## Installation in 30 Seconds
 
@@ -37,7 +38,7 @@ make csi-install \
 
 When installing, you must provide these values:
 
-- `S3_ENDPOINT_URL`: Your Scality S3 endpoint
+- `S3_ENDPOINT_URL`: Your Scality S3 endpoint (REQUIRED, installation will fail without this)
 - `ACCESS_KEY_ID`: S3 access key
 - `SECRET_ACCESS_KEY`: S3 secret key
 
@@ -48,6 +49,9 @@ make csi-install \
   ACCESS_KEY_ID=your_access_key \
   SECRET_ACCESS_KEY=your_secret_key
 ```
+
+> [!IMPORTANT]
+> The S3_ENDPOINT_URL is now a strict requirement - the installation will fail if it's not provided.
 
 ### Optional Parameters
 

@@ -74,6 +74,12 @@ cover:
 fmt:
 	go fmt ./...
 
+# Validate Helm charts for correctness and requirements
+.PHONY: validate-helm
+validate-helm:
+	@echo "Validating Helm charts..."
+	@tests/helm/validate_charts.sh
+
 # Run controller tests with envtest.
 .PHONY: controller-integration-test
 controller-integration-test: envtest

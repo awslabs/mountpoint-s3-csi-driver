@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [lint, unit-test, csi-compliance-test, controller-integration-test]
+        test: [lint, unit-test, csi-compliance-test, controller-integration-test, validate-helm]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -22,6 +22,10 @@ jobs:
       with:
         go-version-file: 'go.mod'
         cache: true
+
+    - name: Setup Helm (for validate-helm test)
+      if: matrix.test == 'validate-helm'
+      uses: azure/setup-helm@v4.3.0
 
     - name: Run ${{ matrix.test }}
       run: make ${{ matrix.test }}

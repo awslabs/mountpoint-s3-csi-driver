@@ -26,6 +26,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -60,6 +61,11 @@ type Driver struct {
 }
 
 func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error) {
+	// Validate that AWS_ENDPOINT_URL is set
+	if os.Getenv(envprovider.EnvEndpointURL) == "" {
+		return nil, fmt.Errorf("AWS_ENDPOINT_URL environment variable must be set for the CSI driver to function")
+	}
+
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("cannot create in-cluster config: %w", err)
