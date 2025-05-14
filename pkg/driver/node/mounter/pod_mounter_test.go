@@ -36,7 +36,7 @@ const dummyIMDSRegion = "us-west-2"
 const testK8sVersion = "v1.28.0"
 
 // testCwdMu serialises process‑wide working‑directory changes across all tests
-// so they remain safe when “go test” runs packages in parallel (‑p flag).
+// so they remain safe when "go test" runs packages in parallel (-p flag).
 var testCwdMu sync.Mutex
 
 type testCtx struct {
@@ -518,6 +518,129 @@ func TestPodMounter(t *testing.T) {
 			for _, arg := range got.Args {
 				if strings.Contains(arg, "--endpoint-url") || strings.Contains(arg, "endpoint-url") {
 					t.Fatalf("Expected endpoint-url to be removed from args, but found: %s", arg)
+				}
+			}
+		})
+
+		t.Run("Mount arg policy: strips disallowed flags", func(t *testing.T) {
+			// Define test cases for each policy-disallowed flag
+			testCases := []struct {
+				name        string
+				argToStrip  string
+				description string
+			}{
+				{
+					name:        "cache-xz",
+					argToStrip:  "--cache-xz",
+					description: "Express One Zone shared cache",
+				},
+				{
+					name:        "incremental-upload",
+					argToStrip:  "--incremental-upload",
+					description: "Express One Zone incremental upload",
+				},
+				{
+					name:        "storage-class",
+					argToStrip:  "--storage-class=REDUCED_REDUNDANCY",
+					description: "non-STANDARD storage class",
+				},
+			}
+
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					testCtx := setup(t)
+
+					devNull := mountertest.OpenDevNull(t)
+
+					testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+						testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+						fd, err = syscall.Dup(int(devNull.Fd()))
+						assert.NoError(t, err)
+						return fd, nil
+					}
+
+					args := mountpoint.ParseArgs([]string{
+						mountpoint.ArgReadOnly,
+						tc.argToStrip,
+					})
+
+					mountRes := make(chan error)
+					go func() {
+						err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+							AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+							VolumeID:             testCtx.volumeID,
+							PodID:                testCtx.podUID,
+						}, args)
+						if err != nil {
+							log.Println("Mount failed", err)
+						}
+						mountRes <- err
+					}()
+
+					mpPod := createMountpointPod(testCtx)
+					mpPod.run()
+
+					got := mpPod.receiveMountOptions(testCtx.ctx)
+
+					err := <-mountRes
+					assert.NoError(t, err)
+
+					// Verify the disallowed flag is not in the args list
+					for _, arg := range got.Args {
+						if strings.Contains(arg, tc.argToStrip) {
+							t.Fatalf("Expected %s to be removed from args, but found: %s", tc.argToStrip, arg)
+						}
+					}
+				})
+			}
+		})
+
+		t.Run("Mount arg policy: strips multiple disallowed flags", func(t *testing.T) {
+			testCtx := setup(t)
+
+			devNull := mountertest.OpenDevNull(t)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				fd, err = syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			args := mountpoint.ParseArgs([]string{
+				mountpoint.ArgReadOnly,
+				"--cache-xz",
+				"--incremental-upload",
+				"--storage-class=STANDARD",
+			})
+
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					PodID:                testCtx.podUID,
+				}, args)
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			mpPod := createMountpointPod(testCtx)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+
+			err := <-mountRes
+			assert.NoError(t, err)
+
+			// Verify none of the policy-disallowed options are in the args list
+			for _, arg := range got.Args {
+				if strings.Contains(arg, "--cache-xz") ||
+					strings.Contains(arg, "--incremental-upload") ||
+					strings.Contains(arg, "--storage-class") {
+					t.Fatalf("Expected policy-disallowed options to be removed from args, but found: %s", arg)
 				}
 			}
 		})
