@@ -129,8 +129,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// there is an existing mount point at `target`.
 	credEnv, authenticationSource, err := pm.provideCredentials(ctx, podPath, string(pod.UID), s3PodAttachment.Spec.WorkloadServiceAccountIAMRoleARN, credentialCtx)
 	if err != nil {
-		klog.Errorf("Failed to provide credentials for %s: %v\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		klog.Errorf("Failed to provide credentials for %s: %v. \n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to provide credentials for %q: %w. \n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	if !isSourceMountPoint {
@@ -238,14 +238,14 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 		Env:        env.List(),
 	})
 	if err != nil {
-		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
-		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
 	err = pm.waitForMount(ctx, source, mpPod.Name, podMountErrorPath)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w\n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
 	// Mountpoint successfully started, so don't unmount the filesystem
