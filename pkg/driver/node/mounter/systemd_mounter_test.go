@@ -324,6 +324,24 @@ func TestS3MounterMount(t *testing.T) {
 			},
 		},
 		{
+			name:       "Mount arg policy: strips --profile flag",
+			bucketName: testBucketName,
+			targetPath: testTargetPath,
+			provideCtx: credentialprovider.ProvideContext{},
+			options:    []string{"--profile=my-aws-profile"},
+			before: func(t *testing.T, env *mounterTestEnv) {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
+					// Verify the profile option is not in the command-line arguments
+					for _, arg := range config.Args {
+						if strings.Contains(arg, "--profile") {
+							t.Fatal("profile should be removed from mount options due to policy")
+						}
+					}
+					return "success", nil
+				})
+			},
+		},
+		{
 			name:       "Mount arg policy: strips multiple disallowed flags",
 			bucketName: testBucketName,
 			targetPath: testTargetPath,
@@ -335,7 +353,8 @@ func TestS3MounterMount(t *testing.T) {
 					for _, arg := range config.Args {
 						if strings.Contains(arg, "--cache-xz") ||
 							strings.Contains(arg, "--incremental-upload") ||
-							strings.Contains(arg, "--storage-class") {
+							strings.Contains(arg, "--storage-class") ||
+							strings.Contains(arg, "--profile") {
 							t.Fatal("policy-disallowed options should be removed from mount options")
 						}
 					}

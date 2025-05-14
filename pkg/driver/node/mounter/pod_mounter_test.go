@@ -544,6 +544,11 @@ func TestPodMounter(t *testing.T) {
 					argToStrip:  "--storage-class=REDUCED_REDUNDANCY",
 					description: "non-STANDARD storage class",
 				},
+				{
+					name:        "profile",
+					argToStrip:  "--profile=my-aws-profile",
+					description: "AWS profile credentials",
+				},
 			}
 
 			for _, tc := range testCases {
@@ -612,6 +617,7 @@ func TestPodMounter(t *testing.T) {
 				"--cache-xz",
 				"--incremental-upload",
 				"--storage-class=STANDARD",
+				"--profile=my-aws-profile",
 			})
 
 			mountRes := make(chan error)
@@ -639,7 +645,8 @@ func TestPodMounter(t *testing.T) {
 			for _, arg := range got.Args {
 				if strings.Contains(arg, "--cache-xz") ||
 					strings.Contains(arg, "--incremental-upload") ||
-					strings.Contains(arg, "--storage-class") {
+					strings.Contains(arg, "--storage-class") ||
+					strings.Contains(arg, "--profile") {
 					t.Fatalf("Expected policy-disallowed options to be removed from args, but found: %s", arg)
 				}
 			}
