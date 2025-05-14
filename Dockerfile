@@ -43,13 +43,13 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
 # Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.24-bullseye as builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.24 as builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
-    TARGETARCH=${TARGETARCH} make bin
+    TARGETARCH=${TARGETARCH} make generate_licenses bin
 
 # `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
 # We need to make sure to use same Amazon Linux version here and while producing Mountpoint to not have glibc compatibility issues.
@@ -63,6 +63,9 @@ COPY --from=mp_builder /mountpoint-s3 /mountpoint-s3
 # TODO: These won't be necessary with containerization.
 COPY --from=mp_builder /lib64/libfuse.so.2 /mountpoint-s3/bin/
 COPY --from=mp_builder /lib64/libgcc_s.so.1 /mountpoint-s3/bin/
+
+# Copy licenses of CSI Driver's dependencies
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/LICENSES /LICENSES
 
 # Copy CSI Driver binaries
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver

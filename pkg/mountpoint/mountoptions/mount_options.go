@@ -1,5 +1,5 @@
 // Package mountoptions provides utilities for passing mount options between
-// Mountpoint and CSI Driver Node Pods running in the same node.
+// containers (e.g., Mountpoint and CSI Driver Node Pods) running in the same node.
 package mountoptions
 
 import (

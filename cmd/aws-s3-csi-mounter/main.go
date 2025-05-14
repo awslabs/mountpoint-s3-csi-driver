@@ -16,7 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
 )
 

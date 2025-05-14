@@ -1,5 +1,9 @@
 # Unreleased
 
+# v1.14.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.14.1/README.md)
+
 ### Notable changes
 * Support Mountpoint [version 1.16.2](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.16.2)
   * Address an issue introduced in v1.16.0 (with CSI Driver v1.14.0) that could affect throughput and memory usage in workloads with many concurrent random read operations. ([mountpoint-s3#1355](https://github.com/awslabs/mountpoint-s3/pull/1355))

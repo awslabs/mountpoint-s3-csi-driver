@@ -9,7 +9,7 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1.14.0"
+  tag: "v1.14.1"
 
 node:
   kubeletPath: /var/lib/kubelet

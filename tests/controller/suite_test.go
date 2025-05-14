@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -65,7 +66,14 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("Bootstrapping test environment")
-	testEnv = &envtest.Environment{}
+
+	crdv1beta.AddToScheme(scheme.Scheme)
+	testEnv = &envtest.Environment{
+		CRDInstallOptions: envtest.CRDInstallOptions{
+			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
+		},
+		ErrorIfCRDPathMissing: true,
+	}
 
 	var err error
 	cfg, err = testEnv.Start()
@@ -78,6 +86,10 @@ var _ = BeforeSuite(func() {
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
+
+	if err := crdv1beta.SetupManagerIndices(k8sManager); err != nil {
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
 		Namespace:         mountpointNamespace,
@@ -99,6 +111,7 @@ var _ = BeforeSuite(func() {
 	}()
 
 	createMountpointNamespace()
+	createDefaultServiceAccount()
 	createMountpointPriorityClass()
 })
 
@@ -115,6 +128,20 @@ func createMountpointNamespace() {
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mountpointNamespace}}
 	Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
 	waitForObject(namespace)
+}
+
+// createDefaultServiceAccount creates default service account in the control plane.
+func createDefaultServiceAccount() {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "default",
+			Namespace: defaultNamespace,
+		},
+	}
+
+	By(fmt.Sprintf("Creating default service account in %q", mountpointNamespace))
+	Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+	waitForObject(sa)
 }
 
 // createMountpointPriorityClass creates priority class for Mountpoint Pods.

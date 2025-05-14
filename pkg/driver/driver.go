@@ -23,18 +23,29 @@ import (
 	"os"
 	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+
+	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
-	"github.com/container-storage-interface/spec/lib/go/csi"
-	"google.golang.org/grpc"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
-	"k8s.io/mount-utils"
 )
 
 const (
@@ -43,11 +54,18 @@ const (
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
-
-	podWatcherResyncPeriod = time.Minute
 )
 
-var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+var (
+	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+	podWatcherResyncPeriod = time.Minute
+	scheme                 = runtime.NewScheme()
+)
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(crdv1beta.AddToScheme(scheme))
+}
 
 type Driver struct {
 	Endpoint string
@@ -90,20 +108,30 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var mounterImpl mounter.Mounter
+	mpMounter := mpmounter.New()
 	if util.UsePodMounter() {
-		podWatcher := watcher.New(clientset, mountpointPodNamespace, podWatcherResyncPeriod)
+		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
 		err = podWatcher.Start(stopCh)
 		if err != nil {
 			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
 		}
 
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, credProvider, mount.New(""), nil, kubernetesVersion)
+		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
+
+		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
+
+		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
+
+		go unmounter.StartPeriodicCleanup(stopCh)
+
+		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
+			kubernetesVersion, nodeID)
 		if err != nil {
 			klog.Fatalln(err)
 		}
 		klog.Infoln("Using pod mounter")
 	} else {
-		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpVersion, kubernetesVersion)
+		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpMounter, mpVersion, kubernetesVersion)
 		if err != nil {
 			klog.Fatalln(err)
 		}
@@ -184,4 +212,55 @@ func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {
 	}
 
 	return version.String(), nil
+}
+
+// setupS3PodAttachmentCache sets up cache for MountpointS3PodAttachment custom resource
+func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, nodeID, kubernetesVersion string) ctrlcache.Cache {
+	options := ctrlcache.Options{
+		Scheme:                      scheme,
+		SyncPeriod:                  &podWatcherResyncPeriod,
+		ReaderFailOnMissingInformer: true,
+	}
+	isSelectFieldsSupported, err := cluster.IsSelectableFieldsSupported(kubernetesVersion)
+	if err != nil {
+		klog.Fatalf("Failed to check support for selectable fields in the cluster %v\n", err)
+	}
+	if isSelectFieldsSupported {
+		options.ByObject = map[client.Object]ctrlcache.ByObject{
+			&crdv1beta.MountpointS3PodAttachment{}: {
+				Field: fields.OneTermEqualSelector("spec.nodeName", nodeID),
+			},
+		}
+	} else {
+		// TODO: We can potentially use label filter hash of nodeId for old clusters instead of field selector
+		options.ByObject = map[client.Object]ctrlcache.ByObject{
+			&crdv1beta.MountpointS3PodAttachment{}: {},
+		}
+	}
+
+	s3paCache, err := ctrlcache.New(config, options)
+	if err != nil {
+		klog.Fatalf("Failed to create cache: %v\n", err)
+	}
+
+	if err := crdv1beta.SetupCacheIndices(s3paCache); err != nil {
+		klog.Fatalf("Failed to setup field indexers: %v", err)
+	}
+
+	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv1beta.MountpointS3PodAttachment{})
+	if err != nil {
+		klog.Fatalf("Failed to create informer for MountpointS3PodAttachment: %v\n", err)
+	}
+
+	go func() {
+		if err := s3paCache.Start(signals.SetupSignalHandler()); err != nil {
+			klog.Fatalf("Failed to start cache: %v\n", err)
+		}
+	}()
+
+	if !cache.WaitForCacheSync(stopCh, s3podAttachmentInformer.HasSynced) {
+		klog.Fatalf("Failed to sync informer cache within the timeout: %v\n", err)
+	}
+
+	return s3paCache
 }

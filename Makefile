@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=1.14.0
+VERSION=1.14.1
 
 PKG=github.com/awslabs/aws-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
@@ -46,6 +46,10 @@ ALL_OS_ARCH_OSVERSION_linux=$(foreach arch, $(ALL_ARCH_linux), $(foreach osversi
 ALL_OS_ARCH_OSVERSION=$(foreach os, $(ALL_OS), ${ALL_OS_ARCH_OSVERSION_${os}})
 
 PLATFORM?=linux/amd64,linux/arm64
+
+# List of allowed licenses in the CSI Driver's dependencies.
+# See https://github.com/google/licenseclassifier/blob/e6a9bb99b5a6f71d5a34336b8245e305f5430f99/license_type.go#L28 for list of cannonical names for licenses.
+ALLOWED_LICENSES="Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT"
 
 # region is expected to be the same where cluster is created
 E2E_REGION?=us-east-1
@@ -124,6 +128,10 @@ push_image:
 login_registry:
 	aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${REGISTRY}
 
+.PHONY: download_go_deps
+download_go_deps:
+	go mod download
+
 .PHONY: bin
 bin:
 	mkdir -p bin
@@ -156,7 +164,7 @@ fmt:
 # Run controller tests with envtest.
 .PHONY: e2e-controller
 e2e-controller: envtest
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TESTBIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TOOLS_BIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
 
 .PHONY: e2e
 e2e: e2e-controller
@@ -170,22 +178,55 @@ e2e: e2e-controller
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
 
+.PHONY: check_licenses
+check_licenses: download_go_deps
+	go tool github.com/google/go-licenses/v2 check --allowed_licenses ${ALLOWED_LICENSES} ./...
+
+.PHONY: generate_licenses
+generate_licenses: download_go_deps
+	go tool github.com/google/go-licenses/v2 save --save_path="./LICENSES" --force ./...
+
 .PHONY: clean
 clean:
 	rm -rf bin/ && docker system prune
 
-## Binaries used in tests.
+# Generate files for Custom Resources (`zz_generated.deepcopy.go` and CustomResourceDefinition YAML file).
+TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments.yaml"
+# Helm CRD file needs extra `{{- if .Values.experimental.podMounter -}}` wrapper, while we don't need it for tests.
+HELM_POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/mountpoints3podattachments-crd.yaml"
+TEST_POD_ATTACHMENT_CRD_FILE ?= "./tests/crd/mountpoints3podattachments-crd.yaml"
+.PHONY: generate
+generate: controller-gen
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
+	$(CONTROLLER_GEN) crd paths="./pkg/api/..." output:crd:dir=./hack/
+	echo '# Auto-generated file via `make generate`. Do not edit.' > $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '{{- if .Values.experimental.podMounter -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '{{- end -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
+	echo '# Auto-generated file via `make generate`. Do not edit.' > $(TEST_POD_ATTACHMENT_CRD_FILE)
+	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(TEST_POD_ATTACHMENT_CRD_FILE)
+	rm $(TMP_POD_ATTACHMENT_CRD_FILE)
 
-TESTBIN ?= $(shell pwd)/tests/bin
-$(TESTBIN):
-	mkdir -p $(TESTBIN)
+## Tool Binaries
 
-ENVTEST ?= $(TESTBIN)/setup-envtest
+TOOLS_BIN ?= $(shell pwd)/tools/bin
+$(TOOLS_BIN):
+	mkdir -p $(TOOLS_BIN)
+
+CONTROLLER_GEN ?= $(TOOLS_BIN)/controller-gen
+ENVTEST ?= $(TOOLS_BIN)/setup-envtest
+
+CONTROLLER_GEN_VERSION ?= v0.17.3
 ENVTEST_VERSION ?= release-0.19
+
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN)
+$(CONTROLLER_GEN): $(TOOLS_BIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_GEN_VERSION))
 
 .PHONY: envtest
 envtest: $(ENVTEST)
-$(ENVTEST): $(TESTBIN)
+$(ENVTEST): $(TOOLS_BIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 # Copied from https://github.com/kubernetes-sigs/kubebuilder/blob/c32f9714456f7e5e7cc6c790bb87c7e5956e710b/pkg/plugins/golang/v4/scaffolds/internal/templates/makefile.go#L275-L289.
@@ -199,7 +240,7 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 rm -f $(1) || true ;\
-GOBIN=$(TESTBIN) go install $${package} ;\
+GOBIN=$(TOOLS_BIN) go install $${package} ;\
 mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)

@@ -5,6 +5,7 @@ set -euox pipefail
 ACTION=${ACTION:-}
 REGION=${AWS_REGION}
 
+AWS_PARTITION=$(aws sts get-caller-identity --query Arn --output text | cut -d: -f2)
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
@@ -86,6 +87,11 @@ fi
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
 MOUNTER_KIND=${MOUNTER_KIND:-systemd}
+if [ "$MOUNTER_KIND" = "pod" ]; then
+  USE_POD_MOUNTER=true
+else
+  USE_POD_MOUNTER=false
+fi
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -218,14 +224,14 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   popd

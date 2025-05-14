@@ -21,6 +21,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
@@ -69,6 +71,15 @@ func main() {
 	if err != nil {
 		klog.Fatalf("failed to create driver: %s", err)
 	}
+
+	// Handle shutdown signals
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-stopCh
+		klog.Infof("Received signal %s, shutting down...", sig)
+		drv.Stop()
+	}()
 
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)

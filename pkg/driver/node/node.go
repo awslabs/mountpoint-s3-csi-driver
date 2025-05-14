@@ -124,14 +124,21 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	args := mountpoint.ParseArgs(mountpointArgs)
 
+	fsGroup := ""
+	pvMountOptions := ""
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
 		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {
+			fsGroup = volumeMountGroup
 			// We need to add the following flags to support fsGroup
 			// If these flags were already set by customer in PV mountOptions then we won't override them
 			args.SetIfAbsent(mountpoint.ArgGid, volumeMountGroup)
 			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
 			args.SetIfAbsent(mountpoint.ArgDirMode, filePerm770)
 			args.SetIfAbsent(mountpoint.ArgFileMode, filePerm660)
+		}
+
+		if mountFlags := capMount.GetMountFlags(); mountFlags != nil {
+			pvMountOptions = strings.Join(mountFlags, ",")
 		}
 	}
 
@@ -144,7 +151,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args); err != nil {
+	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup, pvMountOptions); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}
@@ -257,12 +264,17 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		podID, _ = podIDFromTargetPath(req.GetTargetPath())
 	}
 
+	authSource := credentialprovider.AuthenticationSourceDriver
+	if volumeCtx[volumecontext.AuthenticationSource] != credentialprovider.AuthenticationSourceUnspecified {
+		authSource = volumeCtx[volumecontext.AuthenticationSource]
+	}
+
 	bucketRegion, _ := args.Value(mountpoint.ArgRegion)
 
 	return credentialprovider.ProvideContext{
-		PodID:                podID,
+		WorkloadPodID:        podID,
 		VolumeID:             req.GetVolumeId(),
-		AuthenticationSource: volumeCtx[volumecontext.AuthenticationSource],
+		AuthenticationSource: authSource,
 		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],
 		ServiceAccountTokens: volumeCtx[volumecontext.CSIServiceAccountTokens],
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],

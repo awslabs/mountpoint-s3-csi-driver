@@ -12,10 +12,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
@@ -105,6 +108,11 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 	pvName := "s3-e2e-pv-" + uuid.New().String()
 	pvcName := "s3-e2e-pvc-" + uuid.New().String()
 
+	// Add debug options if they're not already present
+	normalizedOptions := mountpoint.ParseArgs(mountOptions)
+	normalizedOptions.Set(mountpoint.ArgDebug, mountpoint.ArgNoValue)
+	normalizedOptions.Set(mountpoint.ArgDebugCRT, mountpoint.ArgNoValue)
+
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: pvName,
@@ -113,7 +121,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 			PersistentVolumeSource: *pvSource,
 			StorageClassName:       "", // for static provisioning
 			NodeAffinity:           volumeNodeAffinity,
-			MountOptions:           mountOptions, // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
+			MountOptions:           normalizedOptions.SortedList(), // this is not set by storageframework.CreateVolumeResource, which is why we need to implement our own function
 			AccessModes:            []v1.PersistentVolumeAccessMode{accessMode},
 			Capacity: v1.ResourceList{
 				v1.ResourceStorage: resource.MustParse("1200Gi"),
@@ -238,6 +246,39 @@ func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
 	}
 }
 
+func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
+	framework.Logf("Deleting Pod Identity Associations of Service Account with name %s", sa.Name)
+	eksClient := eks.NewFromConfig(awsConfig(ctx))
+
+	listOutput, listErr := eksClient.ListPodIdentityAssociations(ctx, &eks.ListPodIdentityAssociationsInput{
+		ClusterName:    &ClusterName,
+		Namespace:      &sa.Namespace,
+		ServiceAccount: &sa.Name,
+	})
+	framework.ExpectNoError(listErr)
+
+	for _, association := range listOutput.Associations {
+		_, deleteErr := eksClient.DeletePodIdentityAssociation(ctx, &eks.DeletePodIdentityAssociationInput{
+			ClusterName:   &ClusterName,
+			AssociationId: association.AssociationId,
+		})
+		framework.ExpectNoError(deleteErr)
+	}
+}
+
+func csiDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
+	ds := csiDriverDaemonSet(ctx, f)
+	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
+
+	pods, err := client.List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
+	})
+	framework.ExpectNoError(err)
+
+	pod := pods.Items[0]
+	return &pod
+}
+
 func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
 	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
 	ds, err := client.Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
@@ -283,4 +324,14 @@ func waitForKubernetesObject[T any](ctx context.Context, get framework.GetFunc[T
 	return framework.Gomega().Eventually(ctx, framework.RetryNotFound(get)).
 		WithTimeout(1 * time.Minute).
 		ShouldNot(gomega.BeNil())
+}
+
+func waitForKubernetesObjectToDisappear[T any](ctx context.Context, get framework.GetFunc[T], timeout time.Duration, interval time.Duration) error {
+	return framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (*T, error) {
+		v, err := get(ctx)
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return &v, err
+	})).WithTimeout(timeout).WithPolling(interval).Should(gomega.BeNil())
 }

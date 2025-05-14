@@ -11,9 +11,12 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
 )
+
+const successExitCode = 0
+const restartExitCode = 1
 
 func TestRunningMountpoint(t *testing.T) {
 	mountpointPath := filepath.Join(t.TempDir(), "mount-s3")
@@ -37,7 +40,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		assert.Equals(t, 0, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 	})
 
 	t.Run("Passes bucket name", func(t *testing.T) {
@@ -56,7 +59,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		assert.Equals(t, 0, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 	})
 
 	t.Run("Passes environment variables", func(t *testing.T) {
@@ -70,13 +73,14 @@ func TestRunningMountpoint(t *testing.T) {
 		exitCode, err := csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
 			MountOptions: mountoptions.Options{
-				Fd:  int(mountertest.OpenDevNull(t).Fd()),
-				Env: env,
+				Fd:         int(mountertest.OpenDevNull(t).Fd()),
+				BucketName: "test-bucket",
+				Env:        env,
 			},
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		assert.Equals(t, 0, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 	})
 
 	t.Run("Adds `--foreground` argument if not passed", func(t *testing.T) {
@@ -98,7 +102,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		assert.Equals(t, 0, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 
 		exitCode, err = csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
@@ -110,7 +114,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		assert.Equals(t, 0, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 	})
 
 	t.Run("Fails if file descriptor is invalid", func(t *testing.T) {
@@ -139,7 +143,7 @@ func TestRunningMountpoint(t *testing.T) {
 			_, err := c.Stderr.Write([]byte(mountpointErr.Error()))
 			assert.NoError(t, err)
 
-			return 1, mountpointErr
+			return restartExitCode, mountpointErr
 		}
 
 		exitCode, err := csimounter.Run(csimounter.Options{
@@ -152,7 +156,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.Equals(t, mountpointErr, err)
-		assert.Equals(t, 1, exitCode)
+		assert.Equals(t, restartExitCode, exitCode)
 
 		errMsg, err := os.ReadFile(mountErrPath)
 		assert.NoError(t, err)
@@ -185,7 +189,7 @@ func TestRunningMountpoint(t *testing.T) {
 			CmdRunner: runner,
 		})
 		assert.NoError(t, err)
-		// Should be `0` even though Mountpoint exited with a different exit code
-		assert.Equals(t, 0, exitCode)
+		// Should be `successExitCode` even though Mountpoint exited with a different exit code
+		assert.Equals(t, successExitCode, exitCode)
 	})
 }

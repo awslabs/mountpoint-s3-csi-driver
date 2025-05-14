@@ -16,9 +16,11 @@ import (
 var (
 	CommitId      string
 	BucketRegion  string // assumed to be the same as k8s cluster's region
+	ClusterName   string
 	BucketPrefix  string
 	Performance   bool
 	IMDSAvailable bool
+	IsPodMounter  bool
 )
 
 type s3Driver struct {

@@ -12,4 +12,8 @@ spec:
   tokenRequests:
     - audience: "sts.amazonaws.com"
       expirationSeconds: 3600
+    {{- if .Values.experimental.podMounter }}
+    - audience: "pods.eks.amazonaws.com"
+      expirationSeconds: 3600
+    {{- end }}
   requiresRepublish: true

@@ -59,14 +59,18 @@ type ProvideContext struct {
 	// EnvPath is basepath to use while creating environment variables to pass Mountpoint.
 	EnvPath string
 
-	PodID    string
-	VolumeID string
+	// WorkloadPodID is workload Pod UID
+	WorkloadPodID string
+	// MountpointPodID is Mountpoint Pod UID
+	MountpointPodID string
+	VolumeID        string
 
 	// The following values are provided from CSI volume context.
-	AuthenticationSource AuthenticationSource
-	PodNamespace         string
-	ServiceAccountTokens string
-	ServiceAccountName   string
+	AuthenticationSource     AuthenticationSource
+	PodNamespace             string
+	ServiceAccountTokens     string
+	ServiceAccountName       string
+	ServiceAccountEKSRoleARN string
 	// StsRegion is the `stsRegion` parameter passed via volume attribute.
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
@@ -79,6 +83,26 @@ type ProvideContext struct {
 func (ctx *ProvideContext) SetWriteAndEnvPath(writePath, envPath string) {
 	ctx.WritePath = writePath
 	ctx.EnvPath = envPath
+}
+
+// SetServiceAccountEKSRoleARN sets `ServiceAccountEKSRoleARN` for `ctx`.
+func (ctx *ProvideContext) SetServiceAccountEKSRoleARN(roleArn string) {
+	ctx.ServiceAccountEKSRoleARN = roleArn
+}
+
+// SetMountpointPodID sets `MountpointPodID` for `ctx`.
+func (ctx *ProvideContext) SetMountpointPodID(mpPodUID string) {
+	ctx.MountpointPodID = mpPodUID
+}
+
+// GetCredentialPodID returns the appropriate Pod ID for credential operations.
+// When MountpointPodID is not empty string it returns MountpointPodID (for pod mounter mounts),
+// otherwise returns workload Pod ID (for systemd mounts).
+func (p *ProvideContext) GetCredentialPodID() string {
+	if p.MountpointPodID != "" {
+		return p.MountpointPodID
+	}
+	return p.WorkloadPodID
 }
 
 // A CleanupContext contains parameters needed to clean up credentials after volume unmount.

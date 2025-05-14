@@ -14,13 +14,14 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.14.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.0                      |
+| v1.14.1        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.1                      |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v1.14.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.0                      |
 | v1.13.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.13.0                      |
 | v1.12.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.12.0                      |
 | v1.11.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.11.0                      |
@@ -40,6 +41,7 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 </details>
 
 ## Releases
+
 The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.org/). The version will be bumped following the rules below:
 
 * Significant breaking changes will be released as a `MAJOR` update.
@@ -47,6 +49,10 @@ The Mountpoint for S3 CSI Driver follows [semantic versioning](https://semver.or
 * Bug or vulnerability fixes will be released as a `PATCH` update.
 
 Monthly releases will contain at minimum a `MINOR` version bump, even if the content would normally be treated as a `PATCH` version.
+
+### Unstable Releases
+
+Unstable versions (i.e., `beta`, `alpha`, or `rc`) are for testing purposes only and should not be used in production environments or with valuable data. The security and correctness of these releases are not guaranteed. Use unstable versions at your own risk.
 
 ## Support
 
@@ -56,7 +62,7 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0. The driver supports **x86-64** and **arm64** architectures.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.8.0. The driver supports **x86-64** and **arm64** architectures.
 
 ## Distros Support Matrix
 
@@ -72,11 +78,11 @@ The following table provides the support status for various distros with regards
 
 ## Documentation
 
-* [Driver Installation](docs/install.md)
+* [Driver Installation](docs/INSTALL.md)
 * [Configuring volumes and credentials](docs/CONFIGURATION.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)
 * [Kubernetes Static Provisioning Example](/examples/kubernetes/static_provisioning)
-* [Driver Uninstallation](docs/install.md#uninstalling-the-driver)
+* [Driver Uninstallation](docs/INSTALL.md#uninstalling-the-driver)
 * [Development and Contributing](CONTRIBUTING.md)
 
 ## Contributing

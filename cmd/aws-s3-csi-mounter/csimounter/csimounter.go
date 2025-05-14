@@ -1,17 +1,15 @@
 package csimounter
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/runner"
 )
 
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
@@ -20,18 +18,10 @@ var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
 // so Kubernetes doesn't have to restart it and transition the Pod into `Succeeded` state.
 const successExitCode = 0
 
-// A CmdRunner is responsible for running given `cmd` until completion and returning its exit code and its error (if any).
-// This is mainly exposed for mocking in tests, `DefaultCmdRunner` is always used in non-test environments.
-type CmdRunner func(cmd *exec.Cmd) (int, error)
-
-// DefaultCmdRunner is a real CmdRunner implementation that runs given `cmd`.
-func DefaultCmdRunner(cmd *exec.Cmd) (int, error) {
-	err := cmd.Run()
-	if err != nil {
-		return 0, err
-	}
-	return cmd.ProcessState.ExitCode(), nil
-}
+// restartExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate an error exit,
+// so Kubernetes would restart it. This is the default exit code if `mount.exit` is not present,
+// meaning the CSI Driver Node Pod didn't requested a clean exit.
+const restartExitCode = 1
 
 // An Options represents options to use while mounting Mountpoint.
 type Options struct {
@@ -39,27 +29,13 @@ type Options struct {
 	MountExitPath  string
 	MountErrPath   string
 	MountOptions   mountoptions.Options
-	CmdRunner      CmdRunner
+	CmdRunner      runner.CmdRunner
 }
 
 // Run runs Mountpoint with given options until completion and returns its exit code and its error (if any).
 func Run(options Options) (int, error) {
-	if options.CmdRunner == nil {
-		options.CmdRunner = DefaultCmdRunner
-	}
-
 	mountOptions := options.MountOptions
-
-	fuseDev := os.NewFile(uintptr(mountOptions.Fd), "/dev/fuse")
-	if fuseDev == nil {
-		return 0, fmt.Errorf("passed file descriptor %d is invalid", mountOptions.Fd)
-	}
-
 	mountpointArgs := mountpoint.ParseArgs(mountOptions.Args)
-
-	// By default Mountpoint runs in a detached mode. Here we want to monitor it by relaying its output,
-	// and also we want to wait until it terminates. We're passing `--foreground` to achieve this.
-	mountpointArgs.Set(mountpoint.ArgForeground, mountpoint.ArgNoValue)
 
 	// TODO: This is a temporary workaround to create a cache folder if caching is enabled,
 	// ideally we should create a volume (`emptyDir` by default) in the Mountpoint Pod and use that.
@@ -68,27 +44,17 @@ func Run(options Options) (int, error) {
 		return 0, fmt.Errorf("failed to create cache dir: %w", err)
 	}
 
-	args := append([]string{
-		mountOptions.BucketName,
-		// We pass FUSE fd using `ExtraFiles`, and each entry becomes as file descriptor 3+i.
-		"/dev/fd/3",
-	}, mountpointArgs.SortedList()...)
-
-	cmd := exec.Command(options.MountpointPath, args...)
-	cmd.ExtraFiles = []*os.File{fuseDev}
-	cmd.Env = options.MountOptions.Env
-
-	var stderrBuf bytes.Buffer
-
-	// Connect Mountpoint's stdout/stderr to this commands stdout/stderr,
-	// so Mountpoint logs can be viewable with `kubectl logs`.
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-
-	exitCode, err := options.CmdRunner(cmd)
+	exitCode, stdErr, err := runner.RunInForeground(runner.ForegroundOptions{
+		BinaryPath: options.MountpointPath,
+		BucketName: mountOptions.BucketName,
+		Fd:         mountOptions.Fd,
+		Args:       mountpointArgs,
+		Env:        mountOptions.Env,
+		CmdRunner:  options.CmdRunner,
+	})
 	if err != nil {
 		// If Mountpoint fails, write it to `options.MountErrPath` to let `PodMounter` running in the same node know.
-		if writeErr := os.WriteFile(options.MountErrPath, stderrBuf.Bytes(), mountErrorFileperm); writeErr != nil {
+		if writeErr := os.WriteFile(options.MountErrPath, stdErr, mountErrorFileperm); writeErr != nil {
 			klog.Errorf("Failed to write mount error logs to %s: %v\n", options.MountErrPath, err)
 		}
 		return exitCode, err
@@ -100,7 +66,7 @@ func Run(options Options) (int, error) {
 		return successExitCode, nil
 	}
 
-	return exitCode, nil
+	return restartExitCode, nil
 }
 
 // checkIfFileExists checks whether given `path` exists.

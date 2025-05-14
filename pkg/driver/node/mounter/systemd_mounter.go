@@ -13,19 +13,21 @@ import (
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
 )
 
 type SystemdMounter struct {
 	Runner            ServiceRunner
 	Mounter           mount.Interface
+	MpMounter         *mpmounter.Mounter
 	MpVersion         string
 	MountS3Path       string
 	kubernetesVersion string
 	credProvider      *credentialprovider.Provider
 }
 
-func NewSystemdMounter(credProvider *credentialprovider.Provider, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
+func NewSystemdMounter(credProvider *credentialprovider.Provider, mpMounter *mpmounter.Mounter, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
 	runner, err := system.StartOsSystemdSupervisor()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
@@ -33,6 +35,7 @@ func NewSystemdMounter(credProvider *credentialprovider.Provider, mpVersion stri
 	return &SystemdMounter{
 		Runner:            runner,
 		Mounter:           mount.New(""),
+		MpMounter:         mpMounter,
 		MpVersion:         mpVersion,
 		MountS3Path:       MountS3Path(),
 		kubernetesVersion: kubernetesVersion,
@@ -42,7 +45,7 @@ func NewSystemdMounter(credProvider *credentialprovider.Provider, mpVersion stri
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
-	return isMountPoint(m.Mounter, target)
+	return m.MpMounter.CheckMountpoint(target)
 }
 
 // Mount mounts the given bucket at the target path using provided credentials.
@@ -55,7 +58,7 @@ func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args) error {
+func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, _, _ string) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -69,11 +72,11 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 
 	cleanupDir := false
 
+	isMountPoint, err := m.IsMountPoint(target)
 	// check if the target path exists and is a directory
-	mountpointErr := verifyMountPointStatx(target)
-	if mountpointErr != nil {
+	if err != nil {
 		// does not exist, create the directory
-		if os.IsNotExist(mountpointErr) {
+		if os.IsNotExist(err) {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("Failed to create target directory: %w", err)
 			}
@@ -85,23 +88,19 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 					}
 				}
 			}()
-		}
-		// Corrupted mount, try unmounting
-		if mount.IsCorruptedMnt(mountpointErr) {
+			// Corrupted mount, try unmounting
+		} else if m.MpMounter.IsMountpointCorrupted(err) {
 			klog.V(4).Infof("Mount: Target path %q is a corrupted mount. Trying to unmount.", target)
 			if mntErr := m.Unmount(ctx, target, credentialprovider.CleanupContext{
 				WritePath: credentialCtx.WritePath,
-				PodID:     credentialCtx.PodID,
+				PodID:     credentialCtx.WorkloadPodID,
 				VolumeID:  credentialCtx.VolumeID,
 			}); mntErr != nil {
-				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, mountpointErr, mntErr)
+				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)
 			}
+		} else {
+			return fmt.Errorf("Could not check if %q is a mount point: %v", target, err)
 		}
-	}
-
-	isMountPoint, err := m.IsMountPoint(target)
-	if err != nil {
-		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, mountpointErr, err)
 	}
 
 	credEnv, authenticationSource, err := m.credProvider.Provide(ctx, credentialCtx)

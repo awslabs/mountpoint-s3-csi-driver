@@ -1,23 +1,44 @@
 package mppod
 
 import (
+	"fmt"
 	"path/filepath"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
+	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
 )
 
 // Labels populated on spawned Mountpoint Pods.
 const (
 	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
-	LabelPodUID            = "s3.csi.aws.com/pod-uid"
 	LabelVolumeName        = "s3.csi.aws.com/volume-name"
-	LabelCSIDriverVersion  = "s3.csi.aws.com/mounted-by-csi-driver-version"
+	LabelVolumeId          = "s3.csi.aws.com/volume-id"
+	// LabelCSIDriverVersion specifies the CSI Driver's version used during creation of the Mountpoint Pod.
+	// The controller checks this label against the current CSI Driver version before assigning a new workload to the Mountpoint Pod,
+	// if they differ, the controller won't send new workload to the Mountpoint Pod and instead creates a new one.
+	LabelCSIDriverVersion = "s3.csi.aws.com/mounted-by-csi-driver-version"
 )
+
+// Known list of annotations on Mountpoint Pods.
+const (
+	// AnnotationNeedsUnmount means the Mountpoint Pod scheduled for unmount.
+	// Its the controller's responsibility to annotate a Mountpoint Pod as "needs-unmount" once
+	// it has no workloads assigned to it. The controller ensures to not send new workload after the Mountpoint Pod
+	// annotated with this annotation.
+	// Its the node's responsibility to observe this annotation and perform unmount procedure for the Mountpoint Pod.
+	AnnotationNeedsUnmount = "s3.csi.aws.com/needs-unmount"
+	// AnnotationNoNewWorkload means the Mountpoint Pod shouldn't get a new workload assigned to it.
+	// The existing workloads won't affected with this annotation, and would keep running until termination as per their regular lifecycle.
+	// The controller ensures to not send new workload after the Mountpoint Pod annotated with this annotation.
+	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
+)
+
+const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
 type ContainerConfig struct {
@@ -46,22 +67,16 @@ func NewCreator(config Config) *Creator {
 	return &Creator{config: config}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `pod` and `pv`.
-//
-// It automatically assigns Mountpoint Pod to `pod`'s node.
-// The name of the Mountpoint Pod is consistently generated from `pod` and `pv` using `MountpointPodNameFor` function.
-func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.Pod {
-	node := pod.Spec.NodeName
-	name := MountpointPodNameFor(string(pod.UID), pv.Name)
-
+// Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
+func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: c.config.Namespace,
+			GenerateName: "mp-",
+			Namespace:    c.config.Namespace,
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelPodUID:            string(pod.UID),
 				LabelVolumeName:        pv.Name,
+				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 		},
@@ -126,25 +141,80 @@ func (c *Creator) Create(pod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.P
 				{
 					Name: CommunicationDirName,
 					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
+						EmptyDir: &corev1.EmptyDirVolumeSource{
+							Medium:    corev1.StorageMediumMemory,
+							SizeLimit: resource.NewQuantity(CommunicationDirSizeLimit, resource.BinarySI),
+						},
 					},
 				},
 			},
 		},
 	}
 
-	volumeAttributes := extractVolumeAttributes(pv)
+	volumeAttributes := ExtractVolumeAttributes(pv)
 
 	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
 		mpPod.Spec.ServiceAccountName = saName
 	}
 
-	return mpPod
+	mpContainer := &mpPod.Spec.Containers[0]
+
+	{
+		resourceRequestsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsCpu]
+		resourceRequestsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsMemory]
+
+		if resourceRequestsCpu != "" || resourceRequestsMemory != "" {
+			mpContainer.Resources.Requests = make(corev1.ResourceList)
+
+			if resourceRequestsCpu != "" {
+				quantity, err := resource.ParseQuantity(resourceRequestsCpu)
+				if err != nil {
+					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsCpu, resourceRequestsCpu)
+				}
+				mpContainer.Resources.Requests[corev1.ResourceCPU] = quantity
+			}
+
+			if resourceRequestsMemory != "" {
+				quantity, err := resource.ParseQuantity(resourceRequestsMemory)
+				if err != nil {
+					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsMemory, resourceRequestsMemory)
+				}
+				mpContainer.Resources.Requests[corev1.ResourceMemory] = quantity
+			}
+		}
+	}
+
+	{
+		resourceLimitsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsCpu]
+		resourceLimitsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsMemory]
+
+		if resourceLimitsCpu != "" || resourceLimitsMemory != "" {
+			mpContainer.Resources.Limits = make(corev1.ResourceList)
+
+			if resourceLimitsCpu != "" {
+				quantity, err := resource.ParseQuantity(resourceLimitsCpu)
+				if err != nil {
+					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsCpu, resourceLimitsCpu)
+				}
+				mpContainer.Resources.Limits[corev1.ResourceCPU] = quantity
+			}
+
+			if resourceLimitsMemory != "" {
+				quantity, err := resource.ParseQuantity(resourceLimitsMemory)
+				if err != nil {
+					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsMemory, resourceLimitsMemory)
+				}
+				mpContainer.Resources.Limits[corev1.ResourceMemory] = quantity
+			}
+		}
+	}
+
+	return mpPod, nil
 }
 
-// extractVolumeAttributes extracts volume attributes from given `pv`.
+// ExtractVolumeAttributes extracts volume attributes from given `pv`.
 // It always returns a non-nil map, and it's safe to use even though `pv` doesn't contain any volume attributes.
-func extractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
+func ExtractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
 	csiSpec := pv.Spec.CSI
 	if csiSpec == nil {
 		return map[string]string{}
@@ -156,4 +226,9 @@ func extractVolumeAttributes(pv *corev1.PersistentVolume) map[string]string {
 	}
 
 	return volumeAttributes
+}
+
+// failedToParseQuantityError creates an error if provided quantity is not parsable.
+func failedToParseQuantityError(err error, field, value string) error {
+	return fmt.Errorf("failed to parse quantity %q for %q: %w", value, field, err)
 }
