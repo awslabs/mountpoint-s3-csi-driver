@@ -111,9 +111,11 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	//   Driver-level (in order):
 	// 	 	1) AWS credentials passed via Kubernetes secrets
 	// 	 	2) IAM Roles for Service Accounts (IRSA)
-	// 	 	3) IAM instance profile
+	// 		3) EKS Pod Identity
+	// 	 	4) IAM instance profile
 	//   Pod-level:
 	// 		1) IAM Roles for Service Accounts (IRSA)
+	// 		2) EKS Pod Identity
 	//
 	// In our test environment we add "AmazonS3FullAccess" policy to our EC2 instances
 	// (see "eksctl-patch.json" and "kops-patch.yaml") which allows Driver-level 3) to work.

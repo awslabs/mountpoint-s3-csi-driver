@@ -117,6 +117,8 @@ spec:
               value: pod
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
+            - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
+              value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
             {{- end -}}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID

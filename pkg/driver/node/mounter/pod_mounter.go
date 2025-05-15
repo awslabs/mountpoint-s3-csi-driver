@@ -133,11 +133,6 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to provide credentials for %q: %w\n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
-	if isTargetMountPoint {
-		klog.V(4).Infof("Target path %q is already mounted. Only refreshed credentials.", target)
-		return nil
-	}
-
 	if !isSourceMountPoint {
 		err = pm.mountS3AtSource(ctx, source, pod, podPath, bucketName, credEnv, authenticationSource, args)
 		if err != nil {
@@ -145,11 +140,18 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		}
 	}
 
+	if isTargetMountPoint {
+		klog.V(4).Infof("Target path %q is already mounted. Only refreshed credentials.", target)
+		return nil
+	}
+
 	err = pm.bindMountSyscallWithDefault(source, target)
 	if err != nil {
 		klog.Errorf("Failed to bind mount %s to target %s: %v", source, target, err)
 		return fmt.Errorf("Failed to bind mount %s to target %s: %w", source, target, err)
 	}
+
+	klog.V(4).Infof("Created bind mount to target %s from Mountpoint Pod %s at %s", target, pod.Name, source)
 
 	return nil
 }

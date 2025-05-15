@@ -88,6 +88,14 @@ func (m *Mounter) CheckMountpoint(target Target) (bool, error) {
 		return false, err
 	}
 
+	isMountPoint, err := m.mount.IsMountPoint(target)
+	if err != nil {
+		return false, err
+	}
+	if !isMountPoint {
+		return false, nil
+	}
+
 	mountPoints, err := m.mount.List()
 	if err != nil {
 		return false, fmt.Errorf("failed to list mounts for %q: %w", target, err)
