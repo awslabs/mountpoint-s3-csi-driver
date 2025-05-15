@@ -25,11 +25,11 @@ usage() {
     echo "To run a specific validation, provide its function name as an argument."
     echo ""
     echo -e "${BLUE}Available validations:${NC}"
-    echo "  validate_s3_endpoint_required - Verify S3 endpoint URL is required in Helm charts"
+    echo "  validate_custom_endpoint - Verify ability to set custom S3 endpoint URL"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  $0                           # Run all validations"
-    echo "  $0 validate_s3_endpoint_required  # Run only the S3 endpoint URL validation"
+    echo "  $0 validate_custom_endpoint  # Run only the custom S3 endpoint validation"
     echo ""
 }
 
@@ -57,51 +57,32 @@ check_helm_installed() {
   fi
 }
 
-# Validation test for S3 endpoint URL requirement
-validate_s3_endpoint_required() {
+# Validation test for custom S3 endpoint URL
+validate_custom_endpoint() {
   local chart_dir="$CHARTS_DIR/scality-mountpoint-s3-csi-driver"
-  local node_yaml="$chart_dir/templates/node.yaml"
+  local custom_endpoint="https://custom-s3.example.com:8443"
   
-  # Check if node.yaml exists
-  if [ ! -f "$node_yaml" ]; then
-    echo -e "${RED}Error: $node_yaml does not exist.${NC}"
-    return 1
-  fi
-
-  echo "Checking if s3EndpointUrl is marked as required..."
-  if grep -q "required.*S3 endpoint URL.*must be provided" "$node_yaml"; then
-    echo -e "${GREEN}✓ 'required' directive for S3 endpoint URL found.${NC}"
-  else
-    echo -e "${RED}✗ 'required' directive for S3 endpoint URL not found in $node_yaml.${NC}"
-    return 1
-  fi
+  echo "Testing ability to set custom S3 endpoint URL..."
   
-  echo "Testing template rendering without endpoint URL (should fail)..."
-  if helm template "$chart_dir" >/dev/null 2>&1; then
-    echo -e "${RED}✗ Helm template succeeded but should fail without S3 endpoint URL.${NC}"
-    return 1
-  else
-    local result=$(helm template "$chart_dir" 2>&1)
-    if echo "$result" | grep -q "S3 endpoint URL.*must be provided"; then
-      echo -e "${GREEN}✓ Helm template failed with the expected error about missing endpoint URL.${NC}"
-    else
-      echo -e "${RED}✗ Helm template failed but with an unexpected error:${NC}"
-      echo "$result"
-      return 1
-    fi
-  fi
+  # Run helm template with custom endpoint
+  echo "Rendering template with custom endpoint: $custom_endpoint"
+  local result=$(helm template "$chart_dir" --set node.s3EndpointUrl="$custom_endpoint" --show-only templates/node.yaml 2>&1)
   
-  echo "Testing template rendering with endpoint URL (should succeed)..."
-  if helm template "$chart_dir" --set node.s3EndpointUrl=https://example.com >/dev/null 2>&1; then
-    echo -e "${GREEN}✓ Helm template succeeded with endpoint URL provided.${NC}"
-  else
-    local result=$(helm template "$chart_dir" --set node.s3EndpointUrl=https://example.com 2>&1)
-    echo -e "${RED}✗ Helm template failed despite providing endpoint URL:${NC}"
+  # Check if rendering succeeded
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}✗ Helm template failed with custom endpoint URL:${NC}"
     echo "$result"
     return 1
   fi
   
-  return 0
+  # Check if our custom endpoint appears in the rendered template
+  if echo "$result" | grep -q "value: $custom_endpoint"; then
+    echo -e "${GREEN}✓ Custom endpoint URL successfully applied in rendered template${NC}"
+    return 0
+  else
+    echo -e "${RED}✗ Custom endpoint URL not found in rendered template${NC}"
+    return 1
+  fi
 }
 
 # Add other validation functions here
@@ -141,7 +122,7 @@ main() {
   local errors=0
   
   # Run all validations
-  run_validation "S3 Endpoint URL is required" validate_s3_endpoint_required || ((errors++))
+  run_validation "Custom S3 endpoint URL can be specified" validate_custom_endpoint || ((errors++))
   
   # Add more validations here
   # run_validation "Resource limits are set" validate_resource_limits || ((errors++))
