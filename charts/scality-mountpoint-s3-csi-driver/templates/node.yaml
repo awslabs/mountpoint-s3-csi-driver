@@ -119,7 +119,7 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             {{- end }}
             - name: AWS_ENDPOINT_URL
-              value: {{ required "S3 endpoint URL (.Values.node.s3EndpointUrl) must be provided for the CSI driver to function" .Values.node.s3EndpointUrl }}
+              value: {{ .Values.node.s3EndpointUrl }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
