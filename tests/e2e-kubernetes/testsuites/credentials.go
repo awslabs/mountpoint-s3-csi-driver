@@ -1046,6 +1046,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		framework.ExpectNoError(err)
 	}
 
+	framework.Logf("Waiting until all policies are attached to IAM role")
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		policies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
 			RoleName: ptr.To(roleName),

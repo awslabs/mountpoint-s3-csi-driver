@@ -235,7 +235,7 @@ func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx Provide
 
 	eksPodIdentityAgentCredentialsURI := os.Getenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI")
 	if eksPodIdentityAgentCredentialsURI == "" {
-		klog.Errorf("credentialprovider: Seems like EKS Pod Identity is disabled. If you would like to enable it, please provide the eksPodIdentityAgent.containerCredentialsFullURI Helm value.")
+		klog.Warningf("credentialprovider: Seems like EKS Pod Identity is disabled. If you would like to enable it, please provide the eksPodIdentityAgent.containerCredentialsFullURI Helm value.")
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI driver configuration flag")
 	}
 
