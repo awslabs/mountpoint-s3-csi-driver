@@ -17,9 +17,6 @@ const testAccessKeyID = "test-access-key-id"
 const testSecretAccessKey = "test-secret-access-key"
 const testSessionToken = "test-session-token"
 
-const testRoleARN = "arn:aws:iam::111122223333:role/pod-a-role"
-const testWebIdentityToken = "test-web-identity-token"
-
 const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
 const testVolumeID = "test-vol"
 const testProfilePrefix = testPodID + "-" + testVolumeID + "-"
@@ -66,86 +63,12 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		}
 	})
 
-	t.Run("only sts web identity credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForStsWebIdentityCredentials(t)
+	t.Run("missing credentials", func(t *testing.T) {
+		// Clear environment variables to test credential validation
+		t.Setenv("AWS_ACCESS_KEY_ID", "")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+		t.Setenv("AWS_SESSION_TOKEN", "")
 
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
-			}, env)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
-		}
-	})
-
-	t.Run("only profile provider", func(t *testing.T) {
-		basepath := t.TempDir()
-		t.Setenv("AWS_CONFIG_FILE", filepath.Join(basepath, "config"))
-		t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(basepath, "credentials"))
-
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            t.TempDir(),
-			EnvPath:              testEnvPath,
-			PodID:                testPodID,
-			VolumeID:             testVolumeID,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_CONFIG_FILE":             filepath.Join(basepath, "config"),
-			"AWS_SHARED_CREDENTIALS_FILE": filepath.Join(basepath, "credentials"),
-		}, env)
-	})
-
-	t.Run("long-term and sts web identity credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForLongTermCredentials(t)
-			setEnvForStsWebIdentityCredentials(t)
-
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testProfilePrefix + "s3-csi-credentials",
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testDriverLevelServiceAccountToken),
-			}, env)
-			assertLongTermCredentials(t, writePath)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testDriverLevelServiceAccountToken))
-		}
-	})
-
-	t.Run("incomplete long-term credentials", func(t *testing.T) {
-		// Only set access key without secret
-		t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
-
-		provider := credentialprovider.New(nil)
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
 			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
@@ -155,24 +78,32 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			VolumeID:             testVolumeID,
 		}
 
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+		assert.Equals(t, "credentialprovider: static IAM credentials not provided via environment variables", err.Error())
+	})
 
-		// Only set secret key without access key
+	t.Run("missing access key", func(t *testing.T) {
+		// Only set secret access key without access key
 		t.Setenv("AWS_ACCESS_KEY_ID", "")
 		t.Setenv("AWS_SECRET_ACCESS_KEY", testSecretAccessKey)
 
-		env, source, err = provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		writePath := t.TempDir()
+		provideCtx := credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            writePath,
+			EnvPath:              testEnvPath,
+			PodID:                testPodID,
+			VolumeID:             testVolumeID,
+		}
+
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+		assert.Equals(t, "credentialprovider: static IAM credentials not provided via environment variables", err.Error())
 	})
 
-	t.Run("incomplete sts web identity credentials", func(t *testing.T) {
-		// Only set role ARN without token file
-		t.Setenv("AWS_ROLE_ARN", testRoleARN)
+	t.Run("missing secret key", func(t *testing.T) {
+		// Only set access key without secret
+		t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 
 		provider := credentialprovider.New(nil)
 		writePath := t.TempDir()
@@ -184,39 +115,8 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			VolumeID:             testVolumeID,
 		}
 
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
-
-		// Only set token file without role ARN
-		tokenPath := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
-		t.Setenv("AWS_ROLE_ARN", "")
-		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
-
-		env, source, err = provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
-	})
-
-	t.Run("no credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				PodID:                testPodID,
-				VolumeID:             testVolumeID,
-			}
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{}, env)
-		}
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+		assert.Equals(t, "credentialprovider: static IAM credentials not provided via environment variables", err.Error())
 	})
 }
 
@@ -288,19 +188,6 @@ func assertLongTermCredentials(t *testing.T, basepath string) {
 			"aws_session_token":     testSessionToken,
 		},
 	}, credentials)
-}
-
-func setEnvForStsWebIdentityCredentials(t *testing.T) {
-	tokenPath := filepath.Join(t.TempDir(), "token")
-	assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
-	t.Setenv("AWS_ROLE_ARN", testRoleARN)
-	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
-}
-
-func assertWebIdentityTokenFile(t *testing.T, path string) {
-	tokenContent, err := os.ReadFile(path)
-	assert.NoError(t, err)
-	assert.Equals(t, []byte(testWebIdentityToken), tokenContent)
 }
 
 func TestProvideWithSecretAuthSource(t *testing.T) {

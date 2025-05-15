@@ -60,15 +60,13 @@ func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
 		{
 			name: "some allowed env vars set",
 			env: map[string]string{
-				"AWS_REGION":                 "us-west-1",
-				"AWS_DEFAULT_REGION":         "us-east-1",
-				"AWS_STS_REGIONAL_ENDPOINTS": "regional",
-				"AWS_MAX_ATTEMPTS":           "10",
+				"AWS_REGION":         "us-west-1",
+				"AWS_DEFAULT_REGION": "us-east-1",
+				"AWS_MAX_ATTEMPTS":   "10",
 			},
 			want: []string{
 				"AWS_DEFAULT_REGION=us-east-1",
 				"AWS_REGION=us-west-1",
-				"AWS_STS_REGIONAL_ENDPOINTS=regional",
 			},
 		},
 		{
@@ -204,14 +202,14 @@ func TestEnvironmentList(t *testing.T) {
 		{
 			name: "multiple environment variables are sorted",
 			env: envprovider.Environment{
-				"AWS_REGION":                 "us-west-1",
-				"AWS_DEFAULT_REGION":         "us-east-1",
-				"AWS_STS_REGIONAL_ENDPOINTS": "regional",
+				"AWS_REGION":         "us-west-1",
+				"AWS_DEFAULT_REGION": "us-east-1",
+				"AWS_ENDPOINT_URL":   "https://example.com",
 			},
 			want: []string{
 				"AWS_DEFAULT_REGION=us-east-1",
+				"AWS_ENDPOINT_URL=https://example.com",
 				"AWS_REGION=us-west-1",
-				"AWS_STS_REGIONAL_ENDPOINTS=regional",
 			},
 		},
 		{

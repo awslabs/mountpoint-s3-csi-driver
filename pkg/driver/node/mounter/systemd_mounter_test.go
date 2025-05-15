@@ -28,32 +28,44 @@ type mounterTestEnv struct {
 }
 
 func initMounterTestEnv(t *testing.T) *mounterTestEnv {
+	// Set test environment variables for static credentials
+	t.Setenv("AWS_ACCESS_KEY_ID", "TESTKEY123456789")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "TESTSECRET123456789ABCDEFGHIJKLMNOPQRSTUV")
+
 	ctx := context.Background()
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 	mockRunner := mock_driver.NewMockServiceRunner(mockCtl)
 	mountpointVersion := "TEST_MP_VERSION-v1.1"
 
+	// Create a basic SystemdMounter without setting the unexported credProvider field
+	// Instead, we'll mock the service runner responses directly in our tests
+	sysMount := &mounter.SystemdMounter{
+		Runner:      mockRunner,
+		Mounter:     mount.NewFakeMounter(nil),
+		MpVersion:   mountpointVersion,
+		MountS3Path: mounter.MountS3Path(),
+	}
+
 	return &mounterTestEnv{
 		ctx:        ctx,
 		mockCtl:    mockCtl,
 		mockRunner: mockRunner,
-		mounter: &mounter.SystemdMounter{
-			Runner:      mockRunner,
-			Mounter:     mount.NewFakeMounter(nil),
-			MpVersion:   mountpointVersion,
-			MountS3Path: mounter.MountS3Path(),
-		},
+		mounter:    sysMount,
 	}
 }
 
 func TestS3MounterMount(t *testing.T) {
-	testBucketName := "test-bucket"
+	const testBucketName = "test-bucket"
+
+	// Use a temp directory for the target path
 	testTargetPath := filepath.Join(t.TempDir(), "mount")
+
 	testProvideCtx := credentialprovider.ProvideContext{
-		PodID:     "test-pod",
-		VolumeID:  "test-volume",
-		WritePath: t.TempDir(),
+		AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+		PodID:                "test-pod",
+		VolumeID:             "test-volume",
+		// We'll specify the actual WritePath and EnvPath in each test case
 	}
 
 	testCases := []struct {
@@ -71,9 +83,6 @@ func TestS3MounterMount(t *testing.T) {
 			targetPath: testTargetPath,
 			provideCtx: testProvideCtx,
 			options:    []string{},
-			before: func(t *testing.T, env *mounterTestEnv) {
-				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
-			},
 		},
 		{
 			name:       "success: mounts with nil credentials",
@@ -363,17 +372,39 @@ func TestS3MounterMount(t *testing.T) {
 			},
 		},
 	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
 			env := initMounterTestEnv(t)
-			if testCase.before != nil {
-				testCase.before(t, env)
+
+			// Create a temp directory for credentials
+			credentialsDir := t.TempDir()
+
+			// Make a copy of the provide context with the proper paths
+			provideCtx := tc.provideCtx
+			provideCtx.WritePath = credentialsDir
+			provideCtx.EnvPath = credentialsDir
+
+			// Mock the credential provider behavior by directly setting up expectations on mockRunner
+			// For test cases expected to succeed, set up an expectation on StartService
+			if !tc.expectedErr && tc.bucketName != "" && tc.targetPath != "" && tc.before == nil {
+				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).Return("success", nil)
 			}
-			err := env.mounter.Mount(env.ctx, testCase.bucketName, testCase.targetPath,
-				testCase.provideCtx, mountpoint.ParseArgs(testCase.options))
-			env.mockCtl.Finish()
-			if err != nil && !testCase.expectedErr {
-				t.Fatal(err)
+
+			if tc.before != nil {
+				tc.before(t, env)
+			}
+
+			err := env.mounter.Mount(env.ctx, tc.bucketName, tc.targetPath, provideCtx, mountpoint.ParseArgs(tc.options))
+
+			if tc.expectedErr {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, but got: %v", err)
+				}
 			}
 		})
 	}
