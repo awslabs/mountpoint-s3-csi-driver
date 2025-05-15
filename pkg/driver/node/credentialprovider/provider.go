@@ -37,8 +37,7 @@ const (
 
 // A Provider provides methods for accessing AWS credentials.
 type Provider struct {
-	client         k8sv1.CoreV1Interface
-	regionFromIMDS func() (string, error)
+	client k8sv1.CoreV1Interface
 }
 
 // A ProvideContext contains parameters needed to provide credentials for a volume mount.
@@ -63,8 +62,6 @@ type ProvideContext struct {
 	// The following values are provided from CSI volume context.
 	AuthenticationSource AuthenticationSource
 	PodNamespace         string
-	ServiceAccountTokens string
-	ServiceAccountName   string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
 	// SecretData is a map of key-value pairs from the Kubernetes Secret referenced by nodePublishSecretRef.
@@ -86,8 +83,8 @@ type CleanupContext struct {
 }
 
 // New creates a new [Provider] with given client.
-func New(client k8sv1.CoreV1Interface, regionFromIMDS func() (string, error)) *Provider {
-	return &Provider{client, regionFromIMDS}
+func New(client k8sv1.CoreV1Interface) *Provider {
+	return &Provider{client}
 }
 
 // Provide provides credentials for given context.

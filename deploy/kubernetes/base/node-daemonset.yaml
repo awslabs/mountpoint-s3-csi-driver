@@ -20,16 +20,6 @@ spec:
         kubernetes.io/os: linux
       serviceAccountName: s3-csi-driver-sa
       priorityClassName: system-node-critical
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: eks.amazonaws.com/compute-type
-                    operator: NotIn
-                    values:
-                      - fargate
-                      - hybrid
       tolerations:
         - key: CriticalAddonsOnly
           operator: Exists

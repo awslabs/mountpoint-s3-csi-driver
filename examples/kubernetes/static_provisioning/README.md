@@ -11,6 +11,19 @@ This example shows how to make a static provisioned Mountpoint for S3 persistent
 - `aws_max_attempts.yaml` - configure the number of retries for requests to S3. This option is passed to Mountpoint as the `AWS_MAX_ATTEMPTS` environment variable. See the [Mountpoint configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#other-s3-bucket-configuration) for more details.
 - `secret_authentication.yaml` - demonstrates using a Kubernetes Secret to provide access credentials (access key and secret key) at Volume level for authenticating with S3. This is particularly useful when the user wants to set their own credentials which are different than the driver level credentials.
 
+## Authentication
+
+The CSI driver only supports static IAM credentials, which can be provided in two ways:
+
+1. **Driver-level authentication** (default): Credentials are configured at the driver level and used for all PVs
+   - Set using environment variables in the driver deployment
+   - Configured via Helm values or directly in the deployment YAML
+   
+2. **Secret-level authentication**: Credentials are provided per-volume using Kubernetes Secrets
+   - See `secret_authentication.yaml` for an example
+   - Use `authenticationSource: secret` in volumeAttributes
+   - Reference a secret with `nodePublishSecretRef`
+
 ## AWS Endpoint URL Configuration
 For security and consistency reasons, if `--endpoint-url` is specified in the `mountOptions` of a PersistentVolume, it will be **ignored** by the driver. This is enforced in both systemd and pod mounters to prevent potential security risks like endpoint redirection attacks.
 

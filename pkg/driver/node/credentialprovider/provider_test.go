@@ -30,16 +30,10 @@ const testDriverLevelServiceAccountToken = "token"
 const testPodServiceAccount = "test-sa"
 const testPodNamespace = "test-ns"
 
-const testIMDSRegion = "us-east-1"
-
-func dummyRegionProvider() (string, error) {
-	return testIMDSRegion, nil
-}
-
 const testEnvPath = "/test-env"
 
 func TestProvidingDriverLevelCredentials(t *testing.T) {
-	provider := credentialprovider.New(nil, dummyRegionProvider)
+	provider := credentialprovider.New(nil)
 
 	authenticationSourceVariants := []string{
 		credentialprovider.AuthenticationSourceDriver,
@@ -151,7 +145,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		// Only set access key without secret
 		t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
 
-		provider := credentialprovider.New(nil, dummyRegionProvider)
+		provider := credentialprovider.New(nil)
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
 			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
@@ -180,7 +174,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		// Only set role ARN without token file
 		t.Setenv("AWS_ROLE_ARN", testRoleARN)
 
-		provider := credentialprovider.New(nil, dummyRegionProvider)
+		provider := credentialprovider.New(nil)
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
 			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
@@ -230,7 +224,7 @@ func TestCleanup(t *testing.T) {
 	t.Run("cleanup driver level", func(t *testing.T) {
 		// Provide/create long-term AWS credentials first
 		setEnvForLongTermCredentials(t)
-		provider := credentialprovider.New(nil, dummyRegionProvider)
+		provider := credentialprovider.New(nil)
 
 		writePath := t.TempDir()
 		provideCtx := credentialprovider.ProvideContext{
@@ -374,7 +368,7 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := credentialprovider.New(nil, nil)
+			provider := credentialprovider.New(nil)
 
 			provideCtx := credentialprovider.ProvideContext{
 				VolumeID:             "test-volume-id",
@@ -400,7 +394,7 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 }
 
 func TestProvideWithUnknownAuthSource(t *testing.T) {
-	provider := credentialprovider.New(nil, dummyRegionProvider)
+	provider := credentialprovider.New(nil)
 
 	writePath := t.TempDir()
 	provideCtx := credentialprovider.ProvideContext{

@@ -11,15 +11,11 @@ import (
 const (
 	EnvRegion                = "AWS_REGION"
 	EnvDefaultRegion         = "AWS_DEFAULT_REGION"
-	EnvSTSRegionalEndpoints  = "AWS_STS_REGIONAL_ENDPOINTS"
 	EnvMaxAttempts           = "AWS_MAX_ATTEMPTS"
 	EnvEndpointURL           = "AWS_ENDPOINT_URL"
 	EnvProfile               = "AWS_PROFILE"
 	EnvConfigFile            = "AWS_CONFIG_FILE"
 	EnvSharedCredentialsFile = "AWS_SHARED_CREDENTIALS_FILE"
-	EnvRoleARN               = "AWS_ROLE_ARN"
-	EnvWebIdentityTokenFile  = "AWS_WEB_IDENTITY_TOKEN_FILE"
-	EnvEC2MetadataDisabled   = "AWS_EC2_METADATA_DISABLED"
 	EnvAccessKeyID           = "AWS_ACCESS_KEY_ID"
 	EnvSecretAccessKey       = "AWS_SECRET_ACCESS_KEY"
 	EnvSessionToken          = "AWS_SESSION_TOKEN"
@@ -40,7 +36,6 @@ type Environment map[Key]Value
 var envAllowlist = []Key{
 	EnvRegion,
 	EnvDefaultRegion,
-	EnvSTSRegionalEndpoints,
 	EnvEndpointURL,
 }
 

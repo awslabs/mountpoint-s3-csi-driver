@@ -32,7 +32,6 @@ import (
 )
 
 const mountpointPodNamespace = "mount-s3"
-const dummyIMDSRegion = "us-west-2"
 const testK8sVersion = "v1.28.0"
 
 // testCwdMu serialises process‑wide working‑directory changes across all tests
@@ -117,9 +116,7 @@ func setup(t *testing.T) *testCtx {
 		return int(mountertest.OpenDevNull(t).Fd()), nil
 	}
 
-	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
-		return dummyIMDSRegion, nil
-	})
+	credProvider := credentialprovider.New(client.CoreV1())
 
 	podWatcher := watcher.New(client, mountpointPodNamespace, 10*time.Second)
 	stopCh := make(chan struct{})
