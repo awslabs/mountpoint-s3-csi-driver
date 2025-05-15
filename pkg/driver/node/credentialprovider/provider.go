@@ -1,10 +1,9 @@
 // Package credentialprovider provides utilities for obtaining AWS credentials to use.
-// Depending on the configuration, it either uses Pod-level or Driver-level credentials.
+// Depending on the configuration, it either uses Driver-level or Secret-level (through volume context) credentials.
 package credentialprovider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -25,7 +24,7 @@ const CredentialFilePerm = fs.FileMode(0640)
 // Group access is needed as Mountpoint Pod is run as non-root user
 const CredentialDirPerm = fs.FileMode(0750)
 
-// An AuthenticationSource represents the source (i.e., driver-level or pod-level) where the credentials was obtained.
+// An AuthenticationSource represents the source (i.e., driver-level or secret-level) where the credentials was obtained.
 type AuthenticationSource = string
 
 const (
@@ -33,7 +32,6 @@ const (
 	// We're defaulting to `driver` in this case.
 	AuthenticationSourceUnspecified AuthenticationSource = ""
 	AuthenticationSourceDriver      AuthenticationSource = "driver"
-	AuthenticationSourcePod         AuthenticationSource = "pod" // TODO(S3C-9762): Remove other sources of credentials
 	AuthenticationSourceSecret      AuthenticationSource = "secret"
 )
 
@@ -67,8 +65,6 @@ type ProvideContext struct {
 	PodNamespace         string
 	ServiceAccountTokens string
 	ServiceAccountName   string
-	// StsRegion is the `stsRegion` parameter passed via volume attribute.
-	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
 	// SecretData is a map of key-value pairs from the Kubernetes Secret referenced by nodePublishSecretRef.
@@ -95,13 +91,10 @@ func New(client k8sv1.CoreV1Interface, regionFromIMDS func() (string, error)) *P
 }
 
 // Provide provides credentials for given context.
-// Depending on the configuration, it either returns driver-level or pod-level credentials.
+// Depending on the configuration, it either returns driver-level or secret-level credentials.
 func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envprovider.Environment, AuthenticationSource, error) {
 	authenticationSource := provideCtx.AuthenticationSource
 	switch authenticationSource {
-	case AuthenticationSourcePod:
-		env, err := c.provideFromPod(ctx, provideCtx)
-		return env, AuthenticationSourcePod, err
 	case AuthenticationSourceSecret:
 		env, err := c.provideFromSecret(ctx, provideCtx)
 		return env, AuthenticationSourceSecret, err
@@ -109,15 +102,13 @@ func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envp
 		env, err := c.provideFromDriver(provideCtx)
 		return env, AuthenticationSourceDriver, err
 	default:
-		return nil, AuthenticationSourceUnspecified, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified), `pod`, and `secret` supported", authenticationSource)
+		return nil, AuthenticationSourceUnspecified, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified) and `secret` supported", authenticationSource)
 	}
 }
 
 // Cleanup cleans any previously created credential files for given context.
 func (c *Provider) Cleanup(cleanupCtx CleanupContext) error {
-	errPod := c.cleanupFromPod(cleanupCtx)
-	errDriver := c.cleanupFromDriver(cleanupCtx)
-	return errors.Join(errPod, errDriver)
+	return c.cleanupFromDriver(cleanupCtx)
 }
 
 // escapedVolumeIdentifier returns "{podID}-{volumeID}" as a unique identifier for this volume.
