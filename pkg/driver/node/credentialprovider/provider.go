@@ -34,6 +34,7 @@ const (
 	AuthenticationSourceUnspecified AuthenticationSource = ""
 	AuthenticationSourceDriver      AuthenticationSource = "driver"
 	AuthenticationSourcePod         AuthenticationSource = "pod"
+	AuthenticationSourceSecrets     AuthenticationSource = "secrets"
 )
 
 // A Provider provides methods for accessing AWS credentials.
@@ -74,6 +75,8 @@ type ProvideContext struct {
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
+	// Secrets is a map of secret names to their values.
+	Secrets map[string]string
 }
 
 // SetWriteAndEnvPath sets `WritePath` and `EnvPath` for `ctx`.
@@ -123,6 +126,9 @@ func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envp
 	case AuthenticationSourcePod:
 		env, err := c.provideFromPod(ctx, provideCtx)
 		return env, AuthenticationSourcePod, err
+	case AuthenticationSourceSecrets:
+		env, err := c.provideFromSecrets(ctx, provideCtx)
+		return env, AuthenticationSourceSecrets, err
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
 		env, err := c.provideFromDriver(provideCtx)
 		return env, AuthenticationSourceDriver, err
