@@ -114,6 +114,11 @@ func (m *Mounter) CheckMountpoint(target Target) (bool, error) {
 	return false, nil
 }
 
+// FindReferencesToMountpoint returns list of references to Mountpoint at `target`.
+func (m *Mounter) FindReferencesToMountpoint(target Target) ([]string, error) {
+	return m.mount.GetMountRefs(target)
+}
+
 // IsMountpointCorrupted returns whether an error returned from [Mounter.CheckMountpoint]
 // indicates the queried mount point is corrupted or not.
 //
