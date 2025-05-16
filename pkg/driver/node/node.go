@@ -264,9 +264,6 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		VolumeID:             req.GetVolumeId(),
 		AuthenticationSource: volumeCtx[volumecontext.AuthenticationSource],
 		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],
-		ServiceAccountTokens: volumeCtx[volumecontext.CSIServiceAccountTokens],
-		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
-		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
 		SecretData:           req.GetSecrets(),
 	}

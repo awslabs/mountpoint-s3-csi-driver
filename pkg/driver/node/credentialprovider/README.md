@@ -13,10 +13,9 @@ The credential provider system is responsible for:
 
 ## Authentication Sources
 
-The driver supports three authentication sources, controlled via the `authenticationSource` volume attribute:
+The driver supports two authentication sources, controlled via the `authenticationSource` volume attribute:
 
 - `driver` (default): Uses credentials from the CSI driver's environment
-- `pod`: Uses credentials from the workload pod (the pod that's using the volume)
 - `secret`: Uses credentials from a Kubernetes secret
 
 ## Key Components
@@ -49,12 +48,6 @@ It creates unique profile names and file paths for each volume mount to ensure i
 2. Passes environment variables to the systemd service with paths to credential files
 3. The systemd service runs Mountpoint with access to these credentials
 
-### PodMounter
-
-1. Writes credentials to the Mountpoint pod's credentials directory
-2. Sets environment variables for the Mountpoint pod to access these files
-3. The Mountpoint pod uses these credentials when mounting
-
 ## Implementation Details
 
 - Credentials are stored in files with 0640 permissions (CredentialFilePerm)
@@ -72,5 +65,4 @@ On unmount:
 ## Important Notes
 
 - The AWS profile mechanism is used internally by the CSI driver even though `--profile` as a mount option is not supported
-- When using the SystemdMounter, credential files are created in the CSI driver pod but accessible from the host system
-- When using the PodMounter, credential files are created in the Mountpoint pod's directory 
+- When using the SystemdMounter, credential files are created in the CSI driver pod but accessible from the host system 

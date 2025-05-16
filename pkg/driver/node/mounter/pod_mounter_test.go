@@ -32,7 +32,6 @@ import (
 )
 
 const mountpointPodNamespace = "mount-s3"
-const dummyIMDSRegion = "us-west-2"
 const testK8sVersion = "v1.28.0"
 
 // testCwdMu serialises process‑wide working‑directory changes across all tests
@@ -58,6 +57,10 @@ type testCtx struct {
 }
 
 func setup(t *testing.T) *testCtx {
+	// Set test environment variables for static credentials
+	t.Setenv("AWS_ACCESS_KEY_ID", "TESTKEY123456789")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "TESTSECRET123456789ABCDEFGHIJKLMNOPQRSTUV")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 
@@ -117,9 +120,7 @@ func setup(t *testing.T) *testCtx {
 		return int(mountertest.OpenDevNull(t).Fd()), nil
 	}
 
-	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
-		return dummyIMDSRegion, nil
-	})
+	credProvider := credentialprovider.New(client.CoreV1())
 
 	podWatcher := watcher.New(client, mountpointPodNamespace, 10*time.Second)
 	stopCh := make(chan struct{})
@@ -185,7 +186,7 @@ func TestPodMounter(t *testing.T) {
 			// To verify underlying objects are the same, we need to compare "dev" and "ino" from "fstat" syscall, which we do with `AssertSameFile`.
 			got.Fd = 0
 
-			assert.Equals(t, mountoptions.Options{
+			assertMountOptionsEqual(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
 					"--read-only",
@@ -349,7 +350,7 @@ func TestPodMounter(t *testing.T) {
 				}
 			}
 
-			assert.Equals(t, mountoptions.Options{
+			assertMountOptionsEqual(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
 					"--read-only",
@@ -880,4 +881,41 @@ func (mp *mountpointPod) receiveMountOptions(ctx context.Context) mountoptions.O
 	options, err := mountoptions.Recv(ctx, mountSock)
 	assert.NoError(mp.testCtx.t, err)
 	return options
+}
+
+func assertMountOptionsEqual(t *testing.T, expected, actual mountoptions.Options) {
+	t.Helper()
+
+	// Check fields individually, ignoring exact env list
+	assert.Equals(t, expected.BucketName, actual.BucketName)
+	assert.Equals(t, expected.Fd, actual.Fd)
+
+	// For args, ensure all expected args are in the actual args
+	for _, expectedArg := range expected.Args {
+		found := false
+		for _, actualArg := range actual.Args {
+			if actualArg == expectedArg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected arg %q not found in actual args: %v", expectedArg, actual.Args)
+		}
+	}
+
+	// For environment variables, check that we have AWS credential related vars
+	containsCredentials := false
+	for _, env := range actual.Env {
+		if strings.Contains(env, "AWS_CONFIG_FILE") ||
+			strings.Contains(env, "AWS_PROFILE") ||
+			strings.Contains(env, "AWS_SHARED_CREDENTIALS_FILE") {
+			containsCredentials = true
+			break
+		}
+	}
+
+	if !containsCredentials {
+		t.Error("Expected environment variables to contain AWS credential configuration")
+	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/scality/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -22,42 +21,21 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 
 	env := envprovider.Environment{}
 
-	// Long-term AWS credentials
+	// Static IAM credentials
 	accessKeyID := os.Getenv(envprovider.EnvAccessKeyID)
 	secretAccessKey := os.Getenv(envprovider.EnvSecretAccessKey)
-	if accessKeyID != "" && secretAccessKey != "" {
-		sessionToken := os.Getenv(envprovider.EnvSessionToken)
-		longTermCredsEnv, err := provideLongTermCredentialsFromDriver(provideCtx, accessKeyID, secretAccessKey, sessionToken)
-		if err != nil {
-			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide long-term AWS credentials")
-			return nil, err
-		}
-
-		env.Merge(longTermCredsEnv)
-	} else {
-		// Profile provider
-		// TODO: This is not officially supported and won't work by default with containerization.
-		configFile := os.Getenv(envprovider.EnvConfigFile)
-		sharedCredentialsFile := os.Getenv(envprovider.EnvSharedCredentialsFile)
-		if configFile != "" && sharedCredentialsFile != "" {
-			env.Set(envprovider.EnvConfigFile, configFile)
-			env.Set(envprovider.EnvSharedCredentialsFile, sharedCredentialsFile)
-		}
+	if accessKeyID == "" || secretAccessKey == "" {
+		return nil, fmt.Errorf("credentialprovider: static IAM credentials not provided via environment variables")
 	}
 
-	// STS Web Identity provider
-	webIdentityTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
-	roleARN := os.Getenv(envprovider.EnvRoleARN)
-	if webIdentityTokenFile != "" && roleARN != "" {
-		stsWebIdentityCredsEnv, err := provideStsWebIdentityCredentialsFromDriver(provideCtx)
-		if err != nil {
-			klog.V(4).ErrorS(err, "credentialprovider: Failed to provide STS Web Identity credentials from driver")
-			return nil, err
-		}
-
-		env.Merge(stsWebIdentityCredsEnv)
+	sessionToken := os.Getenv(envprovider.EnvSessionToken)
+	longTermCredsEnv, err := provideLongTermCredentialsFromDriver(provideCtx, accessKeyID, secretAccessKey, sessionToken)
+	if err != nil {
+		klog.V(4).ErrorS(err, "credentialprovider: Failed to provide static IAM credentials")
+		return nil, err
 	}
 
+	env.Merge(longTermCredsEnv)
 	return env, nil
 }
 
@@ -68,22 +46,6 @@ func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 		Basepath: cleanupCtx.WritePath,
 		Prefix:   prefix,
 	})
-}
-
-// provideStsWebIdentityCredentialsFromDriver provides credentials for STS Web Identity from the driver's service account.
-// It basically copies driver's injected service account token to [provideCtx.WritePath].
-func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
-	driverServiceAccountTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
-	tokenFile := filepath.Join(provideCtx.WritePath, driverLevelServiceAccountTokenName)
-	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm)
-	if err != nil {
-		return nil, fmt.Errorf("credentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
-	}
-
-	return envprovider.Environment{
-		envprovider.EnvRoleARN:              os.Getenv(envprovider.EnvRoleARN),
-		envprovider.EnvWebIdentityTokenFile: filepath.Join(provideCtx.EnvPath, driverLevelServiceAccountTokenName),
-	}, nil
 }
 
 // provideLongTermCredentialsFromDriver provides long-term AWS credentials from the driver's environment variables.

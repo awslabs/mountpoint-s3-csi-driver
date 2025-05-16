@@ -4,7 +4,6 @@ package volumecontext
 const (
 	BucketName           = "bucketName"
 	AuthenticationSource = "authenticationSource"
-	STSRegion            = "stsRegion"
 
 	MountpointPodServiceAccountName = "mountpointPodServiceAccountName"
 

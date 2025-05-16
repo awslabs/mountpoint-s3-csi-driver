@@ -44,11 +44,6 @@ func TestUserAgent(t *testing.T) {
 			authenticationSource: credentialprovider.AuthenticationSourceDriver,
 			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0",
 		},
-		"pod authentication source": {
-			k8sVersion:           "v1.30.2-eks-db838b0",
-			authenticationSource: credentialprovider.AuthenticationSourcePod,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
-		},
 	}
 
 	for name, test := range tests {

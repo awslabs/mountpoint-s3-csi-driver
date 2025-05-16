@@ -104,10 +104,17 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, mountpointErr, err)
 	}
 
-	credEnv, authenticationSource, err := m.credProvider.Provide(ctx, credentialCtx)
-	if err != nil {
-		klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, err)
-		return err
+	// If a credential‑provider is configured, fetch credentials; otherwise continue
+	// with an empty env and the unspecified source.
+	var credEnv envprovider.Environment
+	authenticationSource := credentialprovider.AuthenticationSourceUnspecified
+	if m.credProvider != nil {
+		var cerr error
+		credEnv, authenticationSource, cerr = m.credProvider.Provide(ctx, credentialCtx)
+		if cerr != nil {
+			klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, cerr)
+			return cerr
+		}
 	}
 
 	if isMountPoint {
@@ -164,9 +171,10 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 		klog.V(5).Infof("umount output: %s", output)
 	}
 
-	err = m.credProvider.Cleanup(credentialCtx)
-	if err != nil {
-		klog.V(4).Infof("Unmount: Failed to clean up credentials for %s: %v", target, err)
+	if m.credProvider != nil {
+		if cleanupErr := m.credProvider.Cleanup(credentialCtx); cleanupErr != nil {
+			klog.V(4).Infof("Unmount: Failed to clean up credentials for %s: %v", target, cleanupErr)
+		}
 	}
 
 	return nil
