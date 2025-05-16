@@ -26,6 +26,12 @@ const KnownPathCredentials = "credentials"
 // `PathOnHost` and `PathInsideMountpointPod` can be used to obtain a correct path for each.
 const CommunicationDirName = "comm"
 
+// LocalCacheDirName is the name and the path of the local cache volume mounted to Mountpoint Pod.
+// The controller will create and mount a cache volume with this path and name if its configured,
+// and the Mountpoint Pod will detect if the cache folder exists, and if so it will pass it to Mountpoint
+// to use as a local cache.
+const LocalCacheDirName = "local-cache"
+
 // PathOnHost returns the full path on the host that refers to `path` inside Mountpoint Pod.
 // This function should be used in the CSI Driver Node Pod which uses `hostPath` volume to mount kubelet.
 func PathOnHost(podPathOnHost string, path ...string) string {

@@ -156,6 +156,7 @@ func (u *PodUnmounter) cleanUnmount(mpPod *corev1.Pod) {
 	// Now unmount and remove `source`
 	if err := u.unmountAndRemoveMountpointSource(source); err != nil {
 		klog.Errorf("Failed to unmount and remove Mountpoint %q: %v", source, err)
+		return
 	}
 
 	if err := u.cleanupCredentials(mpPod); err != nil {
