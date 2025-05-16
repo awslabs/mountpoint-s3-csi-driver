@@ -109,8 +109,11 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 		mpPod, err := u.podWatcher.Get(mpPodName)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
+				klog.Infof("Found a dangling Mountpoint mount %q, cleaning up", mpPodName)
 				if err := u.unmountAndRemoveMountpointSource(source); err != nil {
 					klog.Errorf("Failed to unmount and remove Mountpoint %q: %v", source, err)
+				} else {
+					klog.Infof("Successfully cleaned dangling Mountpoint mount %q", mpPodName)
 				}
 				continue
 			}
@@ -139,6 +142,8 @@ func (u *PodUnmounter) unmountMountpointPodIfNeeded(mpPod *corev1.Pod) {
 
 // cleanUnmount performs a clean unmount for `mpPod`.
 func (u *PodUnmounter) cleanUnmount(mpPod *corev1.Pod) {
+	klog.Infof("Starting unmount procedure for Mountpoint Pod %q", mpPod.Name)
+
 	source := u.mountpointPodSourcePath(mpPod.Name)
 	podPath := u.podPath(string(mpPod.UID))
 
@@ -157,6 +162,8 @@ func (u *PodUnmounter) cleanUnmount(mpPod *corev1.Pod) {
 		klog.Errorf("Failed to cleanup credentials of Mountpoint Pod %q: %v", mpPod.Name, err)
 		return
 	}
+
+	klog.Infof("Mountpoint Pod %q successfully unmounted", mpPod.Name)
 }
 
 // unmountAndRemoveMountpointSource unmounts Mountpoint at `source`, and then removes the (empty) directory.
@@ -202,7 +209,8 @@ func (u *PodUnmounter) unmountAndRemoveMountpointSource(source string) error {
 // Returns error if file creation fails
 func (u *PodUnmounter) writeExitFile(podPath string) error {
 	podMountExitPath := mppod.PathOnHost(podPath, mppod.KnownPathMountExit)
-	_, err := os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, credentialprovider.CredentialFilePerm)
+	f, err := os.OpenFile(podMountExitPath, os.O_RDONLY|os.O_CREATE, credentialprovider.CredentialFilePerm)
+	_ = f.Close()
 	return err
 }
 
