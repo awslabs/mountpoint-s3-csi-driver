@@ -23,10 +23,6 @@ const (
 	serviceAccountTokenAudienceSTS         = "sts.amazonaws.com"
 	serviceAccountTokenAudiencePodIdentity = "pods.eks.amazonaws.com"
 	serviceAccountRoleAnnotation           = "eks.amazonaws.com/role-arn"
-	// TODO: Add a driver configuration flag to handle custom values of podIdentityCredURI. Currently we are assuming the default IPv4 address as determined in the references below:
-	// Doc: https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html
-	// Source code: https://github.com/aws/eks-pod-identity-agent/blob/8bd71a236522993f02427083e485c83f6ae4fe31/configuration/config.go
-	podIdentityCredURI = "http://169.254.170.23/v1/credentials"
 )
 
 const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
@@ -104,17 +100,22 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		}
 
 		klog.V(4).Infof("Providing credentials from pod with Container credential provider (EKS Pod Identity)")
-		eksPodIdentityCredentialsEnvironment := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
+		eksPodIdentityCredentialsEnvironment, eksPodIdentityCredentialsEnvironmentError := c.createEKSPodIdentityCredentialsEnvironment(provideCtx)
 
-		// Copy EKS Token file to WritePath
-		tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
-		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
+		if eksPodIdentityCredentialsEnvironmentError == nil {
+			// Copy EKS Token file to WritePath
+			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
+			err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
+			}
+
+			env.Merge(eksPodIdentityCredentialsEnvironment)
+			return env, nil
+		} else {
+			klog.V(4).Infof("Error providing credentials from pod Container credential provider (EKS Pod Identity)")
+			return nil, eksPodIdentityCredentialsEnvironmentError
 		}
-
-		env.Merge(eksPodIdentityCredentialsEnvironment)
-		return env, nil
 	}
 
 	klog.V(4).Infof("Error providing credentials from pod with STS Web Identity provider (IRSA)")
@@ -227,13 +228,19 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 }
 
 // createEKSPodIdentityCredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with EKS Pod Identity
-func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) envprovider.Environment {
+func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) (envprovider.Environment, error) {
 	podID := provideCtx.GetCredentialPodID()
 	tokenName := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
-	return envprovider.Environment{
-		envprovider.EnvContainerCredentialsFullURI:     podIdentityCredURI,
-		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
+	eksPodIdentityAgentCredentialsURI := os.Getenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI")
+	if eksPodIdentityAgentCredentialsURI == "" {
+		klog.Warningf("credentialprovider: Seems like EKS Pod Identity is disabled. If you would like to enable it, please provide the eksPodIdentityAgent.containerCredentialsFullURI Helm value.")
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to detect EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI driver configuration flag")
 	}
+
+	return envprovider.Environment{
+		envprovider.EnvContainerCredentialsFullURI:     eksPodIdentityAgentCredentialsURI,
+		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
+	}, nil
 }

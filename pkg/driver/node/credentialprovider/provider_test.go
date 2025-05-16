@@ -362,6 +362,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 
 	t.Run("correct values for EKS Pod Identity", func(t *testing.T) {
 		t.Setenv("MOUNTER_KIND", "pod")
+		t.Setenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.23/v1/credentials")
 
 		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
 		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
