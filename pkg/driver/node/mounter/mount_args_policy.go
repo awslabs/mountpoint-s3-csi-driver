@@ -8,6 +8,11 @@ import (
 // enforceCSIDriverMountArgPolicy strips Mountpoint args the CSI driver does not support.
 // Reasons include platform limitations, unsupported backend features, and product scope choices.
 func enforceCSIDriverMountArgPolicy(args *mountpoint.Args) {
+	// The profile flag is not supported in our authentication model
+	if _, ok := args.Remove(mountpoint.ArgProfile); ok {
+		klog.Warningf("--profile ignored: only static keys are supported by the CSI driver")
+	}
+
 	// Volume-specific endpoint overrides are not supported
 	if _, ok := args.Remove(mountpoint.ArgEndpointURL); ok {
 		klog.Warningf("--endpoint-url ignored: driver does not support per-volume endpoint overrides")

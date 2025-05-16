@@ -239,6 +239,13 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			)
 		})
 
+		ginkgo.It("strips --profile volume level mount flag", func(ctx context.Context) {
+			validateStrippedOption(ctx,
+				"--profile=my-aws-profile",
+				"profile",
+			)
+		})
+
 		ginkgo.It("strips all unsupported volume level mount flags when they arrive together", func(ctx context.Context) {
 			ginkgo.By("PVC with every disallowed flag at once")
 
@@ -248,6 +255,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 				"--cache-xz",
 				"--incremental-upload",
 				"--storage-class=EXPRESS_ONEZONE",
+				"--profile=my-aws-profile",
 			}
 
 			res := BuildVolumeWithOptions(
