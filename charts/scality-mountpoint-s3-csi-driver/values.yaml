@@ -41,8 +41,8 @@ node:
 sidecars:
   nodeDriverRegistrar:
     image:
-      repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
-      tag: v2.10.0-eks-1-29-7
+      repository: k8s.gcr.io/sig-storage/csi-node-driver-registrar
+      tag: v2.13.0
       pullPolicy: IfNotPresent
     env:
       - name: KUBE_NODE_NAME
