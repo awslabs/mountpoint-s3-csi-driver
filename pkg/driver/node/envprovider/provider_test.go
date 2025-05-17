@@ -4,69 +4,37 @@ import (
 	"testing"
 
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func TestGettingRegion(t *testing.T) {
-	testCases := []struct {
-		name             string
-		envRegion        string
-		envDefaultRegion string
-		want             string
-	}{
-		{
-			name:             "both region envs are set",
-			envRegion:        "us-west-1",
-			envDefaultRegion: "us-east-1",
-			want:             "us-west-1",
-		},
-		{
-			name:             "only default region env is set",
-			envRegion:        "",
-			envDefaultRegion: "us-east-1",
-			want:             "us-east-1",
-		},
-		{
-			name:             "no region env is set",
-			envRegion:        "",
-			envDefaultRegion: "",
-			want:             "",
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Setenv("AWS_REGION", testCase.envRegion)
-			t.Setenv("AWS_DEFAULT_REGION", testCase.envDefaultRegion)
-			assert.Equals(t, testCase.want, envprovider.Region())
-		})
-	}
-}
-
-func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
-	testutil.CleanRegionEnv(t)
-
+func TestDefault(t *testing.T) {
 	testCases := []struct {
 		name string
 		env  map[string]string
-		want []string
+		want envprovider.Environment
 	}{
 		{
 			name: "no env vars set",
 			env:  map[string]string{},
-			want: []string{},
+			want: envprovider.Environment{},
 		},
 		{
-			name: "some allowed env vars set",
+			name: "only region env set",
 			env: map[string]string{
-				"AWS_REGION":         "us-west-1",
-				"AWS_DEFAULT_REGION": "us-east-1",
-				"AWS_MAX_ATTEMPTS":   "10",
+				"AWS_REGION": "us-west-1",
 			},
-			want: []string{
-				"AWS_DEFAULT_REGION=us-east-1",
-				"AWS_REGION=us-west-1",
+			want: envprovider.Environment{
+				"AWS_REGION": "us-west-1",
+			},
+		},
+		{
+			name: "region and additional non-allowed env vars set",
+			env: map[string]string{
+				"AWS_REGION":       "us-west-1",
+				"AWS_MAX_ATTEMPTS": "10",
+			},
+			want: envprovider.Environment{
+				"AWS_REGION": "us-west-1",
 			},
 		},
 		{
@@ -75,34 +43,92 @@ func TestProvidingDefaultEnvironmentVariables(t *testing.T) {
 				"AWS_REGION":       "us-west-1",
 				"AWS_ENDPOINT_URL": "https://custom-endpoint.example.com",
 			},
+			want: envprovider.Environment{
+				"AWS_REGION":       "us-west-1",
+				"AWS_ENDPOINT_URL": "https://custom-endpoint.example.com",
+			},
+		},
+		{
+			name: "only endpoint url env var set",
+			env: map[string]string{
+				"AWS_ENDPOINT_URL": "https://custom-endpoint.example.com",
+			},
+			want: envprovider.Environment{
+				"AWS_ENDPOINT_URL": "https://custom-endpoint.example.com",
+			},
+		},
+		{
+			name: "empty region value",
+			env: map[string]string{
+				"AWS_REGION": "",
+			},
+			want: envprovider.Environment{},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Clear environment variables before setting test values
+			t.Setenv("AWS_REGION", "")
+			t.Setenv("AWS_ENDPOINT_URL", "")
+
+			// Set environment variables for this test case
+			for k, v := range testCase.env {
+				t.Setenv(k, v)
+			}
+
+			// Test Default() method directly
+			assert.Equals(t, testCase.want, envprovider.Default())
+		})
+	}
+}
+
+func TestEnvironmentList(t *testing.T) {
+	testCases := []struct {
+		name string
+		env  envprovider.Environment
+		want []string
+	}{
+		{
+			name: "empty environment",
+			env:  envprovider.Environment{},
+			want: []string{},
+		},
+		{
+			name: "single environment variable",
+			env:  envprovider.Environment{"AWS_REGION": "us-west-1"},
+			want: []string{"AWS_REGION=us-west-1"},
+		},
+		{
+			name: "multiple environment variables are sorted",
+			env: envprovider.Environment{
+				"AWS_REGION":       "us-west-1",
+				"AWS_ENDPOINT_URL": "https://example.com",
+			},
 			want: []string{
-				"AWS_ENDPOINT_URL=https://custom-endpoint.example.com",
+				"AWS_ENDPOINT_URL=https://example.com",
 				"AWS_REGION=us-west-1",
 			},
 		},
 		{
-			name: "additional env variables shouldn't be passed",
-			env: map[string]string{
-				"AWS_REGION":       "us-west-1",
-				"AWS_MAX_ATTEMPTS": "10",
+			name: "environment variables with empty values",
+			env: envprovider.Environment{
+				"AWS_REGION": "",
 			},
 			want: []string{
-				"AWS_REGION=us-west-1",
+				"AWS_REGION=",
 			},
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			for k, v := range testCase.env {
-				t.Setenv(k, v)
-			}
-			assert.Equals(t, testCase.want, envprovider.Default().List())
+			assert.Equals(t, testCase.want, testCase.env.List())
 		})
 	}
 }
 
-func TestRemovingAKeyFromListOfEnvironmentVariables(t *testing.T) {
+func TestEnvironmentDelete(t *testing.T) {
 	testCases := []struct {
 		name string
 		env  envprovider.Environment
@@ -110,22 +136,22 @@ func TestRemovingAKeyFromListOfEnvironmentVariables(t *testing.T) {
 		want envprovider.Environment
 	}{
 		{
-			name: "empty environment",
+			name: "delete from empty environment",
 			env:  envprovider.Environment{},
 			key:  "AWS_REGION",
 			want: envprovider.Environment{},
 		},
 		{
-			name: "remove existing key",
-			env:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+			name: "delete existing key",
+			env:  envprovider.Environment{"AWS_REGION": "us-west-1"},
 			key:  "AWS_REGION",
-			want: envprovider.Environment{"AWS_DEFAULT_REGION": "us-east-1"},
+			want: envprovider.Environment{},
 		},
 		{
-			name: "remove non-existing key",
-			env:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+			name: "delete non-existing key",
+			env:  envprovider.Environment{"AWS_REGION": "us-west-1"},
 			key:  "AWS_MAX_ATTEMPTS",
-			want: envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+			want: envprovider.Environment{"AWS_REGION": "us-west-1"},
 		},
 	}
 
@@ -137,7 +163,7 @@ func TestRemovingAKeyFromListOfEnvironmentVariables(t *testing.T) {
 	}
 }
 
-func TestSettingKeyValueInEnvironmentVariables(t *testing.T) {
+func TestEnvironmentSet(t *testing.T) {
 	testCases := []struct {
 		name  string
 		env   envprovider.Environment
@@ -162,16 +188,16 @@ func TestSettingKeyValueInEnvironmentVariables(t *testing.T) {
 		{
 			name:  "add new key to non-empty environment",
 			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
-			key:   "AWS_DEFAULT_REGION",
-			value: "us-east-1",
-			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+			key:   "AWS_PROFILE",
+			value: "default",
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_PROFILE": "default"},
 		},
 		{
 			name:  "set empty value",
 			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
-			key:   "AWS_DEFAULT_REGION",
+			key:   "AWS_PROFILE",
 			value: "",
-			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": ""},
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_PROFILE": ""},
 		},
 	}
 
@@ -183,56 +209,7 @@ func TestSettingKeyValueInEnvironmentVariables(t *testing.T) {
 	}
 }
 
-func TestEnvironmentList(t *testing.T) {
-	testCases := []struct {
-		name string
-		env  envprovider.Environment
-		want []string
-	}{
-		{
-			name: "empty environment",
-			env:  envprovider.Environment{},
-			want: []string{},
-		},
-		{
-			name: "single environment variable",
-			env:  envprovider.Environment{"AWS_REGION": "us-west-1"},
-			want: []string{"AWS_REGION=us-west-1"},
-		},
-		{
-			name: "multiple environment variables are sorted",
-			env: envprovider.Environment{
-				"AWS_REGION":         "us-west-1",
-				"AWS_DEFAULT_REGION": "us-east-1",
-				"AWS_ENDPOINT_URL":   "https://example.com",
-			},
-			want: []string{
-				"AWS_DEFAULT_REGION=us-east-1",
-				"AWS_ENDPOINT_URL=https://example.com",
-				"AWS_REGION=us-west-1",
-			},
-		},
-		{
-			name: "environment variables with empty values",
-			env: envprovider.Environment{
-				"AWS_REGION":         "",
-				"AWS_DEFAULT_REGION": "us-east-1",
-			},
-			want: []string{
-				"AWS_DEFAULT_REGION=us-east-1",
-				"AWS_REGION=",
-			},
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			assert.Equals(t, testCase.want, testCase.env.List())
-		})
-	}
-}
-
-func TestMergingEnvironments(t *testing.T) {
+func TestEnvironmentMerge(t *testing.T) {
 	testCases := []struct {
 		name  string
 		env   envprovider.Environment
@@ -254,20 +231,20 @@ func TestMergingEnvironments(t *testing.T) {
 		{
 			name:  "merge with different keys",
 			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
-			other: envprovider.Environment{"AWS_DEFAULT_REGION": "us-east-1"},
-			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_DEFAULT_REGION": "us-east-1"},
+			other: envprovider.Environment{"AWS_PROFILE": "default"},
+			want:  envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_PROFILE": "default"},
 		},
 		{
 			name:  "merge with overlapping keys",
 			env:   envprovider.Environment{"AWS_REGION": "us-west-1", "AWS_PROFILE": "default"},
-			other: envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_DEFAULT_REGION": "us-east-2"},
-			want:  envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_PROFILE": "default", "AWS_DEFAULT_REGION": "us-east-2"},
+			other: envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL": "https://example.com"},
+			want:  envprovider.Environment{"AWS_REGION": "us-east-1", "AWS_PROFILE": "default", "AWS_ENDPOINT_URL": "https://example.com"},
 		},
 		{
 			name:  "merge with empty values",
 			env:   envprovider.Environment{"AWS_REGION": "us-west-1"},
-			other: envprovider.Environment{"AWS_REGION": "", "AWS_DEFAULT_REGION": "us-east-1"},
-			want:  envprovider.Environment{"AWS_REGION": "", "AWS_DEFAULT_REGION": "us-east-1"},
+			other: envprovider.Environment{"AWS_REGION": ""},
+			want:  envprovider.Environment{"AWS_REGION": ""},
 		},
 	}
 

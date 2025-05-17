@@ -10,7 +10,6 @@ import (
 
 const (
 	EnvRegion                = "AWS_REGION"
-	EnvDefaultRegion         = "AWS_DEFAULT_REGION"
 	EnvMaxAttempts           = "AWS_MAX_ATTEMPTS"
 	EnvEndpointURL           = "AWS_ENDPOINT_URL"
 	EnvProfile               = "AWS_PROFILE"
@@ -35,18 +34,7 @@ type Environment map[Key]Value
 // If any of these set, it will be returned as-is in [Default].
 var envAllowlist = []Key{
 	EnvRegion,
-	EnvDefaultRegion,
 	EnvEndpointURL,
-}
-
-// Region returns detected region from environment variables `AWS_REGION` or `AWS_DEFAULT_REGION`.
-// It returns an empty string if both is unset.
-func Region() Value {
-	region := os.Getenv(EnvRegion)
-	if region != "" {
-		return region
-	}
-	return os.Getenv(EnvDefaultRegion)
 }
 
 // Default returns list of environment variables to pass Mountpoint.
