@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 
 # `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
 # We need to make sure to use same Amazon Linux version here and while producing Mountpoint to not have glibc compatibility issues.
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest AS linux-amazon
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:2025-04-17-1744916492.2 AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
