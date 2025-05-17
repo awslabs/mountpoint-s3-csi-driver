@@ -26,6 +26,7 @@ usage() {
     echo ""
     echo -e "${BLUE}Available validations:${NC}"
     echo "  validate_custom_endpoint - Verify ability to set custom S3 endpoint URL"
+    echo "  validate_s3_region     - Verify ability to set S3 region"
     echo ""
     echo -e "${BLUE}Examples:${NC}"
     echo "  $0                           # Run all validations"
@@ -37,9 +38,9 @@ usage() {
 run_validation() {
   local test_name="$1"
   local test_func="$2"
-  
+
   echo -e "\n${YELLOW}Running validation: ${test_name}${NC}"
-  
+
   if $test_func; then
     echo -e "${GREEN}✅ PASSED: ${test_name}${NC}"
     return 0
@@ -61,26 +62,57 @@ check_helm_installed() {
 validate_custom_endpoint() {
   local chart_dir="$CHARTS_DIR/scality-mountpoint-s3-csi-driver"
   local custom_endpoint="https://custom-s3.example.com:8443"
-  
+
   echo "Testing ability to set custom S3 endpoint URL..."
-  
+
   # Run helm template with custom endpoint
   echo "Rendering template with custom endpoint: $custom_endpoint"
   local result=$(helm template "$chart_dir" --set node.s3EndpointUrl="$custom_endpoint" --show-only templates/node.yaml 2>&1)
-  
+
   # Check if rendering succeeded
   if [ $? -ne 0 ]; then
     echo -e "${RED}✗ Helm template failed with custom endpoint URL:${NC}"
     echo "$result"
     return 1
   fi
-  
+
   # Check if our custom endpoint appears in the rendered template
   if echo "$result" | grep -q "value: $custom_endpoint"; then
     echo -e "${GREEN}✓ Custom endpoint URL successfully applied in rendered template${NC}"
     return 0
   else
     echo -e "${RED}✗ Custom endpoint URL not found in rendered template${NC}"
+    return 1
+  fi
+}
+
+# Validation test for S3 region configuration
+validate_s3_region() {
+  local chart_dir="$CHARTS_DIR/scality-mountpoint-s3-csi-driver"
+  local custom_region="us-west-2"
+
+  echo "Testing ability to set S3 region..."
+
+  # First check default value
+  echo "Checking default region is set to us-east-1"
+  local result=$(helm template "$chart_dir" --show-only templates/node.yaml 2>&1)
+
+  if ! echo "$result" | grep -Eq "^[[:space:]]*value: us-east-1"; then
+    echo -e "${RED}✗ Default S3 region not properly set to us-east-1${NC}"
+    return 1
+  else
+    echo -e "${GREEN}✓ Default S3 region correctly set to us-east-1${NC}"
+  fi
+
+  # Then check custom value
+  echo "Rendering template with custom region: $custom_region"
+  result=$(helm template "$chart_dir" --set node.s3Region="$custom_region" --show-only templates/node.yaml 2>&1)
+
+  if echo "$result" | grep -Eq "^[[:space:]]*value: $custom_region"; then
+    echo -e "${GREEN}✓ Custom S3 region successfully applied in rendered template${NC}"
+    return 0
+  else
+    echo -e "${RED}✗ Custom S3 region not found in rendered template${NC}"
     return 1
   fi
 }
@@ -100,10 +132,10 @@ main() {
   echo -e "${BLUE}===============================================${NC}"
   echo -e "${BLUE}   Scality S3 CSI Driver Helm Validation Tool   ${NC}"
   echo -e "${BLUE}===============================================${NC}"
-  
+
   # Check if helm is installed
   check_helm_installed
-  
+
   # Check if a specific validation was requested
   if [ $# -eq 1 ]; then
     # Check if the function exists
@@ -117,16 +149,17 @@ main() {
       exit 1
     fi
   fi
-  
+
   # If no specific validation was requested, run all validations
   local errors=0
   
   # Run all validations
   run_validation "Custom S3 endpoint URL can be specified" validate_custom_endpoint || ((errors++))
-  
+  run_validation "S3 region configuration" validate_s3_region || ((errors++))
+
   # Add more validations here
   # run_validation "Resource limits are set" validate_resource_limits || ((errors++))
-  
+
   # Report final results
   if [ $errors -eq 0 ]; then
     echo -e "\n${GREEN}All validations passed!${NC}"
@@ -144,7 +177,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     usage
     exit 0
   fi
-  
+
   # Run main with all arguments
   main "$@"
-fi 
+fi
