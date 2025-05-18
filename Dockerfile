@@ -18,7 +18,7 @@ ARG MOUNTPOINT_VERSION=1.15.0
 # Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
 # is being packaged up in the container and a newer version linking to a too new glibc
 # can cause portability issues
-FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as mp_builder
+FROM public.ecr.aws/amazonlinux/amazonlinux:2 AS mp_builder
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
@@ -43,7 +43,7 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
 # Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-bullseye as builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-bullseye AS builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/scality/mountpoint-s3-csi-driver
@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 
 # `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
 # We need to make sure to use same Amazon Linux version here and while producing Mountpoint to not have glibc compatibility issues.
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:2025-04-17-1744916492.2 AS linux-amazon
+FROM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:2025-04-17-1744916492.2 AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin

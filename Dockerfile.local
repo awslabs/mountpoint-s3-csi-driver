@@ -12,7 +12,7 @@ ARG MOUNTPOINT_BUILD_ARGS="" # custom build arguments
 #
 # Build Mountpoint
 #
-FROM --platform=$TARGETPLATFORM amazonlinux:2023 as mp_builder
+FROM amazonlinux:2023 AS mp_builder
 ARG MOUNTPOINT_REPOSITORY
 ARG MOUNTPOINT_BRANCH
 ARG MOUNTPOINT_BUILD_ARGS
@@ -46,7 +46,7 @@ RUN cd mountpoint-s3 && \
 #
 
 # Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-bullseye as builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.24-bullseye AS builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/scality/mountpoint-s3-csi-driver
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 
 # `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
 # We need to make sure to use same Amazon Linux version here and while building Mountpoint to not have glibc compatibility issues.
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al23 AS linux-amazon
+FROM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al23 AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
