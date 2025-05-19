@@ -302,4 +302,77 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 			)
 		})
 	})
+
+	// This test verifies that when a volume is mounted with the read-only flag,
+	// write operations to the volume fail with the expected permission error.
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with read-only flag]
+	//        |
+	//        ↓
+	//    [No write access]
+	//
+	// Expected results:
+	// - Reading from the volume is successful
+	// - All write operations (file creation, mkdir) fail with permission errors
+	// - The error message contains "Read-only file system"
+	//
+	// This validates that the S3 CSI driver correctly enforces the read-only mount option.
+	ginkgo.It("should enforce read-only flag when specified", func(ctx context.Context) {
+		// Create volume with standard non-root options plus read-only flag
+		resource := BuildVolumeWithOptions(
+			ctx,
+			l.config,
+			pattern,
+			DefaultNonRootUser,
+			DefaultNonRootGroup,
+			"",          // No specific file mode
+			"read-only", // Add the read-only flag
+		)
+		l.resources = append(l.resources, resource)
+
+		// Create pod with the read-only volume
+		ginkgo.By("Creating pod with a read-only volume")
+		pod := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "")
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		volPath := "/mnt/volume1"
+		fileInVol := fmt.Sprintf("%s/test-file.txt", volPath)
+		dirInVol := fmt.Sprintf("%s/test-dir", volPath)
+
+		// Verify reading from volume works (list directory)
+		ginkgo.By("Verifying read access to the volume")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls -la %s", volPath))
+
+		// Try to create a file - should fail with read-only error
+		ginkgo.By("Verifying write access is denied when creating a file")
+		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("touch %s", fileInVol))
+		if err == nil {
+			framework.Failf("Expected write operation to fail on read-only volume, but it succeeded")
+		}
+		if !strings.Contains(stderr, "Read-only file system") {
+			framework.Failf("Expected 'Read-only file system' error, but got: %s", stderr)
+		}
+		framework.Logf("Got expected error creating file: %s", stderr)
+
+		// Try to create a directory - should also fail with read-only error
+		ginkgo.By("Verifying write access is denied when creating a directory")
+		_, stderr, err = e2evolume.PodExec(f, pod, fmt.Sprintf("mkdir -p %s", dirInVol))
+		if err == nil {
+			framework.Failf("Expected directory creation to fail on read-only volume, but it succeeded")
+		}
+		if !strings.Contains(stderr, "Read-only file system") {
+			framework.Failf("Expected 'Read-only file system' error, but got: %s", stderr)
+		}
+		framework.Logf("Got expected error creating directory: %s", stderr)
+	})
 }
