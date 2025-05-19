@@ -375,4 +375,66 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		}
 		framework.Logf("Got expected error creating directory: %s", stderr)
 	})
+
+	// This test verifies that when a volume is mounted with a specific region option,
+	// the CSI driver correctly passes it to mountpoint-s3 and allows write operations.
+	//
+	// Test scenario:
+	//
+	//      [Pod]
+	//        |
+	//        ↓
+	//   [S3 Volume with region=us-east-1]
+	//        |
+	//        ↓
+	//    [Write operations should succeed]
+	//
+	// Expected results:
+	// - The pod can mount the volume successfully with a specified region
+	// - Write operations to the volume succeed
+	// - Files created have the expected ownership and permissions
+	//
+	// This validates that the S3 CSI driver correctly passes the region mount option
+	// to mountpoint-s3 and that the driver can correctly connect to S3 in that region.
+	ginkgo.It("should successfully write to volume with region specified", func(ctx context.Context) {
+		// Create volume with standard non-root options plus region option
+		// Note: using a valid region for the test bucket
+		resource := BuildVolumeWithOptions(
+			ctx,
+			l.config,
+			pattern,
+			DefaultNonRootUser,
+			DefaultNonRootGroup,
+			"",                 // No specific file mode
+			"region=sa-east-1", // Specify a region
+		)
+		l.resources = append(l.resources, resource)
+
+		// Create pod with the volume
+		ginkgo.By("Creating pod with a volume that specifies region")
+		pod := MakeNonRootPodWithVolume(f.Namespace.Name, []*v1.PersistentVolumeClaim{resource.Pvc}, "")
+		var err error
+		pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer func() {
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
+		}()
+
+		volPath := "/mnt/volume1"
+		fileInVol := fmt.Sprintf("%s/region-test.txt", volPath)
+		testContent := "Testing region option"
+
+		// Verify we can write to the volume
+		ginkgo.By("Verifying write access to the volume")
+		WriteAndVerifyFile(f, pod, fileInVol, testContent)
+
+		// Verify file permissions and ownership
+		ginkgo.By("Verifying file ownership and permissions")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'",
+			fileInVol, DefaultNonRootGroup, DefaultNonRootUser))
+
+		// Verify we can read what we wrote
+		ginkgo.By("Verifying read from the volume")
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q '%s'", fileInVol, testContent))
+	})
 }
