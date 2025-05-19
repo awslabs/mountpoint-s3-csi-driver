@@ -37,6 +37,9 @@ node:
   # S3 endpoint URL to use for all volume mounts (REQUIRED)
   # This is a sample value, replace with your own S3 endpoint
   s3EndpointUrl: "http://s3.example.com:8000"
+  # Default AWS region to use for all volume mounts
+  # The Region can be overridden at per volume at persistent volume level by setting spec.mountOptions.region
+  s3Region: "us-east-1"
 
 sidecars:
   nodeDriverRegistrar:
