@@ -481,3 +481,46 @@ func CreateTestFileAndDir(f *framework.Framework, pod *v1.Pod, basePath, prefix 
 
 	return file, dir
 }
+
+// GetBucketNameFromVolumeResource extracts the bucket name from a VolumeResource
+func GetBucketNameFromVolumeResource(resource *storageframework.VolumeResource) string {
+	var bucketName string
+	if csiSpec := resource.Pv.Spec.CSI; csiSpec != nil {
+		if attrs := csiSpec.VolumeAttributes; attrs != nil {
+			bucketName = attrs["bucketName"]
+		}
+	}
+	return bucketName
+}
+
+// VerifyFilesExistInPod verifies all the given file paths exist in the pod
+func VerifyFilesExistInPod(f *framework.Framework, pod *v1.Pod, basePath string, filePaths []string) {
+	ginkgo.By(fmt.Sprintf("Verifying %d files exist in pod at path %s", len(filePaths), basePath))
+
+	for i, filePath := range filePaths {
+		fullPath := fmt.Sprintf("%s/%s", basePath, filePath)
+
+		// Verify file exists
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("test -f %s", fullPath))
+
+		// Verify file content if it has a standard pattern
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'Content for file %d'", fullPath, i+1))
+	}
+}
+
+// CreateFilesInPod creates multiple files in the pod at the given base path
+func CreateFilesInPod(f *framework.Framework, pod *v1.Pod, basePath string, filePaths []string) {
+	ginkgo.By(fmt.Sprintf("Creating %d files in pod at path %s", len(filePaths), basePath))
+
+	for i, filePath := range filePaths {
+		fullPath := fmt.Sprintf("%s/%s", basePath, filePath)
+		dirPath := filepath.Dir(fullPath)
+
+		// Create directory if it doesn't exist
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir -p %s", dirPath))
+
+		// Create the file with content
+		fileContent := fmt.Sprintf("Content for file %d created through mount", i+1)
+		WriteAndVerifyFile(f, pod, fullPath, fileContent)
+	}
+}

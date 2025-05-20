@@ -3,6 +3,7 @@ package s3client
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -214,4 +215,85 @@ func (c *Client) ListObjects(ctx context.Context, bucket string) (*s3.ListObject
 
 	framework.Logf("Found %d objects in bucket %s", len(out.Contents), bucket)
 	return out, nil
+}
+
+// ListObjectsWithPrefix lists objects in a bucket with the specified prefix and returns the response
+func (c *Client) ListObjectsWithPrefix(ctx context.Context, bucket string, prefix string) (*s3.ListObjectsV2Output, error) {
+	out, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	framework.Logf("Found %d objects in bucket %s with prefix %s", len(out.Contents), bucket, prefix)
+	return out, nil
+}
+
+// PutObject creates a new object with the given key and string content in the specified bucket
+func (c *Client) PutObject(ctx context.Context, bucket string, key string, content string) error {
+	framework.Logf("Creating object %s in bucket %s", key, bucket)
+
+	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   strings.NewReader(content),
+	})
+
+	if err != nil {
+		framework.Logf("Failed to create object %s: %v", key, err)
+		return err
+	}
+
+	framework.Logf("Successfully created object %s in bucket %s", key, bucket)
+	return nil
+}
+
+// CreateObjectsInS3 creates multiple objects directly in S3 under the given prefix
+func (c *Client) CreateObjectsInS3(ctx context.Context, bucket string, prefix string, objectKeys []string) error {
+	framework.Logf("Creating %d objects directly in S3 under prefix %s", len(objectKeys), bucket)
+	for i, key := range objectKeys {
+		fullKey := key
+		if !strings.HasPrefix(key, prefix) {
+			fullKey = prefix + key
+		}
+
+		content := fmt.Sprintf("Content for file %d created directly", i+1)
+		err := c.PutObject(ctx, bucket, fullKey, content)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// VerifyObjectsExistInS3 verifies all the given keys exist in the S3 bucket under the given prefix
+func (c *Client) VerifyObjectsExistInS3(ctx context.Context, bucket string, prefix string, objectKeys []string) error {
+	framework.Logf("Verifying %d objects exist in S3 under prefix %s", len(objectKeys), prefix)
+
+	// List objects with the prefix
+	prefixListOutput, err := c.ListObjectsWithPrefix(ctx, bucket, prefix)
+	if err != nil {
+		return err
+	}
+
+	// Create a map of all object keys for easy lookup
+	existingObjects := make(map[string]bool)
+	for _, obj := range prefixListOutput.Contents {
+		existingObjects[*obj.Key] = true
+	}
+
+	// Verify each expected key exists
+	for _, key := range objectKeys {
+		fullKey := key
+		if !strings.HasPrefix(key, prefix) {
+			fullKey = prefix + key
+		}
+
+		if !existingObjects[fullKey] {
+			return fmt.Errorf("expected object %s not found in bucket %s", fullKey, bucket)
+		}
+	}
+	return nil
 }
