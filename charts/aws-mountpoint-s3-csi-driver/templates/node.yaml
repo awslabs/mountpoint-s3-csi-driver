@@ -98,7 +98,7 @@ spec:
             - --v={{ .Values.node.logLevel }}
           env:
             - name: CSI_ENDPOINT
-              value: unix:/csi/csi.sock
+              value: unix:{{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
             - name: PTMX_PATH
               value: /host/dev/ptmx
             # mount-s3 runs in systemd context, so this is relative to the host
@@ -152,8 +152,6 @@ spec:
               # without needing to mount "/proc/mounts" from host.
               mountPropagation: HostToContainer
               {{- end }}
-            - name: plugin-dir
-              mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev

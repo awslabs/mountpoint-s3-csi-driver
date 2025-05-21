@@ -74,7 +74,7 @@ spec:
             - --v=4
           env:
             - name: CSI_ENDPOINT
-              value: unix:/csi/csi.sock
+              value: unix:/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
             - name: PTMX_PATH
               value: /host/dev/ptmx
             # mount-s3 runs in systemd context, so this is relative to the host
@@ -112,8 +112,6 @@ spec:
               # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
               # without needing to mount "/proc/mounts" from host.
               mountPropagation: HostToContainer
-            - name: plugin-dir
-              mountPath: /csi
             - name: systemd-bus
               mountPath: /run/systemd/private
             - name: host-dev

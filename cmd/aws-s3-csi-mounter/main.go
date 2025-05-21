@@ -34,7 +34,16 @@ func main() {
 	flag.Parse()
 
 	mountpointBinFullPath := filepath.Join(*mountpointBinDir, mountpointBin)
-	mountOptions := recvMountOptions()
+	mountOptions, err := recvMountOptions()
+	if err != nil {
+		if csimounter.ShouldExitWithSuccessCode(mountExitPath) {
+			klog.Info("Failed to receive mount options and detected `mount.exit` file, exiting with zero code")
+			os.Exit(csimounter.SuccessExitCode)
+			return
+		}
+
+		klog.Fatalf("Failed to receive mount options from %s: %v\n", mountSockPath, err)
+	}
 
 	exitCode, err := csimounter.Run(csimounter.Options{
 		MountpointPath: mountpointBinFullPath,
@@ -49,14 +58,14 @@ func main() {
 	os.Exit(exitCode)
 }
 
-func recvMountOptions() mountoptions.Options {
+func recvMountOptions() (mountoptions.Options, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), *mountSockRecvTimeout)
 	defer cancel()
 	klog.Infof("Trying to receive mount options from %s", mountSockPath)
 	options, err := mountoptions.Recv(ctx, mountSockPath)
 	if err != nil {
-		klog.Fatalf("Failed to receive mount options from %s: %v\n", mountSockPath, err)
+		return mountoptions.Options{}, err
 	}
 	klog.Infof("Mount options has been received from %s", mountSockPath)
-	return options
+	return options, nil
 }

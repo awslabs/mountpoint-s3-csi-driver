@@ -171,7 +171,7 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 
 func (m *SystemdMounter) credentialWriteAndEnvPath() (writePath string, envPath string) {
 	// This is the plugin directory for CSI driver mounted in the container.
-	writePath = "/csi"
+	writePath = hostPluginDirWithDefault()
 	// This is the plugin directory for CSI driver in the host.
 	envPath = hostPluginDirWithDefault()
 	return writePath, envPath

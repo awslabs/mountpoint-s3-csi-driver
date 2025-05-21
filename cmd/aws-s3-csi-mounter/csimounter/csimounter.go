@@ -14,9 +14,9 @@ import (
 
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
 
-// successExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate a clean exit,
+// SuccessExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate a clean exit,
 // so Kubernetes doesn't have to restart it and transition the Pod into `Succeeded` state.
-const successExitCode = 0
+const SuccessExitCode = 0
 
 // restartExitCode is the exit code returned from `aws-s3-csi-mounter` to indicate an error exit,
 // so Kubernetes would restart it. This is the default exit code if `mount.exit` is not present,
@@ -60,13 +60,18 @@ func Run(options Options) (int, error) {
 		return exitCode, err
 	}
 
-	if checkIfFileExists(options.MountExitPath) {
-		// If `mount.exit` is exists, that means the CSI Driver Node Pod unmounted the filesystem
-		// and we should cleanly exit regardless of Mountpoint's exit-code.
-		return successExitCode, nil
+	if ShouldExitWithSuccessCode(options.MountExitPath) {
+		return SuccessExitCode, nil
 	}
 
 	return restartExitCode, nil
+}
+
+// ShouldExitWithSuccessCode returns whether the container should exit with zero code.
+// If `mount.exit` is exists, that means the CSI Driver Node Pod unmounted the filesystem
+// and we should cleanly exit regardless of Mountpoint's exit-code.
+func ShouldExitWithSuccessCode(mountExitPath string) bool {
+	return checkIfFileExists(mountExitPath)
 }
 
 // checkIfFileExists checks whether given `path` exists.
