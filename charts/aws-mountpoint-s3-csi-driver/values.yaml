@@ -103,5 +103,11 @@ awsAccessSecret:
   accessKey: access_key
   sessionToken: session_token
 
+# The default IPv4 address in the credentials URI is in accordance to the references below:
+# Doc: https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html
+# Source code: https://github.com/aws/eks-pod-identity-agent/blob/8bd71a236522993f02427083e485c83f6ae4fe31/configuration/config.go
+eksPodIdentityAgent:
+  containerCredentialsFullURI: "http://169.254.170.23/v1/credentials"
+
 experimental:
   podMounter: false
