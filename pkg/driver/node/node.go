@@ -124,6 +124,13 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	args := mountpoint.ParseArgs(mountpointArgs)
 
+	// Check if subDir is provided in volume context (for StatefulSet support)
+	if subDir, hasSubDir := volumeCtx[volumecontext.SubDir]; hasSubDir && subDir != "" {
+		// Add the --subdirectory flag with the namespace_pvcName value
+		args.Set(mountpoint.ArgSubDir, subDir)
+		klog.V(4).Infof("NodePublishVolume: using subdirectory %s for bucket %s", subDir, bucket)
+	}
+
 	fsGroup := ""
 	pvMountOptions := ""
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
