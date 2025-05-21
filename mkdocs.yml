@@ -1,0 +1,44 @@
+site_name: "Scality S3 CSI Driver"
+site_url: https://scality.github.io/mountpoint-s3-csi-driver 
+repo_url: https://github.com/scality/mountpoint-s3-csi-driver
+edit_uri: edit/main/docs/            # ← branch that holds Markdown
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - search.suggest
+
+plugins:
+  - search
+  - mermaid2
+  - awesome-pages
+  - enumerate-headings:
+      toc_depth: 3
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - meta
+  - toc:
+      toc_depth: 3
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_div_format
+
+nav:
+  - Home: README.md
