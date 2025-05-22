@@ -86,7 +86,6 @@ func TestSystemdConnection(t *testing.T) {
 						t.Fatalf("Expected unit name %s, got %s", testUnits[i].Name, units[i].Name)
 					}
 				}
-
 			},
 		},
 		{
@@ -125,7 +124,6 @@ func TestSystemdConnection(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Expected error, got nil")
 				}
-
 			},
 		},
 		{
@@ -144,7 +142,6 @@ func TestSystemdConnection(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Expected error, got nil")
 				}
-
 			},
 		},
 		{
@@ -347,7 +344,7 @@ func TestSystemdStartTransientUnit(t *testing.T) {
 	jobDone := false
 	unitDone := false
 	for s := range signalChan {
-		//fmt.Printf("Got signal: %v\n", s)
+		// fmt.Printf("Got signal: %v\n", s)
 		if s.Name == "org.freedesktop.systemd1.Manager.JobRemoved" &&
 			s.Body[1] == job {
 			if s.Body[3] == "done" {
@@ -399,7 +396,7 @@ func TestSystemdStartServiceFailure(t *testing.T) {
 	defer sysd.Stop()
 
 	mountPath := "/tmp/" + uuid.New().String()
-	os.Mkdir(mountPath, 0755)
+	os.Mkdir(mountPath, 0o755)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()

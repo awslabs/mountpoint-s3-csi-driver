@@ -25,11 +25,13 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/util"
 )
 
-const mountpointPodReadinessTimeout = 10 * time.Second
-const mountpointPodReadinessCheckInterval = 100 * time.Millisecond
+const (
+	mountpointPodReadinessTimeout       = 10 * time.Second
+	mountpointPodReadinessCheckInterval = 100 * time.Millisecond
+)
 
 // targetDirPerm is the permission to use while creating target directory if its not exists.
-const targetDirPerm = fs.FileMode(0755)
+const targetDirPerm = fs.FileMode(0o755)
 
 // mountSyscall is the function that performs `mount` operation for given `target` with given Mountpoint `args`.
 // It returns mounted FUSE file descriptor as a result.

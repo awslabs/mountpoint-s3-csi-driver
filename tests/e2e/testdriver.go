@@ -29,9 +29,11 @@ type s3Volume struct {
 	authenticationSource string
 }
 
-var _ framework.TestDriver = &s3Driver{}
-var _ framework.PreprovisionedVolumeTestDriver = &s3Driver{}
-var _ framework.PreprovisionedPVTestDriver = &s3Driver{}
+var (
+	_ framework.TestDriver                     = &s3Driver{}
+	_ framework.PreprovisionedVolumeTestDriver = &s3Driver{}
+	_ framework.PreprovisionedPVTestDriver     = &s3Driver{}
+)
 
 func initS3Driver() *s3Driver {
 	return &s3Driver{

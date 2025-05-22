@@ -89,6 +89,10 @@ controller-integration-test: envtest
 lint:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
 
+.PHONY: precommit
+precommit:
+	pre-commit run --all-files
+
 .PHONY: clean
 clean:
 	rm -rf bin/ && docker system prune

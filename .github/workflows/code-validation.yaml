@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [lint, unit-test, csi-compliance-test, controller-integration-test, validate-helm]
+        test: [precommit, lint, unit-test, csi-compliance-test, controller-integration-test, validate-helm]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -26,6 +26,15 @@ jobs:
     - name: Setup Helm (for validate-helm test)
       if: matrix.test == 'validate-helm'
       uses: azure/setup-helm@v4.3.0
+
+    - name: Set up Python and install pre-commit (for precommit test)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        cache: pip
+
+    - name: Install pre-commit
+      run: pip install -r requirements.txt
 
     - name: Run ${{ matrix.test }}
       run: make ${{ matrix.test }}

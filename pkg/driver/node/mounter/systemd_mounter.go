@@ -74,7 +74,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	if mountpointErr != nil {
 		// does not exist, create the directory
 		if os.IsNotExist(mountpointErr) {
-			if err := os.MkdirAll(target, 0755); err != nil {
+			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("Failed to create target directory: %w", err)
 			}
 			cleanupDir = true
@@ -141,7 +141,6 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		Args:        append(args.SortedList(), bucketName, target),
 		Env:         env.List(),
 	})
-
 	if err != nil {
 		return fmt.Errorf("Mount failed: %w output: %s", err, output)
 	}

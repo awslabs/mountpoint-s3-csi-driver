@@ -5,9 +5,7 @@ import (
 	"regexp"
 )
 
-var (
-	ErrInvalidTargetPath = errors.New("targetpath: parse: Invalid target path")
-)
+var ErrInvalidTargetPath = errors.New("targetpath: parse: Invalid target path")
 
 var (
 	targetPathRegexp              = regexp.MustCompile("/pods/(?P<podid>[^/]+)/volumes/kubernetes.io~csi/(?P<volumeid>[^/]+)/mount$")

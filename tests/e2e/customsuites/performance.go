@@ -78,9 +78,7 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		resources []*storageframework.VolumeResource
 		config    *storageframework.PerTestConfig
 	}
-	var (
-		l local
-	)
+	var l local
 	f := framework.NewFrameworkWithCustomTimeouts("performance", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
@@ -111,12 +109,12 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 	// writeOutput writes benchmark results to the output file
 	writeOutput := func(output []benchmarkEntry) {
 		// Create directory if it doesn't exist
-		err := os.MkdirAll("test-results", 0755)
+		err := os.MkdirAll("test-results", 0o755)
 		framework.ExpectNoError(err)
 
 		data, err := json.Marshal(output)
 		framework.ExpectNoError(err)
-		err = os.WriteFile(OutputPath, data, 0644)
+		err = os.WriteFile(OutputPath, data, 0o644)
 		framework.ExpectNoError(err)
 	}
 

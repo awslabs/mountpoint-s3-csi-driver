@@ -218,7 +218,6 @@ func createVolumeResourceWithMountOptions(
 	pattern storageframework.TestPattern,
 	mountOptions []string,
 ) *storageframework.VolumeResource {
-
 	f := config.Framework
 	r := storageframework.VolumeResource{Config: config, Pattern: pattern}
 
@@ -280,7 +279,6 @@ func BuildVolumeWithOptions(
 	fileModeOption string,
 	extraOptions ...string,
 ) *storageframework.VolumeResource {
-
 	opts := []string{
 		fmt.Sprintf("uid=%d", uid),
 		fmt.Sprintf("gid=%d", gid),
@@ -304,7 +302,6 @@ func CreatePodWithVolumeAndSecurity(
 	containerName string,
 	uid, gid int64,
 ) (*v1.Pod, error) {
-
 	pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{volume}, admissionapi.LevelRestricted, "")
 	if pod.Spec.SecurityContext == nil {
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{}

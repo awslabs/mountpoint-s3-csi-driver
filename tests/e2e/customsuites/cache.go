@@ -28,8 +28,10 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/tests/e2e/pkg/s3client"
 )
 
-const volumeName1 = "volume1"
-const root = int64(0)
+const (
+	volumeName1 = "volume1"
+	root        = int64(0)
+)
 
 // s3CSICacheTestSuite defines a test suite for testing the S3 CSI driver's caching functionality.
 // This test suite ensures that the cache feature of Mountpoint S3 works correctly within

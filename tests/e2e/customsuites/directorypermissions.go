@@ -52,6 +52,7 @@ func InitS3DirectoryPermissionsTestSuite() storageframework.TestSuite {
 func (t *s3CSIDirectoryPermissionsTestSuite) GetTestSuiteInfo() storageframework.TestSuiteInfo {
 	return t.tsInfo
 }
+
 func (t *s3CSIDirectoryPermissionsTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver, _ storageframework.TestPattern) {
 }
 
@@ -77,8 +78,8 @@ func (t *s3CSIDirectoryPermissionsTestSuite) DefineTests(driver storageframework
 	}
 
 	createVolume := func(ctx context.Context, cfg *storageframework.PerTestConfig, pat storageframework.TestPattern,
-		uid, gid int64, dirMode string, extra ...string) *storageframework.VolumeResource {
-
+		uid, gid int64, dirMode string, extra ...string,
+	) *storageframework.VolumeResource {
 		res := BuildVolumeWithOptions(ctx, cfg, pat, uid, gid, "", append([]string{fmt.Sprintf("dir-mode=%s", dirMode)}, extra...)...)
 		testRegistry.resources = append(testRegistry.resources, res)
 		return res

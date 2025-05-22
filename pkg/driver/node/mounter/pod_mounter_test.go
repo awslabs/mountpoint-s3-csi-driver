@@ -31,8 +31,10 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-const mountpointPodNamespace = "mount-s3"
-const testK8sVersion = "v1.28.0"
+const (
+	mountpointPodNamespace = "mount-s3"
+	testK8sVersion         = "v1.28.0"
+)
 
 // testCwdMu serialises process‑wide working‑directory changes across all tests
 // so they remain safe when "go test" runs packages in parallel (-p flag).
@@ -86,7 +88,7 @@ func setup(t *testing.T) *testCtx {
 	)
 
 	// Same behaviour as Kubernetes, see https://github.com/kubernetes/kubernetes/blob/8f8c94a04d00e59d286fe4387197bc62c6a4f374/pkg/volume/csi/csi_mounter.go#L211-L215
-	err = os.MkdirAll(filepath.Dir(targetPath), 0750)
+	err = os.MkdirAll(filepath.Dir(targetPath), 0o750)
 	assert.NoError(t, err)
 
 	// Eval symlinks on `targetPath` as `mount.NewFakeMounter` also does that and we rely on
@@ -724,7 +726,7 @@ func TestPodMounter(t *testing.T) {
 
 				// Emulate that Mountpoint failed to mount
 				mountErrorPath := mppod.PathOnHost(mpPod.podPath, mppod.KnownPathMountError)
-				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0777)
+				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0o777)
 				assert.NoError(t, err)
 			}()
 
@@ -759,7 +761,7 @@ func TestPodMounter(t *testing.T) {
 
 				// Emulate that Mountpoint failed to mount
 				mountErrorPath := mppod.PathOnHost(mpPod.podPath, mppod.KnownPathMountError)
-				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0777)
+				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0o777)
 				assert.NoError(t, err)
 			}()
 
@@ -859,7 +861,7 @@ func createMountpointPod(testCtx *testCtx) *mountpointPod {
 
 	podPath := filepath.Join(testCtx.kubeletPath, "pods", string(pod.UID))
 	// same with `emptyDir` volume, https://github.com/kubernetes/kubernetes/blob/8f8c94a04d00e59d286fe4387197bc62c6a4f374/pkg/volume/emptydir/empty_dir.go#L43-L48
-	err = os.MkdirAll(mppod.PathOnHost(podPath), 0777)
+	err = os.MkdirAll(mppod.PathOnHost(podPath), 0o777)
 	assert.NoError(t, err)
 
 	return &mountpointPod{testCtx: testCtx, pod: pod, podPath: podPath}
