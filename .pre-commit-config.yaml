@@ -1,0 +1,9 @@
+repos:
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.1.6  # Latest stable version as of May 2025
+    hooks:
+      - id: golangci-lint-fmt
+        args:
+          - --enable=gofmt
+          - --enable=goimports
+          - --enable=gofumpt

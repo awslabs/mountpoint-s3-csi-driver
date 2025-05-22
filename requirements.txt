@@ -4,3 +4,4 @@ mkdocs-mermaid2-plugin==1.2.1            # diagrams
 mkdocs-awesome-pages-plugin==2.10.1      # sidebar ordering
 mkdocs-enumerate-headings-plugin==0.6.2  # auto-number headings
 codespell==2.4.1                         # spelling linter
+pre-commit                               # precommit
