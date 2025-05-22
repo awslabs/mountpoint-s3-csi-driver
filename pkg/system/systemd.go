@@ -114,8 +114,8 @@ func (sc *SystemdOsConnection) StopUnit(ctx context.Context, unitName string) er
 }
 
 func (sc *SystemdOsConnection) StartTransientUnit(ctx context.Context, name string, mode string,
-	props []DbusProperty) (dbus.ObjectPath, error) {
-
+	props []DbusProperty,
+) (dbus.ObjectPath, error) {
 	var job dbus.ObjectPath
 	err := sc.callDbus(ctx, "org.freedesktop.systemd1.Manager.StartTransientUnit",
 		&job, name, mode, props, []DbusPropertySet{})
@@ -123,8 +123,8 @@ func (sc *SystemdOsConnection) StartTransientUnit(ctx context.Context, name stri
 }
 
 func (sc *SystemdOsConnection) callDbus(ctx context.Context, method string, ret any,
-	args ...any) error {
-
+	args ...any,
+) error {
 	ch := make(chan *dbus.Call, 1)
 	sc.Object.Go(method, 0, ch, args...)
 
@@ -212,7 +212,6 @@ func StartOsSystemdSupervisor() (*SystemdSupervisor, error) {
 }
 
 func NewSystemdSupervisor(conn SystemdConnection, pts Pts) *SystemdSupervisor {
-
 	s := &SystemdSupervisor{
 		conn:               conn,
 		pts:                pts,
@@ -354,8 +353,8 @@ func (sd *SystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig)
 }
 
 func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, serviceType string,
-	doneFunc func(*UnitProperties) (bool, error)) (string, error) {
-
+	doneFunc func(*UnitProperties) (bool, error),
+) (string, error) {
 	// Create pts to get standard output
 	pts := NewOsPts()
 	ptm, ptsN, err := pts.NewPts()

@@ -13,19 +13,27 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-const testAccessKeyID = "test-access-key-id"
-const testSecretAccessKey = "test-secret-access-key"
-const testSessionToken = "test-session-token"
+const (
+	testAccessKeyID     = "test-access-key-id"
+	testSecretAccessKey = "test-secret-access-key"
+	testSessionToken    = "test-session-token"
+)
 
-const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
-const testVolumeID = "test-vol"
-const testProfilePrefix = testPodID + "-" + testVolumeID + "-"
+const (
+	testPodID         = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
+	testVolumeID      = "test-vol"
+	testProfilePrefix = testPodID + "-" + testVolumeID + "-"
+)
 
-const testPodLevelServiceAccountToken = testPodID + "-" + testVolumeID + ".token"
-const testDriverLevelServiceAccountToken = "token"
+const (
+	testPodLevelServiceAccountToken    = testPodID + "-" + testVolumeID + ".token"
+	testDriverLevelServiceAccountToken = "token"
+)
 
-const testPodServiceAccount = "test-sa"
-const testPodNamespace = "test-ns"
+const (
+	testPodServiceAccount = "test-sa"
+	testPodNamespace      = "test-ns"
+)
 
 const testEnvPath = "/test-env"
 

@@ -32,7 +32,6 @@ func main() {
 }
 
 func installFiles(binDir string, installDir string) error {
-
 	sd, err := os.Open(binDir)
 	if err != nil {
 		return fmt.Errorf("Failed to open source directory: %w", err)
@@ -49,7 +48,7 @@ func installFiles(binDir string, installDir string) error {
 		destFile := filepath.Join(installDir, name)
 
 		// First copy to a temporary location then rename to handle replacing running binaries
-		err = util.ReplaceFile(destFile, filepath.Join(binDir, name), 0755)
+		err = util.ReplaceFile(destFile, filepath.Join(binDir, name), 0o755)
 		if err != nil {
 			return fmt.Errorf("Failed to copy file %s: %w", name, err)
 		}

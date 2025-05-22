@@ -20,12 +20,16 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
-var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
+var (
+	mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
+	mountpointBinDir     = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
+)
 
-var mountSockPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
-var mountExitPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountExit)
-var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
+var (
+	mountSockPath  = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
+	mountExitPath  = mppod.PathInsideMountpointPod(mppod.KnownPathMountExit)
+	mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
+)
 
 const mountpointBin = "mount-s3"
 

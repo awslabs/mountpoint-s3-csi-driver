@@ -172,7 +172,7 @@ func TestRunningMountpoint(t *testing.T) {
 		}
 
 		// Create `mount.exit` file
-		_, err := os.OpenFile(mountExitPath, os.O_RDONLY|os.O_CREATE, 0666)
+		_, err := os.OpenFile(mountExitPath, os.O_RDONLY|os.O_CREATE, 0o666)
 		assert.NoError(t, err)
 
 		exitCode, err := csimounter.Run(csimounter.Options{

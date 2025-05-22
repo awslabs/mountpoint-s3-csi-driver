@@ -48,7 +48,6 @@ func TestValidatesEndpointURL(t *testing.T) {
 
 		// Attempt to validate with endpoint URL
 		err := validateEndpointURL()
-
 		// Verify it succeeds
 		if err != nil {
 			t.Fatalf("Unexpected error when AWS_ENDPOINT_URL is set: %v", err)

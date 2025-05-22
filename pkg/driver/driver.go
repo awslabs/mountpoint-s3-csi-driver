@@ -43,7 +43,7 @@ const (
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
-	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
+	unixSocketPerm = os.FileMode(0o700) // only owner can write and read.
 
 	podWatcherResyncPeriod = time.Minute
 )

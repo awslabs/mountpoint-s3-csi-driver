@@ -24,34 +24,46 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
-const s3CSIDriver = "s3.csi.scality.com"
-const ebsCSIDriver = "ebs.csi.aws.com"
+const (
+	s3CSIDriver  = "s3.csi.scality.com"
+	ebsCSIDriver = "ebs.csi.aws.com"
+)
 
-const defaultNamespace = "default"
-const defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl"
+const (
+	defaultNamespace      = "default"
+	defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl"
+)
 
 // Configuration values passed for `mppod.Config` while creating a controller to use in tests.
-const mountpointNamespace = "mount-s3"
-const mountpointVersion = "1.10.0"
-const mountpointPriorityClassName = "mount-s3-critical"
-const mountpointContainerCommand = "/bin/scality-s3-csi-mounter"
-const mountpointImage = "mp-image:latest"
-const mountpointImagePullPolicy = corev1.PullNever
+const (
+	mountpointNamespace         = "mount-s3"
+	mountpointVersion           = "1.10.0"
+	mountpointPriorityClassName = "mount-s3-critical"
+	mountpointContainerCommand  = "/bin/scality-s3-csi-mounter"
+	mountpointImage             = "mp-image:latest"
+	mountpointImagePullPolicy   = corev1.PullNever
+)
 
 // Since most things are eventually consistent in the control plane,
 // we need to use `Eventually` Ginkgo construct to wait for updates to applied,
 // these timeouts should be good default for most use-cases.
-const defaultWaitTimeout = 5 * time.Second
-const defaultWaitRetryPeriod = 100 * time.Millisecond
+const (
+	defaultWaitTimeout     = 5 * time.Second
+	defaultWaitRetryPeriod = 100 * time.Millisecond
+)
 
 // Variables to use during the test, mainly `k8sClient` to interact with the control plane.
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+)
 
 // Context to cancel after the suite to stop the controller and the manager.
-var ctx context.Context
-var cancel context.CancelFunc
+var (
+	ctx    context.Context
+	cancel context.CancelFunc
+)
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)

@@ -121,8 +121,10 @@ func createAndStartWatcher(t *testing.T, client kubernetes.Interface) *watcher.W
 	return mpPodWatcher
 }
 
-const testMountpointPodName = "mp-pod"
-const testMountpointPodNamespace = "mount-s3-test"
+const (
+	testMountpointPodName      = "mp-pod"
+	testMountpointPodNamespace = "mount-s3-test"
+)
 
 type mountpointPod struct {
 	t      *testing.T

@@ -143,7 +143,6 @@ func CreateVolumeWithSecretReference(
 	namespace string,
 	bucketName string,
 ) *storageframework.VolumeResource {
-
 	f := config.Framework
 	r := storageframework.VolumeResource{Config: config, Pattern: pattern}
 
@@ -226,7 +225,6 @@ func createVolumeWithSecretReference(
 }
 
 func (s *s3CSICredentialsSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
-
 	f := framework.NewFrameworkWithCustomTimeouts("credentials", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
 
@@ -235,9 +233,7 @@ func (s *s3CSICredentialsSuite) DefineTests(driver storageframework.TestDriver, 
 			resources []*storageframework.VolumeResource // tracks resources for cleanup
 			config    *storageframework.PerTestConfig    // storage framework configuration
 		}
-		var (
-			testRegistry TestResourceRegistry
-		)
+		var testRegistry TestResourceRegistry
 		cleanup := func(ctx context.Context) {
 			var errs []error
 			for _, resource := range testRegistry.resources {

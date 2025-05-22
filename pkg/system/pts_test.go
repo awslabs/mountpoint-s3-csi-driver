@@ -19,7 +19,7 @@ func TestPtsSuccess(t *testing.T) {
 	defer ptm.Close()
 
 	// open pts
-	ptsFile, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR, 0600)
+	ptsFile, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}

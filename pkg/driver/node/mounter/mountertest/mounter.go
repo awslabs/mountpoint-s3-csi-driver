@@ -22,11 +22,11 @@ func OpenDevNull(t *testing.T) *os.File {
 func AssertSameFile(t *testing.T, want *os.File, got *os.File) {
 	t.Helper()
 
-	var wantStat = &syscall.Stat_t{}
+	wantStat := &syscall.Stat_t{}
 	err := syscall.Fstat(int(want.Fd()), wantStat)
 	assert.NoError(t, err)
 
-	var gotStat = &syscall.Stat_t{}
+	gotStat := &syscall.Stat_t{}
 	err = syscall.Fstat(int(got.Fd()), gotStat)
 	assert.NoError(t, err)
 

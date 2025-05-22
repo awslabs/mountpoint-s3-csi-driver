@@ -130,8 +130,8 @@ func (suite *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.
 	// expectedFileMode is the expected permission mode for all files
 	// expectedDirMode is the expected permission mode for all directories
 	verifyPathsPermissions := func(f *framework.Framework, pod *v1.Pod, filePaths, dirPaths []string,
-		expectedFileMode, expectedDirMode string, uid, gid *int64) {
-
+		expectedFileMode, expectedDirMode string, uid, gid *int64,
+	) {
 		// Check file permissions
 		for _, filePath := range filePaths {
 			verifyFilePermissions(f, pod, filePath, expectedFileMode, uid, gid)
@@ -146,8 +146,8 @@ func (suite *s3CSIFilePermissionsTestSuite) DefineTests(driver storageframework.
 	// createVolumeWithOptions is a thin wrapper around BuildVolumeWithOptions that also tracks
 	// the created resource in the TestResourceRegistry resources slice for cleanup.
 	createVolumeWithOptions := func(ctx context.Context, config *storageframework.PerTestConfig, pattern storageframework.TestPattern,
-		uid, gid int64, fileModeOption string, extraOptions ...string) *storageframework.VolumeResource {
-
+		uid, gid int64, fileModeOption string, extraOptions ...string,
+	) *storageframework.VolumeResource {
 		resource := BuildVolumeWithOptions(ctx, config, pattern, uid, gid, fileModeOption, extraOptions...)
 		testRegistry.resources = append(testRegistry.resources, resource)
 		return resource

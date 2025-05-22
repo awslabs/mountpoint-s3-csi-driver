@@ -14,7 +14,7 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/podmounter/mountoptions"
 )
 
-var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
+var mountErrorFileperm = fs.FileMode(0o600) // only owner readable and writeable
 
 // successExitCode is the exit code returned from `scality-s3-csi-mounter` to indicate a clean exit,
 // so Kubernetes doesn't have to restart it and transition the Pod into `Succeeded` state.

@@ -45,16 +45,14 @@ var (
 	}
 )
 
-var (
-	volumeCaps = []csi.VolumeCapability_AccessMode{
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-		},
-		{
-			Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
-		},
-	}
-)
+var volumeCaps = []csi.VolumeCapability_AccessMode{
+	{
+		Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+	},
+	{
+		Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+	},
+}
 
 const (
 	filePerm770 = "770" // User: full access, Group: full access, Others: none

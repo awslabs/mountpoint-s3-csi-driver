@@ -33,7 +33,7 @@ func TestMountOptions(t *testing.T) {
 	t.Run("Long Path", func(t *testing.T) {
 		basePath := filepath.Join(t.TempDir(), "long"+strings.Repeat("g", 108))
 		sockBasepath := filepath.Join(basePath, "mount")
-		assert.NoError(t, os.MkdirAll(sockBasepath, 0700))
+		assert.NoError(t, os.MkdirAll(sockBasepath, 0o700))
 
 		t.Chdir(basePath)
 
@@ -50,7 +50,7 @@ func testRoundtrip(t *testing.T, mountSock string) {
 	assert.NoError(t, err)
 	defer file.Close()
 
-	var wantStat = &syscall.Stat_t{}
+	wantStat := &syscall.Stat_t{}
 	err = syscall.Fstat(int(file.Fd()), wantStat)
 	assert.NoError(t, err)
 
@@ -77,7 +77,7 @@ func testRoundtrip(t *testing.T, mountSock string) {
 		t.Fatalf("received file descriptor %d is invalid\n", got.Fd)
 	}
 
-	var gotStat = &syscall.Stat_t{}
+	gotStat := &syscall.Stat_t{}
 	err = syscall.Fstat(got.Fd, gotStat)
 	assert.NoError(t, err)
 

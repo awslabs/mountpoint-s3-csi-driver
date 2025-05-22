@@ -68,9 +68,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		resources []*storageframework.VolumeResource // tracks resources for cleanup
 		config    *storageframework.PerTestConfig    // storage framework configuration
 	}
-	var (
-		l local
-	)
+	var l local
 
 	// Create a framework with custom timeouts based on the driver's requirements
 	f := framework.NewFrameworkWithCustomTimeouts("mountoptions", storageframework.GetDriverTimeouts(driver))

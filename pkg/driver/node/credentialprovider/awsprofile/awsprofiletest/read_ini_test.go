@@ -13,7 +13,7 @@ import (
 // writeFile is a small helper for the tests below.
 func writeFile(t *testing.T, p, data string) {
 	t.Helper()
-	if err := os.WriteFile(p, []byte(data), 0600); err != nil {
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatalf("writeFile: %v", err)
 	}
 }
@@ -123,7 +123,7 @@ func TestReadConfig_IgnoresInvalidKeyValueLines(t *testing.T) {
 func TestReadConfig_ScannerError(t *testing.T) {
 	dir := t.TempDir()
 	scanErrDir := filepath.Join(dir, "dir")
-	assert.NoError(t, os.Mkdir(scanErrDir, 0755))
+	assert.NoError(t, os.Mkdir(scanErrDir, 0o755))
 
 	_, err := ReadConfig(scanErrDir)
 	if err == nil {
@@ -134,7 +134,7 @@ func TestReadConfig_ScannerError(t *testing.T) {
 func TestReadIniFile_ScannerError(t *testing.T) {
 	dir := t.TempDir()
 	scanErrDir := filepath.Join(dir, "dir")
-	assert.NoError(t, os.Mkdir(scanErrDir, 0755))
+	assert.NoError(t, os.Mkdir(scanErrDir, 0o755))
 
 	_, err := readIniFile(scanErrDir)
 	if err == nil {

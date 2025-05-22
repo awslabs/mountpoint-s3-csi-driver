@@ -22,9 +22,11 @@ var (
 	DefaultS3EndpointUrl   string
 )
 
-const DefaultRegion = "us-east-1"
-const s3BucketNameMaxLength = 63
-const s3BucketNamePrefix = "s3-csi-k8s-e2e-"
+const (
+	DefaultRegion         = "us-east-1"
+	s3BucketNameMaxLength = 63
+	s3BucketNamePrefix    = "s3-csi-k8s-e2e-"
+)
 
 // DeleteBucketFunc is a cleanup function thats returned as a result of "Create*Bucket" calls.
 // It clears the content of the bucket if not empty, and then deletes the bucket.
@@ -131,7 +133,6 @@ func (c *Client) DeleteObject(ctx context.Context, bucketName string, key string
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
 	})
-
 	if err != nil {
 		framework.Logf("Failed to delete object %s: %v", key, err)
 		return err
@@ -240,7 +241,6 @@ func (c *Client) PutObject(ctx context.Context, bucket string, key string, conte
 		Key:    aws.String(key),
 		Body:   strings.NewReader(content),
 	})
-
 	if err != nil {
 		framework.Logf("Failed to create object %s: %v", key, err)
 		return err

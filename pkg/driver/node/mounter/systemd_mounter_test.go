@@ -5,10 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
-
-	"slices"
 
 	"github.com/golang/mock/gomock"
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -449,8 +448,8 @@ func TestIsMountPoint(t *testing.T) {
 		},
 	}
 
-	os.MkdirAll(tmpFsMountPath, 0755)
-	os.MkdirAll(mountpointS3MountPath, 0755)
+	os.MkdirAll(tmpFsMountPath, 0o755)
+	os.MkdirAll(mountpointS3MountPath, 0o755)
 
 	tests := map[string]struct {
 		procMountsContent []mount.MountPoint

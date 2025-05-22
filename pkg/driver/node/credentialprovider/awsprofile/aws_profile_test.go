@@ -16,7 +16,7 @@ const (
 	testAccessKeyID     = "AKIAEXAMPLE"
 	testSecretAccessKey = "secretkey123"
 	testSessionToken    = "sessiontoken456"
-	testFilePerm        = fs.FileMode(0600)
+	testFilePerm        = fs.FileMode(0o600)
 )
 
 // ------------------------------------------------------------------

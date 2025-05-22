@@ -42,51 +42,51 @@ func TestReplaceFile(t *testing.T) {
 		basedir := t.TempDir()
 
 		source := filepath.Join(basedir, "source")
-		content := createFileWithRandomBytes(t, source, 0600, 2*64*1024)
+		content := createFileWithRandomBytes(t, source, 0o600, 2*64*1024)
 
 		dest := filepath.Join(basedir, "dest")
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0o644)
 		assert.NoError(t, err)
 
-		expectContentAndPerm(t, dest, content, 0644)
+		expectContentAndPerm(t, dest, content, 0o644)
 	})
 
 	t.Run("Existing dest", func(t *testing.T) {
 		basedir := t.TempDir()
 
 		source := filepath.Join(basedir, "source")
-		content := createFileWithRandomBytes(t, source, 0600, 2*64*1024)
+		content := createFileWithRandomBytes(t, source, 0o600, 2*64*1024)
 
 		dest := filepath.Join(basedir, "dest")
-		createFileWithRandomBytes(t, dest, 0644, 1024)
+		createFileWithRandomBytes(t, dest, 0o644, 1024)
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0o644)
 		assert.NoError(t, err)
 
-		expectContentAndPerm(t, dest, content, 0644)
+		expectContentAndPerm(t, dest, content, 0o644)
 	})
 
 	t.Run("Existing dest with different permissions", func(t *testing.T) {
 		basedir := t.TempDir()
 
 		source := filepath.Join(basedir, "source")
-		content := createFileWithRandomBytes(t, source, 0600, 2*64*1024)
+		content := createFileWithRandomBytes(t, source, 0o600, 2*64*1024)
 
 		dest := filepath.Join(basedir, "dest")
-		createFileWithRandomBytes(t, dest, 0777, 1024)
+		createFileWithRandomBytes(t, dest, 0o777, 1024)
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0o644)
 		assert.NoError(t, err)
 
-		expectContentAndPerm(t, dest, content, 0644)
+		expectContentAndPerm(t, dest, content, 0o644)
 	})
 
 	t.Run("Concurrently", func(t *testing.T) {
 		basedir := t.TempDir()
 
 		source := filepath.Join(basedir, "source")
-		content := createFileWithRandomBytes(t, source, 0600, 2*64*1024)
+		content := createFileWithRandomBytes(t, source, 0o600, 2*64*1024)
 
 		dest := filepath.Join(basedir, "dest")
 
@@ -96,13 +96,13 @@ func TestReplaceFile(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				err := util.ReplaceFile(dest, source, 0644)
+				err := util.ReplaceFile(dest, source, 0o644)
 				assert.NoError(t, err)
 			}()
 		}
 		wg.Wait()
 
-		expectContentAndPerm(t, dest, content, 0644)
+		expectContentAndPerm(t, dest, content, 0o644)
 	})
 
 	// Error path tests
@@ -111,7 +111,7 @@ func TestReplaceFile(t *testing.T) {
 		nonExistentSource := filepath.Join(basedir, "non-existent-source")
 		dest := filepath.Join(basedir, "dest")
 
-		err := util.ReplaceFile(dest, nonExistentSource, 0644)
+		err := util.ReplaceFile(dest, nonExistentSource, 0o644)
 
 		// The error should not be nil
 		if err == nil {
@@ -134,7 +134,7 @@ func TestReplaceFile(t *testing.T) {
 		source := filepath.Join(basedir, "non-readable-source")
 
 		// Create the file first
-		err := os.WriteFile(source, []byte("test content"), 0600)
+		err := os.WriteFile(source, []byte("test content"), 0o600)
 		if err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
@@ -148,7 +148,7 @@ func TestReplaceFile(t *testing.T) {
 		dest := filepath.Join(basedir, "dest")
 
 		// Try to copy from a non-readable source
-		err = util.ReplaceFile(dest, source, 0644)
+		err = util.ReplaceFile(dest, source, 0o644)
 
 		// The error should not be nil
 		if err == nil {
@@ -170,14 +170,14 @@ func TestReplaceFile(t *testing.T) {
 
 		basedir := t.TempDir()
 		source := filepath.Join(basedir, "source")
-		err := os.WriteFile(source, []byte("test content"), 0600)
+		err := os.WriteFile(source, []byte("test content"), 0o600)
 		if err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
 
 		// Create a read-only directory
 		readOnlyDir := filepath.Join(basedir, "readonly")
-		err = os.Mkdir(readOnlyDir, 0500) // read + execute, no write
+		err = os.Mkdir(readOnlyDir, 0o500) // read + execute, no write
 		if err != nil {
 			t.Fatalf("Failed to create directory: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestReplaceFile(t *testing.T) {
 		dest := filepath.Join(readOnlyDir, "dest")
 
 		// Try to replace file in read-only directory
-		err = util.ReplaceFile(dest, source, 0644)
+		err = util.ReplaceFile(dest, source, 0o644)
 
 		// The error should not be nil
 		if err == nil {
