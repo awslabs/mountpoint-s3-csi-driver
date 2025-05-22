@@ -7,3 +7,6 @@ repos:
           - --enable=gofmt
           - --enable=goimports
           - --enable=gofumpt
+      - id: golangci-lint
+        args:
+          - --enable=govet
