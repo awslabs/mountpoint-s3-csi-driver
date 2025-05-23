@@ -251,7 +251,7 @@ func TestPodMounter(t *testing.T) {
 			testCtx := setup(t)
 
 			// Set AWS_ENDPOINT_URL in the environment
-			t.Setenv("AWS_ENDPOINT_URL", "https://s3.scality-storage.local:8000")
+			t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com:8000")
 
 			devNull := mountertest.OpenDevNull(t)
 
@@ -290,7 +290,7 @@ func TestPodMounter(t *testing.T) {
 			// Verify AWS_ENDPOINT_URL environment variable is passed to the pod
 			endpointPassed := false
 			for _, env := range got.Env {
-				if env == "AWS_ENDPOINT_URL=https://s3.scality-storage.local:8000" {
+				if env == "AWS_ENDPOINT_URL=https://s3.example.com:8000" {
 					endpointPassed = true
 					break
 				}
@@ -366,7 +366,7 @@ func TestPodMounter(t *testing.T) {
 			testCtx := setup(t)
 
 			// Set AWS_ENDPOINT_URL in the environment
-			t.Setenv("AWS_ENDPOINT_URL", "https://s3.trusted-endpoint.com:8000")
+			t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com:8000")
 
 			devNull := mountertest.OpenDevNull(t)
 
@@ -422,7 +422,7 @@ func TestPodMounter(t *testing.T) {
 			for _, envVar := range got.Env {
 				if strings.HasPrefix(envVar, "AWS_ENDPOINT_URL=") {
 					hasEndpointURL = true
-					if envVar == "AWS_ENDPOINT_URL=https://s3.trusted-endpoint.com:8000" {
+					if envVar == "AWS_ENDPOINT_URL=https://s3.example.com:8000" {
 						hasTrustedEndpoint = true
 					}
 				}

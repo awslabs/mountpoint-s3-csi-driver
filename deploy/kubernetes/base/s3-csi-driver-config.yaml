@@ -8,4 +8,4 @@ metadata:
 data:
   dummy: "" # This ensures data is a proper object even when no values are set
   # Uncomment and set the s3-endpoint-url if needed
-  # s3-endpoint-url: "https://s3.scality.com:8000"
+  # s3-endpoint-url: "https://s3.example.com:8000"
