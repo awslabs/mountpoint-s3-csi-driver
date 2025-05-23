@@ -39,8 +39,11 @@ repos:
       - id: lychee
         args: [--config, .lychee.toml]
 
-  - repo: https://github.com/gruntwork-io/pre-commit
-    rev: v0.1.23
+  - repo: local
     hooks:
-      - id: helmlint
-        files: ^charts/.*\.yaml$
+      - id: helm-lint
+        name: helm lint
+        entry: helm lint charts/scality-mountpoint-s3-csi-driver
+        language: system
+        files: ^charts/
+        pass_filenames: false
