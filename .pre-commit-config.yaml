@@ -23,3 +23,9 @@ repos:
       - id: markdownlint
         args: [--config, .markdownlint.yaml, --fix]
         types: [markdown]
+
+  - repo: https://github.com/lycheeverse/lychee
+    rev: lychee-v0.18.1  # Latest stable version
+    hooks:
+      - id: lychee
+        args: [--config, .lychee.toml]

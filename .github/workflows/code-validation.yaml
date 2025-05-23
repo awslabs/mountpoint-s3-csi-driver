@@ -33,6 +33,14 @@ jobs:
         python-version: '3.x'
         cache: pip
 
+    - name: Download lychee binary (for precommit test)
+      if: matrix.test == 'precommit'
+      run: |
+        curl -L https://github.com/lycheeverse/lychee/releases/download/lychee-v0.18.1/lychee-x86_64-unknown-linux-gnu.tar.gz -o lychee.tar.gz
+        tar -xzf lychee.tar.gz
+        sudo mv lychee /usr/local/bin/lychee
+        lychee --version
+
     - name: Install pre-commit
       run: pip install -r requirements.txt
 
