@@ -20,6 +20,7 @@ repos:
         args: [--allow-multiple-documents, --unsafe]
         # Exclude Helm charts templates
         exclude: ^charts/.*/templates/.*\.yaml$
+      - id: end-of-file-fixer
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1  # Latest stable version as of January 2025
