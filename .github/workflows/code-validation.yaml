@@ -23,8 +23,7 @@ jobs:
         go-version-file: 'go.mod'
         cache: true
 
-    - name: Setup Helm (for validate-helm and precommit tests)
-      if: matrix.test == 'validate-helm' || matrix.test == 'precommit'
+    - name: Setup Helm
       uses: azure/setup-helm@v4.3.0
 
     - name: Set up Python and install pre-commit (for precommit test)
