@@ -46,6 +46,10 @@ jobs:
 
     - name: Run ${{ matrix.test }}
       run: make ${{ matrix.test }}
+      env:
+        # Skip golangci-lint hooks in precommit test since we just run them locally
+        # This saves 4 mins of CI time
+        SKIP: ${{ matrix.test == 'precommit' && 'golangci-lint-fmt,golangci-lint' || '' }}
 
     - name: Upload unit test coverage to Codecov
       if: matrix.test == 'unit-test'
