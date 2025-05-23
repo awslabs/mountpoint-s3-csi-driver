@@ -1,0 +1,137 @@
+# Lychee link checker configuration for Scality Mountpoint S3 CSI Driver
+# See: https://github.com/lycheeverse/lychee/blob/master/lychee.example.toml
+
+# Maximum number of concurrent network requests
+max_concurrency = 16
+
+# Timeout for each request (in seconds)
+timeout = 30
+
+# Maximum number of retries per request
+max_retries = 3
+
+# Wait time between retries (in seconds)
+retry_wait_time = 2
+
+# User agent string for requests
+user_agent = "lychee/0.18.1 (Scality Mountpoint S3 CSI Driver docs)"
+
+# Accept status codes (2xx are success, others may be considered valid)
+accept = [
+    100,101,102,103,    # Informational
+    200,201,202,203,204,205,206,207,208,226,    # Success
+    300,301,302,303,304,307,308,    # Redirection
+]
+
+# Include fragments/anchors in link checking
+include_fragments = true
+
+# Skip network requests and only check local files
+offline = false
+
+# Enable progress bar (disabled in CI environments)
+no_progress = false
+
+# Exclude patterns (regex)
+exclude = [
+    # Exclude localhost and local network addresses
+    "^https?://localhost(:[0-9]+)?",
+    "^https?://127\\.0\\.0\\.1(:[0-9]+)?",
+    "^https?://0\\.0\\.0\\.0(:[0-9]+)?",
+    "^https?://\\[::1\\](:[0-9]+)?",
+    "^https?://192\\.168\\.",
+    "^https?://10\\.",
+    "^https?://172\\.(1[6-9]|2[0-9]|3[0-1])\\.",
+
+    # Exclude social media and platforms known to block link checkers
+    "^https?://(www\\.)?(linkedin|twitter|x)\\.com",
+    "^https?://(www\\.)?facebook\\.com",
+    "^https?://(www\\.)?instagram\\.com",
+
+    # Exclude email addresses by default (can be enabled with include_mail)
+    "^mailto:",
+
+    # Exclude placeholder and example domains
+    "^https?://(www\\.)?example\\.(com|org|net)",
+    "^https?://(www\\.)?your-scality\\.(com|cluster\\.com)",
+    "^https?://(www\\.)?s3\\.your-scality\\.",
+    "^https?://(www\\.)?s3\\.example\\.",
+
+    # Exclude S3 example/test endpoints (standardized placeholders)
+    "^https?://s3\\.example\\.com(:[0-9]+)?(/.*)?$",
+    "^https?://s3\\.ring\\.example\\.com(:[0-9]+)?(/.*)?$",
+    "^https?://s3\\.artesca\\.example\\.com(:[0-9]+)?(/.*)?$",
+    "^https?://custom-s3\\.example\\.com(:[0-9]+)?(/.*)?$",
+
+    # Exclude AWS URLs with URL-encoded variables (cause 403 errors)
+    "^https?://s3\\.amazonaws\\.com/.*\\$\\{.*\\}.*$",
+    "^https?://s3\\.amazonaws\\.com/.*\\%7B.*\\%7D.*$",
+
+    # Exclude GitHub edit/blob URLs that may not be accessible
+    "github\\.com/.*/edit/",
+    "github\\.com/.*/blob/.*/.*\\.(md|txt)$",
+
+    # Exclude URLs with placeholders
+    "<[^>]+>",
+    "\\$\\{[^}]+\\}",
+    "\\{\\{[^}]+\\}\\}",
+]
+
+# Include patterns (regex) - only check these if specified
+include = []
+
+# File extensions to check
+extensions = ["md", "markdown", "mkd", "html", "htm", "txt"]
+
+# Include email address checking (disabled by default for performance)
+include_mail = false
+
+# Base URL for resolving relative links
+# base_url = "https://scality.github.io/mountpoint-s3-csi-driver/"
+
+# Cache settings
+cache = true
+max_cache_age = "1d"
+
+# Exclude certain status codes from cache
+cache_exclude_status = [429]  # Rate limiting shouldn't be cached
+
+# Skip SSL certificate verification (not recommended for production)
+insecure = false
+
+# Only check files matching these glob patterns
+# glob_pattern = ["**/*.md", "**/*.html", "docs/**/*"]
+
+# Exclude file paths matching these patterns
+exclude_path = [
+    "*/node_modules/*",
+    "*/.git/*",
+    "*/.venv/*",
+    "*/venv/*",
+    "*/__pycache__/*",
+    "*/target/*",
+    "*/build/*",
+    "*/dist/*",
+]
+
+# Request headers
+headers = [
+    # Avoid being blocked by GitHub's anti-bot measures
+    "Accept=text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    # Some sites require this header
+    "Accept-Language=en-US,en;q=0.5",
+    # Disable compression to avoid issues with some servers
+    "Accept-Encoding=identity",
+]
+
+# Scheme restrictions - only check these URL schemes
+scheme = ["https", "http", "file"]
+
+# Skip checking links to private IP ranges
+exclude_all_private = true
+
+# GitHub token for API rate limiting (set via environment variable)
+# github_token = "${GITHUB_TOKEN}"
+
+# Output format for results
+format = "detailed"

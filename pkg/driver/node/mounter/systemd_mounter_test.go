@@ -134,13 +134,13 @@ func TestS3MounterMount(t *testing.T) {
 			options:    []string{"--aws-max-attempts=10"},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				// Set AWS_ENDPOINT_URL in the environment
-				t.Setenv("AWS_ENDPOINT_URL", "https://s3.scality-storage.local:8000")
+				t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com:8000")
 
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					// Verify that the environment variable is passed to mountpoint-s3
 					endpointPassed := false
 					for _, envVar := range config.Env {
-						if envVar == "AWS_ENDPOINT_URL=https://s3.scality-storage.local:8000" {
+						if envVar == "AWS_ENDPOINT_URL=https://s3.example.com:8000" {
 							endpointPassed = true
 							break
 						}
@@ -205,7 +205,7 @@ func TestS3MounterMount(t *testing.T) {
 			options:    []string{"--endpoint-url=https://malicious-endpoint.example.com"},
 			before: func(t *testing.T, env *mounterTestEnv) {
 				// Set AWS_ENDPOINT_URL in the environment
-				t.Setenv("AWS_ENDPOINT_URL", "https://s3.trusted-endpoint.com:8000")
+				t.Setenv("AWS_ENDPOINT_URL", "https://s3.example.com:8000")
 
 				env.mockRunner.EXPECT().StartService(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, config *system.ExecConfig) (string, error) {
 					// Verify the endpoint URL is not in the command-line arguments
@@ -221,7 +221,7 @@ func TestS3MounterMount(t *testing.T) {
 					for _, envVar := range config.Env {
 						if strings.HasPrefix(envVar, "AWS_ENDPOINT_URL=") {
 							endpointPassed = true
-							if envVar == "AWS_ENDPOINT_URL=https://s3.trusted-endpoint.com:8000" {
+							if envVar == "AWS_ENDPOINT_URL=https://s3.example.com:8000" {
 								trustedEndpoint = true
 							}
 						}

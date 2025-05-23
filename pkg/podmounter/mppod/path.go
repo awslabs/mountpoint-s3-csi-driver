@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 )
 
-// KnownPathMountSock is the path of Unix socket thats going to be used during exchange of mount options
+// KnownPathMountSock is the path of Unix socket that's going to be used during exchange of mount options
 // between Mountpoint Pod and the CSI Driver Node Pod.
 const KnownPathMountSock = "mount.sock"
 

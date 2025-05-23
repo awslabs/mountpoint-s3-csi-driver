@@ -11,4 +11,4 @@ images:
 #   - name: s3-csi-driver-config
 #     behavior: merge
 #     literals:
-#       - s3-endpoint-url=https://s3.scality.com:8000
+#       - s3-endpoint-url=https://s3.example.com:8000

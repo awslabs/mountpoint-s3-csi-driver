@@ -28,7 +28,7 @@ func init() {
 
 	flag.StringVar(&AccessKeyId, "access-key-id", "", "S3 access key, e.g. accessKey1")
 	flag.StringVar(&SecretAccessKey, "secret-access-key", "", "S3 secret access key, e.g. verySecretKey1")
-	flag.StringVar(&S3EndpointUrl, "s3-endpoint-url", "", "S3 endpoint URL, e.g. http://s3.scality.com:8000")
+	flag.StringVar(&S3EndpointUrl, "s3-endpoint-url", "", "S3 endpoint URL, e.g. https://s3.example.com:8000")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.Parse()
 

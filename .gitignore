@@ -8,3 +8,5 @@ go.work.sum
 cover.out
 coverage.txt
 test-results/
+.lycheecache
+site/

@@ -40,6 +40,9 @@ E2E_KUBECONFIG?=""
 # Kubernetes version to use in envtest for controller tests.
 ENVTEST_K8S_VERSION ?= 1.30.x
 
+# Virtual environment activation
+venv := .venv/bin/activate
+
 .EXPORT_ALL_VARIABLES:
 
 .PHONY: bin
@@ -79,6 +82,20 @@ fmt:
 validate-helm:
 	@echo "Validating Helm charts..."
 	@tests/helm/validate_charts.sh
+
+################################################################
+# Documentation commands
+################################################################
+
+.PHONY: docs
+docs:
+	@echo "Building documentation and starting server (strict mode)..."
+	source $(venv) && mkdocs build --strict && mkdocs serve
+
+.PHONY: docs-clean
+docs-clean:
+	@echo "Cleaning documentation build artifacts..."
+	rm -rf site/
 
 # Run controller tests with envtest.
 .PHONY: controller-integration-test
@@ -180,7 +197,7 @@ ADDITIONAL_ARGS ?=
 .PHONY: csi-install
 csi-install:
 	@if [ -z "$(S3_ENDPOINT_URL)" ]; then \
-		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://your-s3-endpoint.com csi-install'"; \
+		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://s3.example.com csi-install'"; \
 		exit 1; \
 	fi; \
 	if [ -z "$(ACCESS_KEY_ID)" ]; then \
@@ -314,7 +331,7 @@ e2e-verify:
 .PHONY: e2e-all
 e2e-all:
 	@if [ -z "$(S3_ENDPOINT_URL)" ]; then \
-		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://your-s3-endpoint.com e2e-all'"; \
+		echo "Error: S3_ENDPOINT_URL is required. Please provide it with 'make S3_ENDPOINT_URL=https://s3.example.com e2e-all'"; \
 		exit 1; \
 	fi; \
 	if [ -z "$(ACCESS_KEY_ID)" ]; then \

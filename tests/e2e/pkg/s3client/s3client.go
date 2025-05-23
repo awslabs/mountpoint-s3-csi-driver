@@ -28,7 +28,7 @@ const (
 	s3BucketNamePrefix    = "s3-csi-k8s-e2e-"
 )
 
-// DeleteBucketFunc is a cleanup function thats returned as a result of "Create*Bucket" calls.
+// DeleteBucketFunc is a cleanup function that's returned as a result of "Create*Bucket" calls.
 // It clears the content of the bucket if not empty, and then deletes the bucket.
 type DeleteBucketFunc func(context.Context) error
 

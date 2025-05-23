@@ -20,7 +20,7 @@ const debugLevel = 4
 
 const mountpointCSIDriverName = "s3.csi.scality.com"
 
-// A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
+// A Reconciler reconciles Mountpoint Pods by watching other workload Pods that's using S3 CSI Driver.
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
 	mountpointPodCreator *mppod.Creator
