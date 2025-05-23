@@ -59,8 +59,9 @@ node:
 
 ### Edit [Persistent Volume](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/examples/kubernetes/static_provisioning/static_provisioning.yaml)
 
-> Note: This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the
-> [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html).
+!!! note
+    This example assumes your S3 bucket has already been created. If you need to create a bucket, follow the
+    [S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html).
 
 - Bucket name (required): `PersistentVolume -> csi -> volumeAttributes -> bucketName`
 - Bucket region (if bucket and cluster are in different regions): `PersistentVolume -> csi -> mountOptions`
