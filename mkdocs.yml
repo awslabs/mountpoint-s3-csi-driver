@@ -1,5 +1,5 @@
 site_name: "Scality S3 CSI Driver"
-site_url: https://scality.github.io/mountpoint-s3-csi-driver 
+site_url: https://scality.github.io/mountpoint-s3-csi-driver
 repo_url: https://github.com/scality/mountpoint-s3-csi-driver
 edit_uri: edit/main/docs/            # ← branch that holds Markdown
 

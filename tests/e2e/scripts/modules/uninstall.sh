@@ -16,13 +16,13 @@ readonly ERROR_SECRET_DELETE=13
 # Uninstall the CSI driver
 uninstall_csi_driver() {
   log "Uninstalling Scality CSI driver..."
-  
+
   # Process arguments
   local DELETE_NS=false
   local FORCE=false
   local NAMESPACE="$DEFAULT_NAMESPACE"
   local IS_CUSTOM_NAMESPACE=false
-  
+
   # Parse arguments
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -49,15 +49,15 @@ uninstall_csi_driver() {
         ;;
     esac
   done
-  
+
   log "Using namespace: $NAMESPACE"
-  
+
   # Check if the namespace exists
   if ! exec_cmd kubectl get namespace $NAMESPACE &> /dev/null; then
     warn "Namespace $NAMESPACE does not exist. Nothing to uninstall."
     return 0
   fi
-  
+
   # Check if the Helm release exists
   if ! exec_cmd helm status scality-s3-csi -n $NAMESPACE &> /dev/null; then
     warn "Helm release scality-s3-csi not found in namespace $NAMESPACE."
@@ -75,7 +75,7 @@ uninstall_csi_driver() {
       log "Helm release uninstalled successfully from namespace $NAMESPACE."
     fi
   fi
-  
+
   # Delete AWS credentials secret
   # Check if secret exists before attempting to delete
   if exec_cmd kubectl get secret aws-secret -n $NAMESPACE &> /dev/null; then
@@ -94,7 +94,7 @@ uninstall_csi_driver() {
   else
     warn "AWS credentials secret not found in namespace $NAMESPACE."
   fi
-  
+
   # Only delete namespace if it's a custom namespace (not kube-system)
   # and the delete flag is set or force mode is enabled
   if [ "$IS_CUSTOM_NAMESPACE" = true ] && [ "$DELETE_NS" = true -o "$FORCE" = true ]; then
@@ -128,12 +128,12 @@ uninstall_csi_driver() {
     # If using kube-system, never delete it
     log "Using system namespace $NAMESPACE, skipping namespace deletion for safety."
   fi
-  
+
   # Check if CSI driver is still registered
   if exec_cmd kubectl get csidrivers | grep -q "s3.csi.scality.com"; then
     warn "CSI driver s3.csi.scality.com is still registered. You may need to delete it manually:"
     warn "kubectl delete csidriver s3.csi.scality.com"
-    
+
     # In force mode, automatically delete the CSI driver
     if [ "$FORCE" = true ]; then
       log "Force mode enabled. Deleting CSI driver s3.csi.scality.com..."
@@ -148,7 +148,7 @@ uninstall_csi_driver() {
   else
     log "CSI driver is no longer registered."
   fi
-  
+
   log "Uninstallation complete."
   return 0
 }
@@ -158,7 +158,7 @@ do_uninstall() {
   # Call uninstall_csi_driver with all arguments
   uninstall_csi_driver "$@"
   local result=$?
-  
+
   if [ $result -ne 0 ]; then
     case $result in
       $ERROR_HELM_UNINSTALL)

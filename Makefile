@@ -164,9 +164,9 @@ ADDITIONAL_ARGS ?=
 ################################################################
 
 # Install the Scality CSI driver
-# 
+#
 # Required parameters:
-#   S3_ENDPOINT_URL - Your Scality S3 endpoint 
+#   S3_ENDPOINT_URL - Your Scality S3 endpoint
 #   ACCESS_KEY_ID - Your S3 access key
 #   SECRET_ACCESS_KEY - Your S3 secret key
 #
@@ -268,7 +268,7 @@ e2e:
 	./tests/e2e/scripts/run.sh test $$TEST_ARGS
 
 # Run only the Go-based e2e tests (skips verification checks)
-# 
+#
 # Usage: make e2e-go
 .PHONY: e2e-go
 e2e-go:
@@ -298,9 +298,9 @@ e2e-verify:
 	./tests/e2e/scripts/run.sh test $$TEST_ARGS
 
 # Install CSI driver and run all tests in one command
-# 
+#
 # Required parameters:
-#   S3_ENDPOINT_URL - Your Scality S3 endpoint 
+#   S3_ENDPOINT_URL - Your Scality S3 endpoint
 #   ACCESS_KEY_ID - Your S3 access key
 #   SECRET_ACCESS_KEY - Your S3 secret key
 #

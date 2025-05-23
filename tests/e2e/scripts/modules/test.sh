@@ -18,21 +18,21 @@ run_go_tests() {
   local access_key_id="${ACCESS_KEY_ID:-}"
   local secret_access_key="${SECRET_ACCESS_KEY:-}"
   local s3_endpoint_url="${S3_ENDPOINT_URL:-}"
-  
+
   log "Running Go-based end-to-end tests for Scality CSI driver in namespace: $namespace..."
-  
+
   # Check if Go is installed
   if ! command -v go &> /dev/null; then
     error "Go is not installed. Please install Go to run the tests."
     return 1
   fi
-  
+
   # Check if the tests directory exists
   if [ ! -d "$e2e_tests_dir" ]; then
     error "End-to-end tests directory not found: $e2e_tests_dir"
     return 1
   fi
-  
+
   # Validate required parameters
   if [ -z "$access_key_id" ]; then
     error "Missing S3 access key. Please set ACCESS_KEY_ID environment variable or provide --access-key-id parameter."
@@ -129,7 +129,7 @@ wait_for_pods() {
   fi
 
   log "Waiting for CSI driver pods to reach Running state..."
-  
+
   while [ $attempt -le $max_attempts ]; do
     local pods_running=false
     local pod_output=""
@@ -278,6 +278,6 @@ do_test() {
   else
     log "Skipping Go-based end-to-end tests as requested."
   fi
-  
+
   log "All tests completed successfully."
 }

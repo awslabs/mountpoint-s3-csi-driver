@@ -127,7 +127,7 @@ func TestNewCustomSuite(t *testing.T) {
     // Setup test environment
     testEnv := setupTestEnvironment(t)
     defer testEnv.Cleanup()
-    
+
     // Run test cases
     t.Run("specific_scenario", func(t *testing.T) {
         // Test implementation
