@@ -1,23 +1,46 @@
-# Scality Mountpoint S3 CSI Driver
-
-(sample for MKdocs integration - to be updated)
-
-The Scality Mountpoint S3 CSI Driver implements the [Container Storage Interface](https://github.com/container-storage-interface/spec/blob/master/spec.md)
-for S3 object storage, allowing Kubernetes workloads to mount S3 buckets as persistent volumes.
+# Mountpoint for Scality's fork of Amazon S3 CSI Driver
 
 ## Overview
 
-This driver leverages [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3), a high-performance open-source
-file client for mounting an S3 bucket as a local file system, enabling the following capabilities:
+The Mountpoint for Scality S3 Container Storage Interface (CSI) Driver allows your Kubernetes applications to access
+Scality S3 objects through a file system interface. Built on [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3),
+the Mountpoint CSI driver presents a Scality S3 bucket as a storage volume accessible by containers in your Kubernetes cluster.
+The Mountpoint CSI driver implements the [CSI](https://github.com/container-storage-interface/spec/blob/master/spec.md)
+specification for container orchestrators (CO) to manage storage volumes.
 
-- Mount S3 buckets as Kubernetes PersistentVolumes
-- Support for dynamic
-- Mount option configuration (read-only, prefix, etc.)
-- S3 object API integration
+## Features
+
+- **Static Provisioning** - Associate an existing S3 bucket with a
+  [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
+- **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted.
+  For Mountpoint-specific options, take a look at the [Mountpoint docs for configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md).
+
+Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may
+affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md)
+for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
+
+## Container Images
+
+| Driver Version | [GHCR Public](https://github.com/scality/mountpoint-s3-csi-driver/pkgs/container/mountpoint-s3-csi-driver) Image |
+|----------------|-----------------------------------------------------------------------------------------------------------------|
+| v0.1.0         | ghcr.io/scality/mountpoint-s3-csi-driver                                                                        |
+
+## Requirements
+
+### S3 Endpoint URL (Required)
+
+The S3 endpoint URL (`node.s3EndpointUrl`) is a **required** parameter when installing the CSI driver via Helm.
+This URL specifies the endpoint for your S3 service. The driver will not function without this parameter and the Helm
+installation will fail if it's not provided.
+
+Example:
+
+```bash
+helm install mountpoint-s3 ./charts/scality-mountpoint-s3-csi-driver \
+  --set node.s3EndpointUrl=https://s3.your-scality-cluster.com
+```
 
 ## Installation
-
-<!-- For detailed installation instructions, see the [deployment guide](./deployment.md). -->
 
 ```bash
 # Quick installation using Helm
@@ -40,16 +63,16 @@ parameters:
   # Add your parameters here
 ```
 
+## Compatibility
+
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0.
+The driver supports **x86-64** and **arm64** architectures.
+
 ## Documentation
 
-This directory contains documentation for the Scality Mountpoint S3 CSI Driver.
+For detailed configuration and advanced usage, see:
 
-The documentation is organized to provide clear guidance for installation, configuration, and usage of the CSI driver
-for integrating Scality S3 storage with Kubernetes clusters.
-
-For quick-start instructions and examples, see the main [README.md](../README.md) in the repository root, which
-includes basic installation steps and links to example configurations.
-
-<!-- - [Configuration Options](./configuration.md) -->
-<!-- - [Examples](./examples.md) -->
-<!-- - [Troubleshooting](./troubleshooting.md)  -->
+- [Configuration Options](CONFIGURATION.md)
+- [Logging Configuration](LOGGING.md)
+- [Installation Guide](install.md)
+- [Scality-specific Documentation](scality/README.md)

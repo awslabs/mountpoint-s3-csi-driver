@@ -48,3 +48,9 @@ repos:
         language: system
         files: ^charts/
         pass_filenames: false
+      - id: mkdocs-build
+        name: mkdocs build
+        entry: mkdocs build --strict
+        language: system
+        files: ^(mkdocs\.yml|docs/.*)$
+        pass_filenames: false
