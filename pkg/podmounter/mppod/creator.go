@@ -11,6 +11,7 @@ import (
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
 )
 
 // Labels populated on spawned Mountpoint Pods.
@@ -151,65 +152,103 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 		},
 	}
 
-	volumeAttributes := ExtractVolumeAttributes(pv)
-
-	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
-		mpPod.Spec.ServiceAccountName = saName
-	}
-
 	mpContainer := &mpPod.Spec.Containers[0]
+	volumeAttributes := ExtractVolumeAttributes(pv)
+	mountpointArgs := mountpoint.ParseArgs(pv.Spec.MountOptions)
 
-	{
-		resourceRequestsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsCpu]
-		resourceRequestsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsMemory]
-
-		if resourceRequestsCpu != "" || resourceRequestsMemory != "" {
-			mpContainer.Resources.Requests = make(corev1.ResourceList)
-
-			if resourceRequestsCpu != "" {
-				quantity, err := resource.ParseQuantity(resourceRequestsCpu)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsCpu, resourceRequestsCpu)
-				}
-				mpContainer.Resources.Requests[corev1.ResourceCPU] = quantity
-			}
-
-			if resourceRequestsMemory != "" {
-				quantity, err := resource.ParseQuantity(resourceRequestsMemory)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsMemory, resourceRequestsMemory)
-				}
-				mpContainer.Resources.Requests[corev1.ResourceMemory] = quantity
-			}
-		}
+	c.configureLocalCache(mpPod, mpContainer, mountpointArgs)
+	c.configureServiceAccount(mpPod, volumeAttributes)
+	if err := c.configureResourceRequests(mpContainer, volumeAttributes); err != nil {
+		return nil, err
 	}
-
-	{
-		resourceLimitsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsCpu]
-		resourceLimitsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsMemory]
-
-		if resourceLimitsCpu != "" || resourceLimitsMemory != "" {
-			mpContainer.Resources.Limits = make(corev1.ResourceList)
-
-			if resourceLimitsCpu != "" {
-				quantity, err := resource.ParseQuantity(resourceLimitsCpu)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsCpu, resourceLimitsCpu)
-				}
-				mpContainer.Resources.Limits[corev1.ResourceCPU] = quantity
-			}
-
-			if resourceLimitsMemory != "" {
-				quantity, err := resource.ParseQuantity(resourceLimitsMemory)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsMemory, resourceLimitsMemory)
-				}
-				mpContainer.Resources.Limits[corev1.ResourceMemory] = quantity
-			}
-		}
+	if err := c.configureResourceLimits(mpContainer, volumeAttributes); err != nil {
+		return nil, err
 	}
 
 	return mpPod, nil
+}
+
+// configureLocalCache configures necessary cache volumes for the pod and the container if its enabled.
+func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Container, args mountpoint.Args) {
+	if !args.Has(mountpoint.ArgCache) {
+		// Cache is not enabled
+		return
+	}
+
+	// TODO: Allow configuring size limit and medium of `emptyDir` volume.
+	mpPod.Spec.Volumes = append(mpPod.Spec.Volumes, corev1.Volume{
+		Name: LocalCacheDirName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+	mpContainer.VolumeMounts = append(mpContainer.VolumeMounts, corev1.VolumeMount{
+		Name:      LocalCacheDirName,
+		MountPath: filepath.Join("/", LocalCacheDirName),
+	})
+}
+
+// configureServiceAccount configures service account of the pod if its specified in the volume attributes.
+func (c *Creator) configureServiceAccount(mpPod *corev1.Pod, volumeAttributes map[string]string) {
+	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
+		mpPod.Spec.ServiceAccountName = saName
+	}
+}
+
+// configureResourceRequests configures resource requests of the container if its specified in the volume attributes.
+func (c *Creator) configureResourceRequests(mpContainer *corev1.Container, volumeAttributes map[string]string) error {
+	resourceRequestsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsCpu]
+	resourceRequestsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsMemory]
+
+	if resourceRequestsCpu != "" || resourceRequestsMemory != "" {
+		mpContainer.Resources.Requests = make(corev1.ResourceList)
+
+		if resourceRequestsCpu != "" {
+			quantity, err := resource.ParseQuantity(resourceRequestsCpu)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsCpu, resourceRequestsCpu)
+			}
+			mpContainer.Resources.Requests[corev1.ResourceCPU] = quantity
+		}
+
+		if resourceRequestsMemory != "" {
+			quantity, err := resource.ParseQuantity(resourceRequestsMemory)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsMemory, resourceRequestsMemory)
+			}
+			mpContainer.Resources.Requests[corev1.ResourceMemory] = quantity
+		}
+	}
+
+	return nil
+}
+
+// configureResourceLimits configures resource limits of the container if its specified in the volume attributes.
+func (c *Creator) configureResourceLimits(mpContainer *corev1.Container, volumeAttributes map[string]string) error {
+	resourceLimitsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsCpu]
+	resourceLimitsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsMemory]
+
+	if resourceLimitsCpu != "" || resourceLimitsMemory != "" {
+		mpContainer.Resources.Limits = make(corev1.ResourceList)
+
+		if resourceLimitsCpu != "" {
+			quantity, err := resource.ParseQuantity(resourceLimitsCpu)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsCpu, resourceLimitsCpu)
+			}
+			mpContainer.Resources.Limits[corev1.ResourceCPU] = quantity
+		}
+
+		if resourceLimitsMemory != "" {
+			quantity, err := resource.ParseQuantity(resourceLimitsMemory)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsMemory, resourceLimitsMemory)
+			}
+			mpContainer.Resources.Limits[corev1.ResourceMemory] = quantity
+		}
+	}
+
+	return nil
 }
 
 // ExtractVolumeAttributes extracts volume attributes from given `pv`.

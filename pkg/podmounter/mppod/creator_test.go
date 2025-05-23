@@ -1,6 +1,7 @@
 package mppod_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -59,17 +60,15 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
-		assert.Equals(t, []corev1.Volume{
-			{
-				Name: mppod.CommunicationDirName,
-				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{
-						Medium:    corev1.StorageMediumMemory,
-						SizeLimit: resource.NewQuantity(mppod.CommunicationDirSizeLimit, resource.BinarySI),
-					},
+		assert.Equals(t, &corev1.Volume{
+			Name: mppod.CommunicationDirName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium:    corev1.StorageMediumMemory,
+					SizeLimit: resource.NewQuantity(mppod.CommunicationDirSizeLimit, resource.BinarySI),
 				},
 			},
-		}, mpPod.Spec.Volumes)
+		}, findVolumeFromPod(mpPod, mppod.CommunicationDirName))
 		assert.Equals(t, &corev1.Affinity{
 			NodeAffinity: &corev1.NodeAffinity{
 				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
@@ -102,12 +101,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		}, mpPod.Spec.Containers[0].SecurityContext.SeccompProfile)
-		assert.Equals(t, []corev1.VolumeMount{
-			{
-				Name:      mppod.CommunicationDirName,
-				MountPath: "/" + mppod.CommunicationDirName,
-			},
-		}, mpPod.Spec.Containers[0].VolumeMounts)
+		assert.Equals(t, &corev1.VolumeMount{
+			Name:      mppod.CommunicationDirName,
+			MountPath: "/" + mppod.CommunicationDirName,
+		}, findVolumeMountFromContainer(mpPod.Spec.Containers[0], mppod.CommunicationDirName))
 	}
 
 	t.Run("Empty PV", func(t *testing.T) {
@@ -126,6 +123,50 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		assert.NoError(t, err)
 		verifyDefaultValues(mpPod)
+	})
+
+	t.Run("Mount Options", func(t *testing.T) {
+		t.Run("With cache", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+						},
+					},
+					MountOptions: []string{
+						"cache /mnt/mp-cache",
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+
+			cacheVol := findVolumeFromPod(mpPod, mppod.LocalCacheDirName)
+			if cacheVol == nil {
+				t.Fatalf("pod should have a cache volume with name %q", mppod.LocalCacheDirName)
+			}
+			assert.Equals(t, &corev1.Volume{
+				Name: mppod.LocalCacheDirName,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			}, cacheVol)
+
+			mpContainer := mpPod.Spec.Containers[0]
+			cacheMount := findVolumeMountFromContainer(mpContainer, mppod.LocalCacheDirName)
+			if cacheMount == nil {
+				t.Fatalf("container should have a cache mount with name %q", mppod.LocalCacheDirName)
+			}
+			assert.Equals(t, &corev1.VolumeMount{
+				Name:      mppod.LocalCacheDirName,
+				MountPath: filepath.Join("/", mppod.LocalCacheDirName),
+			}, cacheMount)
+		})
 	})
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
@@ -297,4 +338,22 @@ func TestCreatingMountpointPods(t *testing.T) {
 
 func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
 	createAndVerifyPod(t, cluster.OpenShift, (*int64)(nil))
+}
+
+func findVolumeMountFromContainer(container corev1.Container, name string) *corev1.VolumeMount {
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == name {
+			return &vm
+		}
+	}
+	return nil
+}
+
+func findVolumeFromPod(pod *corev1.Pod, name string) *corev1.Volume {
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == name {
+			return &v
+		}
+	}
+	return nil
 }
