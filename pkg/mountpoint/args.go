@@ -22,6 +22,7 @@ const (
 	ArgFileMode        = "--file-mode"
 	ArgDebug           = "--debug"
 	ArgDebugCRT        = "--debug-crt"
+	ArgFsTab           = "-o"
 )
 
 // An ArgKey represents the key of an argument.
@@ -82,7 +83,7 @@ func ParseArgs(passedArgs []string) Args {
 
 		// disallow options that don't make sense in CSI
 		switch key {
-		case "--foreground", "-f", "--help", "-h", "--version", "-v":
+		case "--foreground", "-f", "--help", "-h", "--version", "-v", "--run-as-user":
 			continue
 		}
 

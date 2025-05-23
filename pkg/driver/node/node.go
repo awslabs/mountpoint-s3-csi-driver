@@ -124,6 +124,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	args := mountpoint.ParseArgs(mountpointArgs)
 
+	if args.Has(mountpoint.ArgFsTab) {
+		return nil, status.Error(codes.InvalidArgument, "Running mount-s3 with mount flag -o is not supported in CSI Driver.")
+	}
+
 	fsGroup := ""
 	pvMountOptions := ""
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {

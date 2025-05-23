@@ -167,6 +167,34 @@ func TestNodePublishVolume(t *testing.T) {
 			},
 		},
 		{
+			name: "fail: fstab style option is present",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags: []string{"-o rw,nosuid,nodev,allow-other"},
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					TargetPath:    targetPath,
+					VolumeContext: map[string]string{"bucketName": bucketName},
+				}
+
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err == nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
 			name: "success: foreground option is removed",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
@@ -197,6 +225,48 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--test=123"})),
+					gomock.Eq(""),
+					gomock.Eq(""),
+				).Return(nil)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume is failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: --run-as-user option is removed",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId: volumeId,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								MountFlags: []string{"--run-as-user=test"},
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+					VolumeContext: map[string]string{"bucketName": bucketName},
+					TargetPath:    targetPath,
+					Readonly:      true,
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID:             volumeId,
+						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})),
 					gomock.Eq(""),
 					gomock.Eq(""),
 				).Return(nil)
