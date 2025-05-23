@@ -40,6 +40,9 @@ E2E_KUBECONFIG?=""
 # Kubernetes version to use in envtest for controller tests.
 ENVTEST_K8S_VERSION ?= 1.30.x
 
+# Virtual environment activation
+venv := .venv/bin/activate
+
 .EXPORT_ALL_VARIABLES:
 
 .PHONY: bin
@@ -79,6 +82,20 @@ fmt:
 validate-helm:
 	@echo "Validating Helm charts..."
 	@tests/helm/validate_charts.sh
+
+################################################################
+# Documentation commands
+################################################################
+
+.PHONY: docs
+docs:
+	@echo "Building documentation and starting server (strict mode)..."
+	source $(venv) && mkdocs build --strict && mkdocs serve
+
+.PHONY: docs-clean
+docs-clean:
+	@echo "Cleaning documentation build artifacts..."
+	rm -rf site/
 
 # Run controller tests with envtest.
 .PHONY: controller-integration-test
