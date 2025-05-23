@@ -1,11 +1,57 @@
-# E2E Scripts for Scality CSI Driver
+# E2E Test Scripts
 
-This directory contains scripts for end-to-end testing of the Scality CSI driver.
+These scripts provide automation for installing, testing, and managing the Scality S3 CSI Driver in Kubernetes environments.
+
+## Scripts
+
+- `install`: Installs and verifies the CSI driver with the given parameters
+- `test`: Runs end-to-end tests on an already installed CSI driver
+- `uninstall`: Removes the CSI driver from the cluster
+- `all`: Combines install, test, and uninstall operations
+- `go-test`: Runs only the Go-based end-to-end tests
+
+## Quick Examples
+
+Start a documentation server:
+
+```bash
+# From project root
+mkdocs serve
+```
+
+This will start a development server at <http://localhost:8000> with live reloading for documentation changes.
+
+For complete usage instructions and examples, see the main project documentation and the individual script help output
+(`./run.sh <command> --help`).
+
+## Script Organization
+
+### Core Automation Scripts
+
+- `run.sh`: Main entry point that delegates to specific operation scripts
+- `install.sh`: Handles CSI driver installation with validation
+- `test.sh`: Executes test suites with configurable parameters
+- `cleanup.sh`: Provides cleanup and uninstall functionality
+
+### Module System
+
+The scripts use a modular design with shared functionality in the `modules/` directory:
+
+- `validation.sh`: Input validation and prerequisite checking
+- `k8s.sh`: Kubernetes cluster interaction utilities  
+- `s3.sh`: S3 endpoint validation and bucket operations
+- `logging.sh`: Consistent logging and error reporting
+
+### Configuration Files
+
+- `config/`: Default configuration templates
+- `templates/`: YAML templates for Kubernetes resources
 
 ## Current Structure
 
 The main entry point is `run.sh` which supports the following commands:
-- `install`: Installs and verifies the CSI driver 
+
+- `install`: Installs and verifies the CSI driver
 - `test`: Runs end-to-end tests
 - `go-test`: Runs only Go-based tests directly (skips verification checks)
 - `all`: Installs the driver and runs tests
@@ -16,7 +62,7 @@ The main entry point is `run.sh` which supports the following commands:
 
 For tests that interact with S3, the following parameters are required:
 
-- `--endpoint-url`: S3 endpoint URL (e.g., http://localhost:8000)
+- `--endpoint-url`: S3 endpoint URL (e.g., <http://localhost:8000>)
 - `--access-key-id`: S3 access key for authentication
 - `--secret-access-key`: S3 secret key for authentication, S3 endpoint should be operational
 
@@ -36,7 +82,7 @@ These parameters must be passed to both the `install` and `test` commands separa
 
 Scripts in this directory can be called directly or from the Makefile targets.
 
-### Direct script usage:
+### Direct script usage
 
 ```bash
 # Install the driver
@@ -52,7 +98,7 @@ Scripts in this directory can be called directly or from the Makefile targets.
 ./run.sh all --endpoint-url http://localhost:8000 --access-key-id accessKey1 --secret-access-key verySecretKey1
 ```
 
-### Using Makefile targets:
+### Using Makefile targets
 
 ```bash
 # Install the driver

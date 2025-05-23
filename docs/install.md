@@ -3,7 +3,7 @@
 ## Prerequisites
 
 <!-- TODO(S3CSI-17) Add minimum supported kubernetes version -->
-* Kubernetes Version >=
+- Kubernetes Version >=
 
 ## Installation
 
@@ -20,13 +20,15 @@ You may deploy the Mountpoint for Amazon S3 CSI driver via Kustomize, Helm.
 <!-- TODO(S3CSI-18): Support Kustomize deployment anbd update docs -->
 
 > [!WARNING]
-> Using the main branch to deploy the driver is not supported. The main branch may contain upcoming features incompatible with the currently released stable version of the driver.
+> Using the main branch to deploy the driver is not supported. The main branch may contain upcoming features
+> incompatible with the currently released stable version of the driver.
 
 #### Helm
 
 <!-- TODO(S3CSI-17): Add helm installation steps -->
 
-Review the [configuration values](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/charts/scality-mountpoint-s3-csi-driver/values.yaml) for the Helm chart.
+Review the [configuration values](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/charts/scality-mountpoint-s3-csi-driver/values.yaml)
+for the Helm chart.
 
 > [!IMPORTANT]
 > The S3 endpoint URL (`node.s3EndpointUrl`) is a **required** parameter when installing the CSI driver via Helm.
@@ -34,7 +36,7 @@ Review the [configuration values](https://github.com/scality/mountpoint-s3-csi-d
 
 Example installation with the required S3 endpoint URL:
 
-```sh
+```bash
 helm install scality-mountpoint-s3-csi-driver ./charts/scality-mountpoint-s3-csi-driver \
   --namespace kube-system \
   --set node.s3EndpointUrl=https://s3.your-scality-cluster.com
@@ -42,7 +44,7 @@ helm install scality-mountpoint-s3-csi-driver ./charts/scality-mountpoint-s3-csi
 
 #### Once the driver has been deployed, verify the pods are running
 
-```sh
+```bash
 kubectl get pods -n kube-system -l app.kubernetes.io/name=scality-mountpoint-s3-csi-driver
 ```
 
@@ -54,12 +56,12 @@ Follow the [README for examples](https://github.com/scality/mountpoint-s3-csi-dr
 
 #### Helm
 
-```
+```bash
 helm uninstall scality-mountpoint-s3-csi-driver --namespace kube-system
 ```
 
 #### Kustomize
 
-```
+```bash
 kubectl delete -k "github.com/scality/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/?ref=<YOUR-CSI-DRIVER-VERION-NUMBER>"
 ```

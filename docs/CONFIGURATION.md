@@ -90,7 +90,7 @@ configurable with the `--namespace` helm parameter.
 These keys are only read on startup, so must be in place before the driver starts.
 The following snippet can be used to create these secrets in the cluster:
 
-```
+```bash
 kubectl create secret generic aws-secret \
     --namespace kube-system \
     --from-literal "key_id=${AWS_ACCESS_KEY_ID}" \
