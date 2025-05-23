@@ -1,68 +1,58 @@
-# Credential Provider for Mountpoint S3 CSI Driver
+# CSI Driver Credential Provider
 
-This package provides mechanisms for obtaining and managing AWS credentials for the Mountpoint S3 CSI Driver. It acts as a credential broker between various authentication sources and the Mountpoint S3 binary.
+This package provides the interface between the CSI Driver and the credential providers that can authenticate to S3.
+These credential providers work by implementing the `CredentialProvider` interface.
 
-## Overview
+## Architecture
 
-The credential provider system is responsible for:
+```mermaid
+graph TD;
+    PodStartsUp[Pod Starting Up] --> PodSpecification{Pod Specification}
 
-1. Obtaining AWS credentials from various sources
-2. Formatting them in a way Mountpoint S3 can understand
-3. Making them available to the Mountpoint process (whether via systemd or pod)
-4. Cleaning up credentials after unmounting
+    PodSpecification --> |Static Auth| StaticAuth[Use Static Credentials\ndefined in pod]
+    PodSpecification --> |IRSA| IRSA[Use IRSA to authenticate\nto AWS via STS]
 
-## Authentication Sources
+    StaticAuth --> VerifyCredentials{Verify S3 credentials}
+    IRSA --> VerifyCredentials{Verify S3 credentials}
 
-The driver supports two authentication sources, controlled via the `authenticationSource` volume attribute:
+    VerifyCredentials --> |"Failed"| FailPodStartup[Fail Pod Startup]
+    VerifyCredentials --> |"Succeeded"| PassToMountpoint[Pass credentials to Mountpoint]
 
-- `driver` (default): Uses credentials from the CSI driver's environment
-- `secret`: Uses credentials from a Kubernetes secret
-
-## Key Components
-
-### Provider
-
-The main entry point is the `Provider` struct, which offers two primary methods:
-
-- `Provide(ctx, provideCtx)`: Obtains credentials based on the authentication source
-- `Cleanup(cleanupCtx)`: Cleans up credential files after unmounting
-
-### AWS Profile Package
-
-The `awsprofile` subpackage handles creating and managing AWS credential files in the standard format:
-
-```
-[profile-name]
-aws_access_key_id=XXXX
-aws_secret_access_key=YYYY
-aws_session_token=ZZZZ (optional)
+    PassToMountpoint --> StartMountpoint[Start Mountpoint]
 ```
 
-It creates unique profile names and file paths for each volume mount to ensure isolation.
+## Credential Providers
 
-## Credential Flow
+The CSI Driver includes several credential providers:
 
-### SystemdMounter
+### `AwsProfile`
 
-1. Writes credentials to `/csi` in the CSI driver pod (maps to host path)
-2. Passes environment variables to the systemd service with paths to credential files
-3. The systemd service runs Mountpoint with access to these credentials
+Credentials provider that sources credentials by parsing an AWS Profile.
 
-## Implementation Details
+### `EnvCredentials`
 
-- Credentials are stored in files with 0640 permissions (CredentialFilePerm)
-- Directory permissions are set to 0750 (CredentialDirPerm)
-- Each mount gets a unique credential file path based on pod ID and volume ID
-- Volume-level AWS profile flags (--profile) are not supported and stripped from mount options
+Credentials provider that sources credentials from environment variables.
 
-## Cleanup Process
+## How it works
 
-On unmount:
-1. The driver calls `credProvider.Cleanup()` 
-2. This removes any credential files created for that specific volume
-3. This prevents credential leakage between mounts
+The credential provider interface is the method used by the CSI driver to interact with the credential providers:
 
-## Important Notes
+```go
+type CredentialProvider interface {
+    Retrieve(ctx context.Context) (*Credentials, error)
+}
+```
 
-- The AWS profile mechanism is used internally by the CSI driver even though `--profile` as a mount option is not supported
-- When using the SystemdMounter, credential files are created in the CSI driver pod but accessible from the host system 
+The CSI driver determines which credential provider to use based on the volume configuration and instantiates the
+appropriate provider. It then calls `Retrieve()` to get the credentials for that volume.
+
+## Adding new credential providers
+
+To add a new credential provider:
+
+1. The driver calls `credProvider.Retrieve(ctx)` to get credentials  
+2. The credential provider returns a `Credentials` struct with the access key, secret key, and optional session token  
+3. The CSI driver uses these credentials to mount the S3 bucket  
+
+The credential provider can source these credentials from any location (environment variables, files, external services, etc.)
+as long as it implements the `CredentialProvider` interface.

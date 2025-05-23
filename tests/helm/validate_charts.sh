@@ -121,7 +121,7 @@ validate_s3_region() {
 # Example:
 # validate_resource_limits() {
 #   local chart_dir="$CHARTS_DIR/scality-mountpoint-s3-csi-driver"
-#   
+#
 #   # Check if resource limits are set properly
 #   ...
 # }
@@ -152,7 +152,7 @@ main() {
 
   # If no specific validation was requested, run all validations
   local errors=0
-  
+
   # Run all validations
   run_validation "Custom S3 endpoint URL can be specified" validate_custom_endpoint || ((errors++))
   run_validation "S3 region configuration" validate_s3_region || ((errors++))

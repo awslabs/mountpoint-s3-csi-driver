@@ -43,6 +43,7 @@ When installing, you must provide these values:
 - `SECRET_ACCESS_KEY`: S3 secret key
 
 Example:
+
 ```bash
 make csi-install \
   S3_ENDPOINT_URL=https://s3.example.com \
@@ -60,6 +61,7 @@ make csi-install \
 - `ADDITIONAL_ARGS`: Any extra arguments to pass to the script
 
 Example with options:
+
 ```bash
 make csi-install \
   CSI_IMAGE_TAG=v1.14.0 \
@@ -81,7 +83,8 @@ When you set `VALIDATE_S3=true`, the script will perform validation checks befor
    - Validates that your access key and secret key work correctly
    - Shows available buckets if successful
 
-If AWS CLI is not installed, only the endpoint connectivity will be validated, but the credentials cannot be checked. The installation will proceed with a warning that credential issues might occur later.
+If AWS CLI is not installed, only the endpoint connectivity will be validated, but the credentials cannot be checked.
+The installation will proceed with a warning that credential issues might occur later.
 
 ## Common Scality Configurations
 
@@ -176,6 +179,7 @@ make csi-uninstall-force
 ### Can't Connect to S3 Endpoint
 
 **What to check:**
+
 - Is the S3 endpoint URL correct?
 - Is there network connectivity to the endpoint?
 - Are you using the right protocol (http:// or https://)?
@@ -183,6 +187,7 @@ make csi-uninstall-force
 ### Authentication Problems
 
 **What to check:**
+
 - Double-check your access key and secret key
 - Verify the credentials work with other S3 tools
 - Check if your credentials have expired
@@ -190,6 +195,7 @@ make csi-uninstall-force
 ### Pods Won't Start
 
 **What to check:**
+
 - View pod status: `kubectl get pods -n mount-s3`
 - Check pod details: `kubectl describe pods -n mount-s3`
 - Look at logs: `kubectl logs -n mount-s3 <pod-name> -c s3-driver`

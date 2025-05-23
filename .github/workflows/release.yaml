@@ -57,7 +57,7 @@ jobs:
 
       - name: Show the helm chart
         run: helm show all oci://ghcr.io/${{ github.repository }}/helm-charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }}
-  
+
       - name: Template the helm chart
         run: helm template oci://ghcr.io/${{ github.repository }}/helm-charts/scality-mountpoint-s3-csi-driver --version ${{ inputs.tag }}
 

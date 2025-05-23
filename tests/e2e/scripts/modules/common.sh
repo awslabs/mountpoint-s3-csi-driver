@@ -31,7 +31,7 @@ fatal() {
 exec_cmd() {
   # Execute the command
   "$@"
-  
+
   # Return the exit code from the command
   return $?
 }
@@ -39,33 +39,33 @@ exec_cmd() {
 # Check for required tools
 check_dependencies() {
   log "Checking dependencies..."
-  
+
   local missing_deps=0
-  
+
   if ! command -v kubectl &> /dev/null; then
     error "kubectl is not installed. Please install it first."
     missing_deps=1
   fi
-  
+
   if ! command -v helm &> /dev/null; then
     error "Helm is not installed. Please install it first."
     missing_deps=1
   fi
-  
+
   if ! command -v curl &> /dev/null; then
     error "curl is not installed. It's required for basic endpoint validation."
     missing_deps=1
   fi
-  
+
   if ! command -v aws &> /dev/null; then
     warn "AWS CLI is not installed. Only endpoint connectivity will be validated."
     warn "Credentials (access key and secret key) cannot be validated without AWS CLI."
   fi
-  
+
   if [ $missing_deps -ne 0 ]; then
     fatal "Missing dependencies. Please install required tools before proceeding."
   fi
-  
+
   log "All critical dependencies are installed."
 }
 

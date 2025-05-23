@@ -223,7 +223,7 @@ parse_test_parameters() {
   if [[ -n "$ACCESS_KEY_ID" && ! "$params" =~ "--access-key-id" ]]; then
     params="$params --access-key-id $ACCESS_KEY_ID"
   fi
-  
+
   if [[ -n "$SECRET_ACCESS_KEY" && ! "$params" =~ "--secret-access-key" ]]; then
     params="$params --secret-access-key $SECRET_ACCESS_KEY"
   fi
@@ -285,7 +285,7 @@ main() {
 
       # Get namespace parameter
       local namespace_param=$(get_namespace_param "$@")
-      
+
       # Extract installation related arguments, exclude the test-specific arguments
       local install_args=""
       local test_args=""
@@ -301,7 +301,7 @@ main() {
       # Separate install and test args with a while loop that properly handles shifts
       while [[ $# -gt 0 ]]; do
         arg="$1"
-        
+
         # Check for JUnit report param with equals sign format
         if [[ "$arg" == --junit-report=* ]]; then
           test_args="$test_args $arg"
