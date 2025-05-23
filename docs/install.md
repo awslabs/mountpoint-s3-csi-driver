@@ -17,7 +17,7 @@ You may deploy the Mountpoint for Amazon S3 CSI driver via Kustomize, Helm.
 
 #### Kustomize
 
-<!-- TODO(S3CSI-18): Support Kustomize deployment anbd update docs -->
+<!-- TODO(S3CSI-18): Support Kustomize deployment and update docs -->
 
 > [!WARNING]
 > Using the main branch to deploy the driver is not supported. The main branch may contain upcoming features

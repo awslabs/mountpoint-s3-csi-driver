@@ -15,7 +15,7 @@ import (
 
 func TestMountOptions(t *testing.T) {
 	// Go returns `invalid argument` errors if you try to do `net.Listen()` or `net.Dial()` with a Unix socket
-	// path thats longer than 108 characters by default. We're trying to use relative paths if that's the case
+	// path that's longer than 108 characters by default. We're trying to use relative paths if that's the case
 	// to make the socket paths shorter. Here we add test cases for both short and long Unix socket paths.
 	// See https://github.com/golang/go/issues/6895 for more details.
 
