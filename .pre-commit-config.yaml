@@ -16,6 +16,10 @@ repos:
     hooks:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+      - id: check-yaml
+        args: [--allow-multiple-documents, --unsafe]
+        # Exclude Helm charts templates
+        exclude: ^charts/.*/templates/.*\.yaml$
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1  # Latest stable version as of January 2025
@@ -34,3 +38,9 @@ repos:
     hooks:
       - id: lychee
         args: [--config, .lychee.toml]
+
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.23
+    hooks:
+      - id: helmlint
+        files: ^charts/.*\.yaml$
