@@ -50,6 +50,12 @@ jobs:
         # This saves 4 mins of CI time
         SKIP: ${{ matrix.test == 'precommit' && 'golangci-lint-fmt,golangci-lint' || '' }}
 
+    - name: Run golangci-lint
+      if: matrix.test == 'lint'
+      uses: golangci/golangci-lint-action@v8
+      with:
+        version: v2.1.6
+
     - name: Upload unit test coverage to Codecov
       if: matrix.test == 'unit-test'
       continue-on-error: true
