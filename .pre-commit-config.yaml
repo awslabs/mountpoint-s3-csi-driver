@@ -48,11 +48,17 @@ repos:
 
       # Go formatting tools (gofmt, goimports, gofumpt)
       # These run before linting to ensure code is properly formatted
+      # Matches CI formatting checks exactly to prevent CI failures
       #
-      # To install formatting tools:
-      # go install golang.org/x/tools/cmd/goimports@latest
-      # go install mvdan.cc/gofumpt@latest
-      # gofmt comes with Go by default
+      # REQUIRED: Install formatting tools locally (run once):
+      # go install golang.org/x/tools/cmd/goimports@latest  # Organizes imports
+      # go install mvdan.cc/gofumpt@latest                  # Stricter gofmt
+      # gofmt comes with Go by default                      # Basic formatting
+      #
+      # To fix formatting issues manually:
+      # gofmt -w .      # Fix basic formatting
+      # goimports -w .  # Fix imports and formatting
+      # gofumpt -w .    # Apply strict formatting rules
       - id: go-fmt-imports-fumpt
         name: go formatting (gofmt, goimports, gofumpt)
         entry: |
