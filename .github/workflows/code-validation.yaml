@@ -46,15 +46,45 @@ jobs:
     - name: Run ${{ matrix.test }}
       run: make ${{ matrix.test }}
       env:
-        # Skip golangci-lint hooks in precommit test since we just run them locally
+        # Skip golangci-lint hooks in precommit test since we run them separately in the 'lint' job
         # This saves 4 mins of CI time
-        SKIP: ${{ matrix.test == 'precommit' && 'golangci-lint-fmt,golangci-lint' || '' }}
+        SKIP: ${{ matrix.test == 'precommit' && 'golangci-lint,go-fmt-imports-fumpt' || '' }}
 
     - name: Run golangci-lint
       if: matrix.test == 'lint'
       uses: golangci/golangci-lint-action@v8
       with:
         version: v2.1.6
+
+    - name: Check Go formatting
+      if: matrix.test == 'lint'
+      run: |
+        # Install formatting tools
+        go install golang.org/x/tools/cmd/goimports@latest
+        go install mvdan.cc/gofumpt@latest
+
+        # Check gofmt (built into Go)
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "❌ gofmt issues found:"
+          gofmt -l .
+          exit 1
+        fi
+
+        # Check goimports
+        if [ -n "$(goimports -l .)" ]; then
+          echo "❌ goimports issues found:"
+          goimports -l .
+          exit 1
+        fi
+
+        # Check gofumpt
+        if [ -n "$(gofumpt -l .)" ]; then
+          echo "❌ gofumpt issues found:"
+          gofumpt -l .
+          exit 1
+        fi
+
+        echo "✅ All formatting checks passed!"
 
     - name: Upload unit test coverage to Codecov
       if: matrix.test == 'unit-test'
