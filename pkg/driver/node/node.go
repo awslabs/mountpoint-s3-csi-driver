@@ -143,7 +143,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
 	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args); err != nil {
-		os.Remove(target)
+		_ = os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}
 	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
@@ -278,7 +278,7 @@ func credentialCleanupContextFromUnpublishRequest(req *csi.NodeUnpublishVolumeRe
 func podIDFromTargetPath(target string) (string, bool) {
 	targetPath, err := targetpath.Parse(target)
 	if err != nil {
-		klog.V(4).Infof("Failed to parse target path %s: %v", target, err)
+		klog.V(4).Infof("failed to parse target path %s: %v", target, err)
 		return "", false
 	}
 	return targetPath.PodID, true

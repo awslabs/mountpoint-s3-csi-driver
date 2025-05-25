@@ -42,7 +42,7 @@ func main() {
 
 	mgr, err := manager.New(client, manager.Options{})
 	if err != nil {
-		log.Error(err, "Failed to create a new manager")
+		log.Error(err, "failed to create a new manager")
 		os.Exit(1)
 	}
 
@@ -59,12 +59,12 @@ func main() {
 		ClusterVariant:   cluster.DetectVariant(client, log),
 	}).SetupWithManager(mgr)
 	if err != nil {
-		log.Error(err, "Failed to create controller")
+		log.Error(err, "failed to create controller")
 		os.Exit(1)
 	}
 
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
-		log.Error(err, "Failed to start manager")
+		log.Error(err, "failed to start manager")
 		os.Exit(1)
 	}
 }

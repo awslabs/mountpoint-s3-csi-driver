@@ -43,8 +43,12 @@ func main() {
 	klog.InitFlags(nil)
 	// Set logging to stderr false otherwise klog won't call our logger set via
 	// `klog.SetOutput` - which also logs to stderr after escaping newlines.
-	flag.Set("logtostderr", "false")
-	flag.Set("alsologtostderr", "false")
+	if err := flag.Set("logtostderr", "false"); err != nil {
+		klog.Fatalf("failed to set logtostderr flag: %s", err)
+	}
+	if err := flag.Set("alsologtostderr", "false"); err != nil {
+		klog.Fatalf("failed to set alsologtostderr flag: %s", err)
+	}
 	flag.Parse()
 
 	klog.SetOutput(&newlineEscapingStderrWriter{})

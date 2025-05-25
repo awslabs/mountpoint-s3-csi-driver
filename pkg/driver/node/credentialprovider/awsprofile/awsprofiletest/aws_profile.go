@@ -71,7 +71,11 @@ func readIniFile(path string) (map[string]map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		// In this case we'll ignore the close error since it's a read operation
+		// and the data has already been processed
+		_ = file.Close()
+	}()
 
 	profiles := make(map[string]map[string]string)
 	scanner := bufio.NewScanner(file)

@@ -75,13 +75,13 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		// does not exist, create the directory
 		if os.IsNotExist(mountpointErr) {
 			if err := os.MkdirAll(target, 0o755); err != nil {
-				return fmt.Errorf("Failed to create target directory: %w", err)
+				return fmt.Errorf("failed to create target directory: %w", err)
 			}
 			cleanupDir = true
 			defer func() {
 				if cleanupDir {
 					if err := os.Remove(target); err != nil {
-						klog.V(4).Infof("Mount: Failed to delete target dir: %s.", target)
+						klog.V(4).Infof("Mount: failed to delete target dir: %s.", target)
 					}
 				}
 			}()
@@ -94,14 +94,14 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				PodID:     credentialCtx.PodID,
 				VolumeID:  credentialCtx.VolumeID,
 			}); mntErr != nil {
-				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, mountpointErr, mntErr)
+				return fmt.Errorf("unable to unmount the target %q : %v, %v", target, mountpointErr, mntErr)
 			}
 		}
 	}
 
 	isMountPoint, err := m.IsMountPoint(target)
 	if err != nil {
-		return fmt.Errorf("Could not check if %q is a mount point: %v, %v", target, mountpointErr, err)
+		return fmt.Errorf("could not check if %q is a mount point: %v, %v", target, mountpointErr, err)
 	}
 
 	// If a credential‑provider is configured, fetch credentials; otherwise continue
@@ -112,7 +112,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 		var cerr error
 		credEnv, authenticationSource, cerr = m.credProvider.Provide(ctx, credentialCtx)
 		if cerr != nil {
-			klog.V(4).Infof("NodePublishVolume: Failed to provide credentials for %s: %v", target, cerr)
+			klog.V(4).Infof("NodePublishVolume: failed to provide credentials for %s: %v", target, cerr)
 			return cerr
 		}
 	}
@@ -172,7 +172,7 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 
 	if m.credProvider != nil {
 		if cleanupErr := m.credProvider.Cleanup(credentialCtx); cleanupErr != nil {
-			klog.V(4).Infof("Unmount: Failed to clean up credentials for %s: %v", target, cleanupErr)
+			klog.V(4).Infof("Unmount: failed to clean up credentials for %s: %v", target, cleanupErr)
 		}
 	}
 

@@ -25,16 +25,6 @@ const (
 	testProfilePrefix = testPodID + "-" + testVolumeID + "-"
 )
 
-const (
-	testPodLevelServiceAccountToken    = testPodID + "-" + testVolumeID + ".token"
-	testDriverLevelServiceAccountToken = "token"
-)
-
-const (
-	testPodServiceAccount = "test-sa"
-	testPodNamespace      = "test-ns"
-)
-
 const testEnvPath = "/test-env"
 
 func TestProvidingDriverLevelCredentials(t *testing.T) {

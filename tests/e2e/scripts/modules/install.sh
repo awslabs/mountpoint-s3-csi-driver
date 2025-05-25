@@ -38,7 +38,7 @@ validate_s3_configuration() {
         log "Available buckets:"
         cat "$temp_output"
       else
-        error "Failed to validate AWS credentials. Error details:"
+        error "failed to validate AWS credentials. Error details:"
         cat "$temp_output"
         log "Please check your access key and secret key."
         rm -f "$temp_output"
@@ -63,7 +63,7 @@ validate_s3_configuration() {
     rm -f "$temp_output"
     return 0
   else
-    error "Failed to connect to S3 endpoint (HTTP code: $http_code)"
+    error "failed to connect to S3 endpoint (HTTP code: $http_code)"
     log "Please check if the endpoint URL is correct and the S3 service is running."
     cat "$temp_output"
     rm -f "$temp_output"

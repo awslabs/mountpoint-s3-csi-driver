@@ -65,7 +65,7 @@ uninstall_csi_driver() {
     # Uninstall the Helm release
     log "Uninstalling Helm release scality-s3-csi from namespace $NAMESPACE..."
     if ! exec_cmd helm uninstall scality-s3-csi -n $NAMESPACE; then
-      error "Failed to uninstall Helm release from namespace $NAMESPACE. Error code: $ERROR_HELM_UNINSTALL"
+      error "failed to uninstall Helm release from namespace $NAMESPACE. Error code: $ERROR_HELM_UNINSTALL"
       if [ "$FORCE" = true ]; then
         warn "Force mode enabled. Continuing with uninstallation despite Helm uninstall failure."
       else
@@ -81,12 +81,12 @@ uninstall_csi_driver() {
   if exec_cmd kubectl get secret aws-secret -n $NAMESPACE &> /dev/null; then
     log "Deleting AWS credentials secret from namespace $NAMESPACE..."
     if ! exec_cmd kubectl delete secret aws-secret -n $NAMESPACE; then
-      error "Failed to delete AWS credentials secret from namespace $NAMESPACE. Error code: $ERROR_SECRET_DELETE"
+      error "failed to delete AWS credentials secret from namespace $NAMESPACE. Error code: $ERROR_SECRET_DELETE"
       if [ "$FORCE" = true ]; then
         warn "Force mode enabled. Continuing with uninstallation despite secret deletion failure."
       else
         # Non-fatal error, just warn but don't exit
-        warn "Failed to delete AWS credentials secret. You may need to delete it manually."
+        warn "failed to delete AWS credentials secret. You may need to delete it manually."
       fi
     else
       log "AWS credentials secret deleted successfully from namespace $NAMESPACE."
@@ -100,7 +100,7 @@ uninstall_csi_driver() {
   if [ "$IS_CUSTOM_NAMESPACE" = true ] && [ "$DELETE_NS" = true -o "$FORCE" = true ]; then
     log "Deleting custom namespace $NAMESPACE..."
     if ! exec_cmd kubectl delete namespace $NAMESPACE --timeout=60s; then
-      error "Failed to delete namespace $NAMESPACE. Error code: $ERROR_NS_DELETE"
+      error "failed to delete namespace $NAMESPACE. Error code: $ERROR_NS_DELETE"
       warn "You may need to manually delete stuck resources in the namespace."
       if [ "$FORCE" = true ]; then
         warn "Continuing with uninstallation despite namespace deletion failure."
@@ -116,7 +116,7 @@ uninstall_csi_driver() {
     if [[ "$DELETE_NAMESPACE" =~ ^[Yy]$ ]]; then
       log "Deleting namespace $NAMESPACE..."
       if ! exec_cmd kubectl delete namespace $NAMESPACE --timeout=60s; then
-        error "Failed to delete namespace $NAMESPACE. Error code: $ERROR_NS_DELETE"
+        error "failed to delete namespace $NAMESPACE. Error code: $ERROR_NS_DELETE"
         return $ERROR_NS_DELETE
       else
         log "Namespace $NAMESPACE deleted successfully."
@@ -138,7 +138,7 @@ uninstall_csi_driver() {
     if [ "$FORCE" = true ]; then
       log "Force mode enabled. Deleting CSI driver s3.csi.scality.com..."
       if ! exec_cmd kubectl delete csidriver s3.csi.scality.com; then
-        error "Failed to delete CSI driver. Error code: $ERROR_CSI_DELETE"
+        error "failed to delete CSI driver. Error code: $ERROR_CSI_DELETE"
         warn "You may need to manually delete the CSI driver registration."
         return $ERROR_CSI_DELETE
       else

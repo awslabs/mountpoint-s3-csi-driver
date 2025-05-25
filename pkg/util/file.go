@@ -17,7 +17,9 @@ func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("replace-file: failed to create a temporary file at the destination directory %q: %w", destPath, err)
 	}
-	defer destFile.Close()
+	defer func() {
+		_ = destFile.Close()
+	}()
 
 	// `os.CreateTemp` always creates files with 0600 permission, we need to change it before we write to it.
 	err = destFile.Chmod(perm)
@@ -29,7 +31,9 @@ func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
+	defer func() {
+		_ = sourceFile.Close()
+	}()
 
 	buf := make([]byte, 64*1024)
 	_, err = io.CopyBuffer(destFile, sourceFile, buf)

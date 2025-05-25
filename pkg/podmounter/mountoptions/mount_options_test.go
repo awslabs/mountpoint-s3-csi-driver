@@ -48,7 +48,9 @@ func TestMountOptions(t *testing.T) {
 func testRoundtrip(t *testing.T, mountSock string) {
 	file, err := os.Open(os.DevNull)
 	assert.NoError(t, err)
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	wantStat := &syscall.Stat_t{}
 	err = syscall.Fstat(int(file.Fd()), wantStat)

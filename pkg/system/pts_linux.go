@@ -24,29 +24,29 @@ func (p *OsPts) NewPts() (io.ReadCloser, int, error) {
 	}
 	ptsMaster, err := os.Open(ptmxPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Failed to open tty: %w", err)
+		return nil, 0, fmt.Errorf("failed to open tty: %w", err)
 	}
 	success := false
 	defer func() {
 		if !success {
-			ptsMaster.Close()
+			_ = ptsMaster.Close()
 		}
 	}()
 	// grantpt ioctl to allow mount-s3 process access to the pts
 	var n uintptr // dummy int for ioctl
 	if err = unix.IoctlSetInt(int(ptsMaster.Fd()), unix.TIOCGPTN, int(uintptr(unsafe.Pointer(&n)))); err != nil {
-		return nil, 0, fmt.Errorf("Failed grantpt: %w", err)
+		return nil, 0, fmt.Errorf("failed grantpt: %w", err)
 	}
 	n = 0
 	// unlockpt ioctl
 	err = unix.IoctlSetInt(int(ptsMaster.Fd()), unix.TIOCSPTLCK, int(uintptr(unsafe.Pointer(&n))))
 	if err != nil {
-		return nil, 0, fmt.Errorf("Failed unlockpt: %w", err)
+		return nil, 0, fmt.Errorf("failed unlockpt: %w", err)
 	}
 	// ptsname ioctl to get pts path for systemd
 	ptsN, err := unix.IoctlGetInt(int(ptsMaster.Fd()), unix.TIOCGPTN)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Failed to get ptsname: %w", err)
+		return nil, 0, fmt.Errorf("failed to get ptsname: %w", err)
 	}
 
 	success = true

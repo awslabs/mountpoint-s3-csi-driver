@@ -81,7 +81,9 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 	}
 
 	// Ensure to remove event handler at the end
-	defer w.informer.RemoveEventHandler(handle)
+	defer func() {
+		_ = w.informer.RemoveEventHandler(handle)
+	}()
 
 	// Check if the Pod already exists
 	pod, err := w.lister.Get(name)

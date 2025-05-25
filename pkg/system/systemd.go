@@ -62,14 +62,14 @@ type SystemdOsConnection struct {
 func NewSystemdOsConnection() (*SystemdOsConnection, error) {
 	conn, err := dbus.Dial(systemdSocket)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to connect to systemd: %w", err)
+		return nil, fmt.Errorf("failed to connect to systemd: %w", err)
 	}
 
 	// Use uid 0 (root) to auth
 	err = conn.Auth([]dbus.Auth{dbus.AuthExternal("0")})
 	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("Failed to set systemd connection auth: %w", err)
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to set systemd connection auth: %w", err)
 	}
 
 	systemd := conn.Object("org.freedesktop.systemd1", dbus.ObjectPath("/org/freedesktop/systemd1"))
@@ -131,14 +131,14 @@ func (sc *SystemdOsConnection) callDbus(ctx context.Context, method string, ret 
 	select {
 	case call := <-ch:
 		if call.Err != nil {
-			return fmt.Errorf("Failed StartTransientUnit with Call.Err: %w", call.Err)
+			return fmt.Errorf("failed StartTransientUnit with Call.Err: %w", call.Err)
 		}
 		err := call.Store(ret)
 		if err != nil {
-			return fmt.Errorf("Failed StartTransientUnit: %w", err)
+			return fmt.Errorf("failed StartTransientUnit: %w", err)
 		}
 	case <-ctx.Done():
-		return fmt.Errorf("Failed StartTransientUnit, context cancelled")
+		return fmt.Errorf("failed StartTransientUnit, context cancelled")
 	}
 
 	return nil
@@ -245,7 +245,7 @@ func (s *SystemdSupervisor) RemoveServiceWatcher(serviceName string, ch chan<- *
 	}
 	for i, w := range watchers {
 		if w == ch {
-			watchers = append(watchers[:i], watchers[i+1:]...)
+			s.serviceWatchers[serviceName] = append(watchers[:i], watchers[i+1:]...)
 			break
 		}
 	}
@@ -339,14 +339,16 @@ func (sd *SystemdSupervisor) StartService(ctx context.Context, config *ExecConfi
 }
 
 func (sd *SystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig) (string, error) {
-	defer sd.conn.StopUnit(ctx, config.Name)
+	defer func() {
+		_ = sd.conn.StopUnit(ctx, config.Name)
+	}()
 
 	return sd.runUnit(ctx, config, "oneshot", func(props *UnitProperties) (bool, error) {
 		if props.ExecMainCode == 0 {
 			return false, nil
 		}
 		if props.ExecMainStatus != 0 {
-			return true, fmt.Errorf("Non zero status code: %d", props.ExecMainStatus)
+			return true, fmt.Errorf("non zero status code: %d", props.ExecMainStatus)
 		}
 		return true, nil
 	})
@@ -359,13 +361,15 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 	pts := NewOsPts()
 	ptm, ptsN, err := pts.NewPts()
 	if err != nil {
-		return "", fmt.Errorf("Failed to create pts: %w", err)
+		return "", fmt.Errorf("failed to create pts: %w", err)
 	}
-	defer ptm.Close()
+	defer func() {
+		_ = ptm.Close()
+	}()
 
 	readOutput := func() string {
 		buffer := &bytes.Buffer{}
-		buffer.ReadFrom(ptm)
+		_, _ = buffer.ReadFrom(ptm)
 		output := buffer.String()
 		re := regexp.MustCompile(`\r?\n`)
 		return re.ReplaceAllString(output, " ")
@@ -379,7 +383,7 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 
 	job, err := sd.conn.StartTransientUnit(ctx, config.Name, "fail", props)
 	if err != nil {
-		return "", fmt.Errorf("Failed to start transient systemd service: %w", err)
+		return "", fmt.Errorf("failed to start transient systemd service: %w", err)
 	}
 	klog.V(5).Infof("Started service %s, job: %s\n", config.Name, string(job))
 
@@ -388,7 +392,7 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 		select {
 		case u := <-unitUpdates:
 			if u == nil {
-				return readOutput(), fmt.Errorf("Failed to start service")
+				return readOutput(), fmt.Errorf("failed to start service")
 			}
 			started, err = doneFunc(u)
 			if err != nil {
@@ -396,7 +400,7 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 			}
 
 		case <-ctx.Done():
-			return readOutput(), fmt.Errorf("Failed to start systemd unit, context cancelled")
+			return readOutput(), fmt.Errorf("failed to start systemd unit, context cancelled")
 		}
 	}
 	return readOutput(), nil

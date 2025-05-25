@@ -15,7 +15,7 @@ graph TD;
     StaticAuth --> VerifyCredentials{Verify S3 credentials}
     IRSA --> VerifyCredentials{Verify S3 credentials}
 
-    VerifyCredentials --> |"Failed"| FailPodStartup[Fail Pod Startup]
+    VerifyCredentials --> |"failed"| FailPodStartup[Fail Pod Startup]
     VerifyCredentials --> |"Succeeded"| PassToMountpoint[Pass credentials to Mountpoint]
 
     PassToMountpoint --> StartMountpoint[Start Mountpoint]

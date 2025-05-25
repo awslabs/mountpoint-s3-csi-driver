@@ -479,13 +479,13 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// Extract the bucket name from the volume for verification
 		bucketName := GetBucketNameFromVolumeResource(resource)
 		if bucketName == "" {
-			framework.Failf("Failed to extract bucket name from volume resource")
+			framework.Failf("failed to extract bucket name from volume resource")
 		}
 
 		// List all objects in the bucket to verify the prefix doesn't exist BEFORE mounting
 		ginkgo.By("Verifying prefix doesn't exist in bucket before mounting")
 		rootListOutputBefore, err := s3Client.ListObjects(ctx, bucketName)
-		framework.ExpectNoError(err, "Failed to list objects in bucket before mounting")
+		framework.ExpectNoError(err, "failed to list objects in bucket before mounting")
 
 		// Check if any objects with the prefix exist before mounting
 		prefixExistsBefore := false
@@ -519,7 +519,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// List all objects in the bucket to verify the prefix doesn't exist AFTER mounting
 		ginkgo.By("Verifying prefix doesn't exist in bucket after mounting")
 		rootListOutputAfter, err := s3Client.ListObjects(ctx, bucketName)
-		framework.ExpectNoError(err, "Failed to list objects in bucket after mounting")
+		framework.ExpectNoError(err, "failed to list objects in bucket after mounting")
 
 		// Check if any objects with the prefix exist after mounting
 		prefixExistsAfter := false
@@ -577,7 +577,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// Extract the bucket name from the volume for verification
 		bucketName := GetBucketNameFromVolumeResource(resource)
 		if bucketName == "" {
-			framework.Failf("Failed to extract bucket name from volume resource")
+			framework.Failf("failed to extract bucket name from volume resource")
 		}
 
 		// Create pod with the prefixed volume
@@ -608,13 +608,13 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 
 		// Use s3client's VerifyObjectsExistInS3 method instead of manual listing and checking
 		err = s3Client.VerifyObjectsExistInS3(ctx, bucketName, prefix, []string{testFileName})
-		framework.ExpectNoError(err, "Failed to verify object exists under prefix %s", prefix)
+		framework.ExpectNoError(err, "failed to verify object exists under prefix %s", prefix)
 		framework.Logf("Successfully found object %s under prefix %s in bucket %s", testFileName, prefix, bucketName)
 
 		// List objects in the bucket without the prefix to verify no objects exist at the root
 		ginkgo.By("Verifying no objects exist at the root of the bucket")
 		rootListOutput, err := s3Client.ListObjects(ctx, bucketName)
-		framework.ExpectNoError(err, "Failed to list objects in bucket")
+		framework.ExpectNoError(err, "failed to list objects in bucket")
 
 		// Verify no objects exist at the root (that don't have the prefix)
 		for _, obj := range rootListOutput.Contents {
@@ -663,7 +663,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// Extract the bucket name from the volume for direct S3 operations
 		bucketName := GetBucketNameFromVolumeResource(resource)
 		if bucketName == "" {
-			framework.Failf("Failed to extract bucket name from volume resource")
+			framework.Failf("failed to extract bucket name from volume resource")
 		}
 
 		directFileKeys := []string{
@@ -675,12 +675,12 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		// Create objects directly in S3 under the prefix
 		ginkgo.By(fmt.Sprintf("Creating objects directly in S3 under prefix %s", prefix))
 		err = s3Client.CreateObjectsInS3(ctx, bucketName, prefix, directFileKeys)
-		framework.ExpectNoError(err, "Failed to create objects directly in S3")
+		framework.ExpectNoError(err, "failed to create objects directly in S3")
 
 		// Verify objects exist in S3
 		ginkgo.By(fmt.Sprintf("Verifying objects exist in S3 under prefix %s", prefix))
 		err = s3Client.VerifyObjectsExistInS3(ctx, bucketName, prefix, directFileKeys)
-		framework.ExpectNoError(err, "Failed to verify objects exist in S3")
+		framework.ExpectNoError(err, "failed to verify objects exist in S3")
 
 		// Create pod with the prefixed volume
 		ginkgo.By("Creating pod with a volume that uses the same prefix")
@@ -717,14 +717,14 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 
 		// Verify objects exist in S3
 		err = s3Client.VerifyObjectsExistInS3(ctx, bucketName, prefix, mountCreatedFiles)
-		framework.ExpectNoError(err, "Failed to verify mount-created objects exist in S3")
+		framework.ExpectNoError(err, "failed to verify mount-created objects exist in S3")
 
 		// Additional verification that all objects are present (both direct and mount-created)
 		allFiles := append([]string{}, directFileKeys...)
 		allFiles = append(allFiles, mountCreatedFiles...)
 
 		prefixListAfter, err := s3Client.ListObjectsWithPrefix(ctx, bucketName, prefix)
-		framework.ExpectNoError(err, "Failed to list objects with prefix after creating files through mount")
+		framework.ExpectNoError(err, "failed to list objects with prefix after creating files through mount")
 
 		// We should have all files (direct + mount-created)
 		if len(prefixListAfter.Contents) < len(allFiles) {

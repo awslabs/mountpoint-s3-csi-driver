@@ -62,7 +62,7 @@ func RunNegativeCredentialsTest(
 
 	// 2. Create a secret with pod's credentials
 	secretName, err := CreateCredentialSecret(ctx, f, "credentials-test", spec.PodAK, spec.PodSK)
-	framework.ExpectNoError(err, "Failed to create secret with test credentials")
+	framework.ExpectNoError(err, "failed to create secret with test credentials")
 
 	// 3. Build PV/PVC that uses the secret
 	cfg := driver.PrepareTest(ctx, f)
@@ -91,7 +91,7 @@ func RunNegativeCredentialsTest(
 
 	// Create the pod
 	pod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "Failed to create pod")
+	framework.ExpectNoError(err, "failed to create pod")
 	framework.Logf("Pod %s created successfully, now waiting for error event", pod.Name)
 
 	// 5. Wait for expected error pattern

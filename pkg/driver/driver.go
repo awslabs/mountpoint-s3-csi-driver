@@ -94,7 +94,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, podWatcherResyncPeriod)
 		err = podWatcher.Start(stopCh)
 		if err != nil {
-			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
+			klog.Fatalf("failed to start Pod watcher: %v\n", err)
 		}
 
 		mounterImpl, err = mounter.NewPodMounter(podWatcher, credProvider, mount.New(""), nil, kubernetesVersion)
@@ -142,8 +142,8 @@ func (d *Driver) Run() error {
 		// `grpc.Serve` call, we should be fine with `os.Chmod` option.
 		// See https://github.com/golang/go/issues/11822#issuecomment-123850227.
 		if err := os.Chmod(addr, unixSocketPerm); err != nil {
-			klog.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
-			return fmt.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+			klog.Errorf("failed to change permissions on unix socket %s: %v", addr, err)
+			return fmt.Errorf("failed to change permissions on unix socket %s: %v", addr, err)
 		}
 	}
 

@@ -448,8 +448,8 @@ func TestIsMountPoint(t *testing.T) {
 		},
 	}
 
-	os.MkdirAll(tmpFsMountPath, 0o755)
-	os.MkdirAll(mountpointS3MountPath, 0o755)
+	_ = os.MkdirAll(tmpFsMountPath, 0o755)
+	_ = os.MkdirAll(mountpointS3MountPath, 0o755)
 
 	tests := map[string]struct {
 		procMountsContent []mount.MountPoint
