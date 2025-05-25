@@ -15,26 +15,41 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.tabs
-    - navigation.tabs.sticky
     - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - navigation.expand
+    - navigation.top
+
+extra_css:
+  - assets/css/custom.css
 
 plugins:
   - search
   - mermaid2
   - awesome-pages
-  - enumerate-headings:
-      toc_depth: 3
 
 markdown_extensions:
-  - admonition
-  - pymdownx.details
-  - tables
-  - attr_list
-  - md_in_html
-  - meta
+  - admonition # Enables notes, warnings, etc. Usage: !!! note
+  - pymdownx.details  # For collapsible sections. Usage: ::: details
+  - tables # For tables. Usage: |
+  - attr_list  # For adding attributes to markdown elements (e.g., for badges). Usage: [!badge text](url)
+  - md_in_html # For markdown in HTML. Usage: <div markdown="1">
+  - meta # For metadata. Usage: --- title: "My Page" author: "John Doe" date: 2021-01-01 ---
   - toc:
-      toc_depth: 3
+      permalink: true # Adds anchor links to headings. Usage: [Heading](#heading)
+      toc_depth: 2    # Depth of headings to include in the table of contents
+      title: "On This Page"
+  - pymdownx.highlight:
+      anchor_linenums: true      # Makes line numbers clickable with URL anchors
+      line_spans: __span         # Enables line highlighting and selection
+      pygments_lang_class: true  # Adds language class for better styling
+      linenums: true             # Shows line numbers on code blocks
+      pygments_style: monokai    # Style of code blocks
+  - pymdownx.inlinehilite       # Enables inline code highlighting
+  - pymdownx.snippets           # Enables code snippets inclusion
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -43,3 +58,11 @@ markdown_extensions:
 
 nav:
   - Home: README.md
+  - 'Getting Started':
+    - 'Quick Start Guide': quick-start.md
+    - 'Installation': installation.md
+  - 'Configuration':
+    - 'Overview': configuration/index.md
+    - 'Driver Configuration': configuration/driver-configuration.md
+    - 'Volume Configuration': configuration/volume-configuration.md
+    - 'Mount Options': configuration/mount-options.md

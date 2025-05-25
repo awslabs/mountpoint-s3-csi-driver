@@ -1,0 +1,119 @@
+# Minimal Helm Deployment Example
+# This example demonstrates a basic setup for deploying the Scality S3 CSI Driver
+# and an application pod that uses a statically provisioned S3 bucket.
+
+# -----------------------------------------------------------------------------
+# 1. Values for Helm Installation (save as e.g., minimal-values.yaml)
+# -----------------------------------------------------------------------------
+# You would typically pass these values to Helm using `-f minimal-values.yaml`
+#
+# --- Start of content for minimal-values.yaml ---
+# # my-scality-s3-values.yaml
+# node:
+#   # REQUIRED: Specify your Scality S3 endpoint URL
+#   s3EndpointUrl: "https://s3.example.com" # e.g., https://s3.us-east-1.amazonaws.com for AWS S3
+#
+#   # Optional: Default S3 region for the driver.
+#   # Adjust if your Scality S3 endpoint requires a specific region string,
+#   # or if applications will frequently access buckets in a particular region.
+#   s3Region: "us-east-1"
+#
+# awsAccessSecret:
+#   # Reference the secret you created manually (see documentation for instructions)
+#   name: "my-s3-credentials" # Name of the Kubernetes secret you created manually
+#
+# --- End of content for minimal-values.yaml ---
+#
+# Before installing the chart, create the secret:
+# kubectl create secret generic my-s3-credentials \
+#   --namespace kube-system \
+#   --from-literal=key_id='YOUR_ACCESS_KEY_ID' \
+#   --from-literal=access_key='YOUR_SECRET_ACCESS_KEY'
+#
+# Command to install (assuming minimal-values.yaml is created and you added the Scality Helm repo):
+# helm repo add scality https://scality.github.io/mountpoint-s3-csi-driver
+# helm repo update
+# helm install scality-s3-csi scality/mountpoint-s3-csi-driver \
+#   -f minimal-values.yaml \
+#   --namespace kube-system
+
+# -----------------------------------------------------------------------------
+# 2. PersistentVolume (PV) - Static Provisioning
+#    This defines an existing S3 bucket to be used by Kubernetes.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-minimal-pv
+spec:
+  capacity:
+    storage: 1Pi # Nominal capacity, not enforced for S3 but required by Kubernetes
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany # Allows multiple pods to read/write
+  persistentVolumeReclaimPolicy: Retain # Or Delete; Retain is safer for existing data
+  storageClassName: "" # CRITICAL: Empty for static provisioning
+  mountOptions:
+    - "allow-delete"
+    - "allow-overwrite"
+    # If your pod runs as non-root (e.g., uid 1000, gid 1000):
+    # - "uid=1000"
+    # - "gid=1000"
+    # - "allow-other"
+    # - "file-mode=0664" # Example: rw-rw-r--
+    # - "dir-mode=0775"  # Example: rwxrwxr-x
+  csi:
+    driver: s3.csi.scality.com # Ensure this matches the Scality driver name
+    volumeHandle: "my-minimal-bucket-pv-handle" # A unique ID for this PV definition
+    volumeAttributes:
+      # REQUIRED: Replace with your actual S3 bucket name
+      bucketName: "your-target-s3-bucket-name"
+    # Optional: If this PV requires specific credentials different from the global ones
+    # defined during Helm installation. Ensure 'my-app-credentials' secret exists
+    # in the same namespace as the PVC that will claim this PV.
+    # nodePublishSecretRef:
+    #   name: "my-app-credentials"
+    #   namespace: "default" # Or the namespace where your PVC will be
+
+# -----------------------------------------------------------------------------
+# 3. PersistentVolumeClaim (PVC)
+#    This requests the statically provisioned S3 bucket.
+# -----------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-minimal-pvc
+  namespace: default # Ensure this namespace exists, or use your application's namespace
+spec:
+  accessModes:
+    - ReadWriteMany # Must match one of the PV's accessModes
+  storageClassName: "" # CRITICAL: Empty for static provisioning
+  resources:
+    requests:
+      storage: 1Pi # Request size (must be <= PV capacity, nominal for S3)
+  volumeName: s3-minimal-pv # Binds to the PV defined above
+
+# -----------------------------------------------------------------------------
+# 4. Application Pod
+#    This pod mounts and uses the S3 bucket via the PVC.
+# -----------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-app
+  namespace: default # Same namespace as the PVC
+spec:
+  containers:
+    - name: app
+      image: ubuntu
+      command: ["/bin/sh"]
+      args: ["-c", "echo 'Hello from the container!' >> /data/$(date -u).txt; tail -f /dev/null"]
+      volumeMounts:
+        - name: persistent-storage
+          mountPath: /data
+  volumes:
+    - name: persistent-storage
+      persistentVolumeClaim:
+        claimName: s3-minimal-pvc # References the PVC created above
