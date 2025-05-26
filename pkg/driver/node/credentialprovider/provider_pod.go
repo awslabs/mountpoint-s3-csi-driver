@@ -16,7 +16,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -35,7 +34,7 @@ type serviceAccountToken struct {
 
 // provideFromPod provides pod-level AWS credentials.
 func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext) (envprovider.Environment, error) {
-	klog.V(4).Infof("credentialprovider: Using pod identity")
+	klog.V(4).Infof("credentialprovider: Using pod identity and %s mount kind", provideCtx.MountKind)
 
 	podID := provideCtx.GetCredentialPodID()
 	if podID == "" {
@@ -61,7 +60,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 	}
 
 	eksToken := tokens[serviceAccountTokenAudiencePodIdentity]
-	if util.UsePodMounter() && eksToken == nil {
+	if provideCtx.IsPodMountpoint() && eksToken == nil {
 		klog.Errorf("credentialprovider: `authenticationSource` configured to `pod` but no service account token for %s received. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage, serviceAccountTokenAudiencePodIdentity)
 		return nil, status.Errorf(codes.InvalidArgument, "Missing service account token for %s", serviceAccountTokenAudiencePodIdentity)
 	}
@@ -73,11 +72,12 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 	env := envprovider.Environment{
 		envprovider.EnvEC2MetadataDisabled: "true",
+		envprovider.EnvMountpointCacheKey:  cacheKey,
+	}
 
-		// TODO: These were needed with `systemd` but probably won't be necessary with containerization.
-		envprovider.EnvMountpointCacheKey:    cacheKey,
-		envprovider.EnvConfigFile:            filepath.Join(provideCtx.EnvPath, "disable-config"),
-		envprovider.EnvSharedCredentialsFile: filepath.Join(provideCtx.EnvPath, "disable-credentials"),
+	if provideCtx.IsSystemDMountpoint() {
+		env[envprovider.EnvConfigFile] = filepath.Join(provideCtx.EnvPath, "disable-config")
+		env[envprovider.EnvSharedCredentialsFile] = filepath.Join(provideCtx.EnvPath, "disable-credentials")
 	}
 
 	// 3. Provide credentials with IRSA. If not configured, provide credentials with EKS Pod Identity instead.
@@ -95,7 +95,8 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		env.Merge(irsaCredentialsEnvironment)
 		return env, nil
 	} else if errors.Is(irsaCredentialsEnvironmentError, errMissingServiceAccountAnnotationForIRSA) {
-		if !util.UsePodMounter() {
+		if provideCtx.IsSystemDMountpoint() {
+			// SystemD mounts do not support EKS Pod Identity, hence we are returning error here if there is missing IRSA role annotation
 			return nil, status.Errorf(codes.InvalidArgument, "Missing role annotation on pod's service account %s/%s", podNamespace, podServiceAccount)
 		}
 
@@ -157,7 +158,7 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 	podServiceAccount := provideCtx.ServiceAccountName
 
 	// In PodMounter we get IAM Role ARN from MountpointS3PodAttachment custom resource
-	if util.UsePodMounter() {
+	if provideCtx.IsPodMountpoint() {
 		if provideCtx.ServiceAccountEKSRoleARN != "" {
 			return provideCtx.ServiceAccountEKSRoleARN, nil
 		} else {
