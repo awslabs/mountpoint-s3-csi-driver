@@ -43,7 +43,7 @@ func (pm *PodMounter) mountSyscallDefault(target string, args mountpoint.Args) (
 		"default_permissions",
 	}
 
-	var flags uintptr = uintptr(syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOATIME)
+	flags := uintptr(syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOATIME)
 
 	if args.Has(mountpoint.ArgReadOnly) {
 		flags |= syscall.MS_RDONLY

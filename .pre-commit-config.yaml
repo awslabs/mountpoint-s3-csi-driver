@@ -1,16 +1,4 @@
 repos:
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.1.6  # Latest stable version as of May 2025
-    hooks:
-      - id: golangci-lint-fmt
-        args:
-          - --enable=gofmt
-          - --enable=goimports
-          - --enable=gofumpt
-      - id: golangci-lint
-        args:
-          - --enable=govet
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0  # Latest stable version
     hooks:
@@ -42,6 +30,64 @@ repos:
 
   - repo: local
     hooks:
+      # golangci-lint with Linux build environment to match CI
+      # Uses .golangci.yaml configuration automatically
+      # GOOS=linux ensures we analyze the same files as CI (including Linux-specific files)
+      # like pkg/system/pts_test.go (which has //go:build linux constraint)
+      #
+      # To install golangci-lint locally (required for this hook):
+      # curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.1.6
+      # Or on macOS: brew install golangci-lint
+      # Or with Go: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.6
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'GOOS=linux golangci-lint run --config .golangci.yaml'
+        language: system
+        files: \.go$
+        pass_filenames: false
+
+      # Go formatting tools (gofmt, goimports, gofumpt)
+      # These run before linting to ensure code is properly formatted
+      # Matches CI formatting checks exactly to prevent CI failures
+      #
+      # REQUIRED: Install formatting tools locally (run once):
+      # go install golang.org/x/tools/cmd/goimports@latest  # Organizes imports
+      # go install mvdan.cc/gofumpt@latest                  # Stricter gofmt
+      # gofmt comes with Go by default                      # Basic formatting
+      #
+      # To fix formatting issues manually:
+      # gofmt -w .      # Fix basic formatting
+      # goimports -w .  # Fix imports and formatting
+      # gofumpt -w .    # Apply strict formatting rules
+      - id: go-fmt-imports-fumpt
+        name: go formatting (gofmt, goimports, gofumpt)
+        entry: |
+          bash -c '
+          echo "🔧 Running Go formatters...";
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "❌ gofmt issues found:";
+            gofmt -l .;
+            echo "Run: gofmt -w .";
+            exit 1;
+          fi;
+          if [ -n "$(goimports -l .)" ]; then
+            echo "❌ goimports issues found:";
+            goimports -l .;
+            echo "Run: goimports -w .";
+            exit 1;
+          fi;
+          if [ -n "$(gofumpt -l .)" ]; then
+            echo "❌ gofumpt issues found:";
+            gofumpt -l .;
+            echo "Run: gofumpt -w .";
+            exit 1;
+          fi;
+          echo "✅ All Go formatting checks passed!";
+          '
+        language: system
+        files: \.go$
+        pass_filenames: false
+
       - id: helm-lint
         name: helm lint
         entry: helm lint charts/scality-mountpoint-s3-csi-driver

@@ -134,7 +134,7 @@ func (c *Client) DeleteObject(ctx context.Context, bucketName string, key string
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		framework.Logf("Failed to delete object %s: %v", key, err)
+		framework.Logf("failed to delete object %s: %v", key, err)
 		return err
 	}
 
@@ -146,7 +146,7 @@ func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) Delete
 	bucketName := *input.Bucket
 
 	_, err := c.client.CreateBucket(ctx, input)
-	framework.ExpectNoError(err, "Failed to create S3 bucket")
+	framework.ExpectNoError(err, "failed to create S3 bucket")
 	if err == nil {
 		framework.Logf("S3 Bucket %s created", bucketName)
 	}
@@ -242,7 +242,7 @@ func (c *Client) PutObject(ctx context.Context, bucket string, key string, conte
 		Body:   strings.NewReader(content),
 	})
 	if err != nil {
-		framework.Logf("Failed to create object %s: %v", key, err)
+		framework.Logf("failed to create object %s: %v", key, err)
 		return err
 	}
 

@@ -136,13 +136,13 @@ func TestReplaceFile(t *testing.T) {
 		// Create the file first
 		err := os.WriteFile(source, []byte("test content"), 0o600)
 		if err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
+			t.Fatalf("failed to create test file: %v", err)
 		}
 
 		// Then remove read permissions
 		err = os.Chmod(source, 0)
 		if err != nil {
-			t.Fatalf("Failed to change permissions: %v", err)
+			t.Fatalf("failed to change permissions: %v", err)
 		}
 
 		dest := filepath.Join(basedir, "dest")
@@ -156,8 +156,8 @@ func TestReplaceFile(t *testing.T) {
 		}
 
 		// On some systems, we may get 'permission denied'
-		if !(strings.Contains(err.Error(), "permission denied") ||
-			strings.Contains(err.Error(), "no such file")) {
+		if !strings.Contains(err.Error(), "permission denied") &&
+			!strings.Contains(err.Error(), "no such file") {
 			t.Fatalf("Expected permission error, got: %v", err)
 		}
 	})
@@ -172,14 +172,14 @@ func TestReplaceFile(t *testing.T) {
 		source := filepath.Join(basedir, "source")
 		err := os.WriteFile(source, []byte("test content"), 0o600)
 		if err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
+			t.Fatalf("failed to create test file: %v", err)
 		}
 
 		// Create a read-only directory
 		readOnlyDir := filepath.Join(basedir, "readonly")
 		err = os.Mkdir(readOnlyDir, 0o500) // read + execute, no write
 		if err != nil {
-			t.Fatalf("Failed to create directory: %v", err)
+			t.Fatalf("failed to create directory: %v", err)
 		}
 
 		dest := filepath.Join(readOnlyDir, "dest")

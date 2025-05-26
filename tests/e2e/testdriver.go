@@ -115,5 +115,5 @@ func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testV
 
 func (v *s3Volume) DeleteVolume(ctx context.Context) {
 	err := v.deleteBucket(ctx)
-	f.ExpectNoError(err, "Failed to delete S3 Bucket: %s", v.bucketName)
+	f.ExpectNoError(err, "failed to delete S3 Bucket: %s", v.bucketName)
 }

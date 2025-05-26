@@ -40,7 +40,12 @@ func Send(ctx context.Context, sockPath string, options Options) error {
 	if err != nil {
 		return fmt.Errorf("failed to dial to unix socket %s: %w", sockPath, err)
 	}
-	defer unixConn.Close()
+	defer func() {
+		if closeErr := unixConn.Close(); closeErr != nil {
+			// Log error but don't fail the operation since we've already sent data
+			klog.Errorf("failed to close unix connection: %v", closeErr)
+		}
+	}()
 
 	// `unixConn.WriteMsgUnix` does not respect `ctx`'s deadline, we need to call `unixConn.SetDeadline` to ensure `unixConn.WriteMsgUnix` has a deadline.
 	if deadline, ok := ctx.Deadline(); ok {
@@ -111,7 +116,12 @@ func Recv(ctx context.Context, sockPath string) (Options, error) {
 	if err != nil {
 		return Options{}, fmt.Errorf("failed to listen unix socket %s: %w", sockPath, err)
 	}
-	defer l.Close()
+	defer func() {
+		if closeErr := l.Close(); closeErr != nil {
+			// Log error but don't fail the operation since we've already received data
+			klog.Errorf("failed to close unix listener: %v", closeErr)
+		}
+	}()
 
 	// `l.Accept` does not respect `ctx`'s deadline, we need to call `ul.SetDeadline` to ensure `l.Accept` has a deadline.
 	if deadline, ok := ctx.Deadline(); ok {

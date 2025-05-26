@@ -11,10 +11,6 @@ import (
 	"github.com/scality/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
-const (
-	driverLevelServiceAccountTokenName = "token"
-)
-
 // provideFromDriver provides driver-level AWS credentials.
 func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
 	klog.V(4).Infof("credentialprovider: Using driver identity")

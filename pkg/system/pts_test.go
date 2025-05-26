@@ -16,14 +16,18 @@ func TestPtsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ptm.Close()
+	defer func() {
+		_ = ptm.Close()
+	}()
 
 	// open pts
 	ptsFile, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ptsFile.Close()
+	defer func() {
+		_ = ptsFile.Close()
+	}()
 
 	// write to pts
 	testString := "testingpts"
@@ -45,8 +49,10 @@ func TestPtsSuccess(t *testing.T) {
 }
 
 func TestPtsBadPath(t *testing.T) {
-	os.Setenv(system.PtmxPathEnv, "/bad/path")
-	defer os.Unsetenv(system.PtmxPathEnv)
+	_ = os.Setenv(system.PtmxPathEnv, "/bad/path")
+	defer func() {
+		_ = os.Unsetenv(system.PtmxPathEnv)
+	}()
 	pts := system.NewOsPts()
 	_, _, err := pts.NewPts()
 	if err == nil {
@@ -58,12 +64,16 @@ func TestPtsBadFile(t *testing.T) {
 	filename := "/tmp/not-a-ptmx"
 	f, err := os.Create(filename)
 	if err != nil {
-		t.Fatalf("Failed to create test file")
+		t.Fatalf("failed to create test file")
 	}
-	f.Close()
-	defer os.Remove(filename)
-	os.Setenv(system.PtmxPathEnv, filename)
-	defer os.Unsetenv(system.PtmxPathEnv)
+	_ = f.Close()
+	defer func() {
+		_ = os.Remove(filename)
+	}()
+	_ = os.Setenv(system.PtmxPathEnv, filename)
+	defer func() {
+		_ = os.Unsetenv(system.PtmxPathEnv)
+	}()
 	pts := system.NewOsPts()
 	_, _, err = pts.NewPts()
 	if err == nil {

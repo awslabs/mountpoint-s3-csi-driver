@@ -53,7 +53,7 @@ func isMountPoint(mounter mount.Interface, target string) (bool, error) {
 
 	mountPoints, err := mounter.List()
 	if err != nil {
-		return false, fmt.Errorf("Failed to list mounts: %w", err)
+		return false, fmt.Errorf("failed to list mounts: %w", err)
 	}
 	for _, mp := range mountPoints {
 		if mp.Path == target {

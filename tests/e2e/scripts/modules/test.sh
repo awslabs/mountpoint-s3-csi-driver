@@ -189,7 +189,7 @@ run_verification_tests() {
     # If pods not found in the specified namespace, try all namespaces
     log "CSI driver pods not found in namespace $namespace. Checking all namespaces..."
     if ! wait_for_pods "$namespace" "all-namespaces"; then
-      error "Failed to find running CSI driver pods in any namespace."
+      error "failed to find running CSI driver pods in any namespace."
       return 1
     fi
   fi

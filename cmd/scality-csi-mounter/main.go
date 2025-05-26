@@ -47,7 +47,7 @@ func main() {
 		MountOptions:   mountOptions,
 	})
 	if err != nil {
-		klog.Fatalf("Failed to run Mountpoint: %v\n", err)
+		klog.Fatalf("failed to run Mountpoint: %v\n", err)
 	}
 	klog.Infof("Mountpoint exited with %d exit code\n", exitCode)
 	os.Exit(exitCode)
@@ -59,7 +59,7 @@ func recvMountOptions() mountoptions.Options {
 	klog.Infof("Trying to receive mount options from %s", mountSockPath)
 	options, err := mountoptions.Recv(ctx, mountSockPath)
 	if err != nil {
-		klog.Fatalf("Failed to receive mount options from %s: %v\n", mountSockPath, err)
+		klog.Fatalf("failed to receive mount options from %s: %v\n", mountSockPath, err)
 	}
 	klog.Infof("Mount options has been received from %s", mountSockPath)
 	return options

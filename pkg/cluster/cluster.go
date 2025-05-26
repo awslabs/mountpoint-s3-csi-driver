@@ -21,14 +21,14 @@ var defaultMountpointUID = ptr.To(int64(1000))
 func DetectVariant(client *rest.Config, log logr.Logger) Variant {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(client)
 	if err != nil {
-		log.Error(err, "Failed to create DiscoveryClient to determine cluster variant. Assuming this is Default Kubernetes variant")
+		log.Error(err, "failed to create DiscoveryClient to determine cluster variant. Assuming this is Default Kubernetes variant")
 		return DefaultKubernetes
 	}
 
 	// Get API groups
 	apiGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
-		log.Error(err, "Failed to get API groups to determine cluster variant. Assuming this is Default Kubernetes variant")
+		log.Error(err, "failed to get API groups to determine cluster variant. Assuming this is Default Kubernetes variant")
 		return DefaultKubernetes
 	}
 

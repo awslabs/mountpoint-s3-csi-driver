@@ -22,12 +22,14 @@ func validateEndpointURL() error {
 func TestValidatesEndpointURL(t *testing.T) {
 	// Save original environment variables to restore them after the test
 	originalEndpointURL := os.Getenv(envprovider.EnvEndpointURL)
-	defer os.Setenv(envprovider.EnvEndpointURL, originalEndpointURL)
+	defer func() {
+		_ = os.Setenv(envprovider.EnvEndpointURL, originalEndpointURL)
+	}()
 
 	// Test case 1: No endpoint URL set
 	t.Run("fails without endpoint URL", func(t *testing.T) {
 		// Clear environment variable
-		os.Unsetenv(envprovider.EnvEndpointURL)
+		_ = os.Unsetenv(envprovider.EnvEndpointURL)
 
 		// Attempt to validate without endpoint URL
 		err := validateEndpointURL()
@@ -44,7 +46,7 @@ func TestValidatesEndpointURL(t *testing.T) {
 	// Test case 2: Endpoint URL is set
 	t.Run("succeeds with endpoint URL", func(t *testing.T) {
 		// Set the environment variable
-		os.Setenv(envprovider.EnvEndpointURL, "https://test-endpoint.example.com")
+		_ = os.Setenv(envprovider.EnvEndpointURL, "https://test-endpoint.example.com")
 
 		// Attempt to validate with endpoint URL
 		err := validateEndpointURL()
@@ -63,12 +65,14 @@ type TestDriver driver.Driver
 func TestNewDriverEndpointURLValidation(t *testing.T) {
 	// Save original environment variables to restore them after the test
 	originalEndpointURL := os.Getenv(envprovider.EnvEndpointURL)
-	defer os.Setenv(envprovider.EnvEndpointURL, originalEndpointURL)
+	defer func() {
+		_ = os.Setenv(envprovider.EnvEndpointURL, originalEndpointURL)
+	}()
 
 	// Test case 1: No endpoint URL set
 	t.Run("NewDriver fails without endpoint URL", func(t *testing.T) {
 		// Clear environment variable
-		os.Unsetenv(envprovider.EnvEndpointURL)
+		_ = os.Unsetenv(envprovider.EnvEndpointURL)
 
 		// Try to create a new driver without setting the endpoint URL
 		// We expect this to fail with a specific error
@@ -86,7 +90,7 @@ func TestNewDriverEndpointURLValidation(t *testing.T) {
 	// Test case 2: With endpoint URL but without Kubernetes (still fails but differently)
 	t.Run("NewDriver with endpoint URL proceeds to next validation", func(t *testing.T) {
 		// Set environment variable
-		os.Setenv(envprovider.EnvEndpointURL, "https://test-endpoint.example.com")
+		_ = os.Setenv(envprovider.EnvEndpointURL, "https://test-endpoint.example.com")
 
 		// Try to create a new driver with endpoint URL set
 		// This will still fail, but with a different error (about Kubernetes, not about endpoint URL)

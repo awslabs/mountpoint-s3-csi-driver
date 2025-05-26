@@ -665,8 +665,8 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 		modifier(testVolume)
 	}
 
-	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "Failed to create PV")
-	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create PVC")
+	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "failed to create PV")
+	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "failed to create PVC")
 
 	waitForObject(pv)
 	waitForObject(pvc)

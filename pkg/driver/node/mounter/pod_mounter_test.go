@@ -118,7 +118,7 @@ func setup(t *testing.T) *testCtx {
 			return testCtx.mountSyscall(target, args)
 		}
 
-		mount.Mount("mountpoint-s3", target, "fuse", nil)
+		_ = mount.Mount("mountpoint-s3", target, "fuse", nil)
 		return int(mountertest.OpenDevNull(t).Fd()), nil
 	}
 
@@ -148,7 +148,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 
 				// Since `PodMounter.Mount` closes the file descriptor once it passes it to Mountpoint,
 				// we should duplicate our file descriptor to ensure underlying file description won't
@@ -256,7 +256,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -307,7 +307,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -371,7 +371,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -437,7 +437,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -484,7 +484,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -561,7 +561,7 @@ func TestPodMounter(t *testing.T) {
 					devNull := mountertest.OpenDevNull(t)
 
 					testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-						testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+						_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 						fd, err = syscall.Dup(int(devNull.Fd()))
 						assert.NoError(t, err)
 						return fd, nil
@@ -609,7 +609,7 @@ func TestPodMounter(t *testing.T) {
 			devNull := mountertest.OpenDevNull(t)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err = syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
 				return fd, nil
@@ -662,7 +662,7 @@ func TestPodMounter(t *testing.T) {
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
 				mountCount.Add(1)
-				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				_ = testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				return int(mountertest.OpenDevNull(t).Fd()), nil
 			}
 

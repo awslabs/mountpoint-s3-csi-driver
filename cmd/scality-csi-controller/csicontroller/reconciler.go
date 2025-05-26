@@ -59,7 +59,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			log.Info("Pod not found - ignoring")
 			return reconcile.Result{}, nil
 		}
-		log.Error(err, "Failed to get Pod")
+		log.Error(err, "failed to get Pod")
 		return reconcile.Result{}, err
 	}
 
@@ -82,7 +82,7 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 	case corev1.PodSucceeded:
 		err := r.deleteMountpointPod(ctx, pod)
 		if err != nil {
-			log.Error(err, "Failed to delete succeeded Pod")
+			log.Error(err, "failed to delete succeeded Pod")
 			return reconcile.Result{}, err
 		}
 		log.Info("Pod succeeded and successfully deleted")
@@ -174,13 +174,13 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	mpPod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: mpPodName}, mpPod)
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "Failed to get Mountpoint Pod")
+		log.Error(err, "failed to get Mountpoint Pod")
 		return err
 	}
 
 	isMountpointPodExists := err == nil
 
-	// `workloadPod` is not active, its either terminated (i.e., `phase == Succeeded or phase == Failed`) or
+	// `workloadPod` is not active, its either terminated (i.e., `phase == Succeeded or phase == failed`) or
 	// its scheduled for termination (i.e., `DeletionTimestamp != nil`)
 	if !isPodActive(workloadPod) {
 		// if its scheduled for termination and its still in `Pending` phase,
@@ -190,7 +190,7 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 			log.Info("Deleting scheduled Mountpoint Pod")
 			err := r.deleteMountpointPod(ctx, mpPod)
 			if err != nil {
-				log.Error(err, "Failed to delete scheduled Mountpoint Pod")
+				log.Error(err, "failed to delete scheduled Mountpoint Pod")
 				return err
 			}
 
@@ -209,7 +209,7 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 
 	if err := r.spawnMountpointPod(ctx, workloadPod, pvc, pv, csiSpec, mpPodName); err != nil {
-		log.Error(err, "Failed to spawn Mountpoint Pod")
+		log.Error(err, "failed to spawn Mountpoint Pod")
 		return err
 	}
 
@@ -236,14 +236,14 @@ func (r *Reconciler) spawnMountpointPod(
 
 	mpPod := r.mountpointPodCreator.Create(workloadPod, pv)
 	if mpPod.Name != name {
-		err := fmt.Errorf("Mountpoint Pod name mismatch %s vs %s", mpPod.Name, name)
+		err := fmt.Errorf("mountpoint Pod name mismatch %s vs %s", mpPod.Name, name)
 		log.Error(err, "Name mismatch on Mountpoint Pod")
 		return err
 	}
 
 	err := r.Create(ctx, mpPod)
 	if err != nil {
-		log.Error(err, "Failed to create Mountpoint Pod")
+		log.Error(err, "failed to create Mountpoint Pod")
 		return err
 	}
 
@@ -267,7 +267,7 @@ func (r *Reconciler) deleteMountpointPod(ctx context.Context, mountpointPod *cor
 		return nil
 	}
 
-	log.Error(err, "Failed to delete Mountpoint Pod")
+	log.Error(err, "failed to delete Mountpoint Pod")
 	return err
 }
 
@@ -288,8 +288,8 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	pvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: claim.ClaimName}, pvc)
 	if err != nil {
-		log.Error(err, "Failed to get PVC for Pod")
-		return nil, nil, fmt.Errorf("Failed to get PVC for Pod: %w", err)
+		log.Error(err, "failed to get PVC for Pod")
+		return nil, nil, fmt.Errorf("failed to get PVC for Pod: %w", err)
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound || pvc.Spec.VolumeName == "" {
@@ -302,13 +302,13 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	pv := &corev1.PersistentVolume{}
 	err = r.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv)
 	if err != nil {
-		log.Error(err, "Failed to get PV bound to PVC", "volumeName", pvc.Spec.VolumeName)
-		return nil, nil, fmt.Errorf("Failed to get PV bound to PVC: %w", err)
+		log.Error(err, "failed to get PV bound to PVC", "volumeName", pvc.Spec.VolumeName)
+		return nil, nil, fmt.Errorf("failed to get PV bound to PVC: %w", err)
 	}
 
 	if pv.Spec.ClaimRef == nil || pv.Spec.ClaimRef.Name != pvc.Name {
 		log.Info("Found the PV but its `ClaimRef` is not bound to the PVC", "volumeName", pvc.Spec.VolumeName)
-		return nil, nil, errors.New("The PV has a different `ClaimRef` than the PVC")
+		return nil, nil, errors.New("the PV has a different `ClaimRef` than the PVC")
 	}
 
 	return pvc, pv, nil

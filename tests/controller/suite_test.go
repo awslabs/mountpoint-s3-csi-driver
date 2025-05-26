@@ -107,7 +107,7 @@ var _ = BeforeSuite(func() {
 	go func() {
 		defer GinkgoRecover()
 		err = k8sManager.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "Failed to run manager")
+		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
 	}()
 
 	createMountpointNamespace()

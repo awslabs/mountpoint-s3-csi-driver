@@ -27,20 +27,24 @@ func main() {
 
 	err := installFiles(binDir, installDir)
 	if err != nil {
-		log.Fatalf("Failed install binDir %s installDir %s: %v", binDir, installDir, err)
+		log.Fatalf("failed install binDir %s installDir %s: %v", binDir, installDir, err)
 	}
 }
 
 func installFiles(binDir string, installDir string) error {
 	sd, err := os.Open(binDir)
 	if err != nil {
-		return fmt.Errorf("Failed to open source directory: %w", err)
+		return fmt.Errorf("failed to open source directory: %w", err)
 	}
-	defer sd.Close()
+	defer func() {
+		if closeErr := sd.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close source directory: %v", closeErr)
+		}
+	}()
 
 	entries, err := sd.Readdirnames(0)
 	if err != nil {
-		return fmt.Errorf("Failed to read source directory: %w", err)
+		return fmt.Errorf("failed to read source directory: %w", err)
 	}
 
 	for _, name := range entries {
@@ -50,7 +54,7 @@ func installFiles(binDir string, installDir string) error {
 		// First copy to a temporary location then rename to handle replacing running binaries
 		err = util.ReplaceFile(destFile, filepath.Join(binDir, name), 0o755)
 		if err != nil {
-			return fmt.Errorf("Failed to copy file %s: %w", name, err)
+			return fmt.Errorf("failed to copy file %s: %w", name, err)
 		}
 
 	}

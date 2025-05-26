@@ -34,7 +34,7 @@ func TestSystemdConnectionCloseSignal(t *testing.T) {
 		Object: mockObject,
 	}
 	mockDbusConn.EXPECT().Close()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	signalChan := make(chan *dbus.Signal, 2)
 	mockDbusConn.EXPECT().Signal(gomock.Eq(signalChan))
@@ -51,7 +51,7 @@ func TestSystemdConnection(t *testing.T) {
 		Object: mockObject,
 	}
 	mockDbusConn.EXPECT().Close()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	signalChan := make(chan *dbus.Signal, 2)
 	mockDbusConn.EXPECT().Signal(gomock.Eq(signalChan))
@@ -79,7 +79,7 @@ func TestSystemdConnection(t *testing.T) {
 					})
 				units, err := conn.ListUnits(ctx)
 				if err != nil {
-					t.Fatalf("Failed ListUnits: %v", err)
+					t.Fatalf("failed ListUnits: %v", err)
 				}
 				for i := range testUnits {
 					if units[i].Name != testUnits[i].Name {
@@ -104,7 +104,7 @@ func TestSystemdConnection(t *testing.T) {
 					})
 				err := conn.StopUnit(ctx, unitName)
 				if err != nil {
-					t.Fatalf("Failed StopUnit: %v", err)
+					t.Fatalf("failed StopUnit: %v", err)
 				}
 			},
 		},
@@ -179,11 +179,11 @@ func TestSystemdOsConnection(t *testing.T) {
 	}
 	systemd, err := system.NewSystemdOsConnection()
 	if err != nil {
-		t.Fatalf("Failed to connect to systemd: %v", err)
+		t.Fatalf("failed to connect to systemd: %v", err)
 	}
 	err = systemd.Close()
 	if err != nil {
-		t.Fatalf("Failed to close systemd connection: %v", err)
+		t.Fatalf("failed to close systemd connection: %v", err)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestSystemdOsListUnits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer systemd.Close()
+	defer func() { _ = systemd.Close() }()
 
 	ctx := context.Background()
 	units, err := systemd.ListUnits(ctx)
@@ -215,7 +215,7 @@ func TestSystemdOsListUnitsCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer systemd.Close()
+	defer func() { _ = systemd.Close() }()
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -284,7 +284,7 @@ func TestSystemdSupervisorWatchers(t *testing.T) {
 	unitProps := make(chan *system.UnitProperties)
 	mockPts := mock_system.NewMockPts(mockCtl)
 	supervisor := system.NewSystemdSupervisor(mockConn, mockPts)
-	defer supervisor.Stop()
+	defer func() { _ = supervisor.Stop() }()
 	supervisor.AddServiceWatcher(serviceName, unitProps)
 	supervisor.Start()
 
@@ -306,7 +306,7 @@ func TestSystemdStartTransientUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer systemd.Close()
+	defer func() { _ = systemd.Close() }()
 
 	ctx := context.Background()
 	serviceName := "s3-csi-integ-test.service"
@@ -319,7 +319,7 @@ func TestSystemdStartTransientUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ptm.Close()
+	defer func() { _ = ptm.Close() }()
 
 	testString := "Test output magic"
 
@@ -363,8 +363,8 @@ func TestSystemdStartTransientUnit(t *testing.T) {
 
 	// read from ptm
 	buffer := &bytes.Buffer{}
-	buffer.ReadFrom(ptm)
-	output := string(buffer.Bytes())
+	_, _ = buffer.ReadFrom(ptm)
+	output := buffer.String()
 
 	if output != testString {
 		t.Fatalf("Strings do not match, expected \"%s\" got \"%s\"", testString, output)
@@ -393,10 +393,10 @@ func TestSystemdStartServiceFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sysd.Stop()
+	defer func() { _ = sysd.Stop() }()
 
 	mountPath := "/tmp/" + uuid.New().String()
-	os.Mkdir(mountPath, 0o755)
+	_ = os.Mkdir(mountPath, 0o755)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -422,7 +422,7 @@ func TestSystemdRunOneshotSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sysd.Stop()
+	defer func() { _ = sysd.Stop() }()
 
 	testString := "test-echo-oneshot"
 
@@ -453,7 +453,7 @@ func TestSystemdRunOneshotFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sysd.Stop()
+	defer func() { _ = sysd.Stop() }()
 
 	ctx := context.Background()
 	config := &system.ExecConfig{
