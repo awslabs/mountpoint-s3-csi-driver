@@ -16,7 +16,7 @@ SHELL = /bin/bash
 # MP CSI Driver version
 VERSION=1.14.1
 
-PKG=github.com/awslabs/aws-s3-csi-driver
+PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 

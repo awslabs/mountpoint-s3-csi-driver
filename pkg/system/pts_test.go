@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
 )
 
 func TestPtsSuccess(t *testing.T) {

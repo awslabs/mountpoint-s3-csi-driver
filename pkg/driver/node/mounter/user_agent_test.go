@@ -19,7 +19,7 @@ package mounter
 import (
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
 func TestUserAgent(t *testing.T) {

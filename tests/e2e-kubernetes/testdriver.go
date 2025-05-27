@@ -3,8 +3,8 @@ package e2e
 import (
 	"context"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
-	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	custom_testsuites "github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"

@@ -8,8 +8,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	credentialprovider "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	envprovider "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	envprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	gomock "github.com/golang/mock/gomock"
 )
 

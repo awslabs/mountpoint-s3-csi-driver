@@ -4,8 +4,8 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
-	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	custom_testsuites "github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
