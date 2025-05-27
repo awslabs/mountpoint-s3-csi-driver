@@ -45,7 +45,7 @@ type PodMounter struct {
 	mountSyscall      mountSyscall
 	bindMountSyscall  bindMountSyscall
 	kubernetesVersion string
-	credProvider      *credentialprovider.Provider
+	credProvider      credentialprovider.ProviderInterface
 	nodeID            string
 }
 
@@ -53,7 +53,7 @@ type PodMounter struct {
 func NewPodMounter(
 	podWatcher *watcher.Watcher,
 	s3paCache cache.Cache,
-	credProvider *credentialprovider.Provider,
+	credProvider credentialprovider.ProviderInterface,
 	mount *mpmounter.Mounter,
 	mountSyscall mountSyscall,
 	bindMountSyscall bindMountSyscall,
@@ -93,14 +93,35 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
 	}
 
+	isTargetMountPoint, err := pm.IsMountPoint(target)
+	if err != nil {
+		err = pm.verifyOrSetupMountTarget(target, err)
+		if err != nil {
+			return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
+		}
+	}
+
+	if isTargetMountPoint && pm.IsSystemDMountpoint(target) {
+		klog.Infof("Target %q is SystemD Mountpoint. Will only refresh credentials.", target)
+		credentialCtx.SetAsSystemDMountpoint()
+		credentialsPath := hostPluginDirWithDefault()
+		credentialCtx.SetWriteAndEnvPath(credentialsPath, credentialsPath)
+
+		_, _, err := pm.credProvider.Provide(ctx, credentialCtx)
+		if err != nil {
+			klog.Errorf("Failed to provide SystemD credentials for %s: %v", target, err)
+			return fmt.Errorf("Failed to provide SystemD credentials for %q: %w", target, err)
+		}
+
+		return nil
+	}
+
 	s3PodAttachment, mpPodName, err := pm.getS3PodAttachmentWithRetry(ctx, volumeName, credentialCtx, fsGroup, pvMountOptions)
 	if err != nil {
 		klog.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %v", target, err)
 		return fmt.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %w", target, err)
 	}
 
-	// TODO: If `target` is a `systemd`-mounted Mountpoint, this would return an error,
-	// but we should still update the credentials for it by calling `credProvider.Provide`.
 	pod, podPath, err := pm.waitForMountpointPod(ctx, mpPodName)
 	if err != nil {
 		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
@@ -109,14 +130,6 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	source := filepath.Join(SourceMountDir(pm.kubeletPath), mpPodName)
 	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
-
-	isTargetMountPoint, err := pm.IsMountPoint(target)
-	if err != nil {
-		err = pm.verifyOrSetupMountTarget(target, err)
-		if err != nil {
-			return fmt.Errorf("Failed to verify target path can be used as a mount point %q: %w", target, err)
-		}
-	}
 	isSourceMountPoint, err := pm.IsMountPoint(source)
 	if err != nil {
 		err = pm.verifyOrSetupMountTarget(source, err)
@@ -254,18 +267,59 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 }
 
 // Unmount unmounts only the bind mount point at `target`.
-func (pm *PodMounter) Unmount(_ context.Context, target string, _ credentialprovider.CleanupContext) error {
+// Unmounting of source mount and credential cleanup for PodMounter is done separately in PodUnmounter
+// For systemd mounts it will unmount systemd mount and also remove credentials.
+func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
+	isSystemDMountpoint := pm.IsSystemDMountpoint(target)
+
 	err := pm.unmountTarget(target)
 	if err != nil {
 		klog.Errorf("Failed to unmount %q: %v", target, err)
 		return fmt.Errorf("Failed to unmount %q: %w", target, err)
 	}
+
+	if isSystemDMountpoint {
+		klog.Infof("Target %q was SystemD Mountpoint. Will cleanup credentials.", target)
+		credentialCtx.WritePath = hostPluginDirWithDefault()
+
+		err = pm.credProvider.Cleanup(credentialCtx)
+		if err != nil {
+			klog.Errorf("Unmount: Failed to clean up SystemD credentials for %s: %v", target, err)
+		}
+		return nil
+	}
+
 	return nil
 }
 
 // IsMountPoint returns whether given `target` is a `mount-s3` mount.
 func (pm *PodMounter) IsMountPoint(target string) (bool, error) {
 	return pm.mount.CheckMountpoint(target)
+}
+
+// IsSystemDMountpoint determines whether the specified target path is a systemd-managed mountpoint. (Legacy mounts from v1 of CSI Driver)
+//
+// Parameters:
+//   - target: The path to check if it is a systemd-managed mountpoint
+//
+// Returns:
+//   - bool: true if the target is a systemd-managed mountpoint, false otherwise
+//
+// A systemd-managed mountpoint is identified by having zero references (i.e. bind mounts) to it,
+// as systemd mounts directly to target (unlike Pod Mounter which uses bind mounts to target).
+// If there's an error finding references, it assumes the mountpoint is not systemd-managed.
+func (pm *PodMounter) IsSystemDMountpoint(target string) bool {
+	if !util.SupportLegacySystemdMounts() {
+		return false
+	}
+
+	references, err := pm.mount.FindReferencesToMountpoint(target)
+	if err != nil {
+		klog.Warningf("Failed to find references to Mountpoint %s in order to detect systemd mountpoints. Assuming it is not systemd mountpoint. %v", target, err)
+		return false
+	}
+
+	return len(references) == 0
 }
 
 // waitForMountpointPod waits until Mountpoint Pod for given `podName` is in `Running` state.
@@ -369,6 +423,7 @@ func (pm *PodMounter) provideCredentials(ctx context.Context, podPath, mpPodUID,
 		return nil, "", fmt.Errorf("Failed to create credentials directory: %w", err)
 	}
 
+	credentialCtx.SetAsPodMountpoint()
 	credentialCtx.SetWriteAndEnvPath(podCredentialsPath, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
 	credentialCtx.SetServiceAccountEKSRoleARN(serviceAccountEKSRoleARN)
 	credentialCtx.SetMountpointPodID(mpPodUID)

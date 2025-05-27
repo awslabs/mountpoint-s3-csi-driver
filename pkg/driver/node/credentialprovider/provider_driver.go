@@ -19,7 +19,7 @@ const (
 
 // provideFromDriver provides driver-level AWS credentials.
 func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
-	klog.V(4).Infof("credentialprovider: Using driver identity")
+	klog.V(4).Infof("credentialprovider: Using driver identity and %s mount kind", provideCtx.MountKind)
 
 	env := envprovider.Environment{}
 
@@ -38,13 +38,15 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 		env.Merge(longTermCredsEnv)
 	} else {
 		// Profile provider
-		// TODO: This is not officially supported and won't work by default with containerization.
-		klog.V(4).Infof("Providing credentials from driver with Profile provider")
-		configFile := os.Getenv(envprovider.EnvConfigFile)
-		sharedCredentialsFile := os.Getenv(envprovider.EnvSharedCredentialsFile)
-		if configFile != "" && sharedCredentialsFile != "" {
-			env.Set(envprovider.EnvConfigFile, configFile)
-			env.Set(envprovider.EnvSharedCredentialsFile, sharedCredentialsFile)
+		if provideCtx.IsSystemDMountpoint() {
+			// We only have this in systemd mounts and this is not officially supported
+			klog.V(4).Infof("Providing credentials from driver with Profile provider")
+			configFile := os.Getenv(envprovider.EnvConfigFile)
+			sharedCredentialsFile := os.Getenv(envprovider.EnvSharedCredentialsFile)
+			if configFile != "" && sharedCredentialsFile != "" {
+				env.Set(envprovider.EnvConfigFile, configFile)
+				env.Set(envprovider.EnvSharedCredentialsFile, sharedCredentialsFile)
+			}
 		}
 	}
 
@@ -65,7 +67,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 	// Container credential provider (EKS Pod Identity)
 	containerAuthorizationTokenFile := os.Getenv(envprovider.EnvContainerAuthorizationTokenFile)
 	containerCredentialsFullURI := os.Getenv(envprovider.EnvContainerCredentialsFullURI)
-	if util.UsePodMounter() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
+	if provideCtx.IsPodMountpoint() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
 		klog.V(4).Infof("Providing credentials from driver with Container credential provider (EKS Pod Identity)")
 		containerCredsEnv, err := provideContainerCredentialsFromDriver(provideCtx, containerAuthorizationTokenFile, containerCredentialsFullURI)
 		if err != nil {

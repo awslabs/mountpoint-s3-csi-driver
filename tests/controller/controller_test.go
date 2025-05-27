@@ -79,6 +79,29 @@ var _ = Describe("Mountpoint Controller", func() {
 				waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
 				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
 			})
+
+			It("should not create S3PodAttachment or Mountpoint Pod for an already Running workload pod", func() {
+				vol := createVolume()
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				// Simulate systemd mount from v1 by marking Pod as Running and deleting previously created s3pa and MP Pod
+				s3pa, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+				Expect(k8sClient.Delete(ctx, s3pa)).To(Succeed())
+				waitForObjectToDisappear(s3pa)
+				pod.Pod.Status.Phase = corev1.PodRunning
+				Expect(k8sClient.Status().Update(ctx, pod.Pod)).To(Succeed())
+				waitForObject(pod.Pod, func(g Gomega, pod *corev1.Pod) {
+					g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+				})
+
+				// Verify that no S3PodAttachment was created
+				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv))
+			})
 		})
 
 		Context("Scheduled Pod with late PV and PVC binding", func() {
