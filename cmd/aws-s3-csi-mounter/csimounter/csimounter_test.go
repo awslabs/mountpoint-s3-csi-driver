@@ -118,8 +118,12 @@ func TestRunningMountpoint(t *testing.T) {
 	})
 
 	t.Run("Fails if file descriptor is invalid", func(t *testing.T) {
+		basepath := t.TempDir()
+		mountErrPath := filepath.Join(basepath, "mount.err")
+
 		_, err := csimounter.Run(csimounter.Options{
 			MountpointPath: mountpointPath,
+			MountErrPath:   mountErrPath,
 			MountOptions: mountoptions.Options{
 				Fd:         -1,
 				BucketName: "test-bucket",
