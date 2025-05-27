@@ -21,7 +21,7 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 )
 
 const volumeName1 = "volume1"

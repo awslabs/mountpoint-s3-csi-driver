@@ -20,11 +20,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")

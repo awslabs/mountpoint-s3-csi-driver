@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (

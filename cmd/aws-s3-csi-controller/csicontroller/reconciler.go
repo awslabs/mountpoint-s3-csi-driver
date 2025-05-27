@@ -17,10 +17,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/go-logr/logr"
 )
 

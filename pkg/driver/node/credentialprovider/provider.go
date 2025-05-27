@@ -14,7 +14,7 @@ import (
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	k8sstrings "k8s.io/utils/strings"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
 // CredentialFilePerm is the default permissions to be used for credential files.

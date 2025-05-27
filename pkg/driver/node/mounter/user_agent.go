@@ -19,7 +19,7 @@ package mounter
 import (
 	"strings"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 )
 
 const (

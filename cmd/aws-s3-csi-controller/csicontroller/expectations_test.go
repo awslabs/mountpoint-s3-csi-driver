@@ -3,7 +3,7 @@ package csicontroller
 import (
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

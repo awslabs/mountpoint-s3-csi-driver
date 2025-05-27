@@ -14,11 +14,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile/awsprofiletest"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile/awsprofiletest"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 const testAccessKeyID = "test-access-key-id"

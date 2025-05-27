@@ -8,9 +8,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	credentialprovider "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	mountpoint "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mountpoint "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	system "github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
 )
 

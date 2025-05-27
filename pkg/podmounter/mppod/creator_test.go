@@ -10,9 +10,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 const (

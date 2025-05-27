@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 )
 
 func TestGetVersion(t *testing.T) {

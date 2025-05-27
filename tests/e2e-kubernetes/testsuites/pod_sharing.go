@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
