@@ -87,13 +87,13 @@ func NewPodMounter(
 //
 // If Mountpoint is already mounted at `target`, it will return early at step 3 to ensure credentials are up-to-date.
 // If Mountpoint is already mounted at `source`, it will skip steps 4-7 and only perform bind mount to `target`.
-func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, pvMountOptions string) error {
+func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string) error {
 	volumeName, err := pm.volumeNameFromTargetPath(target)
 	if err != nil {
 		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
 	}
 
-	s3PodAttachment, mpPodName, err := pm.getS3PodAttachmentWithRetry(ctx, volumeName, credentialCtx, fsGroup, pvMountOptions)
+	s3PodAttachment, mpPodName, err := pm.getS3PodAttachmentWithRetry(ctx, volumeName, credentialCtx, fsGroup)
 	if err != nil {
 		klog.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %v", target, err)
 		return fmt.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %w", target, err)
@@ -441,12 +441,14 @@ func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) strin
 
 // getS3PodAttachmentWithRetry retrieves a MountpointS3PodAttachment resource that matches the given volume and credential context.
 // It continuously retries the operation until either a matching attachment is found or the context is canceled.
-func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup, pvMountOptions string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
+func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
+	// Intentionally not including `FieldMountOptions` in our filter criteria because `mountOptions` is a
+	// mutable field in PersistentVolumes, which means it could change after the initial mount.
+	// Instead, we rely on matching the workload pod UID in the final filtering step below.
 	fieldFilters := client.MatchingFields{
 		crdv1beta.FieldNodeName:             pm.nodeID,
 		crdv1beta.FieldPersistentVolumeName: volumeName,
 		crdv1beta.FieldVolumeID:             credentialCtx.VolumeID,
-		crdv1beta.FieldMountOptions:         pvMountOptions,
 		crdv1beta.FieldWorkloadFSGroup:      fsGroup,
 		crdv1beta.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
 	}

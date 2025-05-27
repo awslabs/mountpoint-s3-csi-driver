@@ -58,7 +58,7 @@ func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, _, _ string) error {
+func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, _ string) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
