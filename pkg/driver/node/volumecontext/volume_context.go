@@ -3,6 +3,7 @@ package volumecontext
 
 const (
 	BucketName           = "bucketName"
+	SubDir               = "subDir"
 	AuthenticationSource = "authenticationSource"
 	STSRegion            = "stsRegion"
 
