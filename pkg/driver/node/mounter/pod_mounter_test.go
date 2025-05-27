@@ -51,18 +51,17 @@ type testCtx struct {
 	mountSyscall     func(target string, args mountpoint.Args) (fd int, err error)
 	mountBindSyscall func(source, target string) (err error)
 
-	bucketName     string
-	kubeletPath    string
-	sourcePath     string
-	targetPath     string
-	podUID         string
-	volumeID       string
-	pvName         string
-	nodeName       string
-	fsGroup        string
-	pvMountOptions string
-	mpPodName      string
-	mpPodUID       string
+	bucketName  string
+	kubeletPath string
+	sourcePath  string
+	targetPath  string
+	podUID      string
+	volumeID    string
+	pvName      string
+	nodeName    string
+	fsGroup     string
+	mpPodName   string
+	mpPodUID    string
 }
 
 func setup(t *testing.T) *testCtx {
@@ -92,7 +91,6 @@ func setup(t *testing.T) *testCtx {
 	pvName := "s3-csi-driver-pv"
 	nodeName := "test-node"
 	fsGroup := "1000"
-	pvMountOptions := "--fake-mountoption"
 	s3paCache := &mounter.FakeCache{}
 	targetPath := filepath.Join(
 		kubeletPath,
@@ -123,7 +121,6 @@ func setup(t *testing.T) *testCtx {
 		nodeName:         nodeName,
 		fsGroup:          fsGroup,
 		s3paCache:        s3paCache,
-		pvMountOptions:   pvMountOptions,
 		mpPodName:        mpPodName,
 		mpPodUID:         mpPodUID,
 		sourcePath:       sourcePath,
@@ -135,7 +132,6 @@ func setup(t *testing.T) *testCtx {
 			PersistentVolumeName: testCtx.pvName,
 			VolumeID:             testCtx.volumeID,
 			WorkloadFSGroup:      testCtx.fsGroup,
-			MountOptions:         testCtx.pvMountOptions,
 			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 				testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 			},
@@ -208,7 +204,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					WorkloadPodID:        testCtx.podUID,
-				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
+				}, args, testCtx.fsGroup)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -257,7 +253,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 		})
 
@@ -274,7 +270,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					WorkloadPodID:        testCtx.podUID,
-				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
+				}, args, testCtx.fsGroup)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -325,7 +321,7 @@ func TestPodMounter(t *testing.T) {
 					credentialprovider.ProvideContext{
 						VolumeID:      testCtx.volumeID,
 						WorkloadPodID: testCtx.podUID,
-					}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+					}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 				assert.NoError(t, err)
 			}
 
@@ -368,7 +364,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 
 			ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
@@ -396,7 +392,6 @@ func TestPodMounter(t *testing.T) {
 					PersistentVolumeName: testCtx.pvName,
 					VolumeID:             testCtx.volumeID,
 					WorkloadFSGroup:      testCtx.fsGroup,
-					MountOptions:         testCtx.pvMountOptions,
 					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
 						testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 					},
@@ -407,7 +402,7 @@ func TestPodMounter(t *testing.T) {
 			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 
 			ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
@@ -455,7 +450,7 @@ func TestPodMounter(t *testing.T) {
 			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 		})
 
@@ -478,7 +473,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint does not receive the mount options")
 			}
@@ -520,7 +515,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
@@ -563,7 +558,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
@@ -599,7 +594,7 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID:      testCtx.volumeID,
 			WorkloadPodID: testCtx.podUID,
-		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 		assert.NoError(t, err)
 
 		ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
@@ -625,7 +620,7 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID:      testCtx.volumeID,
 			WorkloadPodID: testCtx.podUID,
-		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 		assert.NoError(t, err)
 
 		ok, err := testCtx.podMounter.IsMountPoint(testCtx.targetPath)

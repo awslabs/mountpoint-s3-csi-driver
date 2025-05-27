@@ -125,7 +125,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	args := mountpoint.ParseArgs(mountpointArgs)
 
 	fsGroup := ""
-	pvMountOptions := ""
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
 		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {
 			fsGroup = volumeMountGroup
@@ -135,10 +134,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
 			args.SetIfAbsent(mountpoint.ArgDirMode, filePerm770)
 			args.SetIfAbsent(mountpoint.ArgFileMode, filePerm660)
-		}
-
-		if mountFlags := capMount.GetMountFlags(); mountFlags != nil {
-			pvMountOptions = strings.Join(mountFlags, ",")
 		}
 	}
 
@@ -151,7 +146,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup, pvMountOptions); err != nil {
+	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}

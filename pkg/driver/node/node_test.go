@@ -3,7 +3,6 @@ package node_test
 import (
 	"errors"
 	"io/fs"
-	"strings"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
@@ -75,7 +74,6 @@ func TestNodePublishVolume(t *testing.T) {
 					}),
 					gomock.Any(),
 					gomock.Eq(""),
-					gomock.Eq(""),
 				)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -113,7 +111,6 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})),
-					gomock.Eq(""),
 					gomock.Eq(""),
 				)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -156,7 +153,6 @@ func TestNodePublishVolume(t *testing.T) {
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--test=123"})),
 					gomock.Eq(""),
-					gomock.Eq(""),
 				)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -197,7 +193,6 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--test=123"})),
-					gomock.Eq(""),
 					gomock.Eq(""),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -276,7 +271,6 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
-					gomock.Eq(""),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -318,7 +312,6 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
-					gomock.Eq("--allow-other"),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -359,7 +352,6 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root"})),
-					gomock.Eq(""),
 					gomock.Eq(""),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -402,7 +394,6 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 					}),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-other"})),
 					gomock.Eq(""),
-					gomock.Eq("--allow-other"),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -445,7 +436,6 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 					}),
 					gomock.Eq(mountpoint.ParseArgs(mountFlags)),
 					gomock.Eq("123"),
-					gomock.Eq(strings.Join(mountFlags, ",")),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
 				if err != nil {
@@ -609,7 +599,7 @@ var _ mounter.Mounter = &dummyMounter{}
 
 type dummyMounter struct{}
 
-func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup, pvMountOptions string) error {
+func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string) error {
 	return nil
 }
 
