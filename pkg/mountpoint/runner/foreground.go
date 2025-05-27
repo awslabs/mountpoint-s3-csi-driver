@@ -52,6 +52,7 @@ func RunInForeground(opts ForegroundOptions) (ExitCode, []byte, error) {
 	if fuseDev == nil {
 		return 0, nil, fmt.Errorf("runner: passed file descriptor %d is not a valid FUSE file descriptor", opts.Fd)
 	}
+	defer fuseDev.Close()
 
 	mountpointArgs := opts.Args
 
