@@ -1,9 +1,11 @@
 package mppod
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +41,11 @@ const (
 	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
 )
 
+const (
+	cacheTypeEmptyDir              = "emptyDir"
+	cacheTypePersistentVolumeClaim = "persistentVolumeClaim"
+)
+
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
@@ -61,15 +68,17 @@ type Config struct {
 // A Creator allows creating specification for Mountpoint Pods to schedule.
 type Creator struct {
 	config Config
+	log    logr.Logger
 }
 
 // NewCreator creates a new creator with the given `config`.
-func NewCreator(config Config) *Creator {
-	return &Creator{config: config}
+func NewCreator(config Config, log logr.Logger) *Creator {
+	return &Creator{config: config, log: log}
 }
 
 // Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
 func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	uid := c.config.ClusterVariant.MountpointPodUserID()
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
@@ -87,6 +96,9 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
 			RestartPolicy: corev1.RestartPolicyOnFailure,
+			SecurityContext: &corev1.PodSecurityContext{
+				FSGroup: uid,
+			},
 			Containers: []corev1.Container{{
 				Name:            "mountpoint",
 				Image:           c.config.Container.Image,
@@ -97,7 +109,7 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
-					RunAsUser:    c.config.ClusterVariant.MountpointPodUserID(),
+					RunAsUser:    uid,
 					RunAsNonRoot: ptr.To(true),
 					SeccompProfile: &corev1.SeccompProfile{
 						Type: corev1.SeccompProfileTypeRuntimeDefault,
@@ -156,7 +168,9 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 	volumeAttributes := ExtractVolumeAttributes(pv)
 	mountpointArgs := mountpoint.ParseArgs(pv.Spec.MountOptions)
 
-	c.configureLocalCache(mpPod, mpContainer, mountpointArgs)
+	if err := c.configureLocalCache(mpPod, mpContainer, mountpointArgs, volumeAttributes); err != nil {
+		return nil, err
+	}
 	c.configureServiceAccount(mpPod, volumeAttributes)
 	if err := c.configureResourceRequests(mpContainer, volumeAttributes); err != nil {
 		return nil, err
@@ -169,23 +183,84 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 }
 
 // configureLocalCache configures necessary cache volumes for the pod and the container if its enabled.
-func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Container, args mountpoint.Args) {
-	if !args.Has(mountpoint.ArgCache) {
+func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Container, args mountpoint.Args, volumeAttributes map[string]string) error {
+	cacheEnabledViaOptions := args.Has(mountpoint.ArgCache)
+	cacheType := volumeAttributes[volumecontext.Cache]
+	if !cacheEnabledViaOptions && cacheType == "" {
 		// Cache is not enabled
-		return
+		return nil
 	}
 
-	// TODO: Allow configuring size limit and medium of `emptyDir` volume.
-	mpPod.Spec.Volumes = append(mpPod.Spec.Volumes, corev1.Volume{
-		Name: LocalCacheDirName,
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
+	if cacheEnabledViaOptions {
+		if cacheType != "" {
+			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuragion in `mountOptions`")
+		}
+
+		// TODO: Create and link `CACHING.md`.
+		cacheType = cacheTypeEmptyDir
+		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see CACHING.md for more details.")
+	}
+
+	var volumeSource corev1.VolumeSource
+	var err error
+	switch cacheType {
+	case cacheTypeEmptyDir:
+		volumeSource, err = c.createCacheVolumeSourceForEmptyDir(volumeAttributes)
+	case cacheTypePersistentVolumeClaim:
+		volumeSource, err = c.createCacheVolumeSourceForPVC(volumeAttributes)
+	default:
+		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, cacheTypeEmptyDir, cacheTypePersistentVolumeClaim)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to configure %q local-cache: %w", cacheType, err)
+	}
+
 	mpContainer.VolumeMounts = append(mpContainer.VolumeMounts, corev1.VolumeMount{
 		Name:      LocalCacheDirName,
 		MountPath: filepath.Join("/", LocalCacheDirName),
 	})
+	mpPod.Spec.Volumes = append(mpPod.Spec.Volumes, corev1.Volume{
+		Name:         LocalCacheDirName,
+		VolumeSource: volumeSource,
+	})
+
+	return nil
+}
+
+// createCacheVolumeSourceForEmptyDir creates an `emptyDir` volume source to use as local-cache.
+func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
+	emptyDir := &corev1.EmptyDirVolumeSource{}
+
+	if sizeLimit := volumeAttributes[volumecontext.CacheEmptyDirSizeLimit]; sizeLimit != "" {
+		quantity, err := resource.ParseQuantity(sizeLimit)
+		if err != nil {
+			return corev1.VolumeSource{}, failedToParseQuantityError(err, volumecontext.CacheEmptyDirSizeLimit, sizeLimit)
+		}
+		emptyDir.SizeLimit = &quantity
+	}
+
+	if medium := volumeAttributes[volumecontext.CacheEmptyDirMedium]; medium != "" {
+		switch medium {
+		case string(corev1.StorageMediumMemory):
+			emptyDir.Medium = corev1.StorageMediumMemory
+		default:
+			return corev1.VolumeSource{}, fmt.Errorf("unknown value for %q: %q. Only %q supported", volumecontext.CacheEmptyDirMedium, medium, corev1.StorageMediumMemory)
+		}
+	}
+
+	return corev1.VolumeSource{EmptyDir: emptyDir}, nil
+}
+
+// createCacheVolumeSourceForEmptyDir creates an `persistentVolumeClaim` volume source to use as local-cache.
+func (c *Creator) createCacheVolumeSourceForPVC(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
+	claimName := volumeAttributes[volumecontext.CachePersistentVolumeClaimName]
+	if claimName == "" {
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CachePersistentVolumeClaimName, cacheTypePersistentVolumeClaim)
+	}
+
+	return corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+		ClaimName: claimName,
+	}}, nil
 }
 
 // configureServiceAccount configures service account of the pod if its specified in the volume attributes.

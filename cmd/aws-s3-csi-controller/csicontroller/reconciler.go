@@ -48,8 +48,8 @@ type Reconciler struct {
 }
 
 // NewReconciler returns a new reconciler created from `client` and `podConfig`.
-func NewReconciler(client client.Client, podConfig mppod.Config) *Reconciler {
-	creator := mppod.NewCreator(podConfig)
+func NewReconciler(client client.Client, podConfig mppod.Config, log logr.Logger) *Reconciler {
+	creator := mppod.NewCreator(podConfig, log)
 	return &Reconciler{Client: client, mountpointPodConfig: podConfig, mountpointPodCreator: creator, s3paExpectations: newExpectations()}
 }
 

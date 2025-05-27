@@ -195,7 +195,9 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(idConfig.Cleanup)
 
-			resource := createVolumeResourceWithMountOptions(contextWithAuthenticationSource(ctx, "pod"), l.config, pattern, nil)
+			resource := createVolumeResourceWithMountOptions(contextWithVolumeAttributes(ctx, map[string]string{
+				"authenticationSource": "pod",
+			}), l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
 			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {
@@ -226,7 +228,9 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			ginkgo.DeferCleanup(idConfig2.Cleanup)
 
 			saNames := []string{idConfig1.ServiceAccount.Name, idConfig2.ServiceAccount.Name}
-			resource := createVolumeResourceWithMountOptions(contextWithAuthenticationSource(ctx, "pod"), l.config, pattern, nil)
+			resource := createVolumeResourceWithMountOptions(contextWithVolumeAttributes(ctx, map[string]string{
+				"authenticationSource": "pod",
+			}), l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
 			_, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {

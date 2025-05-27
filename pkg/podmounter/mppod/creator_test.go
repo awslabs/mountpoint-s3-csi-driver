@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -11,6 +12,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -45,7 +47,7 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 }
 
 func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRunAsUser *int64) {
-	creator := mppod.NewCreator(createTestConfig(clusterVariant))
+	creator := mppod.NewCreator(createTestConfig(clusterVariant), testr.New(t))
 
 	verifyDefaultValues := func(mpPod *corev1.Pod) {
 		assert.Equals(t, "mp-", mpPod.GenerateName)
@@ -60,6 +62,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
+		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
 		assert.Equals(t, &corev1.Volume{
 			Name: mppod.CommunicationDirName,
 			VolumeSource: corev1.VolumeSource{
@@ -145,27 +148,248 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 			assert.NoError(t, err)
 			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			})
+		})
+	})
 
-			cacheVol := findVolumeFromPod(mpPod, mppod.LocalCacheDirName)
-			if cacheVol == nil {
-				t.Fatalf("pod should have a cache volume with name %q", mppod.LocalCacheDirName)
-			}
-			assert.Equals(t, &corev1.Volume{
-				Name: mppod.LocalCacheDirName,
-				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{},
+	t.Run("Cache Configuration", func(t *testing.T) {
+		t.Run("With emptyDir cache", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
 				},
-			}, cacheVol)
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache: "emptyDir",
+							},
+						},
+					},
+				},
+			})
 
-			mpContainer := mpPod.Spec.Containers[0]
-			cacheMount := findVolumeMountFromContainer(mpContainer, mppod.LocalCacheDirName)
-			if cacheMount == nil {
-				t.Fatalf("container should have a cache mount with name %q", mppod.LocalCacheDirName)
-			}
-			assert.Equals(t, &corev1.VolumeMount{
-				Name:      mppod.LocalCacheDirName,
-				MountPath: filepath.Join("/", mppod.LocalCacheDirName),
-			}, cacheMount)
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			})
+		})
+
+		t.Run("With emptyDir cache and size limit", func(t *testing.T) {
+			sizeLimit := "1Gi"
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                  "emptyDir",
+								volumecontext.CacheEmptyDirSizeLimit: sizeLimit,
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+				},
+			})
+		})
+
+		t.Run("With emptyDir cache and memory medium", func(t *testing.T) {
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:               "emptyDir",
+								volumecontext.CacheEmptyDirMedium: "Memory",
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium: corev1.StorageMediumMemory,
+				},
+			})
+		})
+
+		t.Run("With emptyDir cache, size limit and memory medium", func(t *testing.T) {
+			sizeLimit := "1Gi"
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                  "emptyDir",
+								volumecontext.CacheEmptyDirSizeLimit: sizeLimit,
+								volumecontext.CacheEmptyDirMedium:    "Memory",
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+					Medium:    corev1.StorageMediumMemory,
+				},
+			})
+		})
+
+		t.Run("With pvc cache", func(t *testing.T) {
+			claimName := "test-cache-pvc"
+			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                          "persistentVolumeClaim",
+								volumecontext.CachePersistentVolumeClaimName: claimName,
+							},
+						},
+					},
+				},
+			})
+
+			assert.NoError(t, err)
+			verifyDefaultValues(mpPod)
+			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: claimName,
+				},
+			})
+		})
+
+		t.Run("With pvc cache but missing claim name", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache: "persistentVolumeClaim",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With invalid cache type", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache: "invalid",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With invalid emptyDir size limit", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                  "emptyDir",
+								volumecontext.CacheEmptyDirSizeLimit: "invalid",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With invalid emptyDir medium", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:               "emptyDir",
+								volumecontext.CacheEmptyDirMedium: "invalid",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With both mount options cache and volume attributes cache", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache: "emptyDir",
+							},
+						},
+					},
+					MountOptions: []string{
+						"cache /mnt/mp-cache",
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
 		})
 	})
 
@@ -356,4 +580,25 @@ func findVolumeFromPod(pod *corev1.Pod, name string) *corev1.Volume {
 		}
 	}
 	return nil
+}
+
+func verifyLocalCacheVolume(t *testing.T, mpPod *corev1.Pod, expected corev1.VolumeSource) {
+	cacheVol := findVolumeFromPod(mpPod, mppod.LocalCacheDirName)
+	if cacheVol == nil {
+		t.Fatalf("pod should have a cache volume with name %q", mppod.LocalCacheDirName)
+	}
+
+	assert.Equals(t, mppod.LocalCacheDirName, cacheVol.Name)
+	assert.Equals(t, expected, cacheVol.VolumeSource)
+
+	mpContainer := mpPod.Spec.Containers[0]
+	cacheMount := findVolumeMountFromContainer(mpContainer, mppod.LocalCacheDirName)
+	if cacheMount == nil {
+		t.Fatalf("container should have a cache mount with name %q", mppod.LocalCacheDirName)
+	}
+
+	assert.Equals(t, &corev1.VolumeMount{
+		Name:      mppod.LocalCacheDirName,
+		MountPath: filepath.Join("/", mppod.LocalCacheDirName),
+	}, cacheMount)
 }
