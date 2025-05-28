@@ -148,6 +148,7 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	credentialCtx.SetAsSystemDMountpoint()
 	credentialCtx.WritePath, _ = m.credentialWriteAndEnvPath()
 
 	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{
