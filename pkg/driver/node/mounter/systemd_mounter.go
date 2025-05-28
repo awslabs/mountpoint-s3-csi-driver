@@ -96,6 +96,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				WritePath: credentialCtx.WritePath,
 				PodID:     credentialCtx.WorkloadPodID,
 				VolumeID:  credentialCtx.VolumeID,
+				MountKind: credentialprovider.MountKindSystemd,
 			}); mntErr != nil {
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)
 			}
@@ -147,6 +148,7 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	credentialCtx.SetAsSystemDMountpoint()
 	credentialCtx.WritePath, _ = m.credentialWriteAndEnvPath()
 
 	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{

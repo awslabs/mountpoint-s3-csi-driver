@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -150,6 +152,29 @@ type CleanupContext struct {
 	WritePath string
 	PodID     string
 	VolumeID  string
+
+	// MountKind indicates whether the mount is managed by systemd or pod mounter
+	MountKind MountKind
+}
+
+// SetAsSystemDMountpoint marks this context as managed by systemd instead of pod mounter.
+func (ctx *CleanupContext) SetAsSystemDMountpoint() {
+	ctx.MountKind = MountKindSystemd
+}
+
+// SetAsPodMountpoint marks this context as managed by pod mounter instead of systemd.
+func (ctx *CleanupContext) SetAsPodMountpoint() {
+	ctx.MountKind = MountKindPod
+}
+
+// IsSystemDMountpoint returns true if this context is managed by systemd mounter.
+func (ctx *CleanupContext) IsSystemDMountpoint() bool {
+	return ctx.MountKind == MountKindSystemd
+}
+
+// IsPodMountpoint returns true if this context is managed by pod mounter.
+func (ctx *CleanupContext) IsPodMountpoint() bool {
+	return ctx.MountKind == MountKindPod
 }
 
 // New creates a new [Provider] with given client.
@@ -179,9 +204,24 @@ func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envp
 
 // Cleanup cleans any previously created credential files for given context.
 func (c *Provider) Cleanup(cleanupCtx CleanupContext) error {
+	if cleanupCtx.MountKind == MountKindUnspecified {
+		return fmt.Errorf("MountKind must be specified on credential CleanupContext struct.")
+	}
+
 	errPod := c.cleanupFromPod(cleanupCtx)
 	errDriver := c.cleanupFromDriver(cleanupCtx)
 	return errors.Join(errPod, errDriver)
+}
+
+// cleanupToken removes a token file from the filesystem. If the file doesn't exist, it's not considered
+// an error. This helper is used by both cleanupFromPod and cleanupFromDriver.
+func (c *Provider) cleanupToken(basePath, tokenName string) error {
+	tokenPath := filepath.Join(basePath, tokenName)
+	err := os.Remove(tokenPath)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // escapedVolumeIdentifier returns "{podID}-{volumeID}" as a unique identifier for this volume.

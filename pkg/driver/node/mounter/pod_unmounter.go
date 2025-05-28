@@ -231,6 +231,7 @@ func (u *PodUnmounter) cleanupCredentials(mpPod *corev1.Pod) error {
 		VolumeID:  mpPod.Labels[mppod.LabelVolumeId],
 		PodID:     string(mpPod.UID),
 		WritePath: mppod.PathOnHost(u.podPath(string(mpPod.UID)), mppod.KnownPathCredentials),
+		MountKind: credentialprovider.MountKindPod,
 	})
 }
 
