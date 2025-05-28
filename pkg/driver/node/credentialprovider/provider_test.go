@@ -982,7 +982,7 @@ func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
 func TestCleanup(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 
-	t.Run("cleanup driver level", func(t *testing.T) {
+	t.Run("cleanup driver level long-term credentials", func(t *testing.T) {
 		// Provide/create long-term credentials first
 		setEnvForLongTermCredentials(t)
 
@@ -1012,6 +1012,7 @@ func TestCleanup(t *testing.T) {
 			WritePath: writePath,
 			PodID:     testPodID,
 			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindSystemd,
 		})
 		assert.NoError(t, err)
 
@@ -1025,6 +1026,121 @@ func TestCleanup(t *testing.T) {
 		_, err = os.Stat(filepath.Join(writePath, testSystemDProfilePrefix+"s3-csi-credentials"))
 		if err == nil {
 			t.Fatalf("AWS Credentials file should be cleaned up")
+		}
+		assert.Equals(t, fs.ErrNotExist, err)
+	})
+
+	t.Run("cleanup driver level sts web identity token (PodMounter)", func(t *testing.T) {
+		setEnvForStsWebIdentityCredentials(t)
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		writePath := t.TempDir()
+		provideCtx := credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            writePath,
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			MountKind:            credentialprovider.MountKindPod,
+		}
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+		assert.Equals(t, envprovider.Environment{
+			"AWS_ROLE_ARN":                testRoleARN,
+			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+		}, env)
+		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+
+		// Perform cleanup
+		err = provider.Cleanup(credentialprovider.CleanupContext{
+			WritePath: writePath,
+			PodID:     testPodID,
+			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindPod,
+		})
+		assert.NoError(t, err)
+
+		// Verify token was removed
+		_, err = os.Stat(filepath.Join(writePath, testWebIdentityServiceAccountToken))
+		if err == nil {
+			t.Fatalf("sts web identity token should be cleaned up")
+		}
+		assert.Equals(t, fs.ErrNotExist, err)
+	})
+
+	t.Run("do not cleanup driver level sts web identity token (SystemD)", func(t *testing.T) {
+		setEnvForStsWebIdentityCredentials(t)
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		writePath := t.TempDir()
+		provideCtx := credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            writePath,
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			MountKind:            credentialprovider.MountKindSystemd,
+		}
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+		assert.Equals(t, envprovider.Environment{
+			"AWS_ROLE_ARN":                testRoleARN,
+			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+		}, env)
+		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+
+		// Perform cleanup
+		err = provider.Cleanup(credentialprovider.CleanupContext{
+			WritePath: writePath,
+			PodID:     testPodID,
+			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindSystemd,
+		})
+		assert.NoError(t, err)
+
+		// Verify token was not removed
+		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+	})
+
+	t.Run("cleanup driver level EKS Pod Identity token (PodMounter)", func(t *testing.T) {
+		setEnvForContainerCredentials(t)
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		writePath := t.TempDir()
+		provideCtx := credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            writePath,
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			MountKind:            credentialprovider.MountKindPod,
+		}
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+		assert.Equals(t, envprovider.Environment{
+			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+		}, env)
+		assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+
+		err = provider.Cleanup(credentialprovider.CleanupContext{
+			WritePath: writePath,
+			PodID:     testPodID,
+			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindPod,
+		})
+		assert.NoError(t, err)
+
+		// Verify token was removed
+		_, err = os.Stat(filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+		if err == nil {
+			t.Fatalf("EKS Pod Identity token should be cleaned up")
 		}
 		assert.Equals(t, fs.ErrNotExist, err)
 	})
@@ -1065,6 +1181,7 @@ func TestCleanup(t *testing.T) {
 			WritePath: writePath,
 			PodID:     testPodID,
 			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindSystemd,
 		})
 		assert.NoError(t, err)
 
@@ -1085,8 +1202,29 @@ func TestCleanup(t *testing.T) {
 			WritePath: writePath,
 			PodID:     testPodID,
 			VolumeID:  testVolumeID,
+			MountKind: credentialprovider.MountKindSystemd,
 		})
 		assert.NoError(t, err)
+	})
+
+	t.Run("cleanup MountKind validation", func(t *testing.T) {
+		writePath := t.TempDir()
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+		err := provider.Cleanup(credentialprovider.CleanupContext{
+			WritePath: writePath,
+			PodID:     testPodID,
+			VolumeID:  testVolumeID,
+			// Deliberately not setting MountKind (MountKindUnspecified) to test validation
+		})
+
+		if err == nil {
+			t.Fatal("Expected error when MountKind is not specified, but got nil")
+		}
+
+		expectedErrMsg := "MountKind must be specified on credential CleanupContext struct."
+		if err.Error() != expectedErrMsg {
+			t.Errorf("Expected error message %q, but got %q", expectedErrMsg, err.Error())
+		}
 	})
 }
 

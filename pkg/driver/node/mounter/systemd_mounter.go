@@ -96,6 +96,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				WritePath: credentialCtx.WritePath,
 				PodID:     credentialCtx.WorkloadPodID,
 				VolumeID:  credentialCtx.VolumeID,
+				MountKind: credentialprovider.MountKindSystemd,
 			}); mntErr != nil {
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)
 			}

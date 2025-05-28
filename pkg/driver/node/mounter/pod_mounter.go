@@ -280,6 +280,7 @@ func (pm *PodMounter) Unmount(ctx context.Context, target string, credentialCtx 
 
 	if isSystemDMountpoint {
 		klog.Infof("Target %q was SystemD Mountpoint. Will cleanup credentials.", target)
+		credentialCtx.SetAsSystemDMountpoint()
 		credentialCtx.WritePath = hostPluginDirWithDefault()
 
 		err = pm.credProvider.Cleanup(credentialCtx)

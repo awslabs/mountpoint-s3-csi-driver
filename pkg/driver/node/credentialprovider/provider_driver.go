@@ -1,10 +1,13 @@
 package credentialprovider
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
@@ -83,10 +86,25 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 // cleanupFromDriver removes any credential files that were created for driver-level authentication via [Provider.provideFromDriver].
 func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 	prefix := driverLevelLongTermCredentialsProfilePrefix(cleanupCtx.PodID, cleanupCtx.VolumeID)
-	return awsprofile.Cleanup(awsprofile.Settings{
+	errLongTerm := awsprofile.Cleanup(awsprofile.Settings{
 		Basepath: cleanupCtx.WritePath,
 		Prefix:   prefix,
 	})
+
+	var errSTS, errEKS error
+	if cleanupCtx.IsPodMountpoint() {
+		errSTS = c.cleanupToken(cleanupCtx.WritePath, webIdentityServiceAccountTokenName)
+		if errSTS != nil {
+			errSTS = status.Errorf(codes.Internal, "Failed to cleanup driver-level service account STS token: %v", errSTS)
+		}
+
+		errEKS = c.cleanupToken(cleanupCtx.WritePath, eksPodIdentityServiceAccountTokenName)
+		if errEKS != nil {
+			errEKS = status.Errorf(codes.Internal, "Failed to cleanup driver-level service account EKS Pod Identity token: %v", errEKS)
+		}
+	}
+
+	return errors.Join(errLongTerm, errSTS, errEKS)
 }
 
 // provideStsWebIdentityCredentialsFromDriver provides credentials for STS Web Identity from the driver's service account.

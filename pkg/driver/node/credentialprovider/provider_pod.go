@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -123,31 +122,21 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 	return nil, irsaCredentialsEnvironmentError
 }
 
-// cleanupFromPod removes any credential files that were created for pod-level authentication authentication via [Provider.provideFromPod].
+// cleanupFromPod removes any credential files that were created for pod-level authentication via [Provider.provideFromPod].
 func (c *Provider) cleanupFromPod(cleanupCtx CleanupContext) error {
-	cleanupToken := func(tokenName string) error {
-		tokenPath := filepath.Join(cleanupCtx.WritePath, tokenName)
-		err := os.Remove(tokenPath)
-		if err != nil && errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-
-		return err
-	}
-
 	tokenNameSTS := podLevelSTSWebIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID)
-	err := cleanupToken(tokenNameSTS)
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to cleanup service account STS token: %v", err)
+	errSTS := c.cleanupToken(cleanupCtx.WritePath, tokenNameSTS)
+	if errSTS != nil {
+		errSTS = status.Errorf(codes.Internal, "Failed to cleanup service account STS token: %v", errSTS)
 	}
 
 	tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID)
-	err = cleanupToken(tokenNameEKS)
-	if err != nil {
-		status.Errorf(codes.Internal, "Failed to cleanup service account EKS Pod Identity token: %v", err)
+	errEKS := c.cleanupToken(cleanupCtx.WritePath, tokenNameEKS)
+	if errEKS != nil {
+		errEKS = status.Errorf(codes.Internal, "Failed to cleanup service account EKS Pod Identity token: %v", errEKS)
 	}
 
-	return nil
+	return errors.Join(errSTS, errEKS)
 }
 
 var errMissingServiceAccountAnnotationForIRSA = errors.New("Missing role annotation on pod's service account")
