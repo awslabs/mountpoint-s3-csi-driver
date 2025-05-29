@@ -2,9 +2,10 @@ package e2e
 
 import (
 	"context"
+	"maps"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
-	custom_testsuites "github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	custom_testsuites "github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,9 +30,9 @@ type s3Driver struct {
 }
 
 type s3Volume struct {
-	bucketName           string
-	deleteBucket         s3client.DeleteBucketFunc
-	authenticationSource string
+	bucketName       string
+	deleteBucket     s3client.DeleteBucketFunc
+	volumeAttributes map[string]string
 }
 
 var _ framework.TestDriver = &s3Driver{}
@@ -92,9 +93,9 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 	}
 
 	return &s3Volume{
-		bucketName:           bucketName,
-		deleteBucket:         deleteBucket,
-		authenticationSource: custom_testsuites.AuthenticationSourceFromContext(ctx),
+		bucketName:       bucketName,
+		deleteBucket:     deleteBucket,
+		volumeAttributes: custom_testsuites.VolumeAttributesFromContext(ctx),
 	}
 }
 
@@ -102,9 +103,9 @@ func (d *s3Driver) GetPersistentVolumeSource(readOnly bool, fsType string, testV
 	volume, _ := testVolume.(*s3Volume)
 
 	volumeAttributes := map[string]string{"bucketName": volume.bucketName}
-	if volume.authenticationSource != "" {
-		f.Logf("Using authentication source %s for volume", volume.authenticationSource)
-		volumeAttributes["authenticationSource"] = volume.authenticationSource
+	maps.Copy(volumeAttributes, volume.volumeAttributes)
+	if authenticationSource := volumeAttributes["authenticationSource"]; authenticationSource != "" {
+		f.Logf("Using authentication source %s for volume", authenticationSource)
 	}
 
 	return &v1.PersistentVolumeSource{

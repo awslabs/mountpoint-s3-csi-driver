@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
@@ -194,7 +195,9 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(idConfig.Cleanup)
 
-			resource := createVolumeResourceWithMountOptions(contextWithAuthenticationSource(ctx, "pod"), l.config, pattern, nil)
+			resource := createVolumeResourceWithMountOptions(contextWithVolumeAttributes(ctx, map[string]string{
+				"authenticationSource": "pod",
+			}), l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
 			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {
@@ -225,7 +228,9 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			ginkgo.DeferCleanup(idConfig2.Cleanup)
 
 			saNames := []string{idConfig1.ServiceAccount.Name, idConfig2.ServiceAccount.Name}
-			resource := createVolumeResourceWithMountOptions(contextWithAuthenticationSource(ctx, "pod"), l.config, pattern, nil)
+			resource := createVolumeResourceWithMountOptions(contextWithVolumeAttributes(ctx, map[string]string{
+				"authenticationSource": "pod",
+			}), l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
 			_, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {
@@ -298,6 +303,67 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			checkReadFromPath(f, pods[1], firstFile, toWrite, seed)
 			checkWriteToPathFails(f, pods[1], secondFile, toWrite, seed)
 		})
+
+		ginkgo.It("should keep Mountpoint Pod serving second workload after first workload termination", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {})
+
+			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
+			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
+
+			checkCrossReadWrite(f, pods[0], pods[1])
+
+			ginkgo.By("Deleting the first pod")
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[0]))
+
+			ginkgo.By("Verify the second pod can still access the volume after first pod is deleted")
+			toWrite := 1024 // 1KB
+			path := "/mnt/volume1/new-file-after-pod1-terminated.txt"
+			seed := time.Now().UTC().UnixNano()
+			checkWriteToPath(f, pods[1], path, toWrite, seed)
+			checkReadFromPath(f, pods[1], path, toWrite, seed)
+		})
+
+		ginkgo.It("should keep Mountpoint Pod running during graceful termination period", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {
+				if index > 1 {
+					pod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(10))
+					pod.Spec.Containers[0].Command = []string{"/bin/sh"}
+					pod.Spec.Containers[0].Args = []string{"-c", `
+						handle_sigterm() {
+							sleep 8
+							echo terminating > /mnt/volume1/terminating.txt
+						}
+						trap handle_sigterm SIGTERM
+
+						while true; do
+						    sleep 1
+						done
+					`}
+				}
+			})
+
+			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
+			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
+
+			checkCrossReadWrite(f, pods[0], pods[1])
+
+			ginkgo.By("Deleting the first and the second pod")
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[0]))
+			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[1]))
+
+			targetNode, pods = createPodsInTheSameNode(ctx, f, 1, resource, func(index int, pod *v1.Pod) {})
+			s3paNames, mountpointPodNames = verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
+			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
+
+			e2evolume.VerifyExecInPodSucceed(f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
+		})
+
 	})
 }
 

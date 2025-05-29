@@ -13,13 +13,13 @@ import (
 	"github.com/golang/mock/gomock"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	mock_driver "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mocks"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	mock_driver "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 type mounterTestEnv struct {
@@ -154,7 +154,7 @@ func TestS3MounterMount(t *testing.T) {
 				testCase.before(t, env)
 			}
 			err := env.mounter.Mount(env.ctx, testCase.bucketName, testCase.targetPath,
-				testCase.provideCtx, mountpoint.ParseArgs(testCase.options), "", "")
+				testCase.provideCtx, mountpoint.ParseArgs(testCase.options), "")
 			env.mockCtl.Finish()
 			if err != nil && !testCase.expectedErr {
 				t.Fatal(err)

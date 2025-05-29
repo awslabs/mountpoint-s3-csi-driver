@@ -21,7 +21,7 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 )
 
 const volumeName1 = "volume1"
@@ -98,7 +98,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		checkWriteToPath(f, pod, first, testWriteSize, seed)
 		checkListingPathWithEntries(f, pod, basePath, []string{"first"})
 		// Test reading multiple times to ensure cached-read works
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			checkReadFromPath(f, pod, first, testWriteSize, seed)
 		}
 
@@ -108,7 +108,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		// Ensure the data still read from the cache - without cache this would fail as its removed from underlying bucket
 		checkReadFromPath(f, pod, first, testWriteSize, seed)
 
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s", dir, dir, second))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
 		checkListingPathWithEntries(f, pod, dir, []string{"second"})
 		checkListingPathWithEntries(f, pod, basePath, []string{"test-dir"})
@@ -134,28 +134,52 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		return pod, bucketName
 	}
 
+	type localCacheKind string
+	const (
+		localCacheUnspecified  localCacheKind = ""
+		localCacheMountOptions                = "localCacheMountOptions"
+		localCacheEmptyDir                    = "localCacheEmptyDir"
+	)
+
 	type cacheTestConfig struct {
-		useLocalCache   bool
+		localCacheKind  localCacheKind
 		useExpressCache bool
 	}
 
 	testCache := func(config cacheTestConfig) {
 		var baseMountOptions []string
 		var basePodModifiers []func(*v1.Pod)
+		var enhanceContext func(context.Context) context.Context
 		var expressCacheBucketName string
 
 		BeforeEach(func(ctx context.Context) {
 			// Reset shared configuration on each run
 			baseMountOptions = nil
 			basePodModifiers = nil
+			enhanceContext = func(ctx context.Context) context.Context { return ctx }
 			expressCacheBucketName = ""
 
-			if config.useLocalCache {
+			switch config.localCacheKind {
+			case localCacheMountOptions:
 				cacheDir := randomCacheDir()
-				basePodModifiers = append(basePodModifiers, func(pod *v1.Pod) {
-					ensureCacheDirExistsInNode(pod, cacheDir)
-				})
+
+				if !IsPodMounter {
+					// This hacky workaround is only needed for `SystemdMounter`,
+					// `PodMounter` will automatically create cache folder within the Mountpoint Pod.
+					basePodModifiers = append(basePodModifiers, func(pod *v1.Pod) {
+						ensureCacheDirExistsInNode(pod, cacheDir)
+					})
+				}
+
 				baseMountOptions = append(baseMountOptions, fmt.Sprintf("cache %s", cacheDir))
+			case localCacheEmptyDir:
+				enhanceContext = func(ctx context.Context) context.Context {
+					return contextWithVolumeAttributes(ctx, map[string]string{
+						"cache":                  "emptyDir",
+						"cacheEmptyDirSizeLimit": "32Mi",
+						"cacheEmptyDirMedium":    "Memory",
+					})
+				}
 			}
 
 			if config.useExpressCache {
@@ -168,6 +192,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("basic file operations as root", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			mountOptions := append(baseMountOptions, "allow-delete")
 			podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 				pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -179,6 +205,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("basic file operations as non-root", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			mountOptions := append(baseMountOptions,
 				"allow-delete",
 				"allow-other",
@@ -191,6 +219,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("two containers in the same pod using the same cache", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			testFile := filepath.Join(e2epod.VolumeMountPath1, "helloworld.txt")
 
 			mountOptions := append(baseMountOptions, "allow-delete")
@@ -217,8 +247,10 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		// If we're testing multi-level cache, add two more test cases:
 		// 	1) Ensure it still works if local-cache is wiped out
 		// 	1) Ensure it still works if Express-cache is wiped out
-		if config.useLocalCache && config.useExpressCache {
+		if config.localCacheKind != localCacheUnspecified && config.useExpressCache {
 			It("should use Express cache if local cache is empty", func(ctx context.Context) {
+				ctx = enhanceContext(ctx)
+
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -234,7 +266,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				checkWriteToPath(f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 
@@ -243,12 +275,14 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				e2evolume.VerifyExecInPodSucceed(f, pod, "rm -rf /cache/*")
 
 				// Reading should still work
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 			})
 
 			It("should use local cache if Express cache is empty", func(ctx context.Context) {
+				ctx = enhanceContext(ctx)
+
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -264,7 +298,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				checkWriteToPath(f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 
@@ -273,7 +307,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				s3client.New().WipeoutBucket(ctx, expressCacheBucketName)
 
 				// Reading should still work
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 			})
@@ -281,9 +315,21 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 	}
 
 	Describe("Cache", func() {
-		Describe("Local", func() {
+		Describe("Local (MountOptions)", func() {
 			testCache(cacheTestConfig{
-				useLocalCache: true,
+				localCacheKind: localCacheMountOptions,
+			})
+		})
+
+		Describe("Local (EmptyDir)", func() {
+			BeforeEach(func() {
+				if !IsPodMounter {
+					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
+				}
+			})
+
+			testCache(cacheTestConfig{
+				localCacheKind: localCacheEmptyDir,
 			})
 		})
 
@@ -293,9 +339,22 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 		})
 
-		Describe("Multi-Level", Serial, func() {
+		Describe("Multi-Level (MountOptions)", Serial, func() {
 			testCache(cacheTestConfig{
-				useLocalCache:   true,
+				localCacheKind:  localCacheMountOptions,
+				useExpressCache: true,
+			})
+		})
+
+		Describe("Multi-Level (EmptyDir)", Serial, func() {
+			BeforeEach(func() {
+				if !IsPodMounter {
+					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
+				}
+			})
+
+			testCache(cacheTestConfig{
+				localCacheKind:  localCacheEmptyDir,
 				useExpressCache: true,
 			})
 		})

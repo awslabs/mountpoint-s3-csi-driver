@@ -52,13 +52,13 @@ const (
 	// "AccessDenied" exceptions until they are in sync. We're retrying on "AccessDenied" as a workaround.
 	stsAssumeRoleTimeout              = 2 * time.Minute
 	stsAssumeRoleRetryCode            = "AccessDenied"
-	stsAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	stsAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	stsAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
 const (
 	eksauthAssumeRoleRetryCode            = "AccessDeniedException"
-	eksauthAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	eksauthAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
@@ -510,11 +510,15 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 		Describe("Pod Level", func() {
 			enablePodLevelIdentity := func(ctx context.Context) context.Context {
-				return contextWithAuthenticationSource(ctx, "pod")
+				return contextWithVolumeAttributes(ctx, map[string]string{
+					"authenticationSource": "pod",
+				})
 			}
 
 			enableDriverLevelIdentity := func(ctx context.Context) context.Context {
-				return contextWithAuthenticationSource(ctx, "driver")
+				return contextWithVolumeAttributes(ctx, map[string]string{
+					"authenticationSource": "driver",
+				})
 			}
 
 			// Helper functions related to IAM Roles for Service Accounts (IRSA)
@@ -1121,7 +1125,7 @@ func waitUntilRoleIsAssumableSTS[Input any, Output any](
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *sts.Options) {
 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
-		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
 }
@@ -1133,7 +1137,7 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *eksauth.Options) {
 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryCode)
-		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, eksauthAssumeRoleRetryMaxBackoffDelay)
 	})
 }
@@ -1360,19 +1364,22 @@ func eksPodIdentityAgentDaemonSetForCluster(ctx context.Context, f *framework.Fr
 
 type contextKey string
 
-const authenticationSourceKey contextKey = "authenticationSource"
+const volumeAttributesKey contextKey = "volumeAttributes"
 
-// contextWithAdditionalVolumeAttributes enhances given context with given authentication source.
+// contextWithVolumeAttributes enhances given context with given volume attributes.
 // This value is used by `s3Volume.CreateVolume` and `s3Volume.GetPersistentVolumeSource`.
 //
 // This is kinda a magical way to pass values to those functions, but since Kubernetes Storage Test framework
 // does not allow us to passing extra values, this is the only way to achieve that without duplicating the framework code.
-func contextWithAuthenticationSource(ctx context.Context, authenticationSource string) context.Context {
-	return context.WithValue(ctx, authenticationSourceKey, authenticationSource)
+func contextWithVolumeAttributes(ctx context.Context, volumeAttributes map[string]string) context.Context {
+	return context.WithValue(ctx, volumeAttributesKey, volumeAttributes)
 }
 
-// AuthenticationSourceFromContext returns authentication source set for given context.
-func AuthenticationSourceFromContext(ctx context.Context) string {
-	val, _ := ctx.Value(authenticationSourceKey).(string)
+// VolumeAttributesFromContext returns volume attributes set for given context.
+func VolumeAttributesFromContext(ctx context.Context) map[string]string {
+	val, _ := ctx.Value(volumeAttributesKey).(map[string]string)
+	if val == nil {
+		val = make(map[string]string)
+	}
 	return val
 }

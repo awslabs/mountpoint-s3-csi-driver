@@ -28,12 +28,12 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/targetpath"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 var kubeletPath = util.KubeletPath()
@@ -129,7 +129,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	fsGroup := ""
-	pvMountOptions := ""
 	if capMount := volCap.GetMount(); capMount != nil && util.UsePodMounter() {
 		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {
 			fsGroup = volumeMountGroup
@@ -139,10 +138,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 			args.SetIfAbsent(mountpoint.ArgAllowOther, mountpoint.ArgNoValue)
 			args.SetIfAbsent(mountpoint.ArgDirMode, filePerm770)
 			args.SetIfAbsent(mountpoint.ArgFileMode, filePerm660)
-		}
-
-		if mountFlags := capMount.GetMountFlags(); mountFlags != nil {
-			pvMountOptions = strings.Join(mountFlags, ",")
 		}
 	}
 
@@ -155,7 +150,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup, pvMountOptions); err != nil {
+	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}

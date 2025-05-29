@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -110,7 +110,7 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				klog.Infof("Found a dangling Mountpoint mount %q, cleaning up", mpPodName)
-				if err := u.unmountAndRemoveMountpointSource(source); err != nil {
+				if _, err := u.unmountAndRemoveMountpointSource(source); err != nil {
 					klog.Errorf("Failed to unmount and remove Mountpoint %q: %v", source, err)
 				} else {
 					klog.Infof("Successfully cleaned dangling Mountpoint mount %q", mpPodName)
@@ -142,20 +142,28 @@ func (u *PodUnmounter) unmountMountpointPodIfNeeded(mpPod *corev1.Pod) {
 
 // cleanUnmount performs a clean unmount for `mpPod`.
 func (u *PodUnmounter) cleanUnmount(mpPod *corev1.Pod) {
-	klog.Infof("Starting unmount procedure for Mountpoint Pod %q", mpPod.Name)
+	klog.V(5).Infof("Starting unmount procedure for Mountpoint Pod %q", mpPod.Name)
 
 	source := u.mountpointPodSourcePath(mpPod.Name)
 	podPath := u.podPath(string(mpPod.UID))
 
 	// First, write `mount.exit` file to signal a clean exit to Mountpoint Pod, so it exists with zero code.
 	if err := u.writeExitFile(podPath); err != nil {
-		klog.Errorf("Failed to write exit file for Mountpoint Pod %q: %v", mpPod.Name, err)
+		if !errors.Is(err, fs.ErrNotExist) {
+			klog.Errorf("Failed to write exit file for Mountpoint Pod %q: %v", mpPod.Name, err)
+		}
 		return
 	}
 
 	// Now unmount and remove `source`
-	if err := u.unmountAndRemoveMountpointSource(source); err != nil {
-		klog.Errorf("Failed to unmount and remove Mountpoint %q: %v", source, err)
+	wasMountpoint, err := u.unmountAndRemoveMountpointSource(source)
+	if err != nil {
+		if errors.Is(err, errMountpointIsStillInUse) {
+			klog.Infof("Mountpoint Pod %q is still in use, will retry later", mpPod.Name)
+		} else {
+			klog.Errorf("Failed to unmount and remove Mountpoint Pod %q: %v", mpPod.Name, err)
+		}
+		return
 	}
 
 	if err := u.cleanupCredentials(mpPod); err != nil {
@@ -163,45 +171,48 @@ func (u *PodUnmounter) cleanUnmount(mpPod *corev1.Pod) {
 		return
 	}
 
-	klog.Infof("Mountpoint Pod %q successfully unmounted", mpPod.Name)
+	if wasMountpoint {
+		klog.Infof("Mountpoint Pod %q successfully unmounted", mpPod.Name)
+	}
 }
 
 // unmountAndRemoveMountpointSource unmounts Mountpoint at `source`, and then removes the (empty) directory.
-func (u *PodUnmounter) unmountAndRemoveMountpointSource(source string) error {
+// It returns whether `source` was a Mountpoint and any error encountered.
+func (u *PodUnmounter) unmountAndRemoveMountpointSource(source string) (bool, error) {
 	isMountpoint, err := u.mount.CheckMountpoint(source)
 	isCorruptedMountpoint := err != nil && u.mount.IsMountpointCorrupted(err)
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
 		// Target does not exists, nothing to do
-		return nil
+		return isMountpoint, nil
 	} else if err != nil && !isCorruptedMountpoint {
-		return fmt.Errorf("failed to check orphan Mountpoint %q: %w", source, err)
+		return isMountpoint, fmt.Errorf("failed to check orphan Mountpoint %q: %w", source, err)
 	}
 
 	if isMountpoint {
 		// If `source` is still a Mountpoint mount, let's wait until all references (i.e., bind mounts) are gone
 		// to ensure to not interrupt any (potentially terminating) workloads.
 		if err := u.waitUntilMountpointIsUnused(source); err != nil {
-			return fmt.Errorf("failed to wait until orphan Mountpoint %q is unused: %w", source, err)
+			return isMountpoint, fmt.Errorf("failed to wait until orphan Mountpoint %q is unused: %w", source, err)
 		}
 	}
 
 	if isMountpoint || isCorruptedMountpoint {
 		if err := u.mount.Unmount(source); err != nil {
-			return fmt.Errorf("failed to unmount orphan Mountpoint %q: %w", source, err)
+			return isMountpoint, fmt.Errorf("failed to unmount orphan Mountpoint %q: %w", source, err)
 		}
 	}
 
 	if err := u.waitUntilMountpointIsUnmounted(source); err != nil {
-		return fmt.Errorf("failed to wait until orphan Mountpoint %q is unmounted: %w", source, err)
+		return isMountpoint, fmt.Errorf("failed to wait until orphan Mountpoint %q is unmounted: %w", source, err)
 	}
 
 	// Now we know there is no Mountpoint at `source`, and it should be a regular directory.
 	// Let's remove it
 	if err := os.Remove(source); err != nil {
-		return fmt.Errorf("failed to remove source directory of orphan Mountpoint %q: %w", source, err)
+		return isMountpoint, fmt.Errorf("failed to remove source directory of orphan Mountpoint %q: %w", source, err)
 	}
 
-	return nil
+	return isMountpoint, nil
 }
 
 // writeExitFile creates an exit file in the pod's directory to signal Mountpoint Pod termination
@@ -220,8 +231,12 @@ func (u *PodUnmounter) cleanupCredentials(mpPod *corev1.Pod) error {
 		VolumeID:  mpPod.Labels[mppod.LabelVolumeId],
 		PodID:     string(mpPod.UID),
 		WritePath: mppod.PathOnHost(u.podPath(string(mpPod.UID)), mppod.KnownPathCredentials),
+		MountKind: credentialprovider.MountKindPod,
 	})
 }
+
+// errMountpointIsStillInUse is returned when [waitUntilMountpointIsUnused] fails with timeout.
+var errMountpointIsStillInUse = errors.New("podunmounter: mountpoint is still in use")
 
 // waitUntilMountpointIsUnused waits until all references to Mountpoint at `source` is gone.
 // Returns an error if condition is not met within `waitUntilMountpointIsUnusedTimeout`.
@@ -229,7 +244,7 @@ func (u *PodUnmounter) waitUntilMountpointIsUnused(source string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), waitUntilMountpointIsUnusedTimeout)
 	defer cancel()
 
-	return wait.PollUntilContextCancel(ctx, waitUntilMountpointIsUnusedInterval, true, func(ctx context.Context) (done bool, err error) {
+	err := wait.PollUntilContextCancel(ctx, waitUntilMountpointIsUnusedInterval, true, func(ctx context.Context) (done bool, err error) {
 		references, err := u.mount.FindReferencesToMountpoint(source)
 		if err != nil {
 			return false, err
@@ -241,6 +256,11 @@ func (u *PodUnmounter) waitUntilMountpointIsUnused(source string) error {
 
 		return true, nil
 	})
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return errMountpointIsStillInUse
+	}
+
+	return err
 }
 
 // waitUntilMountpointIsUnmounted waits until Mountpoint at `source` is unmounted.

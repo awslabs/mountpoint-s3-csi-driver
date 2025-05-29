@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,10 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 var _ = Describe("Mountpoint Controller", func() {
@@ -78,6 +79,29 @@ var _ = Describe("Mountpoint Controller", func() {
 
 				waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
 				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
+			})
+
+			It("should not create S3PodAttachment or Mountpoint Pod for an already Running workload pod", func() {
+				vol := createVolume()
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				// Simulate systemd mount from v1 by marking Pod as Running and deleting previously created s3pa and MP Pod
+				s3pa, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+				Expect(k8sClient.Delete(ctx, s3pa)).To(Succeed())
+				waitForObjectToDisappear(s3pa)
+				pod.Pod.Status.Phase = corev1.PodRunning
+				Expect(k8sClient.Status().Update(ctx, pod.Pod)).To(Succeed())
+				waitForObject(pod.Pod, func(g Gomega, pod *corev1.Pod) {
+					g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+				})
+
+				// Verify that no S3PodAttachment was created
+				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv))
 			})
 		})
 
@@ -960,6 +984,130 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
 
+		Context("Caching configuration", func() {
+			It("should configure emptyDir cache through mount options", func() {
+				vol := createVolume(withMountOptions([]string{"cache /mp-cache-dir"}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should configure emptyDir cache with size limit and memory medium", func() {
+				sizeLimit := "1Gi"
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                  "emptyDir",
+					"cacheEmptyDirSizeLimit": sizeLimit,
+					"cacheEmptyDirMedium":    "Memory",
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+						Medium:    corev1.StorageMediumMemory,
+					},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should configure PVC cache", func() {
+				// First create a PVC to use as cache
+				cachePVC := &corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cache-pvc",
+						Namespace: mountpointNamespace,
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: resource.MustParse("1Gi"),
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, cachePVC)).To(Succeed())
+				waitForObject(cachePVC)
+
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                          "persistentVolumeClaim",
+					"cachePersistentVolumeClaimName": cachePVC.Name,
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: cachePVC.Name,
+					},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should fail if both mount options and volume attributes are used to configure cache", func() {
+				vol := createVolume(
+					withVolumeAttributes(map[string]string{
+						"cache": "emptyDir",
+					}),
+					withMountOptions([]string{"cache /mp-cache-dir"}),
+				)
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if PVC cache is configured without claim name", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache": "persistentVolumeClaim",
+					// No cachePersistentVolumeClaimName provided
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail with invalid cache type", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache": "invalid-cache-type",
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+		})
+
 		It("should use configured resource requests and limits in PV", func() {
 			vol := createVolume(withVolumeAttributes(map[string]string{
 				"mountpointContainerResourcesRequestsCpu":    "1",
@@ -1167,6 +1315,13 @@ func withCSIDriver(name string) volumeModifier {
 func withVolumeAttributes(volAttributes map[string]string) volumeModifier {
 	return func(v *testVolume) {
 		v.pv.Spec.PersistentVolumeSource.CSI.VolumeAttributes = volAttributes
+	}
+}
+
+// withMountOptions returns a `volumeModifier` that updates volume to have given mount options.
+func withMountOptions(mountOptions []string) volumeModifier {
+	return func(v *testVolume) {
+		v.pv.Spec.MountOptions = mountOptions
 	}
 }
 
@@ -1475,6 +1630,44 @@ func waitForObjectToDisappear(obj client.Object) {
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Expected not found error but fond: %v", err)
 		}
 	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+}
+
+// verifyLocalCacheVolume verifies that the Mountpoint pod has a cache volume configured correctly
+func verifyLocalCacheVolume(mpPod *corev1.Pod, expected corev1.VolumeSource) {
+	GinkgoHelper()
+
+	// Verify cache volume is configured
+	cacheVol := findVolumeFromPod(mpPod, mppod.LocalCacheDirName)
+	Expect(cacheVol).NotTo(BeNil(), "pod should have a cache volume with name %q", mppod.LocalCacheDirName)
+	Expect(cacheVol.Name).To(Equal(mppod.LocalCacheDirName))
+	Expect(cacheVol.VolumeSource).To(Equal(expected))
+
+	// Verify cache volume is mounted
+	mpContainer := mpPod.Spec.Containers[0]
+	cacheMount := findVolumeMountFromContainer(mpContainer, mppod.LocalCacheDirName)
+	Expect(cacheMount).NotTo(BeNil(), "container should have a cache mount with name %q", mppod.LocalCacheDirName)
+	Expect(cacheMount.Name).To(Equal(mppod.LocalCacheDirName))
+	Expect(cacheMount.MountPath).To(Equal(filepath.Join("/", mppod.LocalCacheDirName)))
+}
+
+// findVolumeFromPod tries to find a specific volume name in pod's `Volumes`.
+func findVolumeFromPod(pod *corev1.Pod, name string) *corev1.Volume {
+	for i := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[i].Name == name {
+			return &pod.Spec.Volumes[i]
+		}
+	}
+	return nil
+}
+
+// findVolumeMountFromContainer tries to find a specific `name` in container's `VolumeMounts`.
+func findVolumeMountFromContainer(container corev1.Container, name string) *corev1.VolumeMount {
+	for i := range container.VolumeMounts {
+		if container.VolumeMounts[i].Name == name {
+			return &container.VolumeMounts[i]
+		}
+	}
+	return nil
 }
 
 // generateRandomNodeName generates random node name

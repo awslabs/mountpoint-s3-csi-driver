@@ -3,8 +3,8 @@ package mountpoint_test
 import (
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func TestParsingMountpointArgs(t *testing.T) {

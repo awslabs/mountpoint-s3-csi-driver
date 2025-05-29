@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
-	mock_system "github.com/awslabs/aws-s3-csi-driver/pkg/system/mocks"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
+	mock_system "github.com/awslabs/mountpoint-s3-csi-driver/pkg/system/mocks"
 	"github.com/godbus/dbus/v5"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
