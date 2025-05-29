@@ -67,14 +67,14 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 	// 2. Create environment to be returned with common variables (used in both cases: IRSA and EKS PI)
 	podNamespace := provideCtx.PodNamespace
 	podServiceAccount := provideCtx.ServiceAccountName
-	cacheKey := podNamespace + "/" + podServiceAccount
 
 	env := envprovider.Environment{
 		envprovider.EnvEC2MetadataDisabled: "true",
-		envprovider.EnvMountpointCacheKey:  cacheKey,
 	}
 
 	if provideCtx.IsSystemDMountpoint() {
+		cacheKey := podNamespace + "/" + podServiceAccount
+		env[envprovider.EnvMountpointCacheKey] = cacheKey
 		env[envprovider.EnvConfigFile] = filepath.Join(provideCtx.EnvPath, "disable-config")
 		env[envprovider.EnvSharedCredentialsFile] = filepath.Join(provideCtx.EnvPath, "disable-credentials")
 	}

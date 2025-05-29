@@ -29,7 +29,7 @@ const testContainerCredentialsFullURI = "http://169.254.170.23/v1/credentials"
 const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
 const testContainerAuthorizationToken = "test-container-authorization-token"
 const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
-const testPodLevelEksPodIdentityServiceAccountToken = testPodID + "-" + testVolumeID + "-eks-pod-identity.token"
+const testPodLevelEksPodIdentityServiceAccountToken = testMountpointPodID + "-" + testVolumeID + "-eks-pod-identity.token"
 
 const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
 const testMountpointPodID = "6984d258-b0bc-4103-a104-3d7fc5440744"
@@ -109,9 +109,10 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testPodMounterProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testPodMounterProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testPodMounterProfilePrefix + "s3-csi-credentials",
+				"AWS_PROFILE":                   testPodMounterProfilePrefix + "s3-csi",
+				"AWS_CONFIG_FILE":               "/test-env/" + testPodMounterProfilePrefix + "s3-csi-config",
+				"AWS_SHARED_CREDENTIALS_FILE":   "/test-env/" + testPodMounterProfilePrefix + "s3-csi-credentials",
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 			}, env)
 			assertLongTermCredentials(t, writePath, testPodMounterProfilePrefix)
 		}
@@ -127,6 +128,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
 				WorkloadPodID:        testPodID,
+				MountpointPodID:      testMountpointPodID,
 				VolumeID:             testVolumeID,
 				MountKind:            credentialprovider.MountKindPod,
 			}
@@ -135,8 +137,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+				"AWS_ROLE_ARN":                  testRoleARN,
+				"AWS_WEB_IDENTITY_TOKEN_FILE":   filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 			}, env)
 			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
@@ -155,6 +158,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.Equals(t, envprovider.Environment{
 				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
 				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY":          testMountpointPodID,
 			}, env)
 			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
 		}
@@ -221,7 +225,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			env, source, err := provider.Provide(context.Background(), provideCtx)
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{}, env)
+			assert.Equals(t, envprovider.Environment{
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+			}, env)
 		}
 	})
 
@@ -236,6 +242,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
 				WorkloadPodID:        testPodID,
+				MountpointPodID:      testMountpointPodID,
 				VolumeID:             testVolumeID,
 				MountKind:            credentialprovider.MountKindPod,
 			}
@@ -244,13 +251,14 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testSystemDProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+				"AWS_PROFILE":                   testPodMounterProfilePrefix + "s3-csi",
+				"AWS_CONFIG_FILE":               "/test-env/" + testPodMounterProfilePrefix + "s3-csi-config",
+				"AWS_SHARED_CREDENTIALS_FILE":   "/test-env/" + testPodMounterProfilePrefix + "s3-csi-credentials",
+				"AWS_ROLE_ARN":                  testRoleARN,
+				"AWS_WEB_IDENTITY_TOKEN_FILE":   filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 			}, env)
-			assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
+			assertLongTermCredentials(t, writePath, testPodMounterProfilePrefix)
 			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 		}
 	})
@@ -267,18 +275,19 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                            testSystemDProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":                        "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE":            "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
+				"AWS_PROFILE":                            testPodMounterProfilePrefix + "s3-csi",
+				"AWS_CONFIG_FILE":                        "/test-env/" + testPodMounterProfilePrefix + "s3-csi-config",
+				"AWS_SHARED_CREDENTIALS_FILE":            "/test-env/" + testPodMounterProfilePrefix + "s3-csi-credentials",
 				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
 				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY":          testMountpointPodID,
 			}, env)
-			assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
+			assertLongTermCredentials(t, writePath, testPodMounterProfilePrefix)
 			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
 		}
 	})
 
-	t.Run("sts web identity credentials and containter credentials", func(t *testing.T) {
+	t.Run("sts web identity credentials and container credentials", func(t *testing.T) {
 		for _, authSource := range authenticationSourceVariants {
 			setEnvForContainerCredentials(t)
 			setEnvForStsWebIdentityCredentials(t)
@@ -294,6 +303,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
 				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
 				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY":          testMountpointPodID,
 			}, env)
 			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
 			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
@@ -311,6 +321,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
+			MountpointPodID:      testMountpointPodID,
 			VolumeID:             testVolumeID,
 			MountKind:            credentialprovider.MountKindPod,
 		}
@@ -318,7 +329,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err := provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 
 		// Only set secret key without access key
 		t.Setenv("AWS_ACCESS_KEY_ID", "")
@@ -327,7 +340,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err = provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 	})
 
 	t.Run("incomplete sts web identity credentials", func(t *testing.T) {
@@ -341,6 +356,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
+			MountpointPodID:      testMountpointPodID,
 			VolumeID:             testVolumeID,
 			MountKind:            credentialprovider.MountKindPod,
 		}
@@ -348,7 +364,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err := provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 
 		// Only set token file without role ARN
 		tokenPath := filepath.Join(t.TempDir(), "token")
@@ -359,7 +377,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err = provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 	})
 
 	t.Run("incomplete container credentials", func(t *testing.T) {
@@ -373,7 +393,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err := provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 
 		// Only set token file without role ARN
 		tokenPath := filepath.Join(t.TempDir(), "token")
@@ -384,7 +406,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		env, source, err = provider.Provide(context.Background(), provideCtx)
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+		assert.Equals(t, envprovider.Environment{
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+		}, env)
 	})
 
 	t.Run("no credentials", func(t *testing.T) {
@@ -395,6 +419,7 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 				WritePath:            writePath,
 				EnvPath:              testEnvPath,
 				WorkloadPodID:        testPodID,
+				MountpointPodID:      testMountpointPodID,
 				VolumeID:             testVolumeID,
 				MountKind:            credentialprovider.MountKindPod,
 			}
@@ -402,7 +427,9 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 			env, source, err := provider.Provide(context.Background(), provideCtx)
 			assert.NoError(t, err)
 			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{}, env)
+			assert.Equals(t, envprovider.Environment{
+				"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
+			}, env)
 		}
 	})
 }
@@ -423,6 +450,7 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
 			VolumeID:             testVolumeID,
+			MountpointPodID:      testMountpointPodID,
 			PodNamespace:         testPodNamespace,
 			ServiceAccountName:   testPodServiceAccount,
 			ServiceAccountTokens: serviceAccountTokens(t, tokens{
@@ -443,8 +471,8 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testPodLevelEksPodIdentityServiceAccountToken),
 			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
 
-			// Having a unique cache key for namespace/serviceaccount pair
-			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
+			// Having a unique cache key for Mountpoint Pod ID
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 
 			// Disable EC2 credentials
 			"AWS_EC2_METADATA_DISABLED": "true",
@@ -534,8 +562,8 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 			"AWS_ROLE_ARN":                testRoleARN,
 			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testPodMounterPodLevelServiceAccountToken),
 
-			// Having a unique cache key for namespace/serviceaccount pair
-			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
+			// Having a unique cache key for Mountpoint Pod ID
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 
 			// Disable EC2 credentials
 			"AWS_EC2_METADATA_DISABLED": "true",
@@ -1040,6 +1068,7 @@ func TestCleanup(t *testing.T) {
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
+			MountpointPodID:      testMountpointPodID,
 			VolumeID:             testVolumeID,
 			MountKind:            credentialprovider.MountKindPod,
 		}
@@ -1048,8 +1077,9 @@ func TestCleanup(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
 		assert.Equals(t, envprovider.Environment{
-			"AWS_ROLE_ARN":                testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+			"AWS_ROLE_ARN":                  testRoleARN,
+			"AWS_WEB_IDENTITY_TOKEN_FILE":   filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testMountpointPodID,
 		}, env)
 		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
 
@@ -1116,6 +1146,7 @@ func TestCleanup(t *testing.T) {
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
+			MountpointPodID:      testMountpointPodID,
 			VolumeID:             testVolumeID,
 			MountKind:            credentialprovider.MountKindPod,
 		}
@@ -1126,6 +1157,7 @@ func TestCleanup(t *testing.T) {
 		assert.Equals(t, envprovider.Environment{
 			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
 			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+			"UNSTABLE_MOUNTPOINT_CACHE_KEY":          testMountpointPodID,
 		}, env)
 		assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
 
@@ -1247,7 +1279,7 @@ func TestProvideValidations(t *testing.T) {
 			t.Fatal("Expected error when MountKind is not specified, but got nil")
 		}
 
-		expectedErrMsg := "MountKind must be specified on credential ProvideContext struct."
+		expectedErrMsg := "Missing `MountKind` from `ProvideContext`"
 		if err.Error() != expectedErrMsg {
 			t.Errorf("Expected error message %q, but got %q", expectedErrMsg, err.Error())
 		}
@@ -1260,6 +1292,7 @@ func TestProvideValidations(t *testing.T) {
 			WritePath:            writePath,
 			EnvPath:              testEnvPath,
 			WorkloadPodID:        testPodID,
+			MountpointPodID:      testMountpointPodID,
 			VolumeID:             testVolumeID,
 			MountKind:            credentialprovider.MountKindPod,
 		}
@@ -1317,6 +1350,7 @@ func provideCtx(t *testing.T, writePath string, authSource string) credentialpro
 		WritePath:            writePath,
 		EnvPath:              testEnvPath,
 		WorkloadPodID:        testPodID,
+		MountpointPodID:      testMountpointPodID,
 		VolumeID:             testVolumeID,
 		MountKind:            credentialprovider.MountKindPod,
 	}

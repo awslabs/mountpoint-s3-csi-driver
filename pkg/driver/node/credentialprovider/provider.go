@@ -186,20 +186,32 @@ func New(client k8sv1.CoreV1Interface, regionFromIMDS func() (string, error)) *P
 // Depending on the configuration, it either returns driver-level or pod-level credentials.
 func (c *Provider) Provide(ctx context.Context, provideCtx ProvideContext) (envprovider.Environment, AuthenticationSource, error) {
 	if provideCtx.MountKind == MountKindUnspecified {
-		return nil, "", fmt.Errorf("MountKind must be specified on credential ProvideContext struct.")
+		return nil, AuthenticationSourceUnspecified, errors.New("Missing `MountKind` from `ProvideContext`")
+	}
+
+	if provideCtx.IsPodMountpoint() && provideCtx.MountpointPodID == "" {
+		return nil, AuthenticationSourceUnspecified, errors.New("Missing `MountpointPodID` from `ProvideContext`")
 	}
 
 	authenticationSource := provideCtx.AuthenticationSource
+	var env envprovider.Environment
+	var err error
 	switch authenticationSource {
 	case AuthenticationSourcePod:
-		env, err := c.provideFromPod(ctx, provideCtx)
-		return env, AuthenticationSourcePod, err
+		env, err = c.provideFromPod(ctx, provideCtx)
 	case AuthenticationSourceUnspecified, AuthenticationSourceDriver:
-		env, err := c.provideFromDriver(provideCtx)
-		return env, AuthenticationSourceDriver, err
+		authenticationSource = AuthenticationSourceDriver
+		env, err = c.provideFromDriver(provideCtx)
 	default:
 		return nil, AuthenticationSourceUnspecified, fmt.Errorf("unknown `authenticationSource`: %s, only `driver` (default option if not specified) and `pod` supported", authenticationSource)
 	}
+
+	if provideCtx.IsPodMountpoint() {
+		env.Set(envprovider.EnvMountpointCacheKey, provideCtx.MountpointPodID)
+	}
+
+	return env, authenticationSource, err
+
 }
 
 // Cleanup cleans any previously created credential files for given context.
