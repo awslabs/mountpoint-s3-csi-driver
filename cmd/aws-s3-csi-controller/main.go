@@ -75,7 +75,7 @@ func main() {
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
 		ClusterVariant:   cluster.DetectVariant(conf, log),
-	})
+	}, log)
 
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		log.Error(err, "Failed to create controller")
