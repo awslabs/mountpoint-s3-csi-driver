@@ -83,7 +83,7 @@ func ParseArgs(passedArgs []string) Args {
 
 		// disallow options that don't make sense in CSI
 		switch key {
-		case "--foreground", "-f", "--help", "-h", "--version", "-v", "--run-as-user":
+		case "--foreground", "-f", "--help", "-h", "--version", "-v":
 			continue
 		}
 

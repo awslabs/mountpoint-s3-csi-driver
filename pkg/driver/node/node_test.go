@@ -232,48 +232,6 @@ func TestNodePublishVolume(t *testing.T) {
 			},
 		},
 		{
-			name: "success: --run-as-user option is removed",
-			testFunc: func(t *testing.T) {
-				nodeTestEnv := initNodeServerTestEnv(t)
-				ctx := context.Background()
-				req := &csi.NodePublishVolumeRequest{
-					VolumeId: volumeId,
-					VolumeCapability: &csi.VolumeCapability{
-						AccessType: &csi.VolumeCapability_Mount{
-							Mount: &csi.VolumeCapability_MountVolume{
-								MountFlags: []string{"--run-as-user=test"},
-							},
-						},
-						AccessMode: &csi.VolumeCapability_AccessMode{
-							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-						},
-					},
-					VolumeContext: map[string]string{"bucketName": bucketName},
-					TargetPath:    targetPath,
-					Readonly:      true,
-				}
-
-				nodeTestEnv.mockMounter.EXPECT().Mount(
-					gomock.Eq(context.Background()),
-					gomock.Eq(bucketName),
-					gomock.Eq(targetPath),
-					gomock.Eq(credentialprovider.ProvideContext{
-						VolumeID:             volumeId,
-						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})),
-					gomock.Eq(""),
-					gomock.Eq(""),
-				).Return(nil)
-				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
-				if err != nil {
-					t.Fatalf("NodePublishVolume is failed: %v", err)
-				}
-
-				nodeTestEnv.mockCtl.Finish()
-			},
-		},
-		{
 			name: "fail: missing volume id",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
