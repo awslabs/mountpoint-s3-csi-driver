@@ -30,12 +30,11 @@ This documentation provides comprehensive information to install, configure, use
 
 - **[Configuration](configuration/index.md)** – Driver and volume configuration, including supported mount options and static provisioning patterns
 - **[How-To Guides](how-to/static-provisioning.md)** – Practical implementation examples
-- **[Minimal Helm Example](../examples/minimal-helm.yaml)** – Complete, copy-pasteable example for production
+- **[Minimal Helm Example](examples/minimal-helm.yaml)** – Complete, copy-pasteable example for production
 
 ### Understanding the Driver
 
 - **[Concepts](concepts/filesystem-semantics.md)** – Filesystem semantics, limitations, and S3-specific behaviors
-- **[Reference](reference/access-modes.md)** – Detailed feature and option reference
 
 ### Support & Troubleshooting
 
