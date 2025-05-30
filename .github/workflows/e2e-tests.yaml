@@ -61,11 +61,24 @@ jobs:
             CSI_IMAGE_REPOSITORY=ghcr.io/${{ github.repository }} \
             ADDITIONAL_ARGS="--junit-report=./test-results/e2e-tests-results.xml"
 
+      - name: Copy S3 logs to artifacts directory
+        if: always()
+        run: |
+          mkdir -p artifacts/logs/s3
+          cp -r .github/scality-storage-deployment/logs/s3/* artifacts/logs/s3/ 2>/dev/null || true
+
+      - name: Upload S3 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-tests-${{ matrix.ring_version }}
+          path: artifacts
+
       - name: Upload test results to Codecov
         if: ${{ always() }}
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./tests/e2e/test-results/e2e-tests-results.xml
-          flags: e2e_tests,cloudserver_${{ matrix.cloudserver_version }}
+          flags: e2e_tests,cloudserver_${{ matrix.ring_version }}
           slug: scality/mountpoint-s3-csi-driver
