@@ -27,6 +27,15 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
+var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+
+const (
+	mountpointPodAttachmentWaitDuration = 15 * time.Second
+	mountpointPodAttachmentPollInterval = 250 * time.Millisecond
+
+	mountpointPodReadinessWaitDuration = 15 * time.Second
+)
+
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
 
@@ -109,8 +118,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 		_, _, err := pm.credProvider.Provide(ctx, credentialCtx)
 		if err != nil {
-			klog.Errorf("Failed to provide SystemD credentials for %s: %v", target, err)
-			return fmt.Errorf("Failed to provide SystemD credentials for %q: %w", target, err)
+			klog.Errorf("Failed to provide SystemD credentials for %q: %v", target, err)
+			return fmt.Errorf("Failed to provide SystemD credentials: %w", err)
 		}
 
 		return nil
@@ -118,18 +127,19 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	s3PodAttachment, mpPodName, err := pm.getS3PodAttachmentWithRetry(ctx, volumeName, credentialCtx, fsGroup)
 	if err != nil {
-		klog.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %v", target, err)
-		return fmt.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource %q: %w", target, err)
+		klog.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource for %q: %v. %s", target, err, pm.helpMessageForGettingControllerLogs())
+		return fmt.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource: %w. %s", err, pm.helpMessageForGettingControllerLogs())
 	}
 
 	pod, podPath, err := pm.waitForMountpointPod(ctx, mpPodName)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %v", target, err)
-		return fmt.Errorf("Failed to wait for Mountpoint Pod to be ready for %q: %w", target, err)
+		klog.Errorf("Failed to wait for Mountpoint Pod %q to be ready for %q: %v. %s", mpPodName, target, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %q to be ready: %w. %s", mpPodName, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
 	}
-	source := filepath.Join(SourceMountDir(pm.kubeletPath), mpPodName)
 	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
+
+	source := filepath.Join(SourceMountDir(pm.kubeletPath), mpPodName)
 	isSourceMountPoint, err := pm.IsMountPoint(source)
 	if err != nil {
 		err = pm.verifyOrSetupMountTarget(source, err)
@@ -142,14 +152,14 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// there is an existing mount point at `target`.
 	credEnv, authenticationSource, err := pm.provideCredentials(ctx, podPath, string(pod.UID), s3PodAttachment.Spec.WorkloadServiceAccountIAMRoleARN, credentialCtx)
 	if err != nil {
-		klog.Errorf("Failed to provide credentials for %s: %v. \n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
-		return fmt.Errorf("Failed to provide credentials for %q: %w. \n%s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		klog.Errorf("Failed to provide credentials for %q: %v. %s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
+		return fmt.Errorf("Failed to provide credentials for %q: %w. %s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 	}
 
 	if !isSourceMountPoint {
 		err = pm.mountS3AtSource(ctx, source, pod, podPath, bucketName, credEnv, authenticationSource, args)
 		if err != nil {
-			return fmt.Errorf("Failed to mount at source %s: %v", source, err)
+			return fmt.Errorf("Failed to mount at source %q: %w. %s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 		}
 	}
 
@@ -160,8 +170,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	err = pm.bindMountSyscallWithDefault(source, target)
 	if err != nil {
-		klog.Errorf("Failed to bind mount %s to target %s: %v", source, target, err)
-		return fmt.Errorf("Failed to bind mount %s to target %s: %w", source, target, err)
+		klog.Errorf("Failed to bind mount %q to target %q: %v", source, target, err)
+		return fmt.Errorf("Failed to bind mount %q to target %q: %w", source, target, err)
 	}
 
 	klog.V(4).Infof("Created bind mount to target %s from Mountpoint Pod %s at %s", target, pod.Name, source)
@@ -251,14 +261,14 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 		Env:        env.List(),
 	})
 	if err != nil {
-		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
-		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		klog.Errorf("Failed to send mount option to Mountpoint Pod %s for %s: %v. %s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to send mount options to Mountpoint Pod %s for %s: %w. %s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
 	err = pm.waitForMount(ctx, source, mpPod.Name, podMountErrorPath)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w. \n%s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		klog.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %v. %s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %s to be ready for %s: %w. %s", mpPod.Name, source, err, pm.helpMessageForGettingMountpointLogs(mpPod))
 	}
 
 	// Mountpoint successfully started, so don't unmount the filesystem
@@ -326,6 +336,9 @@ func (pm *PodMounter) IsSystemDMountpoint(target string) bool {
 // waitForMountpointPod waits until Mountpoint Pod for given `podName` is in `Running` state.
 // It returns found Mountpoint Pod and it's base directory.
 func (pm *PodMounter) waitForMountpointPod(ctx context.Context, podName string) (*corev1.Pod, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, mountpointPodReadinessWaitDuration)
+	defer cancel()
+
 	pod, err := pm.podWatcher.Wait(ctx, podName)
 	if err != nil {
 		return nil, "", err
@@ -491,13 +504,27 @@ func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
 	return tp.VolumeID, nil
 }
 
+// helpMessageForGettingMountpointLogs returns a help message to throubleshoot Mountpoint failures.
 func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) string {
 	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
+}
+
+// helpMessageForGettingMountpointPodStatus returns a help message to throubleshoot if Mountpoint Pod is not running.
+func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(mpPodName string) string {
+	return fmt.Sprintf("Seems like Mountpoint Pod is not in 'Running' status. You can see it's status and any potential failures by running: `kubectl describe pods -n %s %s`", mountpointPodNamespace, mpPodName)
+}
+
+// helpMessageForGettingControllerLogs returns a help message to throubleshoot if the `MountpointS3PodAttachment` is not created/updated.
+func (pm *PodMounter) helpMessageForGettingControllerLogs() string {
+	return "You can see the controller logs by running `kubectl logs -n kube-system -lapp=s3-csi-controller`."
 }
 
 // getS3PodAttachmentWithRetry retrieves a MountpointS3PodAttachment resource that matches the given volume and credential context.
 // It continuously retries the operation until either a matching attachment is found or the context is canceled.
 func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, mountpointPodAttachmentWaitDuration)
+	defer cancel()
+
 	// Intentionally not including `FieldMountOptions` in our filter criteria because `mountOptions` is a
 	// mutable field in PersistentVolumes, which means it could change after the initial mount.
 	// Instead, we rely on matching the workload pod UID in the final filtering step below.
@@ -542,7 +569,7 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		select {
 		case <-ctx.Done():
 			return nil, "", ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(mountpointPodAttachmentPollInterval):
 		}
 	}
 }

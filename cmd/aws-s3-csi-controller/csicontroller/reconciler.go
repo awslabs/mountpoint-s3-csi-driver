@@ -166,7 +166,12 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		}
 	}
 
-	return reconcile.Result{Requeue: requeue}, errors.Join(errs...)
+	err := errors.Join(errs...)
+	if err != nil {
+		return reconcile.Result{}, nil
+	}
+
+	return reconcile.Result{Requeue: requeue}, nil
 }
 
 // spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `workloadPod` and volume if needed.
