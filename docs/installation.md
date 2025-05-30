@@ -38,7 +38,7 @@ Before installing the driver, ensure your environment meets the following requir
 ### Network Connectivity
 
 - Kubernetes worker nodes must have network connectivity to your Scality S3 endpoint (RING).
-- This includes resolving the S3 endpoint DNS name and reaching the S3 service on the appropriate ports (typically 80 for HTTP or 443 for HTTPS, unless port isspecified in the S3 endpoint URL).
+- This includes resolving the S3 endpoint DNS name and reaching the S3 service on the appropriate ports (typically 80 for HTTP or 443 for HTTPS, unless port is specified in the S3 endpoint URL).
 
 ### S3 Credentials
 
