@@ -6,7 +6,6 @@ on:
       - '**'
 
 env:
-  CLOUDSERVER_TAG: ${{ vars.CLOUDSERVER_TAG }}
   KUBECONFIG: "/home/runner/.kube/config"
 
 jobs:
@@ -23,9 +22,19 @@ jobs:
       tag: ${{ github.sha }}
 
   e2e-tests:
-    name: Execute E2E Tests
+    name: E2E tests with RING S3 v${{ matrix.ring_version }}
     runs-on: ubuntu-22.04-8core
     needs: dev-image
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ring_version: "9.4"
+            github_varirable_name: "CLOUDSERVER_RING_9_4"
+          - ring_version: "9.5"
+            github_varirable_name: "CLOUDSERVER_RING_9_5"
+    env:
+      CLOUDSERVER_TAG: ${{ vars[matrix.github_varirable_name] }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -58,5 +67,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./tests/e2e/test-results/e2e-tests-results.xml
-          flags: e2e_tests
+          flags: e2e_tests,cloudserver_${{ matrix.cloudserver_version }}
           slug: scality/mountpoint-s3-csi-driver
