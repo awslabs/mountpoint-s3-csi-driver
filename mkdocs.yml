@@ -57,12 +57,16 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_div_format
 
 nav:
-  - Home: README.md
-  - 'Getting Started':
-    - 'Quick Start Guide': quick-start.md
-    - 'Installation': installation.md
-  - 'Configuration':
-    - 'Overview': configuration/index.md
-    - 'Driver Configuration': configuration/driver-configuration.md
-    - 'Volume Configuration': configuration/volume-configuration.md
-    - 'Mount Options': configuration/mount-options.md
+  - Home: index.md
+  - Quick Start: quick-start.md
+  - Installation: installation.md
+  - Configuration:
+      - Overview: configuration/index.md
+      - Driver Configuration: configuration/driver-configuration.md
+      - Volume Configuration: configuration/volume-configuration.md
+      - Mount Options: configuration/mount-options.md
+  - How-To Guides:
+      - Static Provisioning: how-to/static-provisioning.md
+      - Mount Multiple Buckets: how-to/multi-volume.md
+      - Region Override: how-to/region-override.md
+      - Permissions & Non-Root Access: how-to/permissions.md
