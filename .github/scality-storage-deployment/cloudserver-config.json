@@ -45,5 +45,24 @@
         "viaProxy": false,
         "trustedProxyCIDRs": [],
         "extractClientIPFromHeader": ""
+    },
+    "metadataClient": {
+        "host": "127.0.0.1",
+        "port": 9990
+    },
+    "dataClient": {
+        "host": "127.0.0.1",
+        "port": 9991
+    },
+    "metadataDaemon": {
+        "bindAddress": "127.0.0.1",
+        "port": 9990
+    },
+    "dataDaemon": {
+        "bindAddress": "127.0.0.1",
+        "port": 9991
+    },
+    "bucketd": {
+        "bootstrap": ["localhost:9000"]
     }
 }
