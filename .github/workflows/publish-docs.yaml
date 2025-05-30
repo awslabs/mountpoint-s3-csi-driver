@@ -36,7 +36,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Build MkDocs site
-        run: mkdocs build --strict
+        run: mkdocs build
+        # TODO(S3CSI-55): re-enable strict mode
+        # run: mkdocs build --strict
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5

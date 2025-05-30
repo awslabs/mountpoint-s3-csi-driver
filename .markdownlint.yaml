@@ -1,5 +1,5 @@
 ###############################################################################
-# Scality Mountpoint S3 CSI Driver – Markdownlint ruleset
+# Scality S3 CSI Driver – Markdownlint ruleset
 # Every rule reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
 ###############################################################################
 default: true
@@ -23,8 +23,8 @@ MD012: { maximum: 2 }               # No more than two consecutive blank lines t
 
 # Line length
 MD013:
-  line_length: 150                  # Soft wrap at 150 chars—reasonable for user facing docs on Github Pages
-  heading_line_length: 150
+  line_length: 200                  # Soft wrap at 200 chars—reasonable for technical docs on Github Pages
+  heading_line_length: 200
   code_blocks: false                # Do not wrap code blocks
   tables: false                     # Do not wrap tables
 

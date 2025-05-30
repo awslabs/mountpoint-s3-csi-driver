@@ -1,78 +1,70 @@
-# Mountpoint for Scality's fork of Amazon S3 CSI Driver
+# Welcome to the Scality S3 CSI Driver Documentation
 
-## Overview
+The Scality S3 Container Storage Interface (CSI) Driver allows Kubernetes applications to access Scality S3 objects through a file system interface.
+This driver is a fork of the [Mountpoint for Amazon S3 CSI Driver](https://github.com/awslabs/mountpoint-s3-csi-driver) and has been adapted for use with Scality S3-compatible storage solutions.
 
-The Mountpoint for Scality S3 Container Storage Interface (CSI) Driver allows your Kubernetes applications to access
-Scality S3 objects through a file system interface. Built on [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3),
-the Mountpoint CSI driver presents a Scality S3 bucket as a storage volume accessible by containers in your Kubernetes cluster.
-The Mountpoint CSI driver implements the [CSI](https://github.com/container-storage-interface/spec/blob/master/spec.md)
-specification for container orchestrators (CO) to manage storage volumes.
+Scality CSI driver presents an S3 bucket as a storage volume accessible by containers in Kubernetes clusters using [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3).
+It implements the [CSI specification](https://github.com/container-storage-interface/spec/blob/master/spec.md) for container orchestrators to manage storage volumes.
 
-## Features
+## Key Features
 
-- **Static Provisioning** - Associate an existing S3 bucket with a
-  [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
-- **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted.
-  For Mountpoint-specific options, take a look at the [Mountpoint docs for configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md).
+- **Static Provisioning Only**: Integrate existing S3 buckets as persistent storage in Kubernetes. Dynamic provisioning is not supported.
+- **Familiar File Access**: Access S3 objects as files and directories, simplifying application integration.
+- **Customizable Mounts**: Fine-tune volume mounts with a variety of supported options for performance and behavior.
+- **Scality Integration**: Optimized for Scality S3 storage solutions like [Scality RING](https://www.scality.com/ring/).
 
-Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may
-affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md)
-for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
+## Getting Started
+
+The **[Quick Start Guide](quick-start.md)** provides step-by-step instructions for deploying the driver, securely creating secrets, and mounting S3 buckets in Kubernetes clusters.
+
+## Documentation Overview
+
+This documentation provides comprehensive information to install, configure, use, and troubleshoot the Scality S3 CSI Driver.
+
+### Installation & Setup
+
+- **[Installation](installation.md)** – Prerequisites and secure installation instructions, including manual secret creation
+- **[Quick Start Guide](quick-start.md)** – Step-by-step deployment guide
+
+### Configuration & Usage
+
+- **[Configuration](configuration/index.md)** – Driver and volume configuration, including supported mount options and static provisioning patterns
+- **[How-To Guides](how-to/static-provisioning.md)** – Practical implementation examples
+- **[Minimal Helm Example](../examples/minimal-helm.yaml)** – Complete, copy-pasteable example for production
+
+### Understanding the Driver
+
+- **[Concepts](concepts/filesystem-semantics.md)** – Filesystem semantics, limitations, and S3-specific behaviors
+- **[Reference](reference/access-modes.md)** – Detailed feature and option reference
+
+### Support & Troubleshooting
+
+- **[Troubleshooting](troubleshooting.md)** – Common issue resolution and diagnostic tips
+
+## Security & Best Practices
+
+- **Manual Secret Creation**: Always create S3 credential secrets manually before installing the chart. Do not store credentials in Helm values or use in-line secrets.
+- **Access Modes**: Only `ReadWriteMany` and `ReadOnlyMany` are supported for S3 volumes.
+- **Namespace Isolation**: Use dedicated namespaces and RBAC for improved security.
 
 ## Container Images
 
-| Driver Version | [GHCR Public](https://github.com/scality/mountpoint-s3-csi-driver/pkgs/container/mountpoint-s3-csi-driver) Image |
-|----------------|-----------------------------------------------------------------------------------------------------------------|
-| v0.1.0         | ghcr.io/scality/mountpoint-s3-csi-driver                                                                        |
+Container images for the Scality S3 CSI Driver are hosted on GHCR:
 
-## Requirements
+| Driver Version | Image URL                                                                 |
+|----------------|---------------------------------------------------------------------------|
+| 1.0.0          | `ghcr.io/scality/mountpoint-s3-csi-driver:1.0.0`                          |
 
-### S3 Endpoint URL (Required)
+*Note: Please check the [releases page](https://github.com/scality/mountpoint-s3-csi-driver/releases) for the latest available versions.*
 
-The S3 endpoint URL (`node.s3EndpointUrl`) is a **required** parameter when installing the CSI driver via Helm.
-This URL specifies the endpoint for your S3 service. The driver will not function without this parameter and the Helm
-installation will fail if it's not provided.
+## Support and Community
 
-Example:
+For issues or questions:
 
-```bash
-helm install mountpoint-s3 ./charts/scality-mountpoint-s3-csi-driver \
-  --set node.s3EndpointUrl=https://s3.your-scality-cluster.com
-```
+1. Search existing [GitHub Issues](https://github.com/scality/mountpoint-s3-csi-driver/issues)
+2. Open a new [GitHub Issue](https://github.com/scality/mountpoint-s3-csi-driver/issues) if the problem is not already addressed
 
-## Installation
+## License
 
-```bash
-# Quick installation using Helm
-helm repo add scality https://scality.github.io/mountpoint-s3-csi-driver/charts
-helm install mountpoint-s3-csi-driver scality/scality-mountpoint-s3-csi-driver
-```
-
-## Usage
-
-Create a StorageClass, PersistentVolumeClaim, and Pod with the CSI driver:
-
-```yaml
-# Example StorageClass for dynamic provisioning
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: s3-storage
-provisioner: s3.csi.scality.com
-parameters:
-  # Add your parameters here
-```
-
-## Compatibility
-
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.23+ and implements the CSI Specification v1.8.0.
-The driver supports **x86-64** and **arm64** architectures.
-
-## Documentation
-
-For detailed configuration and advanced usage, see:
-
-- [Configuration Options](CONFIGURATION.md)
-- [Logging Configuration](LOGGING.md)
-- [Installation Guide](install.md)
-- [Scality-specific Documentation](scality/README.md)
+This project is licensed under the Apache License 2.0. See the [LICENSE](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/LICENSE) file for details.
+It incorporates code from the original Mountpoint for Amazon S3 CSI Driver, also licensed under Apache 2.0.

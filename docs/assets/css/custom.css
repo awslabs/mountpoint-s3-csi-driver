@@ -1,0 +1,34 @@
+/* Improve code block wrapping for long URLs */
+.md-typeset pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: .25em .4em;
+    font-size: 75%;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: .25rem;
+    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+  }
+
+  .badge-required {
+    color: #fff;
+    background-color: #dc3545; /* Red for required */
+  }
+
+  .badge-optional {
+    color: #212529;
+    background-color: #ffc107; /* Yellow for optional */
+  }
+
+  .badge-info {
+    color: #fff;
+    background-color: #17a2b8; /* Blue for info */
+  }
