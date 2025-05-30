@@ -11,7 +11,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -136,9 +140,10 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 	type localCacheKind string
 	const (
-		localCacheUnspecified  localCacheKind = ""
-		localCacheMountOptions                = "localCacheMountOptions"
-		localCacheEmptyDir                    = "localCacheEmptyDir"
+		localCacheUnspecified           localCacheKind = ""
+		localCacheMountOptions                         = "localCacheMountOptions"
+		localCacheEmptyDir                             = "localCacheEmptyDir"
+		localCachePersistentVolumeClaim                = "localCachePersistentVolumeClaim"
 	)
 
 	type cacheTestConfig struct {
@@ -178,6 +183,14 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 						"cache":                  "emptyDir",
 						"cacheEmptyDirSizeLimit": "32Mi",
 						"cacheEmptyDirMedium":    "Memory",
+					})
+				}
+			case localCachePersistentVolumeClaim:
+				cachePVC := createEBSCacheSCAndPVC(ctx, f)
+				enhanceContext = func(ctx context.Context) context.Context {
+					return contextWithVolumeAttributes(ctx, map[string]string{
+						"cache":                          "persistentVolumeClaim",
+						"cachePersistentVolumeClaimName": cachePVC.Name,
 					})
 				}
 			}
@@ -315,46 +328,71 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 	}
 
 	Describe("Cache", func() {
-		Describe("Local (MountOptions)", func() {
-			testCache(cacheTestConfig{
-				localCacheKind: localCacheMountOptions,
+		Describe("MountOptions (Legacy)", func() {
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCacheMountOptions,
+				})
+			})
+
+			Describe("Multi-Level", Serial, func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCacheMountOptions,
+					useExpressCache: true,
+				})
 			})
 		})
 
-		Describe("Local (EmptyDir)", func() {
+		Describe("EmptyDir", func() {
 			BeforeEach(func() {
 				if !IsPodMounter {
 					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
 				}
 			})
 
-			testCache(cacheTestConfig{
-				localCacheKind: localCacheEmptyDir,
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCacheEmptyDir,
+				})
+			})
+
+			Describe("Multi-Level", Serial, func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCacheEmptyDir,
+					useExpressCache: true,
+				})
+			})
+		})
+
+		Describe("PersistentVolumeClaim (EBS)", Ordered, Serial, func() {
+			BeforeAll(func(ctx context.Context) {
+				if ebsCSIDriverDaemonSet(ctx, f) == nil {
+					Skip("EBS CSI Driver is not installed, skipping EBS PVC cache tests")
+				}
+			})
+
+			BeforeEach(func() {
+				if !IsPodMounter {
+					Skip("Skipping `persistentVolumeClaim` cache tests for `SystemdMounter`")
+				}
+			})
+
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCachePersistentVolumeClaim,
+				})
+			})
+
+			Describe("Multi-Level", func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCachePersistentVolumeClaim,
+					useExpressCache: true,
+				})
 			})
 		})
 
 		Describe("Express", Serial, func() {
 			testCache(cacheTestConfig{
-				useExpressCache: true,
-			})
-		})
-
-		Describe("Multi-Level (MountOptions)", Serial, func() {
-			testCache(cacheTestConfig{
-				localCacheKind:  localCacheMountOptions,
-				useExpressCache: true,
-			})
-		})
-
-		Describe("Multi-Level (EmptyDir)", Serial, func() {
-			BeforeEach(func() {
-				if !IsPodMounter {
-					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
-				}
-			})
-
-			testCache(cacheTestConfig{
-				localCacheKind:  localCacheEmptyDir,
 				useExpressCache: true,
 			})
 		})
@@ -374,6 +412,69 @@ func deleteObjectFromS3(ctx context.Context, bucket string, key string) {
 
 func randomCacheDir() string {
 	return filepath.Join("/tmp/mp-cache", uuid.New().String())
+}
+
+// createEBSCacheSCAndPVC creates a StorageClass and PersistentVolumeClaim to provision and use an EBS volume as local-cache.
+// It automatically cleans up SC and PVC after the test-case.
+func createEBSCacheSCAndPVC(ctx context.Context, f *framework.Framework) *v1.PersistentVolumeClaim {
+	scName, pvcName := f.UniqueName+"-sc", f.UniqueName+"-pvc"
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: scName,
+		},
+		Provisioner:       "ebs.csi.aws.com",
+		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
+		ReclaimPolicy:     ptr.To(v1.PersistentVolumeReclaimDelete),
+	}
+
+	framework.Logf("Creating StorageClass %s with EBS CSI Driver provisioner", scName)
+	_, err := f.ClientSet.StorageV1().StorageClasses().Create(ctx, sc, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create StorageClass for cache")
+
+	DeferCleanup(func(ctx context.Context) {
+		framework.Logf("Deleting StorageClass %s", scName)
+		err := f.ClientSet.StorageV1().StorageClasses().Delete(ctx, scName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
+	})
+
+	pvc := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: mountpointNamespace,
+		},
+		Spec: v1.PersistentVolumeClaimSpec{
+			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
+			Resources: v1.VolumeResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceStorage: resource.MustParse("10Mi"),
+				},
+			},
+			StorageClassName: ptr.To(scName),
+		},
+	}
+
+	framework.Logf("Creating cache PVC %s in namespace %s", pvcName, mountpointNamespace)
+	_, err = f.ClientSet.CoreV1().PersistentVolumeClaims(mountpointNamespace).Create(ctx, pvc, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create cache PVC")
+
+	DeferCleanup(func(ctx context.Context) {
+		framework.Logf("Deleting PVC %s", pvcName)
+		err := f.ClientSet.CoreV1().PersistentVolumeClaims(mountpointNamespace).Delete(ctx, pvcName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "Failed to delete PVC for cache")
+	})
+
+	return pvc
+}
+
+// ebsCSIDriverDaemonSet returns the DaemonSet of EBS CSI Driver if its installed in the cluster.
+func ebsCSIDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
+	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := client.Get(ctx, "ebs-csi-node", metav1.GetOptions{})
+	if err != nil {
+		return nil
+	}
+	return ds
 }
 
 // ensureCacheDirExistsInNode adds a hostPath for given `cacheDir` with `DirectoryOrCreate` type.
