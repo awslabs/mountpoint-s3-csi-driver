@@ -140,10 +140,10 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 	type localCacheKind string
 	const (
-		localCacheUnspecified           localCacheKind = ""
-		localCacheMountOptions                         = "localCacheMountOptions"
-		localCacheEmptyDir                             = "localCacheEmptyDir"
-		localCachePersistentVolumeClaim                = "localCachePersistentVolumeClaim"
+		localCacheUnspecified  localCacheKind = ""
+		localCacheMountOptions                = "localCacheMountOptions"
+		localCacheEmptyDir                    = "localCacheEmptyDir"
+		localCacheEBSPVC                      = "localCacheEBSPVC"
 	)
 
 	type cacheTestConfig struct {
@@ -185,7 +185,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 						"cacheEmptyDirMedium":    "Memory",
 					})
 				}
-			case localCachePersistentVolumeClaim:
+			case localCacheEBSPVC:
 				cachePVC := createEBSCacheSCAndPVC(ctx, f)
 				enhanceContext = func(ctx context.Context) context.Context {
 					return contextWithVolumeAttributes(ctx, map[string]string{
@@ -364,7 +364,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 		})
 
-		Describe("PersistentVolumeClaim (EBS)", Ordered, Serial, func() {
+		Describe("EBS PersistentVolumeClaim", Ordered, Serial, func() {
 			BeforeAll(func(ctx context.Context) {
 				if ebsCSIDriverDaemonSet(ctx, f) == nil {
 					Skip("EBS CSI Driver is not installed, skipping EBS PVC cache tests")
@@ -379,13 +379,13 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 			Describe("Local", func() {
 				testCache(cacheTestConfig{
-					localCacheKind: localCachePersistentVolumeClaim,
+					localCacheKind: localCacheEBSPVC,
 				})
 			})
 
 			Describe("Multi-Level", func() {
 				testCache(cacheTestConfig{
-					localCacheKind:  localCachePersistentVolumeClaim,
+					localCacheKind:  localCacheEBSPVC,
 					useExpressCache: true,
 				})
 			})
