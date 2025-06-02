@@ -46,45 +46,11 @@ spec:
       {{- end }}
       {{- end }}
 
-      {{ if not .Values.experimental.podMounter -}}
-      # This `install-mountpoint` is only needed with `SystemdMounter` and not with `PodMounter`.
-      initContainers:
-        - name: install-mountpoint
-          image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            {{- with .Values.node.seLinuxOptions }}
-            seLinuxOptions:
-              user: {{ .user }}
-              type: {{ .type }}
-              role: {{ .role }}
-              level: {{ .level }}
-            {{- end }}
-          imagePullPolicy: IfNotPresent
-          command:
-            - "/bin/install-mp"
-          env:
-            - name: MOUNTPOINT_INSTALL_DIR
-              value: /target
-          volumeMounts:
-            - name: mp-install
-              mountPath: /target
-          {{- with default .Values.node.resources .Values.initContainer.installMountpoint.resources }}
-          resources: {{- toYaml . | nindent 12 }}
-          {{- end }}
-      {{- end }}
-
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           securityContext:
-            {{ if .Values.experimental.podMounter -}}
             privileged: true
-            {{- else -}}
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            {{- end }}
             {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
@@ -99,11 +65,6 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:{{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
-            - name: PTMX_PATH
-              value: /host/dev/ptmx
-            # mount-s3 runs in systemd context, so this is relative to the host
-            - name: MOUNT_S3_PATH
-              value: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}mount-s3
             - name: KUBELET_PATH
               value: {{ .Values.node.kubeletPath }}
             - name: CSI_NODE_NAME
@@ -112,16 +73,12 @@ spec:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
               value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
-            {{- if .Values.experimental.podMounter }}
-            - name: MOUNTER_KIND
-              value: pod
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
-            {{- end -}}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -145,20 +102,7 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletPath }}
-              {{ if .Values.experimental.podMounter -}}
               mountPropagation: Bidirectional
-              {{- else -}}
-              # Currently we spawn Mountpoint instances on the host using systemd,
-              # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
-              # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
-              # without needing to mount "/proc/mounts" from host.
-              mountPropagation: HostToContainer
-              {{- end }}
-            - name: systemd-bus
-              mountPath: /run/systemd
-              mountPropagation: HostToContainer
-            - name: host-dev
-              mountPath: /host/dev
           ports:
             - name: healthz
               containerPort: 9808
@@ -227,18 +171,6 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: host-dev
-          hostPath:
-            path: /dev/
-            type: Directory
-        - name: mp-install
-          hostPath:
-            path: {{ default "/opt/mountpoint-s3-csi/bin/" .Values.node.mountpointInstallPath }}
-            type: DirectoryOrCreate
-        - name: systemd-bus
-          hostPath:
-            path: /run/systemd
-            type: Directory
         - name: kubelet-dir
           hostPath:
             path: {{ .Values.node.kubeletPath }}

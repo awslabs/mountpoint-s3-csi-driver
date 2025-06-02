@@ -72,13 +72,6 @@ fi
 
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 
-MOUNTER_KIND=${MOUNTER_KIND:-systemd}
-if [ "$MOUNTER_KIND" = "pod" ]; then
-  USE_POD_MOUNTER=true
-else
-  USE_POD_MOUNTER=false
-fi
-
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
 export PATH="$PATH:${BIN_DIR}"
@@ -177,19 +170,18 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "$HELM_RELEASE_NAME" \
     "${REGISTRY}/${IMAGE_NAME}" \
     "${TAG}" \
-    "${KUBECONFIG}" \
-    "${MOUNTER_KIND}"
+    "${KUBECONFIG}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   popd

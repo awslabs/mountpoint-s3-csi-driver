@@ -1,5 +1,3 @@
-{{- if .Values.experimental.podMounter -}}
-
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
@@ -11,5 +9,3 @@ description: >-
     Default priority class for Mountpoint Pods.
     It has the highest possible value for non-builtin PriorityClasses to ensure Mountpoint Pods get scheduled quickly and not evicted first in case of a resource pressure.
     It will not cause other Pods to be preempted.
-
-{{- end -}}

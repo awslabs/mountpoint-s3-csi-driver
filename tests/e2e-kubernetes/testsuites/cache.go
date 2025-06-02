@@ -166,15 +166,6 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			switch config.localCacheKind {
 			case localCacheMountOptions:
 				cacheDir := randomCacheDir()
-
-				if !IsPodMounter {
-					// This hacky workaround is only needed for `SystemdMounter`,
-					// `PodMounter` will automatically create cache folder within the Mountpoint Pod.
-					basePodModifiers = append(basePodModifiers, func(pod *v1.Pod) {
-						ensureCacheDirExistsInNode(pod, cacheDir)
-					})
-				}
-
 				baseMountOptions = append(baseMountOptions, fmt.Sprintf("cache %s", cacheDir))
 			case localCacheEmptyDir:
 				enhanceContext = func(ctx context.Context) context.Context {
@@ -344,12 +335,6 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		Describe("EmptyDir", func() {
-			BeforeEach(func() {
-				if !IsPodMounter {
-					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
-				}
-			})
-
 			Describe("Local", func() {
 				testCache(cacheTestConfig{
 					localCacheKind: localCacheEmptyDir,
@@ -368,12 +353,6 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			BeforeAll(func(ctx context.Context) {
 				if ebsCSIDriverDaemonSet(ctx, f) == nil {
 					Skip("EBS CSI Driver is not installed, skipping EBS ephemeral volume cache tests")
-				}
-			})
-
-			BeforeEach(func() {
-				if !IsPodMounter {
-					Skip("Skipping `ephemeral` cache tests for `SystemdMounter`")
 				}
 			})
 
@@ -452,45 +431,4 @@ func ebsCSIDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.
 		return nil
 	}
 	return ds
-}
-
-// ensureCacheDirExistsInNode adds a hostPath for given `cacheDir` with `DirectoryOrCreate` type.
-// This hack required because Mountpoint process is running on the underlying host and not inside the container,
-// so we need to ensure cache directory exists on the host.
-// This hack hopefully will go away with https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279.
-func ensureCacheDirExistsInNode(pod *v1.Pod, cacheDir string) {
-	cacheVolumeMount := v1.VolumeMount{
-		Name:      "make-cache-dir",
-		MountPath: "/cache",
-	}
-
-	if pod.Spec.SecurityContext == nil {
-		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
-	}
-	// We need to set this false at Pod-level as `chmod-cache-dir` needs to run as `root` and this
-	// would prevent container creation if its true.
-	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(false)
-
-	// The directory created with `DirectoryOrCreate` will have 0755 permissions and will be owned by kubelet.
-	// Unless we change permissions here, non-root containers won't be able to access to the cache dir.
-	pod.Spec.InitContainers = append(pod.Spec.DeepCopy().InitContainers, v1.Container{
-		Name:    "chmod-cache-dir",
-		Image:   e2epod.GetDefaultTestImage(),
-		Command: e2epod.GenerateScriptCmd("chmod -R 777 /cache"),
-		SecurityContext: &v1.SecurityContext{
-			RunAsUser:  ptr.To(root),
-			RunAsGroup: ptr.To(root),
-		},
-		VolumeMounts: []v1.VolumeMount{cacheVolumeMount},
-	})
-	pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
-		Name: "make-cache-dir",
-		VolumeSource: v1.VolumeSource{
-			HostPath: &v1.HostPathVolumeSource{
-				Path: cacheDir,
-				Type: ptr.To(v1.HostPathDirectoryOrCreate),
-			},
-		},
-	})
-	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, cacheVolumeMount)
 }
