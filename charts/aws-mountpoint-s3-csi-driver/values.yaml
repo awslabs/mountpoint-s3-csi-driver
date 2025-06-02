@@ -34,7 +34,7 @@ node:
     limits:
       memory: 256Mi
   # Tolerates all taints and overrides defaultTolerations
-  tolerateAllTaints: false
+  tolerateAllTaints: true
   defaultTolerations: true
   tolerations: []
   affinity:
@@ -47,8 +47,6 @@ node:
                 values:
                   - fargate
                   - hybrid
-  podInfoOnMountCompat:
-    enable: false
 
 sidecars:
   nodeDriverRegistrar:
