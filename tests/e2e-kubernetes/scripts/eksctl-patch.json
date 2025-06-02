@@ -45,6 +45,13 @@
     }
   },
   {
+    "op": "add",
+    "path": "/addons/-",
+    "value": {
+      "name": "aws-ebs-csi-driver"
+    }
+  },
+  {
     "op": "replace",
     "path": "/cloudWatch/clusterLogging",
     "value": {
