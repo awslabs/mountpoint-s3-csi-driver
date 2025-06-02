@@ -20,12 +20,12 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
+	sanity "github.com/kubernetes-csi/csi-test/v5/pkg/sanity"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
@@ -88,12 +88,9 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("Amazon S3 CSI Driver", func() {
 	_ = os.MkdirAll("/tmp/csi", os.ModePerm)
-	config := &sanity.Config{
-		Address:        endpoint,
-		TargetPath:     mountPath,
-		StagingPath:    stagePath,
-		TestVolumeSize: 2000 * driver.GiB,
-		IDGen:          &sanity.DefaultIDGenerator{},
-	}
-	sanity.GinkgoTest(config)
+	config := sanity.NewTestConfig()
+	config.Address = endpoint
+	config.TargetPath = mountPath
+	config.StagingPath = stagePath
+	sanity.GinkgoTest(&config)
 })

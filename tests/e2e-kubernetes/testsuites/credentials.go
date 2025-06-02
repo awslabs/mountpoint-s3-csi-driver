@@ -300,7 +300,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			sa := csiDriverServiceAccount(ctx, f)
 			overrideServiceAccountRole(ctx, f, sa, "")
 
-			if IsPodMounter && eksPodIdentityAgentDaemonSetForCluster(ctx, f) != nil {
+			if eksPodIdentityAgentDaemonSetForCluster(ctx, f) != nil {
 				deletePodIdentityAssociations(ctx, sa)
 			}
 
@@ -450,9 +450,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 			Context("EKS Pod Identity", Ordered, func() {
 				BeforeAll(func(ctx context.Context) {
-					if !IsPodMounter {
-						Skip("Pod Mounter is not enabled, skipping EKS Pod Identity tests")
-					}
 					if eksPodIdentityAgentDaemonSet == nil {
 						Skip("EKS Pod Identity Agent is not configured, skipping EKS Pod Identity tests")
 					}
@@ -773,9 +770,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 			Context("EKS Pod Identity", Ordered, func() {
 				BeforeEach(func(ctx context.Context) {
-					if !IsPodMounter {
-						Skip("Pod Mounter is not enabled, skipping EKS Pod Identity tests")
-					}
 					if eksPodIdentityAgentDaemonSet == nil {
 						Skip("EKS Pod Identity Agent is not configured, skipping EKS Pod Identity tests")
 					}
@@ -900,9 +894,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				BeforeEach(func(ctx context.Context) {
 					if oidcProvider == "" {
 						Skip("OIDC provider is not configured, skipping tests of IRSA and EKS Pod Identity in combination")
-					}
-					if !IsPodMounter {
-						Skip("Pod Mounter is not enabled, skipping tests of IRSA and EKS Pod Identity in combination")
 					}
 					if eksPodIdentityAgentDaemonSet == nil {
 						Skip("EKS Pod Identity Agent is not configured, skipping tests of IRSA and EKS Pod Identity in combination")

@@ -573,3 +573,11 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		}
 	}
 }
+
+func hostPluginDirWithDefault() string {
+	hostPluginDir := os.Getenv("HOST_PLUGIN_DIR")
+	if hostPluginDir == "" {
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+	}
+	return hostPluginDir
+}
