@@ -13,7 +13,6 @@ image:
 
 node:
   kubeletPath: /var/lib/kubelet
-  mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
   logLevel: 4
   seLinuxOptions:
     user: system_u
@@ -78,10 +77,6 @@ sidecars:
         name: plugin-dir
     resources: {}
 
-initContainer:
-  installMountpoint:
-    resources: {}
-
 controller:
   serviceAccount:
     # Specifies whether a service account should be created
@@ -115,6 +110,3 @@ eksPodIdentityAgent:
 # or if you've migrated all workloads using S3 volumes after upgrading to v2.
 # TODO: Remove this in v3 as systemd mount support will be discontinued
 supportLegacySystemDMounts: true
-
-experimental:
-  podMounter: false
