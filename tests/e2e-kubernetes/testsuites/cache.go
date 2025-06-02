@@ -426,6 +426,9 @@ func createEBSCacheSCAndPVC(ctx context.Context, f *framework.Framework) *v1.Per
 		Provisioner:       "ebs.csi.aws.com",
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 		ReclaimPolicy:     ptr.To(v1.PersistentVolumeReclaimDelete),
+		Parameters: map[string]string{
+			"encrypted": "true",
+		},
 	}
 
 	framework.Logf("Creating StorageClass %s with EBS CSI Driver provisioner", scName)
