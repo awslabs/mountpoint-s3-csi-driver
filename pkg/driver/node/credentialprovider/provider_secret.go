@@ -15,7 +15,7 @@ import (
 
 const (
 	// Keys expected in the Secret map from NodePublishVolumeRequest.
-	keyID           = "key_id"
+	keyID           = "access_key_id"
 	secretAccessKey = "secret_access_key"
 
 	// Upper limits (not exact) — suits Vault & test creds.
@@ -26,7 +26,7 @@ const (
 /*
 Validation rules (loosened for cloudserver test credentials):
 
-	key_id     – 1 … 16 chars, uppercase A–Z or 0–9
+	access_key_id     – 1 … 16 chars, uppercase A–Z or 0–9
 	secret_access_key – 1 … 40 chars, [A-Za-z0-9 / + =]
 
 The patterns are supersets of AWS IAM and permit shorter dummy keys.
@@ -55,7 +55,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 	if okID {
 		id = strings.TrimSpace(id)
 		if !accessKeyIDRe.MatchString(id) {
-			klog.Warningf("credentialprovider: key_id %q is not alphanumeric or exceeds %d chars",
+			klog.Warningf("credentialprovider: access_key_id %q is not alphanumeric or exceeds %d chars",
 				id, maxAccessKeyIDLen)
 			okID = false
 		}
@@ -74,8 +74,8 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 		env.Set(envprovider.EnvAccessKeyID, id)
 		env.Set(envprovider.EnvSecretAccessKey, sec)
 
-		// FULL key_id logged (no masking) for audit purposes.
-		klog.V(3).Infof("credentialprovider: volume %s authenticated with key_id %s",
+		// FULL access_key_id logged (no masking) for audit purposes.
+		klog.V(3).Infof("credentialprovider: volume %s authenticated with access_key_id %s",
 			provideCtx.VolumeID, id)
 
 		return env, nil

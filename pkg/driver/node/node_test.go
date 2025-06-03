@@ -580,7 +580,7 @@ func TestLogSafeNodePublishVolumeRequest(t *testing.T) {
 			publishReq: &csi.NodePublishVolumeRequest{
 				VolumeId: "test-volume-id",
 				Secrets: map[string]string{
-					"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+					"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 					"secret_access_key": "SECRET-VALUE-TO-REDACT",
 				},
 				VolumeContext: map[string]string{
@@ -591,7 +591,7 @@ func TestLogSafeNodePublishVolumeRequest(t *testing.T) {
 			expectedPublishReq: &csi.NodePublishVolumeRequest{
 				VolumeId: "test-volume-id",
 				Secrets: map[string]string{
-					"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+					"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 					"secret_access_key": "[REDACTED]",
 				},
 				VolumeContext: map[string]string{

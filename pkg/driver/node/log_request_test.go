@@ -19,23 +19,23 @@ func TestLogSafeNodePublishVolumeRequestCoverage(t *testing.T) {
 		{
 			name: "redact secret_access_key only",
 			secrets: map[string]string{
-				"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+				"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 				"secret_access_key": "secret-that-should-be-redacted",
 			},
 			expectedOutput: map[string]string{
-				"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+				"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 				"secret_access_key": "[REDACTED]",
 			},
 		},
 		{
 			name: "keep other values",
 			secrets: map[string]string{
-				"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+				"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 				"secret_access_key": "secret-that-should-be-redacted",
 				"other_key":         "other-value",
 			},
 			expectedOutput: map[string]string{
-				"key_id":            "AKIAXXXXXXXXXXXXXXXX",
+				"access_key_id":     "AKIAXXXXXXXXXXXXXXXX",
 				"secret_access_key": "[REDACTED]",
 				"other_key":         "other-value",
 			},

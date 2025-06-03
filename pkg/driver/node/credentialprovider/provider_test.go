@@ -198,14 +198,14 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 		{
 			name: "valid credentials",
 			secretData: map[string]string{
-				"key_id":            "ACCESS123",
+				"access_key_id":     "ACCESS123",
 				"secret_access_key": "SECRET456",
 			},
 			expectError:  false,
 			expectedAuth: credentialprovider.AuthenticationSourceSecret,
 		},
 		{
-			name: "missing key_id",
+			name: "missing access_key_id",
 			secretData: map[string]string{
 				"secret_access_key": "SECRET456",
 			},
@@ -214,7 +214,7 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 		{
 			name: "missing secret_access_key",
 			secretData: map[string]string{
-				"key_id": "ACCESS123",
+				"access_key_id": "ACCESS123",
 			},
 			expectError: true,
 		},
@@ -224,9 +224,9 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "invalid key_id format",
+			name: "invalid access_key_id format",
 			secretData: map[string]string{
-				"key_id":            "Invalid@Key", // Contains non-alphanumeric character
+				"access_key_id":     "Invalid@Key", // Contains non-alphanumeric character
 				"secret_access_key": "SECRET456",
 			},
 			expectError: true,
@@ -234,7 +234,7 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 		{
 			name: "invalid secret_access_key format",
 			secretData: map[string]string{
-				"key_id":            "ACCESS123",
+				"access_key_id":     "ACCESS123",
 				"secret_access_key": "Invalid@Secret", // Contains invalid character
 			},
 			expectError: true,
@@ -242,7 +242,7 @@ func TestProvideWithSecretAuthSource(t *testing.T) {
 		{
 			name: "unexpected keys",
 			secretData: map[string]string{
-				"key_id":            "ACCESS123",
+				"access_key_id":     "ACCESS123",
 				"secret_access_key": "SECRET456",
 				"extra_key":         "ignored",
 			},
