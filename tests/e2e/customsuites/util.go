@@ -420,8 +420,8 @@ func CreateCredentialSecret(
 		},
 		Type: v1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"key_id":     accessKey,
-			"access_key": secretKey,
+			"key_id":            accessKey,
+			"secret_access_key": secretKey,
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {

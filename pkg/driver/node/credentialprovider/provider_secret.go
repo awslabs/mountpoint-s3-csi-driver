@@ -16,7 +16,7 @@ import (
 const (
 	// Keys expected in the Secret map from NodePublishVolumeRequest.
 	keyID           = "key_id"
-	secretAccessKey = "access_key"
+	secretAccessKey = "secret_access_key"
 
 	// Upper limits (not exact) — suits Vault & test creds.
 	maxAccessKeyIDLen     = 16
@@ -27,7 +27,7 @@ const (
 Validation rules (loosened for cloudserver test credentials):
 
 	key_id     – 1 … 16 chars, uppercase A–Z or 0–9
-	access_key – 1 … 40 chars, [A-Za-z0-9 / + =]
+	secret_access_key – 1 … 40 chars, [A-Za-z0-9 / + =]
 
 The patterns are supersets of AWS IAM and permit shorter dummy keys.
 */
@@ -64,7 +64,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 	if okSec {
 		sec = strings.TrimSpace(sec)
 		if !secretAccessKeyRe.MatchString(sec) || !utf8.ValidString(sec) {
-			klog.Warningf("credentialprovider: access_key is invalid or exceeds %d chars",
+			klog.Warningf("credentialprovider: secret_access_key is invalid or exceeds %d chars",
 				maxSecretAccessKeyLen)
 			okSec = false
 		}

@@ -72,7 +72,7 @@ Method 1: From environment variables (quick but less secure)
 ```bash
 kubectl create secret generic ${SECRET_NAME} \
   --from-literal=key_id="${AWS_ACCESS_KEY_ID}" \
-  --from-literal=access_key="${AWS_SECRET_ACCESS_KEY}" \
+  --from-literal=secret_access_key="${AWS_SECRET_ACCESS_KEY}" \
   --namespace=${NAMESPACE}
 ```
 
@@ -88,7 +88,7 @@ Create credential files locally (these won't appear in shell history):
 
 ```bash
 echo -n "${AWS_ACCESS_KEY_ID}" > /tmp/key_id
-echo -n "${AWS_SECRET_ACCESS_KEY}" > /tmp/access_key
+echo -n "${AWS_SECRET_ACCESS_KEY}" > /tmp/secret_access_key
 ```
 
 Create secret from files:
@@ -96,14 +96,14 @@ Create secret from files:
 ```bash
 kubectl create secret generic ${SECRET_NAME} \
   --from-file=key_id=/tmp/key_id \
-  --from-file=access_key=/tmp/access_key \
+  --from-file=secret_access_key=/tmp/secret_access_key \
   --namespace=${NAMESPACE}
 ```
 
 Clean up temporary files:
 
 ```bash
-rm /tmp/key_id /tmp/access_key
+rm /tmp/key_id /tmp/secret_access_key
 ```
 
 ### Step 5: Install the CSI driver

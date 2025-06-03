@@ -77,7 +77,7 @@ The recommended method for installing the Scality S3 CSI Driver is using Helm.
    ```bash
    kubectl create secret generic ${SECRET_NAME} \
      --from-literal=key_id="${AWS_ACCESS_KEY_ID}" \
-     --from-literal=access_key="${AWS_SECRET_ACCESS_KEY}" \
+     --from-literal=secret_access_key="${AWS_SECRET_ACCESS_KEY}" \
      --namespace kube-system
    ```
 
@@ -91,12 +91,12 @@ The recommended method for installing the Scality S3 CSI Driver is using Helm.
        For better security, create credential files locally (these won't appear in shell history):
        ```bash
        echo -n "${AWS_ACCESS_KEY_ID}" > /tmp/key_id
-       echo -n "${AWS_SECRET_ACCESS_KEY}" > /tmp/access_key
+       echo -n "${AWS_SECRET_ACCESS_KEY}" > /tmp/secret_access_key
        kubectl create secret generic ${SECRET_NAME} \
          --from-file=key_id=/tmp/key_id \
-         --from-file=access_key=/tmp/access_key \
+         --from-file=secret_access_key=/tmp/secret_access_key \
          --namespace kube-system
-       rm /tmp/key_id /tmp/access_key  # Clean up
+       rm /tmp/key_id /tmp/secret_access_key  # Clean up
        ```
 
 3. **Create a Custom Values File**:

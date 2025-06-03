@@ -293,7 +293,7 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 	// Create a copy of credential with sensitive values redacted
 	redactedCredential := make(map[string]string)
 	for k, v := range req.Secrets {
-		if k == "access_key" {
+		if k == "secret_access_key" {
 			// Redact the secret access key
 			redactedCredential[k] = "[REDACTED]"
 		} else {

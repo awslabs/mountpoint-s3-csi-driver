@@ -156,7 +156,7 @@ install_csi_driver() {
   # Create or update the secret with provided values
   exec_cmd kubectl create secret generic s3-secret \
     --from-literal=key_id="$ACCESS_KEY_ID" \
-    --from-literal=access_key="$SECRET_ACCESS_KEY" \
+    --from-literal=secret_access_key="$SECRET_ACCESS_KEY" \
     -n $NAMESPACE \
     --dry-run=client -o yaml | kubectl apply -f -
 
