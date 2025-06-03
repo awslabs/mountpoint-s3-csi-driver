@@ -54,10 +54,10 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_div_format
+          format: pymdownx.superfences.fence_div_format
 
 nav:
-  - Home: index.md
+  - Home: README.md
   - Quick Start: quick-start.md
   - Installation: installation.md
   - Configuration:
@@ -70,3 +70,12 @@ nav:
       - Mount Multiple Buckets: how-to/multi-volume.md
       - Region Override: how-to/region-override.md
       - Permissions & Non-Root Access: how-to/permissions.md
+  - Concepts:
+      - Filesystem Semantics: concepts/filesystem-semantics.md
+  - Reference:
+      - Compatibility Matrix: reference/compatibility-matrix.md
+  - Operations:
+      - Troubleshooting: troubleshooting.md
+      - Administrator and User Guide: admin-user-guide.md
+  - Reference:
+      - Minimal Helm Example: examples/minimal-helm.yaml

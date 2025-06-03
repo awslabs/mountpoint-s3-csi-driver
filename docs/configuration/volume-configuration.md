@@ -114,7 +114,7 @@ The following mount options are supported by the Scality S3 CSI Driver for stand
 
 ### Practical Usage
 
-For advanced examples, see the [How-To Guides](../how-to/static-provisioning.md) and [Minimal Helm Example](../../examples/minimal-helm.yaml).
+For advanced examples, see the [How-To Guides](../how-to/static-provisioning.md) and [Minimal Helm Example](../examples/minimal-helm.yaml).
 
 ## Configuration Precedence for Mount Options
 

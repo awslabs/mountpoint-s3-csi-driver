@@ -77,4 +77,4 @@ kubectl get pod s3-app
 ## 5. Next Steps
 
 - For advanced configuration, see [Volume Configuration](../configuration/volume-configuration.md)
-- For a full example, see [Minimal Helm Example](../../examples/minimal-helm.yaml)
+- For a full example, see [Minimal Helm Example](../examples/minimal-helm.yaml)

@@ -96,9 +96,7 @@ repos:
         pass_filenames: false
       - id: mkdocs-build
         name: mkdocs build
-        # entry: bash -c 'source .venv/bin/activate 2>/dev/null || true; mkdocs build --strict'
-        # aborted strict mode for builind documentation, will be renabled in TODO(S3CSI-55)
-        entry: bash -c 'source .venv/bin/activate 2>/dev/null || true; mkdocs build'
+        entry: bash -c 'source .venv/bin/activate 2>/dev/null || true; mkdocs build --strict'
         language: system
         files: ^(mkdocs\.yml|docs/.*)$
         pass_filenames: false

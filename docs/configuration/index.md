@@ -44,5 +44,3 @@ Configuration for the Scality S3 CSI Driver can be applied at different stages:
 - **RBAC**: The Helm chart installs necessary RBAC roles and bindings. Review these to understand the permissions granted to the driver.
 - **Network Policies**: If your cluster uses network policies, ensure that the CSI driver pods can communicate with the Kubernetes API server and that application pods can communicate with the CSI node
   pods if necessary (though typically not required for the default mounter). Node pods also need to reach your S3 endpoint.
-
-For a comprehensive understanding of configuration precedence, refer to the [Configuration Precedence](../reference/config-precedence.md) page.

@@ -251,5 +251,5 @@ This quick start provides a basic overview. For more advanced configurations and
 
 - **[Configuration Options](configuration/index.md)** for detailed settings.
 - **[How-To Guides](how-to/static-provisioning.md)** for common use cases.
-- **[Minimal Helm Example](../examples/minimal-helm.yaml)**: A self-contained example demonstrating a minimal deployment, PVC and Pod manifest.
+- **[Minimal Helm Example](examples/minimal-helm.yaml)**: A self-contained example demonstrating a minimal deployment, PVC and Pod manifest.
   (Note: this example YAML uses a local Helm chart path. Adapt as needed for your environment).
