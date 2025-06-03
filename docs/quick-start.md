@@ -112,7 +112,7 @@ rm /tmp/key_id /tmp/access_key
 helm install mountpoint-s3-csi-driver scality/scality-mountpoint-s3-csi-driver \
   --set node.s3EndpointUrl="${S3_ENDPOINT_URL}" \
   --set node.s3Region="${S3_REGION}" \
-  --set awsAccessSecret.name="${SECRET_NAME}" \
+  --set s3CredentialSecret.name="${SECRET_NAME}" \
   --namespace ${NAMESPACE}
 ```
 

@@ -18,7 +18,7 @@
 #   # or if applications will frequently access buckets in a particular region.
 #   s3Region: "us-east-1"
 #
-# awsAccessSecret:
+# s3CredentialSecret:
 #   # Reference the secret you created manually (see documentation for instructions)
 #   name: "my-s3-credentials" # Name of the Kubernetes secret you created manually
 #

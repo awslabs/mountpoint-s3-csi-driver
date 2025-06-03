@@ -14,7 +14,7 @@ node:
   s3EndpointUrl: "https://your-s3-endpoint.example.com"
   s3Region: "us-west-2" # All volumes will use us-west-2 by default
 
-awsAccessSecret:
+s3CredentialSecret:
   # ... your credential configuration
 ```
 

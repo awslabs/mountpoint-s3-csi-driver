@@ -122,7 +122,7 @@ spec:
               value: {{ .Values.node.s3EndpointUrl }}
             - name: AWS_REGION
               value: {{ .Values.node.s3Region }}
-            {{- with .Values.awsAccessSecret }}
+            {{- with .Values.s3CredentialSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:

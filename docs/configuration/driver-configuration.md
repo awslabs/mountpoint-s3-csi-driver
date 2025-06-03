@@ -30,10 +30,10 @@ These parameters configure the overall behavior of the CSI driver components.
 | `node.podInfoOnMountCompat.enable`                   | Enable `podInfoOnMount` for older Kubernetes versions (&lt;1.30) if your API server supports it but Kubelet version in Helm doesn't reflect it.    | `false`                                                | No                          |
 | `node.s3EndpointUrl`                                 | The S3 endpoint URL to be used by the driver for all mount operations.                                                                             | `""`                                                   | **Yes**                     |
 | `node.s3Region`                                      | The default AWS region to use for S3 requests. Can be overridden per-volume via PV `mountOptions`.                                               | `us-east-1`                                            | No                          |
-| `awsAccessSecret.name`                               | Name of the Kubernetes Secret containing AWS credentials (`key_id`, `access_key`, optionally `session_token`). You must create this secret manually. | `aws-secret`                                           | No                          |
-| `awsAccessSecret.keyId`                              | Key within the secret for Access Key ID.                                                                                                       | `key_id`                                               | No                          |
-| `awsAccessSecret.accessKey`                          | Key within the secret for Secret Access Key.                                                                                                   | `access_key`                                           | No                          |
-| `awsAccessSecret.sessionToken`                       | Key within the secret for Session Token (optional).                                                                                            | `session_token`                                        | No                          |
+| `s3CredentialSecret.name`                               | Name of the Kubernetes Secret containing AWS credentials (`key_id`, `access_key`, optionally `session_token`). You must create this secret manually. | `aws-secret`                                           | No                          |
+| `s3CredentialSecret.keyId`                              | Key within the secret for Access Key ID.                                                                                                       | `key_id`                                               | No                          |
+| `s3CredentialSecret.accessKey`                          | Key within the secret for Secret Access Key.                                                                                                   | `access_key`                                           | No                          |
+| `s3CredentialSecret.sessionToken`                       | Key within the secret for Session Token (optional).                                                                                            | `session_token`                                        | No                          |
 | `sidecars.nodeDriverRegistrar.image.repository`      | Image repository for the `csi-node-driver-registrar` sidecar.                                                                                      | `k8s.gcr.io/sig-storage/csi-node-driver-registrar`     | No                          |
 | `sidecars.nodeDriverRegistrar.image.tag`             | Image tag for the `csi-node-driver-registrar` sidecar.                                                                                             | `v2.13.0`                                              | No                          |
 | `sidecars.nodeDriverRegistrar.image.pullPolicy`      | Image pull policy for the `csi-node-driver-registrar` sidecar.                                                                                     | `IfNotPresent`                                         | No                          |
@@ -50,7 +50,7 @@ These parameters configure the overall behavior of the CSI driver components.
 | `controller.*`                                       | Configuration for the CSI controller (Deployment, ServiceAccount). *Only used if `experimental.podMounter` is true.*                               | N/A (not documented)                                   | No                          |
 | `mountpointPod.*`                                    | Configuration for the Mountpoint pods spawned by the controller. *Only used if `experimental.podMounter` is true.*                                  | N/A (not documented)                                   | No                          |
 
-### Security Notes on `awsAccessSecret`
+### Security Notes on `s3CredentialSecret`
 
 The Helm chart **does not create secrets automatically**. You must create a Kubernetes Secret containing your S3 credentials before installing the chart. The secret must contain the following keys:
 
@@ -70,7 +70,7 @@ kubectl create secret generic my-s3-credentials \
 Then in your `values.yaml`:
 
 ```yaml
-awsAccessSecret:
+s3CredentialSecret:
   name: "my-s3-credentials"
 ```
 
@@ -84,5 +84,5 @@ The `node.s3EndpointUrl` and `node.s3Region` parameters set the default S3 endpo
 The `node.s3Region` can be overridden on a per-volume basis using the `region` mount option in the PersistentVolume definition.
 However, the `node.s3EndpointUrl` **cannot** be overridden at the volume level for security reasons; it is a global setting for the driver instance.
 
-The S3 credentials specified via `awsAccessSecret` are also global by default but
+The S3 credentials specified via `s3CredentialSecret` are also global by default but
 can be overridden on a per-volume basis if the `authenticationSource: secret` and `nodePublishSecretRef` are used in the `PersistentVolume.spec.csi` definition.

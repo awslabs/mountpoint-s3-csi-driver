@@ -116,17 +116,17 @@ The recommended method for installing the Scality S3 CSI Driver is using Helm.
      # Default is /var/lib/kubelet. Change if your cluster uses a different path.
      # kubeletPath: /var/lib/kubelet
 
-   awsAccessSecret:
+   s3CredentialSecret:
      # Reference the secret you created above
      name: "s3-credentials"  # Must match the secret name you created
    ```
 
    - Replace `https://your-s3-endpoint.example.com` with your actual S3 endpoint.
-   - Ensure the `awsAccessSecret.name` matches the secret name you created.
+   - Ensure the `s3CredentialSecret.name` matches the secret name you created.
    - Review other options in the default [chart values](https://github.com/scality/mountpoint-s3-csi-driver/blob/main/charts/scality-mountpoint-s3-csi-driver/values.yaml) and customize as needed.
 
    !!! important "S3 Endpoint URL is Required"
-       The `node.s3EndpointUrl`  and `awsAccessSecret.name` parameter is **mandatory**. The Helm installation will fail if it's not provided.
+       The `node.s3EndpointUrl`  and `s3CredentialSecret.name` parameter is **mandatory**. The Helm installation will fail if it's not provided.
 
 4. **Install the Helm Chart**:
    Deploy the driver using Helm, by default into the `kube-system` namespace. If you want to install the driver in a different namespace, the credentials secret should be created in that namespace.
@@ -160,7 +160,7 @@ To uninstall the driver:
 helm uninstall scality-s3-csi --namespace kube-system
 ```
 
-If you created the S3 credentials secret manually (or if `awsAccessSecret.create` was true and Helm didn't clean it up), you may need to delete it separately:
+If you created the S3 credentials secret manually (or if `s3CredentialSecret.create` was true and Helm didn't clean it up), you may need to delete it separately:
 
 ```bash
 kubectl delete secret aws-secret --namespace kube-system
