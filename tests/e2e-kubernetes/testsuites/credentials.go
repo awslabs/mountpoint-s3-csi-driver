@@ -1276,7 +1276,11 @@ func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa 
 
 	return sa, func(ctx context.Context) error {
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
-		return annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
+		err := annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
 	}
 }
 
