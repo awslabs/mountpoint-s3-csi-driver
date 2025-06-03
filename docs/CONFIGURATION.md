@@ -45,6 +45,7 @@ See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/p
 
 > [!Note]
 > To use a bucket on S3 Outposts, you will need to provide the bucket's ARN in the `bucketName` field in the PersistentVolume.
+> See [the example](../examples/kubernetes/static_provisioning/outpost_bucket.yaml) for more details.
 
 ## AWS Credentials
 
