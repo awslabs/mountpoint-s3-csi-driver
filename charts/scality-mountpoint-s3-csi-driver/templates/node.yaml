@@ -133,7 +133,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
-                  key: {{ .accessKey }}
+                  key: {{ .secretAccessKey }}
                   optional: true
             - name: AWS_SESSION_TOKEN
               valueFrom:
