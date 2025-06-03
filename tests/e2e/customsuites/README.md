@@ -181,7 +181,7 @@ Custom tests are integrated into the CI pipeline:
     cd tests/e2e/customsuites
     go test -v ./... \
       --s3-endpoint-url=${{ secrets.S3_ENDPOINT }} \
-      --access-key-id=${{ secrets.ACCESS_KEY }} \
+      --access-key-id=${{ secrets.ACCESS_KEY_ID }} \
       --secret-access-key=${{ secrets.SECRET_ACCESS_KEY }} \
       --cleanup-policy=always
 ```

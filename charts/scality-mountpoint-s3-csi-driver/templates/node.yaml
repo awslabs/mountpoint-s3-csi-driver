@@ -127,7 +127,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
-                  key: {{ .keyId }}
+                  key: {{ .accessKeyId }}
                   optional: true
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:

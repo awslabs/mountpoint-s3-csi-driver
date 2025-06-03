@@ -410,7 +410,7 @@ func CleanupPodInErrorState(ctx context.Context, f *framework.Framework, podName
 func CreateCredentialSecret(
 	ctx context.Context,
 	f *framework.Framework,
-	namePrefix, accessKey, secretAccessKey string,
+	namePrefix, accessKeyID, secretAccessKey string,
 ) (string, error) {
 	secretName := namePrefix + "-" + uuid.NewString()[:8]
 	_, err := f.ClientSet.CoreV1().Secrets(f.Namespace.Name).Create(ctx, &v1.Secret{
@@ -420,7 +420,7 @@ func CreateCredentialSecret(
 		},
 		Type: v1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"access_key_id":     accessKey,
+			"access_key_id":     accessKeyID,
 			"secret_access_key": secretAccessKey,
 		},
 	}, metav1.CreateOptions{})

@@ -38,7 +38,7 @@ func init() {
 		os.Exit(1)
 	}
 
-	s3client.DefaultAccessKey = AccessKeyId
+	s3client.DefaultAccessKeyID = AccessKeyId
 	s3client.DefaultSecretAccessKey = SecretAccessKey
 	s3client.DefaultS3EndpointUrl = S3EndpointUrl
 }

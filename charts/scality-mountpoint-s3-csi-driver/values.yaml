@@ -90,7 +90,7 @@ imagePullSecrets: []
 
 s3CredentialSecret:
   name: s3-secret
-  keyId: access_key_id
+  accessKeyId: access_key_id
   secretAccessKey: secret_access_key
   sessionToken: session_token
 

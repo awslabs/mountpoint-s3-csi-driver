@@ -15,7 +15,7 @@ import (
 
 const (
 	// Keys expected in the Secret map from NodePublishVolumeRequest.
-	keyID           = "access_key_id"
+	accessKeyID     = "access_key_id"
 	secretAccessKey = "secret_access_key"
 
 	// Upper limits (not exact) — suits Vault & test creds.
@@ -41,15 +41,15 @@ var (
 func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContext) (envprovider.Environment, error) {
 	env := envprovider.Environment{}
 
-	valid := map[string]struct{}{keyID: {}, secretAccessKey: {}}
+	valid := map[string]struct{}{accessKeyID: {}, secretAccessKey: {}}
 	for k := range provideCtx.SecretData {
 		if _, ok := valid[k]; !ok {
 			klog.Warningf("credentialprovider: Secret contains unexpected key %q (ignored). Only %q and %q are supported.",
-				k, keyID, secretAccessKey)
+				k, accessKeyID, secretAccessKey)
 		}
 	}
 
-	id, okID := provideCtx.SecretData[keyID]
+	id, okID := provideCtx.SecretData[accessKeyID]
 	sec, okSec := provideCtx.SecretData[secretAccessKey]
 
 	if okID {
@@ -83,7 +83,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 
 	var missing []string
 	if !okID {
-		missing = append(missing, keyID)
+		missing = append(missing, accessKeyID)
 	}
 	if !okSec {
 		missing = append(missing, secretAccessKey)

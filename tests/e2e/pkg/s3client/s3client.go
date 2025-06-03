@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	DefaultAccessKey       string
+	DefaultAccessKeyID     string
 	DefaultSecretAccessKey string
 	DefaultS3EndpointUrl   string
 )
@@ -38,9 +38,9 @@ type Client struct {
 }
 
 // New returns a new client with "DefaultRegion".
-func New(region string, accessKey string, secretAccessKey string) *Client {
-	if accessKey == "" {
-		accessKey = DefaultAccessKey
+func New(region string, accessKeyID string, secretAccessKey string) *Client {
+	if accessKeyID == "" {
+		accessKeyID = DefaultAccessKeyID
 	}
 	if secretAccessKey == "" {
 		secretAccessKey = DefaultSecretAccessKey
@@ -51,7 +51,7 @@ func New(region string, accessKey string, secretAccessKey string) *Client {
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			accessKey,
+			accessKeyID,
 			secretAccessKey,
 			"",
 		)),
