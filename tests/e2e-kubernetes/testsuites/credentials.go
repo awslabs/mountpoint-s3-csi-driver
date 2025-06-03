@@ -1244,25 +1244,29 @@ func deleteCredentialSecret(ctx context.Context, f *framework.Framework) error {
 
 //-- Service Account utils
 
-func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) error {
+func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, error) {
 	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+	var latestSA *v1.ServiceAccount
 
 	// Need to retry on conflict because OpenShift automatically adds some annotations and labels to service accounts after creation.
-	return k8sretry.RetryOnConflict(k8sretry.DefaultRetry, func() error {
+	err := k8sretry.RetryOnConflict(k8sretry.DefaultRetry, func() error {
 		// Get the latest version
-		sa, err := client.Get(ctx, sa.Name, metav1.GetOptions{})
+		var err error
+		latestSA, err = client.Get(ctx, sa.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 
-		if sa.Annotations == nil {
-			sa.Annotations = make(map[string]string)
+		if latestSA.Annotations == nil {
+			latestSA.Annotations = make(map[string]string)
 		}
-		sa.Annotations[roleARNAnnotation] = roleARN
+		latestSA.Annotations[roleARNAnnotation] = roleARN
 
-		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
+		latestSA, err = client.Update(ctx, sa, metav1.UpdateOptions{})
 		return err
 	})
+
+	return latestSA, err
 }
 
 // overrideServiceAccountRole overrides and updates given Service Account's EKS Role ARN annotation.
@@ -1271,12 +1275,12 @@ func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework,
 func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, func(context.Context) error) {
 	originalRoleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Overriding ServiceAccount %s's role", sa.Name)
-	err := annotateServiceAccountWithRole(ctx, f, sa, roleARN)
+	latestSA, err := annotateServiceAccountWithRole(ctx, f, sa, roleARN)
 	framework.ExpectNoError(err)
 
-	return sa, func(ctx context.Context) error {
+	return latestSA, func(ctx context.Context) error {
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
-		err := annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
+		_, err := annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
