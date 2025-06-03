@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/errors"
+	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2eevents "k8s.io/kubernetes/test/e2e/framework/events"
@@ -1243,11 +1244,25 @@ func deleteCredentialSecret(ctx context.Context, f *framework.Framework) error {
 
 //-- Service Account utils
 
-func annotateServiceAccountWithRole(sa *v1.ServiceAccount, roleARN string) {
-	if sa.Annotations == nil {
-		sa.Annotations = make(map[string]string)
-	}
-	sa.Annotations[roleARNAnnotation] = roleARN
+func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) error {
+	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+
+	// Need to retry on conflict because OpenShift automatically adds some annotations and labels to service accounts after creation.
+	return k8sretry.RetryOnConflict(k8sretry.DefaultRetry, func() error {
+		// Get the latest version
+		sa, err := client.Get(ctx, sa.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if sa.Annotations == nil {
+			sa.Annotations = make(map[string]string)
+		}
+		sa.Annotations[roleARNAnnotation] = roleARN
+
+		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
+		return err
+	})
 }
 
 // overrideServiceAccountRole overrides and updates given Service Account's EKS Role ARN annotation.
@@ -1256,25 +1271,12 @@ func annotateServiceAccountWithRole(sa *v1.ServiceAccount, roleARN string) {
 func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, func(context.Context) error) {
 	originalRoleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Overriding ServiceAccount %s's role", sa.Name)
-
-	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
-	annotateServiceAccountWithRole(sa, roleARN)
-	sa, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+	err := annotateServiceAccountWithRole(ctx, f, sa, roleARN)
 	framework.ExpectNoError(err)
 
 	return sa, func(ctx context.Context) error {
-		sa, err := client.Get(ctx, sa.Name, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
-		annotateServiceAccountWithRole(sa, originalRoleARN)
-		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
-		return err
+		return annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
 	}
 }
 
