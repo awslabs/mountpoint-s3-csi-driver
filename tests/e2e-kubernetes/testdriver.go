@@ -21,7 +21,6 @@ var (
 	BucketPrefix  string
 	Performance   bool
 	IMDSAvailable bool
-	IsPodMounter  bool
 )
 
 type s3Driver struct {
