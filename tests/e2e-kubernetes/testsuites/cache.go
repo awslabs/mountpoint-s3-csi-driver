@@ -325,6 +325,23 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				}
 			})
 		}
+
+		if config.localCacheKind == localCacheEBSPVC {
+			It("two pods in the same node using the same cache without interfering the other", func(ctx context.Context) {
+				ctx = enhanceContext(ctx)
+
+				mountOptions := append(baseMountOptions, "allow-delete")
+
+				pod1, bucketName1 := createPod(ctx, mountOptions, basePodModifiers...)
+				pod2, bucketName2 := createPod(ctx, mountOptions, append(basePodModifiers, func(pod *v1.Pod) {
+					pod.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": pod1.Spec.NodeName}
+				})...)
+
+				// Try basic file operations with the same path, which shouldn't be shared and each should get unique data
+				checkBasicFileOperations(ctx, pod1, bucketName1, e2epod.VolumeMountPath1)
+				checkBasicFileOperations(ctx, pod2, bucketName2, e2epod.VolumeMountPath1)
+			})
+		}
 	}
 
 	Describe("Cache", func() {
