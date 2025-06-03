@@ -25,6 +25,8 @@ spec:
     driver: s3.csi.aws.com
     volumeHandle: s3-csi-driver-volume # Must be unique
     ...
+    volumeAttributes:
+      bucketName: amzn-s3-demo-bucket # Replace with your bucket name
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -40,6 +42,9 @@ See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/p
 
 > [!IMPORTANT]
 > You need to make sure that `volumeHandle` of your PV is unique, this is needed because Kubernetes will only process a volume once per its `volumeHandle`. If multiple PVs uses the same `volumeHandle`, only one will get processed. See [I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide for more information.
+
+> [!Note]
+> To use a bucket on S3 Outposts, you will need to provide the bucket's ARN in the `bucketName` field in the PersistentVolume.
 
 ## AWS Credentials
 
