@@ -2,9 +2,9 @@ name: Unit tests
 
 on:
   push:
-    branches: [ "main", "feature/*" ]
+    branches: [ "main", "v2", "feature/*" ]
   pull_request:
-    branches: [ "main", "feature/*" ]
+    branches: [ "main", "v2", "feature/*" ]
   merge_group:
     types: [ "checks_requested" ]
 
