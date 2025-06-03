@@ -90,17 +90,4 @@ There is also [a feature request on Mountpoint](https://github.com/awslabs/mount
 ## I'm using an S3 Outposts bucket and am getting 'The bucket does not exist' errors
 
 When using S3 Outposts, it is required to include the full ARN for your Outpost bucket in the `bucketName` field.
-
-```yaml
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: s3-pv-1
-spec:
-  # ...
-  csi:
-    driver: s3.csi.aws.com
-    # ...
-    volumeAttributes:
-      bucketName: "arn:aws:s3-outposts:region:account-id:outpost/outpost-id/bucket/bucket-name" # Replace with your outpost bucket's ARN.
-```
+See [the S3 Outposts example](../examples/kubernetes/static_provisioning/outpost_bucket.yaml).
