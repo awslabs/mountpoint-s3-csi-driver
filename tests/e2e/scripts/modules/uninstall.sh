@@ -78,9 +78,9 @@ uninstall_csi_driver() {
 
   # Delete AWS credentials secret
   # Check if secret exists before attempting to delete
-  if exec_cmd kubectl get secret aws-secret -n $NAMESPACE &> /dev/null; then
+  if exec_cmd kubectl get secret s3-secret -n $NAMESPACE &> /dev/null; then
     log "Deleting AWS credentials secret from namespace $NAMESPACE..."
-    if ! exec_cmd kubectl delete secret aws-secret -n $NAMESPACE; then
+    if ! exec_cmd kubectl delete secret s3-secret -n $NAMESPACE; then
       error "failed to delete AWS credentials secret from namespace $NAMESPACE. Error code: $ERROR_SECRET_DELETE"
       if [ "$FORCE" = true ]; then
         warn "Force mode enabled. Continuing with uninstallation despite secret deletion failure."

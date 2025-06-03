@@ -89,7 +89,7 @@ fullnameOverride: ""
 imagePullSecrets: []
 
 s3CredentialSecret:
-  name: aws-secret
+  name: s3-secret
   keyId: key_id
   accessKey: access_key
   sessionToken: session_token

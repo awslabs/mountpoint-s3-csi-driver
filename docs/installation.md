@@ -163,5 +163,5 @@ helm uninstall scality-s3-csi --namespace kube-system
 If you created the S3 credentials secret manually (or if `s3CredentialSecret.create` was true and Helm didn't clean it up), you may need to delete it separately:
 
 ```bash
-kubectl delete secret aws-secret --namespace kube-system
+kubectl delete secret s3-secret --namespace kube-system
 ```
