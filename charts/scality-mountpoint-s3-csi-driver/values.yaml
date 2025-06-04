@@ -88,10 +88,10 @@ fullnameOverride: ""
 
 imagePullSecrets: []
 
-awsAccessSecret:
-  name: aws-secret
-  keyId: key_id
-  accessKey: access_key
+s3CredentialSecret:
+  name: s3-secret
+  accessKeyId: access_key_id
+  secretAccessKey: secret_access_key
   sessionToken: session_token
 
 experimental:

@@ -15,8 +15,8 @@ import (
 
 const (
 	// Keys expected in the Secret map from NodePublishVolumeRequest.
-	keyID           = "key_id"
-	secretAccessKey = "access_key"
+	accessKeyID     = "access_key_id"
+	secretAccessKey = "secret_access_key"
 
 	// Upper limits (not exact) — suits Vault & test creds.
 	maxAccessKeyIDLen     = 16
@@ -26,8 +26,8 @@ const (
 /*
 Validation rules (loosened for cloudserver test credentials):
 
-	key_id     – 1 … 16 chars, uppercase A–Z or 0–9
-	access_key – 1 … 40 chars, [A-Za-z0-9 / + =]
+	access_key_id     – 1 … 16 chars, uppercase A–Z or 0–9
+	secret_access_key – 1 … 40 chars, [A-Za-z0-9 / + =]
 
 The patterns are supersets of AWS IAM and permit shorter dummy keys.
 */
@@ -41,21 +41,21 @@ var (
 func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContext) (envprovider.Environment, error) {
 	env := envprovider.Environment{}
 
-	valid := map[string]struct{}{keyID: {}, secretAccessKey: {}}
+	valid := map[string]struct{}{accessKeyID: {}, secretAccessKey: {}}
 	for k := range provideCtx.SecretData {
 		if _, ok := valid[k]; !ok {
 			klog.Warningf("credentialprovider: Secret contains unexpected key %q (ignored). Only %q and %q are supported.",
-				k, keyID, secretAccessKey)
+				k, accessKeyID, secretAccessKey)
 		}
 	}
 
-	id, okID := provideCtx.SecretData[keyID]
+	id, okID := provideCtx.SecretData[accessKeyID]
 	sec, okSec := provideCtx.SecretData[secretAccessKey]
 
 	if okID {
 		id = strings.TrimSpace(id)
 		if !accessKeyIDRe.MatchString(id) {
-			klog.Warningf("credentialprovider: key_id %q is not alphanumeric or exceeds %d chars",
+			klog.Warningf("credentialprovider: access_key_id %q is not alphanumeric or exceeds %d chars",
 				id, maxAccessKeyIDLen)
 			okID = false
 		}
@@ -64,7 +64,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 	if okSec {
 		sec = strings.TrimSpace(sec)
 		if !secretAccessKeyRe.MatchString(sec) || !utf8.ValidString(sec) {
-			klog.Warningf("credentialprovider: access_key is invalid or exceeds %d chars",
+			klog.Warningf("credentialprovider: secret_access_key is invalid or exceeds %d chars",
 				maxSecretAccessKeyLen)
 			okSec = false
 		}
@@ -74,8 +74,8 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 		env.Set(envprovider.EnvAccessKeyID, id)
 		env.Set(envprovider.EnvSecretAccessKey, sec)
 
-		// FULL key_id logged (no masking) for audit purposes.
-		klog.V(3).Infof("credentialprovider: volume %s authenticated with key_id %s",
+		// FULL access_key_id logged (no masking) for audit purposes.
+		klog.V(3).Infof("credentialprovider: volume %s authenticated with access_key_id %s",
 			provideCtx.VolumeID, id)
 
 		return env, nil
@@ -83,7 +83,7 @@ func (c *Provider) provideFromSecret(_ context.Context, provideCtx ProvideContex
 
 	var missing []string
 	if !okID {
-		missing = append(missing, keyID)
+		missing = append(missing, accessKeyID)
 	}
 	if !okSec {
 		missing = append(missing, secretAccessKey)

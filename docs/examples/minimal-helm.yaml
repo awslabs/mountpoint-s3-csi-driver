@@ -18,7 +18,7 @@
 #   # or if applications will frequently access buckets in a particular region.
 #   s3Region: "us-east-1"
 #
-# awsAccessSecret:
+# s3CredentialSecret:
 #   # Reference the secret you created manually (see documentation for instructions)
 #   name: "my-s3-credentials" # Name of the Kubernetes secret you created manually
 #
@@ -27,8 +27,8 @@
 # Before installing the chart, create the secret:
 # kubectl create secret generic my-s3-credentials \
 #   --namespace kube-system \
-#   --from-literal=key_id='YOUR_ACCESS_KEY_ID' \
-#   --from-literal=access_key='YOUR_SECRET_ACCESS_KEY'
+#   --from-literal=access_key_id='YOUR_ACCESS_KEY_ID' \
+#   --from-literal=secret_access_key='YOUR_SECRET_ACCESS_KEY'
 #
 # Command to install (assuming minimal-values.yaml is created and you added the Scality Helm repo):
 # helm repo add scality https://scality.github.io/mountpoint-s3-csi-driver

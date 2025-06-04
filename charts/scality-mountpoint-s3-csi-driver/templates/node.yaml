@@ -122,18 +122,18 @@ spec:
               value: {{ .Values.node.s3EndpointUrl }}
             - name: AWS_REGION
               value: {{ .Values.node.s3Region }}
-            {{- with .Values.awsAccessSecret }}
+            {{- with .Values.s3CredentialSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
-                  key: {{ .keyId }}
+                  key: {{ .accessKeyId }}
                   optional: true
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
-                  key: {{ .accessKey }}
+                  key: {{ .secretAccessKey }}
                   optional: true
             - name: AWS_SESSION_TOKEN
               valueFrom:
