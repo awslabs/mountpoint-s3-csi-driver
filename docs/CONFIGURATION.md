@@ -60,11 +60,11 @@ Kubernetes cluster, or using credentials assigned to pods.
 By setting driver-level credentials, the whole cluster uses the same set of credentials.
 
 Using this configuration, the credentials that are used are set at installation time, either using Service
-Accounts, or using K8s secrets.
+Accounts, or using Kubernetes secrets.
 
 The CSI Driver uses the following load order for credentials:
 
-1. K8s secrets (not recommended)
+1. Kubernetes secrets (not recommended)
 2. Driver-Level IAM Roles for Service Accounts (IRSA)
 3. Driver-Level EKS Pod Identity
 4. Instance profiles
@@ -74,7 +74,7 @@ The CSI Driver uses the following load order for credentials:
 Configuring [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) is the recommended way to set up the CSI Driver if you want to use Driver-Level credentials in an EKS Cluster.
 For non-EKS clusters, see [Driver-Level Credentials with IRSA](#driver-level-credentials-with-irsa).
 
-This approach associates your AWS role to a Service Account used by the CSI Driver. The role is then assumed by the CSI Driver for all volumes with a `driver` authentication source.
+This approach associates your AWS IAM role to a Service Account used by the CSI Driver. The role is then assumed by the Mountpoint Pod for all volumes with a `driver` authentication source.
 
 ```mermaid
 graph LR;
@@ -115,7 +115,7 @@ The following section describes how to create the supporting resources for EKS P
 
 The following command will use `eksctl` to create the IAM role that will be used by the CSI driver's service account.
 The service account is not created by this command, only the IAM role due to the `--role-only` option.
-It will be created when the Mountpoint CSI driver is installed.
+The service account will be created when the Mountpoint CSI driver is installed.
 
 > [!IMPORTANT]
 > The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver
@@ -197,9 +197,9 @@ eksctl create iamserviceaccount \
     --role-only
 ```
 
-### Driver-Level Credentials with K8s Secrets
+### Driver-Level Credentials with Kubernetes Secrets
 
-For cases where EKS Pod Identity and IAM Roles for Service Accounts (IRSA) are not viable options, Mountpoint CSI Driver also supports sourcing static AWS credentials from K8s secrets.
+For cases where EKS Pod Identity and IAM Roles for Service Accounts (IRSA) are not viable options, Mountpoint CSI Driver also supports sourcing static AWS credentials from Kubernetes secrets.
 
 > [!WARNING]
 > We do not recommend using long-term AWS credentials. Instead, we recommend using short-term credentials with EKS Pod Identity or IRSA.
@@ -210,9 +210,9 @@ graph LR;
     CSI[CSI Driver]
 
     P["`Application Pod
-    *K8s Secret Credentials*`"]
+    *Kubernetes Secret Credentials*`"]
 
-    K8sS[K8s Secret]
+    KubernetesS[Kubernetes Secret]
 
     IAM_LT["Long Term IAM Credentials"]
 
@@ -225,16 +225,16 @@ graph LR;
 
     PV --> CSI
 
-    CSI --> K8sS
+    CSI --> KubernetesS
 
-    K8sS --> IAM_LT
+    KubernetesS --> IAM_LT
 
 
     style IAM_LT stroke:#0000ff,fill:#ccccff,color:#0000ff
     style P stroke:#0000ff,fill:#ccccff,color:#0000ff
 ```
 
-The CSI driver will read K8s secrets at `aws-secret.key_id` and `aws-secret.access_key` to pass keys to the driver.
+The CSI driver will read Kubernetes secrets at `aws-secret.key_id` and `aws-secret.access_key` to pass keys to the driver.
 The secret name configurable if installing with helm: `awsAccessSecret.name`, and the installation namespace is
 configurable with the `--namespace` helm parameter.
 
@@ -248,11 +248,11 @@ kubectl create secret generic aws-secret \
     --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
 ```
 
-To use K8s secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be
+To use Kubernetes secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be
 restarted to use the secret.
 
 > [!WARNING]
-> K8s secrets are not refreshed once read. To update long term credentials stored in K8s secrets, restart the CSI Driver pods.
+> Kubernetes secrets are not refreshed once read. To update long term credentials stored in Kubernetes secrets, restart the CSI Driver pods.
 
 
 ### Driver-Level Credentials with Node IAM Profiles
@@ -290,7 +290,7 @@ graph LR;
 ### Pod-Level Credentials
 
 > [!WARNING]
-> To enable Pod-Level credentials on K8s clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
+> To enable Pod-Level credentials on Kubernetes clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
 > your Helm installation.
 
 You can configure Mountpoint CSI Driver to use the credentials associated with the pod's Service Account rather than the
@@ -308,7 +308,7 @@ For non-EKS clusters, [IAM Roles for Service Accounts (IRSA)](https://docs.aws.a
 
 
 > [!NOTE]
-> Only EKS Pod Identity and IRSA are supported with Pod-Level credentials. You cannot configure K8s secrets or use instance profiles.
+> Only EKS Pod Identity and IRSA are supported with Pod-Level credentials. You cannot configure Kubernetes secrets or use instance profiles.
 
 
 
