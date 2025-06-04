@@ -45,7 +45,7 @@ const (
 	// cacheTypeEmptyDir creates a cache unique to the Mountpoint Pod by using `emptyDir` volume type.
 	// See https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.
 	cacheTypeEmptyDir = "emptyDir"
-	// cacheTypeEphemeral creates a generic ephemeral volume unique to the Mountpoint Pod (with `ReadWriteOncePod` access mode) by using `ephemeral` volume type.
+	// cacheTypeEphemeral creates a generic ephemeral volume unique to the Mountpoint Pod by using `ephemeral` volume type.
 	// See https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes.
 	cacheTypeEphemeral = "ephemeral"
 )
@@ -281,10 +281,7 @@ func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[strin
 					},
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes: []corev1.PersistentVolumeAccessMode{
-						// Make sure the Mountpoint Pods is the exclusive owner of this volume
-						corev1.ReadWriteOncePod,
-					},
+					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					StorageClassName: &storageClassName,
 					VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
 					Resources: corev1.VolumeResourceRequirements{

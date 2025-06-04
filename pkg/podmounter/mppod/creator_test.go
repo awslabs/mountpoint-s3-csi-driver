@@ -296,7 +296,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 							},
 						},
 						Spec: corev1.PersistentVolumeClaimSpec{
-							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod},
+							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 							StorageClassName: &scName,
 							VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
 							Resources: corev1.VolumeResourceRequirements{

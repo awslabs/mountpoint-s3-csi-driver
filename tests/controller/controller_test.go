@@ -1052,7 +1052,7 @@ var _ = Describe("Mountpoint Controller", func() {
 								},
 							},
 							Spec: corev1.PersistentVolumeClaimSpec{
-								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod},
+								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 								StorageClassName: &storageClassName,
 								VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
 								Resources: corev1.VolumeResourceRequirements{
