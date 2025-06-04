@@ -42,8 +42,12 @@ const (
 )
 
 const (
-	cacheTypeEmptyDir              = "emptyDir"
-	cacheTypePersistentVolumeClaim = "persistentVolumeClaim"
+	// cacheTypeEmptyDir creates a cache unique to the Mountpoint Pod by using `emptyDir` volume type.
+	// See https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.
+	cacheTypeEmptyDir = "emptyDir"
+	// cacheTypeEphemeral creates a generic ephemeral volume unique to the Mountpoint Pod (with `ReadWriteOncePod` access mode) by using `ephemeral` volume type.
+	// See https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes.
+	cacheTypeEphemeral = "ephemeral"
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
@@ -206,10 +210,10 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 	switch cacheType {
 	case cacheTypeEmptyDir:
 		volumeSource, err = c.createCacheVolumeSourceForEmptyDir(volumeAttributes)
-	case cacheTypePersistentVolumeClaim:
-		volumeSource, err = c.createCacheVolumeSourceForPVC(volumeAttributes)
+	case cacheTypeEphemeral:
+		volumeSource, err = c.createCacheVolumeSourceForEphemeral(volumeAttributes)
 	default:
-		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, cacheTypeEmptyDir, cacheTypePersistentVolumeClaim)
+		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, cacheTypeEmptyDir, cacheTypeEphemeral)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to configure %q local-cache: %w", cacheType, err)
@@ -251,16 +255,47 @@ func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string
 	return corev1.VolumeSource{EmptyDir: emptyDir}, nil
 }
 
-// createCacheVolumeSourceForEmptyDir creates an `persistentVolumeClaim` volume source to use as local-cache.
-func (c *Creator) createCacheVolumeSourceForPVC(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
-	claimName := volumeAttributes[volumecontext.CachePersistentVolumeClaimName]
-	if claimName == "" {
-		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CachePersistentVolumeClaimName, cacheTypePersistentVolumeClaim)
+// createCacheVolumeSourceForEphemeral creates an `ephemeral` volume source to use as local-cache.
+func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
+	storageClassName := volumeAttributes[volumecontext.CacheEphemeralStorageClassName]
+	if storageClassName == "" {
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageClassName, cacheTypeEphemeral)
 	}
 
-	return corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-		ClaimName: claimName,
-	}}, nil
+	storageResourceRequestStr := volumeAttributes[volumecontext.CacheEphemeralStorageResourceRequest]
+	if storageResourceRequestStr == "" {
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageResourceRequest, cacheTypeEphemeral)
+	}
+
+	storageRequestSize, err := resource.ParseQuantity(storageResourceRequestStr)
+	if err != nil {
+		return corev1.VolumeSource{}, failedToParseQuantityError(err, volumecontext.CacheEphemeralStorageResourceRequest, storageResourceRequestStr)
+	}
+
+	return corev1.VolumeSource{
+		Ephemeral: &corev1.EphemeralVolumeSource{
+			VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"type": "mountpoint-csi-driver-local-cache",
+					},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						// Make sure the Mountpoint Pods is the exclusive owner of this volume
+						corev1.ReadWriteOncePod,
+					},
+					StorageClassName: &storageClassName,
+					VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: storageRequestSize,
+						},
+					},
+				},
+			},
+		},
+	}, nil
 }
 
 // configureServiceAccount configures service account of the pod if its specified in the volume attributes.

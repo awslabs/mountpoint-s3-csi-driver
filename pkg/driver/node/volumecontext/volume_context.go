@@ -6,10 +6,11 @@ const (
 	AuthenticationSource = "authenticationSource"
 	STSRegion            = "stsRegion"
 
-	Cache                          = "cache"
-	CacheEmptyDirSizeLimit         = "cacheEmptyDirSizeLimit"
-	CacheEmptyDirMedium            = "cacheEmptyDirMedium"
-	CachePersistentVolumeClaimName = "cachePersistentVolumeClaimName"
+	Cache                                = "cache"
+	CacheEmptyDirSizeLimit               = "cacheEmptyDirSizeLimit"
+	CacheEmptyDirMedium                  = "cacheEmptyDirMedium"
+	CacheEphemeralStorageClassName       = "cacheEphemeralStorageClassName"
+	CacheEphemeralStorageResourceRequest = "cacheEphemeralStorageResourceRequest"
 
 	MountpointPodServiceAccountName = "mountpointPodServiceAccountName"
 

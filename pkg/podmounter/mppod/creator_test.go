@@ -264,8 +264,9 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			})
 		})
 
-		t.Run("With pvc cache", func(t *testing.T) {
-			claimName := "test-cache-pvc"
+		t.Run("With ephemeral cache", func(t *testing.T) {
+			scName := "test-cache-sc"
+			storageRequest := "1Gi"
 			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
@@ -275,8 +276,9 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						CSI: &corev1.CSIPersistentVolumeSource{
 							VolumeHandle: testVolID,
 							VolumeAttributes: map[string]string{
-								volumecontext.Cache:                          "persistentVolumeClaim",
-								volumecontext.CachePersistentVolumeClaimName: claimName,
+								volumecontext.Cache:                                "ephemeral",
+								volumecontext.CacheEphemeralStorageClassName:       scName,
+								volumecontext.CacheEphemeralStorageResourceRequest: storageRequest,
 							},
 						},
 					},
@@ -286,13 +288,29 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			assert.NoError(t, err)
 			verifyDefaultValues(mpPod)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: claimName,
+				Ephemeral: &corev1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								"type": "mountpoint-csi-driver-local-cache",
+							},
+						},
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod},
+							StorageClassName: &scName,
+							VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse(storageRequest),
+								},
+							},
+						},
+					},
 				},
 			})
 		})
 
-		t.Run("With pvc cache but missing claim name", func(t *testing.T) {
+		t.Run("With ephemeral cache but missing storage class name", func(t *testing.T) {
 			_, err := creator.Create(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
@@ -302,7 +320,49 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						CSI: &corev1.CSIPersistentVolumeSource{
 							VolumeHandle: testVolID,
 							VolumeAttributes: map[string]string{
-								volumecontext.Cache: "persistentVolumeClaim",
+								volumecontext.Cache: "ephemeral",
+								volumecontext.CacheEphemeralStorageResourceRequest: "1Gi",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With ephemeral cache but missing resource request", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                          "ephemeral",
+								volumecontext.CacheEphemeralStorageClassName: "test-sc",
+							},
+						},
+					},
+				},
+			})
+			assert.Equals(t, cmpopts.AnyError, err)
+		})
+
+		t.Run("With ephemeral cache but invalid resource request", func(t *testing.T) {
+			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.Cache:                                "ephemeral",
+								volumecontext.CacheEphemeralStorageClassName:       "test-sc",
+								volumecontext.CacheEphemeralStorageResourceRequest: "invalid",
 							},
 						},
 					},

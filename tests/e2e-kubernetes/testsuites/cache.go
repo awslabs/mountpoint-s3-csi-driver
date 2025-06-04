@@ -14,7 +14,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -143,7 +142,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		localCacheUnspecified  localCacheKind = ""
 		localCacheMountOptions                = "localCacheMountOptions"
 		localCacheEmptyDir                    = "localCacheEmptyDir"
-		localCacheEBSPVC                      = "localCacheEBSPVC"
+		localCacheEBSEphemeral                = "localCacheEBSEphemeral"
 	)
 
 	type cacheTestConfig struct {
@@ -185,12 +184,13 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 						"cacheEmptyDirMedium":    "Memory",
 					})
 				}
-			case localCacheEBSPVC:
-				cachePVC := createEBSCacheSCAndPVC(ctx, f)
+			case localCacheEBSEphemeral:
+				scName := createEBSCacheSC(ctx, f)
 				enhanceContext = func(ctx context.Context) context.Context {
 					return contextWithVolumeAttributes(ctx, map[string]string{
-						"cache":                          "persistentVolumeClaim",
-						"cachePersistentVolumeClaimName": cachePVC.Name,
+						"cache":                                "ephemeral",
+						"cacheEphemeralStorageClassName":       scName,
+						"cacheEphemeralStorageResourceRequest": "10Mi",
 					})
 				}
 			}
@@ -364,28 +364,28 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 		})
 
-		Describe("EBS PersistentVolumeClaim", Ordered, Serial, func() {
+		Describe("EBS Ephemeral Volume", Ordered, Serial, func() {
 			BeforeAll(func(ctx context.Context) {
 				if ebsCSIDriverDaemonSet(ctx, f) == nil {
-					Skip("EBS CSI Driver is not installed, skipping EBS PVC cache tests")
+					Skip("EBS CSI Driver is not installed, skipping EBS ephemeral volume cache tests")
 				}
 			})
 
 			BeforeEach(func() {
 				if !IsPodMounter {
-					Skip("Skipping `persistentVolumeClaim` cache tests for `SystemdMounter`")
+					Skip("Skipping `ephemeral` cache tests for `SystemdMounter`")
 				}
 			})
 
 			Describe("Local", func() {
 				testCache(cacheTestConfig{
-					localCacheKind: localCacheEBSPVC,
+					localCacheKind: localCacheEBSEphemeral,
 				})
 			})
 
 			Describe("Multi-Level", func() {
 				testCache(cacheTestConfig{
-					localCacheKind:  localCacheEBSPVC,
+					localCacheKind:  localCacheEBSEphemeral,
 					useExpressCache: true,
 				})
 			})
@@ -414,10 +414,10 @@ func randomCacheDir() string {
 	return filepath.Join("/tmp/mp-cache", uuid.New().String())
 }
 
-// createEBSCacheSCAndPVC creates a StorageClass and PersistentVolumeClaim to provision and use an EBS volume as local-cache.
-// It automatically cleans up SC and PVC after the test-case.
-func createEBSCacheSCAndPVC(ctx context.Context, f *framework.Framework) *v1.PersistentVolumeClaim {
-	scName, pvcName := f.UniqueName+"-sc", f.UniqueName+"-pvc"
+// createEBSCacheSC creates a StorageClass to provision an EBS volume as local-cache.
+// It automatically cleans up SC after the test-case.
+func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
+	scName := f.UniqueName + "-sc"
 
 	sc := &storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
@@ -441,33 +441,7 @@ func createEBSCacheSCAndPVC(ctx context.Context, f *framework.Framework) *v1.Per
 		framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
 	})
 
-	pvc := &v1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: mountpointNamespace,
-		},
-		Spec: v1.PersistentVolumeClaimSpec{
-			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-			Resources: v1.VolumeResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceStorage: resource.MustParse("10Mi"),
-				},
-			},
-			StorageClassName: ptr.To(scName),
-		},
-	}
-
-	framework.Logf("Creating cache PVC %s in namespace %s", pvcName, mountpointNamespace)
-	_, err = f.ClientSet.CoreV1().PersistentVolumeClaims(mountpointNamespace).Create(ctx, pvc, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "Failed to create cache PVC")
-
-	DeferCleanup(func(ctx context.Context) {
-		framework.Logf("Deleting PVC %s", pvcName)
-		err := f.ClientSet.CoreV1().PersistentVolumeClaims(mountpointNamespace).Delete(ctx, pvcName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "Failed to delete PVC for cache")
-	})
-
-	return pvc
+	return scName
 }
 
 // ebsCSIDriverDaemonSet returns the DaemonSet of EBS CSI Driver if its installed in the cluster.
