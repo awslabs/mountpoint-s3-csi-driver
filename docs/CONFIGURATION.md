@@ -271,7 +271,7 @@ graph LR;
     IAM_Instance["Instance IAM Credentials"]
 
     PV[Persistent Volume]
-    PVC[PVC]
+    PVC[Persistent Volume Claim]
 
     P --> PVC
 
@@ -324,7 +324,7 @@ graph LR;
     IAM_P[IAM Credentials - Pod]
 
     PV[Persistent Volume]
-    PVC[PVC]
+    PVC[Persistent Volume Claim]
 
     P --> PVC
 
