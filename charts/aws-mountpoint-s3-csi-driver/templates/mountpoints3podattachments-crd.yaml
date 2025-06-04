@@ -18,7 +18,7 @@ spec:
     singular: mountpoints3podattachment
   scope: Cluster
   versions:
-  - name: v1beta
+  - name: v2beta
     schema:
       openAPIV3Schema:
         description: MountpointS3PodAttachment is the Schema for the mountpoints3podattachments

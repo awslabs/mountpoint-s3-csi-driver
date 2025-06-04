@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
@@ -521,7 +521,7 @@ func (pm *PodMounter) helpMessageForGettingControllerLogs() string {
 
 // getS3PodAttachmentWithRetry retrieves a MountpointS3PodAttachment resource that matches the given volume and credential context.
 // It continuously retries the operation until either a matching attachment is found or the context is canceled.
-func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv1beta.MountpointS3PodAttachment, string, error) {
+func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv2beta.MountpointS3PodAttachment, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, mountpointPodAttachmentWaitDuration)
 	defer cancel()
 
@@ -529,15 +529,15 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 	// mutable field in PersistentVolumes, which means it could change after the initial mount.
 	// Instead, we rely on matching the workload pod UID in the final filtering step below.
 	fieldFilters := client.MatchingFields{
-		crdv1beta.FieldNodeName:             pm.nodeID,
-		crdv1beta.FieldPersistentVolumeName: volumeName,
-		crdv1beta.FieldVolumeID:             credentialCtx.VolumeID,
-		crdv1beta.FieldWorkloadFSGroup:      fsGroup,
-		crdv1beta.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
+		crdv2beta.FieldNodeName:             pm.nodeID,
+		crdv2beta.FieldPersistentVolumeName: volumeName,
+		crdv2beta.FieldVolumeID:             credentialCtx.VolumeID,
+		crdv2beta.FieldWorkloadFSGroup:      fsGroup,
+		crdv2beta.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
 	}
 	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
-		fieldFilters[crdv1beta.FieldWorkloadNamespace] = credentialCtx.PodNamespace
-		fieldFilters[crdv1beta.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
+		fieldFilters[crdv2beta.FieldWorkloadNamespace] = credentialCtx.PodNamespace
+		fieldFilters[crdv2beta.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
 		// Note that we intentionally do not include `FieldWorkloadServiceAccountIAMRoleARN` to list filters because
 		// CSI Driver Node does not know which role ARN to use (if any).
 		// Role ARN is determined by reconciler and passed to node via MountpointS3PodAttachment.
@@ -550,7 +550,7 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		default:
 		}
 
-		s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
+		s3paList := &crdv2beta.MountpointS3PodAttachmentList{}
 		err := pm.s3paCache.List(ctx, s3paList, fieldFilters)
 		if err != nil {
 			klog.Errorf("Failed to list MountpointS3PodAttachments: %v", err)
