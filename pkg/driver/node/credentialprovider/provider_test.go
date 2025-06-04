@@ -443,9 +443,6 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testPodLevelEksPodIdentityServiceAccountToken),
 			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
 
-			// Having a unique cache key for namespace/serviceaccount pair
-			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
-
 			// Disable EC2 credentials
 			"AWS_EC2_METADATA_DISABLED": "true",
 		}, env)
@@ -533,9 +530,6 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 		assert.Equals(t, envprovider.Environment{
 			"AWS_ROLE_ARN":                testRoleARN,
 			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testPodMounterPodLevelServiceAccountToken),
-
-			// Having a unique cache key for namespace/serviceaccount pair
-			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
 
 			// Disable EC2 credentials
 			"AWS_EC2_METADATA_DISABLED": "true",
