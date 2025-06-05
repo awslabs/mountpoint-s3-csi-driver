@@ -166,3 +166,199 @@
     color: #fff;
     background-color: #17a2b8; /* Blue */
 }
+
+/* ========================================================================
+   DARK THEME STYLES (Slate Color Scheme)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Dark Theme Color Variables & Base Colors
+   ------------------------------------------------------------------------ */
+
+[data-md-color-scheme="slate"] {
+    /* Background colors - from darkest to lightest */
+    --md-default-bg-color: #101010;        /* Main background */
+    --md-code-bg-color: #242424;           /* Code block background */
+    --md-default-bg-color--light: #181818;
+    --md-default-bg-color--lighter: #202020;
+    --md-default-bg-color--lightest: #282828;
+
+    /* Text colors */
+    --md-default-fg-color: #CBCBCB;       /* Primary text color */
+    --md-typeset-color: #CBCBCB;          /* Content text color */
+
+    /* Primary theme color (used for header) */
+    --md-primary-fg-color: #101010;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Typography
+   ------------------------------------------------------------------------ */
+
+/* Heading colors */
+[data-md-color-scheme="slate"] .md-typeset h1,
+[data-md-color-scheme="slate"] .md-typeset h2,
+[data-md-color-scheme="slate"] .md-typeset h3,
+[data-md-color-scheme="slate"] .md-typeset h4,
+[data-md-color-scheme="slate"] .md-typeset h5,
+[data-md-color-scheme="slate"] .md-typeset h6 {
+    color: #CBCBCB;
+}
+
+/* Content link colors */
+[data-md-color-scheme="slate"] .md-typeset a {
+    color: #CBCBCB;
+}
+
+/* Permalink (header anchor) styling */
+[data-md-color-scheme="slate"] .md-typeset .headerlink {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .headerlink:hover,
+[data-md-color-scheme="slate"] .md-typeset .headerlink:focus {
+    color: white !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Navigation
+   ------------------------------------------------------------------------ */
+
+/* Left sidebar navigation colors */
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link {
+    color: #CBCBCB;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link:hover {
+    color: #CBCBCB;
+    background-color: #1F1F1F !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link--active {
+    color: #CBCBCB;
+    background-color: #1F1F1F !important;
+}
+
+/* Right sidebar (TOC) colors */
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link:hover,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link:focus {
+    color: white !important;
+}
+
+/* Active TOC link styling */
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link--active {
+    text-decoration: underline !important;
+    color: white !important;
+}
+
+/* Navigation arrow icon color */
+[data-md-color-scheme="slate"] .md-nav__icon::after {
+    background-color: #CBCBCB !important;
+}
+
+/* Navigation title colors */
+[data-md-color-scheme="slate"] .md-nav__title {
+    color: #CBCBCB;
+}
+
+/* Mobile navigation background */
+[data-md-color-scheme="slate"] .md-nav__source,
+[data-md-color-scheme="slate"] .md-nav__source .md-source {
+    background-color: #101010 !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Footer
+   ------------------------------------------------------------------------ */
+
+/* Footer background */
+[data-md-color-scheme="slate"] .md-footer,
+[data-md-color-scheme="slate"] .md-footer-meta {
+    background-color: #101010 !important;
+}
+
+/* Footer text and copyright */
+[data-md-color-scheme="slate"] .md-footer-meta,
+[data-md-color-scheme="slate"] .md-copyright,
+[data-md-color-scheme="slate"] .md-copyright__highlight {
+    color: #CBCBCB !important;
+}
+
+/* Footer links */
+[data-md-color-scheme="slate"] .md-footer a,
+[data-md-color-scheme="slate"] .md-footer-meta a,
+[data-md-color-scheme="slate"] .md-copyright__highlight a {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-footer a:hover,
+[data-md-color-scheme="slate"] .md-footer-meta a:hover,
+[data-md-color-scheme="slate"] .md-copyright__highlight a:hover {
+    color: white !important;
+}
+
+/* Footer navigation (if present) */
+[data-md-color-scheme="slate"] .md-footer-nav {
+    background-color: #101010 !important;
+    color: #CBCBCB !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Header Elements
+   ------------------------------------------------------------------------ */
+
+/* Header title and text */
+[data-md-color-scheme="slate"] .md-header__title,
+[data-md-color-scheme="slate"] .md-header__title .md-header__topic,
+[data-md-color-scheme="slate"] .md-header__title .md-ellipsis {
+    color: #CBCBCB;
+}
+
+/* Header buttons and icons */
+[data-md-color-scheme="slate"] .md-header__button {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-header__button svg,
+[data-md-color-scheme="slate"] .md-header__button[for="__search"] svg {
+    fill: #CBCBCB !important;
+}
+
+/* Search input styling */
+[data-md-color-scheme="slate"] .md-search__input {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search__input::placeholder {
+    color: #CBCBCB !important;
+    opacity: 0.7;
+}
+
+[data-md-color-scheme="slate"] .md-search__form {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search__icon svg {
+    fill: #CBCBCB !important;
+}
+
+/* Search results */
+[data-md-color-scheme="slate"] .md-search-result__meta {
+    color: #CBCBCB !important;
+}
+
+/* GitHub source styling */
+[data-md-color-scheme="slate"] .md-source {
+    background-color: #101010 !important;
+}
+
+[data-md-color-scheme="slate"] .md-source__repository,
+[data-md-color-scheme="slate"] .md-source__fact--version {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-source__icon,
+[data-md-color-scheme="slate"] .md-source__icon svg {
+    color: #CBCBCB !important;
+    fill: #CBCBCB !important;
+}
