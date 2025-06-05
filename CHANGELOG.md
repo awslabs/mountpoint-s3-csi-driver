@@ -1,5 +1,8 @@
 # Unreleased
 
+### Notable changes
+* Support Mountpoint [version 1.18.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.18.0)
+
 # v1.14.1
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.14.1/README.md)
