@@ -1,10 +1,141 @@
-/* Improve code block wrapping for long URLs */
+/* ========================================================================
+   Scality S3 CSI Driver - Custom Styles
+   ======================================================================== */
+
+/* ========================================================================
+   SITE-WIDE STYLES (Both Light and Dark Themes)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Typography & Text Formatting
+   ------------------------------------------------------------------------ */
+
+/* Improve code block readability with proper wrapping */
 .md-typeset pre code {
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-/* Badges */
+/* Make all headings bold for better hierarchy */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+    font-weight: bold;
+}
+
+/* Underline all content links for better visibility */
+.md-typeset a {
+    text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------------
+   Header Layout & Organization
+   ------------------------------------------------------------------------ */
+
+/* Create flexible header layout */
+.md-header__inner {
+    display: flex;
+    align-items: center;
+}
+
+/* Define header element order from left to right */
+.md-header__button.md-logo { order: 1; }
+.md-header__button[for="__drawer"] { order: 2; }
+.md-header__title { order: 3; }
+.md-header__source { order: 4; }
+.md-header__button[for="__search"] { order: 5; }
+.md-search { order: 6; }
+.md-header__option[data-md-component="palette"] {
+    order: 7;
+    margin-left: 12px; /* Spacing from search */
+}
+
+/* Push content to the right after title */
+.md-header__title {
+    margin-right: auto;
+}
+
+/* Logo sizing - maintains aspect ratio */
+.md-header__button.md-logo img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+}
+
+/* ------------------------------------------------------------------------
+   GitHub Integration Styling
+   ------------------------------------------------------------------------ */
+
+/* Hide GitHub stars and forks counts */
+.md-source__fact--stars,
+.md-source__fact--forks {
+    display: none !important;
+}
+
+/* Compact GitHub button styling */
+.md-header__source {
+    max-width: 150px;
+    min-width: auto;
+}
+
+.md-source {
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.md-source__repository {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+/* ------------------------------------------------------------------------
+   Navigation & Sidebar Styling
+   ------------------------------------------------------------------------ */
+
+/* Hide site name in mobile navigation drawer */
+.md-nav__title[for="__drawer"] {
+    display: none;
+}
+
+/* Left sidebar (primary navigation) link styling */
+.md-sidebar--primary .md-nav__link {
+    padding: 6px 12px;
+    border-radius: 6px;
+}
+
+/* Hover effect for left sidebar navigation */
+.md-sidebar--primary .md-nav__link:hover {
+    font-weight: bold;
+    /* Background color moved to theme-specific sections */
+}
+
+/* Navigation arrow rotation - point down when collapsed, up when expanded */
+.md-nav__icon {
+    transition: transform 0.25s;
+}
+
+/* Default state (collapsed) - rotate to point up */
+.md-nav__item--nested > .md-nav__link .md-nav__icon {
+    transform: rotate(-90deg);
+}
+
+/* When expanded - rotate to point down */
+.md-nav__item--nested > .md-nav__toggle:checked ~ .md-nav__link .md-nav__icon {
+    transform: rotate(0deg);
+}
+
+/* ------------------------------------------------------------------------
+   Badge Styling (for required/optional/info indicators)
+   ------------------------------------------------------------------------ */
+
 .badge {
     display: inline-block;
     padding: .25em .4em;
@@ -15,20 +146,515 @@
     white-space: nowrap;
     vertical-align: baseline;
     border-radius: .25rem;
-    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
-  }
+    transition: color .15s ease-in-out,
+                background-color .15s ease-in-out,
+                border-color .15s ease-in-out,
+                box-shadow .15s ease-in-out;
+}
 
-  .badge-required {
+.badge-required {
     color: #fff;
-    background-color: #dc3545; /* Red for required */
-  }
+    background-color: #dc3545; /* Red */
+}
 
-  .badge-optional {
+.badge-optional {
     color: #212529;
-    background-color: #ffc107; /* Yellow for optional */
-  }
+    background-color: #ffc107; /* Yellow */
+}
 
-  .badge-info {
+.badge-info {
     color: #fff;
-    background-color: #17a2b8; /* Blue for info */
-  }
+    background-color: #17a2b8; /* Blue */
+}
+
+/* ========================================================================
+   DARK THEME STYLES (Slate Color Scheme)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Dark Theme Color Variables & Base Colors
+   ------------------------------------------------------------------------ */
+
+[data-md-color-scheme="slate"] {
+    /* Background colors - from darkest to lightest */
+    --md-default-bg-color: #101010;        /* Main background */
+    --md-code-bg-color: #242424;           /* Code block background */
+    --md-default-bg-color--light: #181818;
+    --md-default-bg-color--lighter: #202020;
+    --md-default-bg-color--lightest: #282828;
+
+    /* Text colors */
+    --md-default-fg-color: #CBCBCB;       /* Primary text color */
+    --md-typeset-color: #CBCBCB;          /* Content text color */
+
+    /* Primary theme color (used for header) */
+    --md-primary-fg-color: #101010;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Typography
+   ------------------------------------------------------------------------ */
+
+/* Heading colors */
+[data-md-color-scheme="slate"] .md-typeset h1,
+[data-md-color-scheme="slate"] .md-typeset h2,
+[data-md-color-scheme="slate"] .md-typeset h3,
+[data-md-color-scheme="slate"] .md-typeset h4,
+[data-md-color-scheme="slate"] .md-typeset h5,
+[data-md-color-scheme="slate"] .md-typeset h6 {
+    color: #CBCBCB;
+}
+
+/* Content link colors */
+[data-md-color-scheme="slate"] .md-typeset a {
+    color: #CBCBCB;
+}
+
+/* Permalink (header anchor) styling */
+[data-md-color-scheme="slate"] .md-typeset .headerlink {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .headerlink:hover,
+[data-md-color-scheme="slate"] .md-typeset .headerlink:focus {
+    color: white !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Navigation
+   ------------------------------------------------------------------------ */
+
+/* Left sidebar navigation colors */
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link {
+    color: #CBCBCB;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link:hover {
+    color: #CBCBCB;
+    background-color: #1F1F1F !important;
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary .md-nav__link--active {
+    color: #CBCBCB;
+    background-color: #1F1F1F !important;
+}
+
+/* Right sidebar (TOC) colors */
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link:hover,
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link:focus {
+    color: white !important;
+}
+
+/* Active TOC link styling */
+[data-md-color-scheme="slate"] .md-sidebar--secondary .md-nav__link--active {
+    text-decoration: underline !important;
+    color: white !important;
+}
+
+/* Navigation arrow icon color */
+[data-md-color-scheme="slate"] .md-nav__icon::after {
+    background-color: #CBCBCB !important;
+}
+
+/* Navigation title colors */
+[data-md-color-scheme="slate"] .md-nav__title {
+    color: #CBCBCB;
+}
+
+/* Mobile navigation background */
+[data-md-color-scheme="slate"] .md-nav__source,
+[data-md-color-scheme="slate"] .md-nav__source .md-source {
+    background-color: #101010 !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Footer
+   ------------------------------------------------------------------------ */
+
+/* Footer background */
+[data-md-color-scheme="slate"] .md-footer,
+[data-md-color-scheme="slate"] .md-footer-meta {
+    background-color: #101010 !important;
+}
+
+/* Footer text and copyright */
+[data-md-color-scheme="slate"] .md-footer-meta,
+[data-md-color-scheme="slate"] .md-copyright,
+[data-md-color-scheme="slate"] .md-copyright__highlight {
+    color: #CBCBCB !important;
+}
+
+/* Footer links */
+[data-md-color-scheme="slate"] .md-footer a,
+[data-md-color-scheme="slate"] .md-footer-meta a,
+[data-md-color-scheme="slate"] .md-copyright__highlight a {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-footer a:hover,
+[data-md-color-scheme="slate"] .md-footer-meta a:hover,
+[data-md-color-scheme="slate"] .md-copyright__highlight a:hover {
+    color: white !important;
+}
+
+/* Footer navigation (if present) */
+[data-md-color-scheme="slate"] .md-footer-nav {
+    background-color: #101010 !important;
+    color: #CBCBCB !important;
+}
+
+/* ------------------------------------------------------------------------
+   Dark Theme Header Elements
+   ------------------------------------------------------------------------ */
+
+/* Header shadow for dark theme */
+[data-md-color-scheme="slate"] .md-header {
+    border-bottom: 1px solid #2a2a2a !important;
+    box-shadow: none !important;
+}
+
+/* Header title and text */
+[data-md-color-scheme="slate"] .md-header__title,
+[data-md-color-scheme="slate"] .md-header__title .md-header__topic,
+[data-md-color-scheme="slate"] .md-header__title .md-ellipsis {
+    color: #CBCBCB;
+}
+
+/* Header buttons and icons */
+[data-md-color-scheme="slate"] .md-header__button {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-header__button svg,
+[data-md-color-scheme="slate"] .md-header__button[for="__search"] svg {
+    fill: #CBCBCB !important;
+}
+
+/* Search input styling */
+[data-md-color-scheme="slate"] .md-search__input {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search__input::placeholder {
+    color: #CBCBCB !important;
+    opacity: 0.7;
+}
+
+[data-md-color-scheme="slate"] .md-search__form {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search__icon svg {
+    fill: #CBCBCB !important;
+}
+
+/* Search results */
+[data-md-color-scheme="slate"] .md-search-result__meta {
+    color: #CBCBCB !important;
+}
+
+/* Search result links and text for dark theme */
+[data-md-color-scheme="slate"] .md-search-result__link {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__link:hover,
+[data-md-color-scheme="slate"] .md-search-result__link:focus {
+    color: white !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__title {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__teaser {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result mark {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    color: white !important;
+}
+
+/* GitHub source styling */
+[data-md-color-scheme="slate"] .md-source {
+    background-color: #101010 !important;
+}
+
+[data-md-color-scheme="slate"] .md-source__repository,
+[data-md-color-scheme="slate"] .md-source__fact--version {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-source__icon,
+[data-md-color-scheme="slate"] .md-source__icon svg {
+    color: #CBCBCB !important;
+    fill: #CBCBCB !important;
+}
+
+/* ========================================================================
+   LIGHT THEME STYLES (Default Color Scheme)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Light Theme Color Variables & Base Colors
+   ------------------------------------------------------------------------ */
+
+   [data-md-color-scheme="default"] {
+    /* Background colors */
+    --md-default-bg-color: #F8F7F6;        /* Main background */
+    --md-code-bg-color: #EDEDED;           /* Code block background */
+    --md-default-bg-color--light: #FFFFFF;
+    --md-default-bg-color--lighter: #FAFAFA;
+    --md-default-bg-color--lightest: #FCFCFC;
+
+    /* Text colors */
+    --md-default-fg-color: #333333;        /* Primary text color */
+    --md-typeset-color: #333333;           /* Content text color */
+
+    /* Primary theme color (used for header) */
+    --md-primary-fg-color: #F8F7F6;        /* Header background */
+    --md-primary-fg-color--light: #FAFAFA;
+    --md-primary-fg-color--dark: #E8E8E8;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Typography
+   ------------------------------------------------------------------------ */
+
+/* Body and content text color */
+[data-md-color-scheme="default"] .md-typeset {
+    color: #333333;
+}
+
+/* Heading colors */
+[data-md-color-scheme="default"] .md-typeset h1,
+[data-md-color-scheme="default"] .md-typeset h2,
+[data-md-color-scheme="default"] .md-typeset h3,
+[data-md-color-scheme="default"] .md-typeset h4,
+[data-md-color-scheme="default"] .md-typeset h5,
+[data-md-color-scheme="default"] .md-typeset h6 {
+    color: #333333;
+}
+
+/* Content link colors */
+[data-md-color-scheme="default"] .md-typeset a {
+    color: #333333;
+}
+
+/* Permalink (header anchor) styling */
+[data-md-color-scheme="default"] .md-typeset .headerlink {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-typeset .headerlink:hover,
+[data-md-color-scheme="default"] .md-typeset .headerlink:focus {
+    color: #000000 !important;  /* Darker on hover */
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Navigation
+   ------------------------------------------------------------------------ */
+
+/* Left sidebar navigation colors */
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link {
+    color: #333333;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link:hover {
+    color: #333333;
+    background-color: #E8E8E8 !important;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link--active {
+    color: #333333;
+    background-color: #E8E8E8 !important;
+}
+
+/* Right sidebar (TOC) colors */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link {
+    color: #333333;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link:hover,
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link:focus {
+    color: #000000 !important;  /* Darker on hover */
+}
+
+/* Active TOC link styling - underlined and same color */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link--active {
+    color: #333333 !important;
+    text-decoration: underline !important;
+}
+
+/* Navigation arrow icon color */
+[data-md-color-scheme="default"] .md-nav__icon::after {
+    background-color: #333333 !important;
+}
+
+/* Navigation titles */
+[data-md-color-scheme="default"] .md-nav__title {
+    color: #333333;
+}
+
+/* Right sidebar "On This Page" title specifically */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__title {
+    color: #333333 !important;
+}
+
+/* Sidebar backgrounds */
+[data-md-color-scheme="default"] .md-sidebar {
+    background-color: #F8F7F6;
+}
+
+[data-md-color-scheme="default"] .md-sidebar__scrollwrap {
+    background-color: #F8F7F6;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Header Elements
+   ------------------------------------------------------------------------ */
+
+/* Header background */
+[data-md-color-scheme="default"] .md-header {
+    background-color: #F8F7F6;
+}
+
+/* Header shadow for light theme */
+[data-md-color-scheme="default"] .md-header {
+    border-bottom: 1px solid #c0c0c0 !important;
+    box-shadow: none !important;
+}
+
+/* Header title and text */
+[data-md-color-scheme="default"] .md-header__title,
+[data-md-color-scheme="default"] .md-header__title .md-header__topic,
+[data-md-color-scheme="default"] .md-header__title .md-ellipsis {
+    color: #333333;
+}
+
+/* Header buttons and icons */
+[data-md-color-scheme="default"] .md-header__button {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-header__button svg,
+[data-md-color-scheme="default"] .md-header__button[for="__drawer"] svg,
+[data-md-color-scheme="default"] .md-header__button[for="__search"] svg {
+    fill: #333333 !important;
+}
+
+/* Theme switcher icons specifically */
+[data-md-color-scheme="default"] .md-header__option svg {
+    fill: #333333 !important;
+}
+
+/* Search input styling */
+[data-md-color-scheme="default"] .md-search__input {
+    color: #333333 !important;
+    background-color: white;
+    border: 1px solid #E0E0E0;
+}
+
+[data-md-color-scheme="default"] .md-search__input::placeholder {
+    color: #333333 !important;
+    opacity: 0.6;
+}
+
+[data-md-color-scheme="default"] .md-search__form {
+    background-color: white;
+}
+
+[data-md-color-scheme="default"] .md-search__icon svg {
+    fill: #333333 !important;
+}
+
+/* Search results */
+[data-md-color-scheme="default"] .md-search-result__meta {
+    color: #333333 !important;
+}
+
+/* Search result links and text for light theme */
+[data-md-color-scheme="default"] .md-search-result__link {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__link:hover,
+[data-md-color-scheme="default"] .md-search-result__link:focus {
+    color: #000000 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__title {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__teaser {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result mark {
+    background-color: rgba(255, 235, 59, 0.5) !important;
+    color: #333333 !important;
+}
+
+/* GitHub source styling */
+[data-md-color-scheme="default"] .md-source {
+    background-color: #F8F7F6 !important;
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-source__repository,
+[data-md-color-scheme="default"] .md-source__fact--version {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-source__icon,
+[data-md-color-scheme="default"] .md-source__icon svg {
+    color: #333333 !important;
+    fill: #333333 !important;
+}
+
+/* Mobile navigation background */
+[data-md-color-scheme="default"] .md-nav__source {
+    background-color: #F8F7F6 !important;
+}
+
+[data-md-color-scheme="default"] .md-nav__source .md-source {
+    background-color: #F8F7F6 !important;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Footer
+   ------------------------------------------------------------------------ */
+
+/* Footer background */
+[data-md-color-scheme="default"] .md-footer,
+[data-md-color-scheme="default"] .md-footer-meta {
+    background-color: #F8F7F6 !important;
+}
+
+/* Footer text and copyright */
+[data-md-color-scheme="default"] .md-footer-meta,
+[data-md-color-scheme="default"] .md-copyright,
+[data-md-color-scheme="default"] .md-copyright__highlight {
+    color: #333333 !important;
+}
+
+/* Footer links */
+[data-md-color-scheme="default"] .md-footer a,
+[data-md-color-scheme="default"] .md-footer-meta a,
+[data-md-color-scheme="default"] .md-copyright__highlight a {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-footer a:hover,
+[data-md-color-scheme="default"] .md-footer-meta a:hover,
+[data-md-color-scheme="default"] .md-copyright__highlight a:hover {
+    color: #000000 !important;  /* Slightly darker on hover */
+}
+
+/* Footer navigation */
+[data-md-color-scheme="default"] .md-footer-nav {
+    background-color: #F8F7F6 !important;
+    color: #333333 !important;
+}
