@@ -307,6 +307,12 @@
    Dark Theme Header Elements
    ------------------------------------------------------------------------ */
 
+/* Header shadow for dark theme */
+[data-md-color-scheme="slate"] .md-header {
+    border-bottom: 1px solid #2a2a2a !important;
+    box-shadow: none !important;
+}
+
 /* Header title and text */
 [data-md-color-scheme="slate"] .md-header__title,
 [data-md-color-scheme="slate"] .md-header__title .md-header__topic,
@@ -491,6 +497,12 @@
     background-color: #F8F7F6;
 }
 
+/* Header shadow for light theme */
+[data-md-color-scheme="default"] .md-header {
+    border-bottom: 1px solid #c0c0c0 !important;
+    box-shadow: none !important;
+}
+
 /* Header title and text */
 [data-md-color-scheme="default"] .md-header__title,
 [data-md-color-scheme="default"] .md-header__title .md-header__topic,
@@ -532,6 +544,11 @@
 
 [data-md-color-scheme="default"] .md-search__icon svg {
     fill: #333333 !important;
+}
+
+/* Search results */
+[data-md-color-scheme="default"] .md-search-result__meta {
+    color: #333333 !important;
 }
 
 /* GitHub source styling */
