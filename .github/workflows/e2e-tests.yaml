@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - '**'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'mkdocs.yml'
+      - 'requirements.txt'  # MkDocs requirements
 
 env:
   KUBECONFIG: "/home/runner/.kube/config"
