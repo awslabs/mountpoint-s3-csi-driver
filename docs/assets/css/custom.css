@@ -362,3 +362,236 @@
     color: #CBCBCB !important;
     fill: #CBCBCB !important;
 }
+
+/* ========================================================================
+   LIGHT THEME STYLES (Default Color Scheme)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Light Theme Color Variables & Base Colors
+   ------------------------------------------------------------------------ */
+
+   [data-md-color-scheme="default"] {
+    /* Background colors */
+    --md-default-bg-color: #F8F7F6;        /* Main background */
+    --md-code-bg-color: #EDEDED;           /* Code block background */
+    --md-default-bg-color--light: #FFFFFF;
+    --md-default-bg-color--lighter: #FAFAFA;
+    --md-default-bg-color--lightest: #FCFCFC;
+
+    /* Text colors */
+    --md-default-fg-color: #333333;        /* Primary text color */
+    --md-typeset-color: #333333;           /* Content text color */
+
+    /* Primary theme color (used for header) */
+    --md-primary-fg-color: #F8F7F6;        /* Header background */
+    --md-primary-fg-color--light: #FAFAFA;
+    --md-primary-fg-color--dark: #E8E8E8;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Typography
+   ------------------------------------------------------------------------ */
+
+/* Body and content text color */
+[data-md-color-scheme="default"] .md-typeset {
+    color: #333333;
+}
+
+/* Heading colors */
+[data-md-color-scheme="default"] .md-typeset h1,
+[data-md-color-scheme="default"] .md-typeset h2,
+[data-md-color-scheme="default"] .md-typeset h3,
+[data-md-color-scheme="default"] .md-typeset h4,
+[data-md-color-scheme="default"] .md-typeset h5,
+[data-md-color-scheme="default"] .md-typeset h6 {
+    color: #333333;
+}
+
+/* Content link colors */
+[data-md-color-scheme="default"] .md-typeset a {
+    color: #333333;
+}
+
+/* Permalink (header anchor) styling */
+[data-md-color-scheme="default"] .md-typeset .headerlink {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-typeset .headerlink:hover,
+[data-md-color-scheme="default"] .md-typeset .headerlink:focus {
+    color: #000000 !important;  /* Darker on hover */
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Navigation
+   ------------------------------------------------------------------------ */
+
+/* Left sidebar navigation colors */
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link {
+    color: #333333;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link:hover {
+    color: #333333;
+    background-color: #E8E8E8 !important;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--primary .md-nav__link--active {
+    color: #333333;
+    background-color: #E8E8E8 !important;
+}
+
+/* Right sidebar (TOC) colors */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link {
+    color: #333333;
+}
+
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link:hover,
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link:focus {
+    color: #000000 !important;  /* Darker on hover */
+}
+
+/* Active TOC link styling - underlined and same color */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__link--active {
+    color: #333333 !important;
+    text-decoration: underline !important;
+}
+
+/* Navigation arrow icon color */
+[data-md-color-scheme="default"] .md-nav__icon::after {
+    background-color: #333333 !important;
+}
+
+/* Navigation titles */
+[data-md-color-scheme="default"] .md-nav__title {
+    color: #333333;
+}
+
+/* Right sidebar "On This Page" title specifically */
+[data-md-color-scheme="default"] .md-sidebar--secondary .md-nav__title {
+    color: #333333 !important;
+}
+
+/* Sidebar backgrounds */
+[data-md-color-scheme="default"] .md-sidebar {
+    background-color: #F8F7F6;
+}
+
+[data-md-color-scheme="default"] .md-sidebar__scrollwrap {
+    background-color: #F8F7F6;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Header Elements
+   ------------------------------------------------------------------------ */
+
+/* Header background */
+[data-md-color-scheme="default"] .md-header {
+    background-color: #F8F7F6;
+}
+
+/* Header title and text */
+[data-md-color-scheme="default"] .md-header__title,
+[data-md-color-scheme="default"] .md-header__title .md-header__topic,
+[data-md-color-scheme="default"] .md-header__title .md-ellipsis {
+    color: #333333;
+}
+
+/* Header buttons and icons */
+[data-md-color-scheme="default"] .md-header__button {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-header__button svg,
+[data-md-color-scheme="default"] .md-header__button[for="__drawer"] svg,
+[data-md-color-scheme="default"] .md-header__button[for="__search"] svg {
+    fill: #333333 !important;
+}
+
+/* Theme switcher icons specifically */
+[data-md-color-scheme="default"] .md-header__option svg {
+    fill: #333333 !important;
+}
+
+/* Search input styling */
+[data-md-color-scheme="default"] .md-search__input {
+    color: #333333 !important;
+    background-color: white;
+    border: 1px solid #E0E0E0;
+}
+
+[data-md-color-scheme="default"] .md-search__input::placeholder {
+    color: #333333 !important;
+    opacity: 0.6;
+}
+
+[data-md-color-scheme="default"] .md-search__form {
+    background-color: white;
+}
+
+[data-md-color-scheme="default"] .md-search__icon svg {
+    fill: #333333 !important;
+}
+
+/* GitHub source styling */
+[data-md-color-scheme="default"] .md-source {
+    background-color: #F8F7F6 !important;
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-source__repository,
+[data-md-color-scheme="default"] .md-source__fact--version {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-source__icon,
+[data-md-color-scheme="default"] .md-source__icon svg {
+    color: #333333 !important;
+    fill: #333333 !important;
+}
+
+/* Mobile navigation background */
+[data-md-color-scheme="default"] .md-nav__source {
+    background-color: #F8F7F6 !important;
+}
+
+[data-md-color-scheme="default"] .md-nav__source .md-source {
+    background-color: #F8F7F6 !important;
+}
+
+/* ------------------------------------------------------------------------
+   Light Theme Footer
+   ------------------------------------------------------------------------ */
+
+/* Footer background */
+[data-md-color-scheme="default"] .md-footer,
+[data-md-color-scheme="default"] .md-footer-meta {
+    background-color: #F8F7F6 !important;
+}
+
+/* Footer text and copyright */
+[data-md-color-scheme="default"] .md-footer-meta,
+[data-md-color-scheme="default"] .md-copyright,
+[data-md-color-scheme="default"] .md-copyright__highlight {
+    color: #333333 !important;
+}
+
+/* Footer links */
+[data-md-color-scheme="default"] .md-footer a,
+[data-md-color-scheme="default"] .md-footer-meta a,
+[data-md-color-scheme="default"] .md-copyright__highlight a {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-footer a:hover,
+[data-md-color-scheme="default"] .md-footer-meta a:hover,
+[data-md-color-scheme="default"] .md-copyright__highlight a:hover {
+    color: #000000 !important;  /* Slightly darker on hover */
+}
+
+/* Footer navigation */
+[data-md-color-scheme="default"] .md-footer-nav {
+    background-color: #F8F7F6 !important;
+    color: #333333 !important;
+}
