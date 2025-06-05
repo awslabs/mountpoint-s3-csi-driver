@@ -1048,7 +1048,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
 							ObjectMeta: metav1.ObjectMeta{
 								Labels: map[string]string{
-									"type": "mountpoint-csi-driver-local-cache",
+									"s3.csi.aws.com/type": "local-ephemeral-cache",
 								},
 							},
 							Spec: corev1.PersistentVolumeClaimSpec{

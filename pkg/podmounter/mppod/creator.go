@@ -197,7 +197,7 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 
 	if cacheEnabledViaOptions {
 		if cacheType != "" {
-			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuragion in `mountOptions`")
+			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
 		}
 
 		// TODO: Create and link `CACHING.md`.
@@ -277,7 +277,7 @@ func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[strin
 			VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"type": "mountpoint-csi-driver-local-cache",
+						"s3.csi.aws.com/type": "local-ephemeral-cache",
 					},
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
