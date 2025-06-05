@@ -29,3 +29,4 @@ flag_management:
 
 ignore:
   - "**/*.pb.go"  # Ignore all protobuf generated files
+  - "docs/**"     # Ignore all documentation files
