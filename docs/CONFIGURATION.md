@@ -378,7 +378,7 @@ See the [example spec for pod-level identity](https://github.com/awslabs/mountpo
 
 ### Configuring the STS region
 
-In order to use Pod-Level credentials, the CSI Driver needs to know the STS region to request AWS credentials from.
+In order to use Pod-Level credentials with IRSA, the CSI Driver needs to know the STS region to request AWS credentials from.
 The CSI Driver can normally automatically detect the current region to use as the STS region, but in case it can't,
 either troubleshoot the automatic setup, or manually configure the volume's STS region.
 
