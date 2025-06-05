@@ -189,7 +189,6 @@ clean:
 	rm -rf bin/ && docker system prune
 
 # Generate files for Custom Resources (`zz_generated.deepcopy.go` and CustomResourceDefinition YAML file).
-# Helm CRD file needs extra `{{- if .Values.experimental.podMounter -}}` wrapper, while we don't need it for tests.
 HELM_POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/mountpoints3podattachments-crd.yaml"
 TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments.yaml"
 .PHONY: generate
