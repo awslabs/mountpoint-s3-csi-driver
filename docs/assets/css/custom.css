@@ -353,6 +353,29 @@
     color: #CBCBCB !important;
 }
 
+/* Search result links and text for dark theme */
+[data-md-color-scheme="slate"] .md-search-result__link {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__link:hover,
+[data-md-color-scheme="slate"] .md-search-result__link:focus {
+    color: white !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__title {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result__teaser {
+    color: #CBCBCB !important;
+}
+
+[data-md-color-scheme="slate"] .md-search-result mark {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    color: white !important;
+}
+
 /* GitHub source styling */
 [data-md-color-scheme="slate"] .md-source {
     background-color: #101010 !important;
@@ -548,6 +571,29 @@
 
 /* Search results */
 [data-md-color-scheme="default"] .md-search-result__meta {
+    color: #333333 !important;
+}
+
+/* Search result links and text for light theme */
+[data-md-color-scheme="default"] .md-search-result__link {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__link:hover,
+[data-md-color-scheme="default"] .md-search-result__link:focus {
+    color: #000000 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__title {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result__teaser {
+    color: #333333 !important;
+}
+
+[data-md-color-scheme="default"] .md-search-result mark {
+    background-color: rgba(255, 235, 59, 0.5) !important;
     color: #333333 !important;
 }
 
