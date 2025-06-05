@@ -6,16 +6,29 @@ edit_uri: edit/main/docs/            # ← branch that holds Markdown
 theme:
   logo: assets/images/Scality_logo.png
   favicon: assets/images/Scality_logo.png
+  icon:
+    repo: fontawesome/brands/github
   name: material
   palette:
-    - scheme: default
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       toggle:
         icon: custom/moon
         name: Switch to dark mode
-    - scheme: slate
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       toggle:
         icon: custom/sun
-        name: Switch to light mode
+        name: Switch to system preference
   custom_dir: docs/assets/
   features:
     - search.suggest
