@@ -29,7 +29,7 @@ The CSI Driver only shares Mountpoint instances between multiple workloads if al
 - Workloads use the same volume (same PV name and volume ID)
 - Workloads use the same mount options
 - Workloads use the same authentication source (`driver` or `pod`)
-- Workloads have the same FSGroup (if specified)
+- Workloads have the same FSGroup from Pod Security Context (if specified)
 - For pod-level identity, workloads must also have:
   - The same namespace
   - The same service account name

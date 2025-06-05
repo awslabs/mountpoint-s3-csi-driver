@@ -109,29 +109,10 @@ graph LR;
 EKS allows using Kubernetes service accounts to authenticate requests to S3 using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html).
 This is supported for both [driver-level identity](#driver-level-credentials-with-eks-pod-identity) and [pod-level identity](#pod-level-credentials).
 
-The following section describes how to create the supporting resources for EKS Pod Identity with driver-level identity.
-
-##### Create an IAM role for use by the CSI driver's service account
-
-The following command will use `eksctl` to create the IAM role that will be used by the CSI driver's service account.
-The service account is not created by this command, only the IAM role due to the `--role-only` option.
-The service account will be created when the Mountpoint CSI driver is installed.
-
-> [!IMPORTANT]
-> The same service account name (`s3-csi-driver-sa`) must be specified both in this command and when creating a driver
-> pod (in the pod spec `deploy/kubernetes/base/node-daemonset.yaml`, Helm value `node.serviceAccount.name`).
-
-```
-eksctl create iamserviceaccount \
-    --name s3-csi-driver-sa \
-    --namespace kube-system \
-    --cluster $CLUSTER_NAME \
-    --attach-policy-arn $ROLE_ARN \
-    --approve \
-    --role-name $ROLE_NAME \
-    --region $REGION \
-    --role-only
-```
+To create the supporting resources for EKS Pod Identity with driver-level identity:
+1. [Set up the Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html)
+2. Create a Pod Identity association for the service account `s3-csi-driver-sa` by following the [Assign an IAM role to a Kubernetes service account](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-association.html) documentation.
+3. [Configure Pods to access AWS services with service accounts](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-configure-pods.html)
 
 ### Driver-Level Credentials with IRSA
 
@@ -371,9 +352,12 @@ Pods mounting the specified PV will use the pod's own Service Account for EKS Po
 EKS allows using Kubernetes service accounts to authenticate requests to S3 using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) or [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
 This is supported for both [driver-level identity](#driver-level-credentials-with-eks-pod-identity) and [pod-level identity](#pod-level-credentials).
 
-The following sections describe how to create the supporting resources for EKS Pod Identity or IRSA with pod-level identity.
+To setup the supporting resources for EKS Pod Identity with pod-level identity:
+1. [Set up the Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html)
+2. Create a Pod Identity association for the pod's service account by following the [Assign an IAM role to a Kubernetes service account](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-association.html) documentation.
+3. [Configure Pods to access AWS services with service accounts](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-configure-pods.html)
 
-##### Create an IAM role for use by the pod's service account
+To setup the supporting resources for IRSA with pod-level identity, create an IAM role for use by the pod's service account:
 
 The following command will use `eksctl` to create the IAM role that will be used by the pod's service account.
 The service account is not created by this command, only the IAM role due to the `--role-only` option.
