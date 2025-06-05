@@ -1,10 +1,141 @@
-/* Improve code block wrapping for long URLs */
+/* ========================================================================
+   Scality S3 CSI Driver - Custom Styles
+   ======================================================================== */
+
+/* ========================================================================
+   SITE-WIDE STYLES (Both Light and Dark Themes)
+   ======================================================================== */
+
+/* ------------------------------------------------------------------------
+   Typography & Text Formatting
+   ------------------------------------------------------------------------ */
+
+/* Improve code block readability with proper wrapping */
 .md-typeset pre code {
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-/* Badges */
+/* Make all headings bold for better hierarchy */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+    font-weight: bold;
+}
+
+/* Underline all content links for better visibility */
+.md-typeset a {
+    text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------------
+   Header Layout & Organization
+   ------------------------------------------------------------------------ */
+
+/* Create flexible header layout */
+.md-header__inner {
+    display: flex;
+    align-items: center;
+}
+
+/* Define header element order from left to right */
+.md-header__button.md-logo { order: 1; }
+.md-header__button[for="__drawer"] { order: 2; }
+.md-header__title { order: 3; }
+.md-header__source { order: 4; }
+.md-header__button[for="__search"] { order: 5; }
+.md-search { order: 6; }
+.md-header__option[data-md-component="palette"] {
+    order: 7;
+    margin-left: 12px; /* Spacing from search */
+}
+
+/* Push content to the right after title */
+.md-header__title {
+    margin-right: auto;
+}
+
+/* Logo sizing - maintains aspect ratio */
+.md-header__button.md-logo img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+}
+
+/* ------------------------------------------------------------------------
+   GitHub Integration Styling
+   ------------------------------------------------------------------------ */
+
+/* Hide GitHub stars and forks counts */
+.md-source__fact--stars,
+.md-source__fact--forks {
+    display: none !important;
+}
+
+/* Compact GitHub button styling */
+.md-header__source {
+    max-width: 150px;
+    min-width: auto;
+}
+
+.md-source {
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.md-source__repository {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+/* ------------------------------------------------------------------------
+   Navigation & Sidebar Styling
+   ------------------------------------------------------------------------ */
+
+/* Hide site name in mobile navigation drawer */
+.md-nav__title[for="__drawer"] {
+    display: none;
+}
+
+/* Left sidebar (primary navigation) link styling */
+.md-sidebar--primary .md-nav__link {
+    padding: 6px 12px;
+    border-radius: 6px;
+}
+
+/* Hover effect for left sidebar navigation */
+.md-sidebar--primary .md-nav__link:hover {
+    font-weight: bold;
+    /* Background color moved to theme-specific sections */
+}
+
+/* Navigation arrow rotation - point down when collapsed, up when expanded */
+.md-nav__icon {
+    transition: transform 0.25s;
+}
+
+/* Default state (collapsed) - rotate to point up */
+.md-nav__item--nested > .md-nav__link .md-nav__icon {
+    transform: rotate(-90deg);
+}
+
+/* When expanded - rotate to point down */
+.md-nav__item--nested > .md-nav__toggle:checked ~ .md-nav__link .md-nav__icon {
+    transform: rotate(0deg);
+}
+
+/* ------------------------------------------------------------------------
+   Badge Styling (for required/optional/info indicators)
+   ------------------------------------------------------------------------ */
+
 .badge {
     display: inline-block;
     padding: .25em .4em;
@@ -15,20 +146,23 @@
     white-space: nowrap;
     vertical-align: baseline;
     border-radius: .25rem;
-    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
-  }
+    transition: color .15s ease-in-out,
+                background-color .15s ease-in-out,
+                border-color .15s ease-in-out,
+                box-shadow .15s ease-in-out;
+}
 
-  .badge-required {
+.badge-required {
     color: #fff;
-    background-color: #dc3545; /* Red for required */
-  }
+    background-color: #dc3545; /* Red */
+}
 
-  .badge-optional {
+.badge-optional {
     color: #212529;
-    background-color: #ffc107; /* Yellow for optional */
-  }
+    background-color: #ffc107; /* Yellow */
+}
 
-  .badge-info {
+.badge-info {
     color: #fff;
-    background-color: #17a2b8; /* Blue for info */
-  }
+    background-color: #17a2b8; /* Blue */
+}
