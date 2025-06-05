@@ -270,10 +270,6 @@ graph LR;
 
 ### Pod-Level Credentials
 
-> [!WARNING]
-> To enable Pod-Level credentials on Kubernetes clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
-> your Helm installation.
-
 You can configure Mountpoint CSI Driver to use the credentials associated with the pod's Service Account rather than the
 driver's own credentials.
 
