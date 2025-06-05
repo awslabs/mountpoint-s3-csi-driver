@@ -4,6 +4,8 @@ repo_url: https://github.com/scality/mountpoint-s3-csi-driver
 edit_uri: edit/main/docs/            # ← branch that holds Markdown
 
 theme:
+  logo: assets/images/Scality_logo.png
+  favicon: assets/images/Scality_logo.png
   name: material
   palette:
     - scheme: default
