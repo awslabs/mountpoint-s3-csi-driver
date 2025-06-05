@@ -58,6 +58,10 @@ markdown_extensions:
           class: mermaid
           format: pymdownx.superfences.fence_div_format
 
+copyright: |
+  Copyright &copy; 2025 Scality, Inc. All rights reserved. |
+  <a href="https://github.com/scality/mountpoint-s3-csi-driver/blob/main/LICENSE">Apache License 2.0</a>
+
 nav:
   - Home: README.md
   - Quick Start: quick-start.md
