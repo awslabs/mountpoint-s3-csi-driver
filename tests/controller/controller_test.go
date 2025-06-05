@@ -1027,28 +1027,14 @@ var _ = Describe("Mountpoint Controller", func() {
 				waitForObjectToDisappear(mountpointPod.Pod)
 			})
 
-			It("should configure PVC cache", func() {
-				// First create a PVC to use as cache
-				cachePVC := &corev1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cache-pvc",
-						Namespace: mountpointNamespace,
-					},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse("1Gi"),
-							},
-						},
-					},
-				}
-				Expect(k8sClient.Create(ctx, cachePVC)).To(Succeed())
-				waitForObject(cachePVC)
+			It("should configure ephemeral cache", func() {
+				storageClassName := "test-storage-class"
+				storageRequest := "1Gi"
 
 				vol := createVolume(withVolumeAttributes(map[string]string{
-					"cache":                          "persistentVolumeClaim",
-					"cachePersistentVolumeClaimName": cachePVC.Name,
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageClassName":       storageClassName,
+					"cacheEphemeralStorageResourceRequest": storageRequest,
 				}))
 				vol.bind()
 
@@ -1058,8 +1044,24 @@ var _ = Describe("Mountpoint Controller", func() {
 				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
 
 				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: cachePVC.Name,
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"s3.csi.aws.com/type": "local-ephemeral-cache",
+								},
+							},
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+								StorageClassName: &storageClassName,
+								VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse(storageRequest),
+									},
+								},
+							},
+						},
 					},
 				})
 
@@ -1082,10 +1084,39 @@ var _ = Describe("Mountpoint Controller", func() {
 				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
 			})
 
-			It("should fail if PVC cache is configured without claim name", func() {
+			It("should fail if ephemeral cache is configured without a storage class name", func() {
 				vol := createVolume(withVolumeAttributes(map[string]string{
-					"cache": "persistentVolumeClaim",
-					// No cachePersistentVolumeClaimName provided
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageResourceRequest": "1Gi",
+					// No cacheEphemeralStorageClassName provided
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if ephemeral cache is configured without a storage resource request", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                          "ephemeral",
+					"cacheEphemeralStorageClassName": "test-storage-class",
+					// No cacheEphemeralStorageResourceRequest provided
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if ephemeral cache is configured with invalid resource request", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageClassName":       "test-storage-class",
+					"cacheEphemeralStorageResourceRequest": "invalid-size",
 				}))
 				vol.bind()
 
