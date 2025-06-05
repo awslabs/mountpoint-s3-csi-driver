@@ -15,6 +15,7 @@ theme:
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
+      accent: teal
 
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
@@ -22,6 +23,7 @@ theme:
       toggle:
         icon: custom/moon
         name: Switch to dark mode
+      accent: teal
 
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
@@ -29,6 +31,7 @@ theme:
       toggle:
         icon: custom/sun
         name: Switch to system preference
+      accent: teal
   custom_dir: docs/assets/
   features:
     - search.suggest
