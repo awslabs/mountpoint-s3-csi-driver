@@ -8,12 +8,13 @@ theme:
   palette:
     - scheme: default
       toggle:
-        icon: material/brightness-7
+        icon: custom/moon
         name: Switch to dark mode
     - scheme: slate
       toggle:
-        icon: material/brightness-4
+        icon: custom/sun
         name: Switch to light mode
+  custom_dir: docs/assets/
   features:
     - search.suggest
     - search.highlight
