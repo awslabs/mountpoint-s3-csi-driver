@@ -23,8 +23,8 @@ theme:
     - search.share
     - content.code.copy
     - content.code.annotate
-    - navigation.expand
     - navigation.top
+    - toc.follow
 
 extra_css:
   - assets/css/custom.css
