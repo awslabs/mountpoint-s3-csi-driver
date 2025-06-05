@@ -1,0 +1,53 @@
+name: Code Quality Tests
+
+on:
+  push:
+    branches:
+      - '**'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'mkdocs.yml'
+      - 'requirements.txt'
+
+jobs:
+  code-quality-tests:
+    name: Run
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [unit-test, csi-compliance-test, controller-integration-test, validate-helm]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4.3.0
+
+    - name: Run ${{ matrix.test }}
+      run: make ${{ matrix.test }}
+
+    - name: Upload unit test coverage to Codecov
+      if: matrix.test == 'unit-test'
+      continue-on-error: true
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        slug: scality/mountpoint-s3-csi-driver
+
+    - name: Upload controller test results to Codecov
+      if: matrix.test == 'controller-integration-test'
+      continue-on-error: true
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./controller-integration-tests-results.xml
+        flags: controller_integration_tests
+        slug: scality/mountpoint-s3-csi-driver

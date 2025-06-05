@@ -1,4 +1,4 @@
-name: Code Validation
+name: Code Quality Checks
 
 on:
   push:
@@ -6,13 +6,13 @@ on:
       - '**'
 
 jobs:
-  tests:
+  code-quality-checks:
     name: Run
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        test: [precommit, lint, unit-test, csi-compliance-test, controller-integration-test, validate-helm]
+        test: [precommit, lint]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -22,9 +22,6 @@ jobs:
       with:
         go-version-file: 'go.mod'
         cache: true
-
-    - name: Setup Helm
-      uses: azure/setup-helm@v4.3.0
 
     - name: Set up Python and install pre-commit (for precommit test)
       uses: actions/setup-python@v5
@@ -57,21 +54,3 @@ jobs:
       uses: golangci/golangci-lint-action@v8
       with:
         version: v2.1.6
-
-    - name: Upload unit test coverage to Codecov
-      if: matrix.test == 'unit-test'
-      continue-on-error: true
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        slug: scality/mountpoint-s3-csi-driver
-
-    - name: Upload controller test results to Codecov
-      if: matrix.test == 'controller-integration-test'
-      continue-on-error: true
-      uses: codecov/test-results-action@v1
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./controller-integration-tests-results.xml
-        flags: controller_integration_tests
-        slug: scality/mountpoint-s3-csi-driver
