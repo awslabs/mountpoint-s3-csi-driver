@@ -18,7 +18,8 @@ For Amazon EKS clusters, the Mountpoint for Amazon S3 CSI driver is also availab
 ## Features
 * **Static Provisioning** - Associate an existing S3 bucket with a [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
 * **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted. For Mountpoint-specific options, take a look at the [Mountpoint docs for configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md).
-* **Pod Sharing** - Multiple workloads can share a single Mountpoint instance when appropriate, improving resource utilization. See [Pod Sharing](docs/FEATURES.md#pod-sharing) for more details.
+* **Mountpoint Pod Sharing** - Multiple workloads can share a single Mountpoint instance when appropriate, improving resource utilization. See [Mountpoint Pod Sharing](docs/MOUNTPOINT_POD_SHARING.md) for more details.
+* **Managed Local Cache** - Use an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) or a [generic ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes) as a local cache with Mountpoint. See [Caching Configuration](docs/CACHING.md) for more details.
 
 Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md) for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
 
@@ -92,7 +93,6 @@ The following table provides the support status for various distros with regards
 
 * [Driver Installation](docs/INSTALL.md)
 * [Configuring volumes and credentials](docs/CONFIGURATION.md)
-* [Driver Features](docs/FEATURES.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)
 * [Kubernetes Static Provisioning Example](/examples/kubernetes/static_provisioning)
 * [Driver Uninstallation](docs/INSTALL.md#uninstalling-the-driver)

@@ -1,23 +1,19 @@
-# Features of the Mountpoint for Amazon S3 CSI Driver
+# Mountpoint Pod Sharing feature of Mountpoint for Amazon S3 CSI Driver
 
-This document provides detailed explanations of specific features in the Mountpoint for Amazon S3 CSI Driver.
+Mountpoint Pod Sharing improves resource utilization by allowing multiple workloads to share a single [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) instance when appropriate.
 
-## Pod Sharing
+### How Mountpoint Pod Sharing Works
 
-Pod Sharing improves resource utilization by allowing multiple workloads to share a single Mountpoint instance when appropriate.
-
-### How Pod Sharing Works
-
-With Pod Sharing, the CSI Driver can reuse existing Mountpoint instances between multiple workloads instead of creating one instance per workload. This reduces the overall number of Mountpoint instances in your cluster, leading to better resource utilization.
+With Mountpoint Pod Sharing, the CSI Driver can reuse existing Mountpoint instances between multiple workloads instead of creating one instance per workload. This reduces the overall number of Mountpoint instances in your cluster, leading to better resource utilization.
 
 ```mermaid
 graph LR;
     MP[Mountpoint Pod]
-    
+
     P1[Workload Pod 1]
     P2[Workload Pod 2]
     P3[Workload Pod 3]
-    
+
     P1 --> MP
     P2 --> MP
     P3 --> MP
@@ -35,9 +31,9 @@ The CSI Driver only shares Mountpoint instances between multiple workloads if al
   - The same service account name
   - The same IAM role ARN (from service account annotation)
 
-### How Pod Sharing is Implemented
+### How Mountpoint Pod Sharing is Implemented
 
-Pod Sharing is implemented using a Custom Resource Definition (CRD) called `MountpointS3PodAttachment`. This CRD stores the mapping between Mountpoint Pods and Workload Pods and serves as the source-of-truth for which workloads are assigned to which Mountpoint Pods.
+Mountpoint Pod Sharing is implemented using a Custom Resource Definition (CRD) called `MountpointS3PodAttachment`. This CRD stores the mapping between Mountpoint Pods and Workload Pods and serves as the source-of-truth for which workloads are assigned to which Mountpoint Pods.
 
 The CSI Driver Controller component manages these CRDs based on workload pod events:
 - When a new workload pod is scheduled, the controller checks if there's an existing Mountpoint Pod that can be shared
