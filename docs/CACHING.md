@@ -130,7 +130,7 @@ The EBS volume and the Mountpoint Pod (therefore it's ephemeral PVC) will automa
 
 ##### Using Local Volume Static Provisioner to use local NVMe
 
-Some Amazon EC2 instances offer non-volatile memory express (NVMe) solid state drives (SSD) instance store volumes. You can utilise [Local Volume Static Provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner) to use instance store as cache. See [Instance store volume limits for EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-store-volumes.html) for more details about instance store support on EC2 instances.
+Some Amazon EC2 instances offer non-volatile memory express (NVMe) solid state drives (SSD) instance store volumes. You can utilise [Local Volume Static Provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner) to use instance store as cache. See [Instance store volume limits for EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-store-volumes.html) for more details about instance store support on EC2 instances, and [EKS Persistent Volumes for Instance Store](https://aws.amazon.com/blogs/containers/eks-persistent-volumes-for-instance-store/) on using instance storage in EKS.
 
 The Local Volume Static Provisioner allows you to configure some options, you can find more details in their [Getting started guide](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner/blob/master/docs/getting-started.md).
 
