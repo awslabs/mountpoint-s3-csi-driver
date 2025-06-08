@@ -1262,7 +1262,7 @@ func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework,
 		}
 		latestSA.Annotations[roleARNAnnotation] = roleARN
 
-		latestSA, err = client.Update(ctx, sa, metav1.UpdateOptions{})
+		latestSA, err = client.Update(ctx, latestSA, metav1.UpdateOptions{})
 		return err
 	})
 
