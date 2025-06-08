@@ -1,4 +1,4 @@
-package v1beta
+package v2beta
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

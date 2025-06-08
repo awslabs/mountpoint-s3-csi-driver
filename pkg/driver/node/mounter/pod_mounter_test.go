@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/mount-utils"
 
-	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -126,18 +126,18 @@ func setup(t *testing.T) *testCtx {
 		sourcePath:       sourcePath,
 	}
 
-	testCrd := crdv1beta.MountpointS3PodAttachment{
-		Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+	testCrd := crdv2beta.MountpointS3PodAttachment{
+		Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 			NodeName:             testCtx.nodeName,
 			PersistentVolumeName: testCtx.pvName,
 			VolumeID:             testCtx.volumeID,
 			WorkloadFSGroup:      testCtx.fsGroup,
-			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+			MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
 				testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 			},
 		},
 	}
-	testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd}
+	testCtx.s3paCache.TestItems = []crdv2beta.MountpointS3PodAttachment{testCrd}
 
 	mountSyscall := func(target string, args mountpoint.Args) (fd int, err error) {
 		if testCtx.mountSyscall != nil {
@@ -386,18 +386,18 @@ func TestPodMounter(t *testing.T) {
 			assert.NoError(t, err)
 			targetPath2 = filepath.Join(parentDir, filepath.Base(targetPath2))
 			testCtx.targetPath = targetPath2
-			testCrd2 := crdv1beta.MountpointS3PodAttachment{
-				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+			testCrd2 := crdv2beta.MountpointS3PodAttachment{
+				Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 					NodeName:             testCtx.nodeName,
 					PersistentVolumeName: testCtx.pvName,
 					VolumeID:             testCtx.volumeID,
 					WorkloadFSGroup:      testCtx.fsGroup,
-					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+					MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
 						testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 					},
 				},
 			}
-			testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd2}
+			testCtx.s3paCache.TestItems = []crdv2beta.MountpointS3PodAttachment{testCrd2}
 
 			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,

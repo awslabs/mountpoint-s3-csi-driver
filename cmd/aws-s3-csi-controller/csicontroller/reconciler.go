@@ -17,7 +17,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	crdv1beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v1beta"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -219,7 +219,7 @@ func (r *Reconciler) setupLogger(
 	pvc *corev1.PersistentVolumeClaim,
 	workloadUID string,
 	fieldFilters client.MatchingFields,
-	s3pa *crdv1beta.MountpointS3PodAttachment,
+	s3pa *crdv2beta.MountpointS3PodAttachment,
 ) logr.Logger {
 	logger := logf.FromContext(ctx).WithValues(
 		"workloadPod", types.NamespacedName{Namespace: workloadPod.Namespace, Name: workloadPod.Name},
@@ -249,18 +249,18 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 	fsGroup := r.getFSGroup(workloadPod)
 
 	fieldFilters := client.MatchingFields{
-		crdv1beta.FieldNodeName:             workloadPod.Spec.NodeName,
-		crdv1beta.FieldPersistentVolumeName: pv.Name,
-		crdv1beta.FieldVolumeID:             pv.Spec.CSI.VolumeHandle,
-		crdv1beta.FieldMountOptions:         strings.Join(pv.Spec.MountOptions, ","),
-		crdv1beta.FieldWorkloadFSGroup:      fsGroup,
-		crdv1beta.FieldAuthenticationSource: authSource,
+		crdv2beta.FieldNodeName:             workloadPod.Spec.NodeName,
+		crdv2beta.FieldPersistentVolumeName: pv.Name,
+		crdv2beta.FieldVolumeID:             pv.Spec.CSI.VolumeHandle,
+		crdv2beta.FieldMountOptions:         strings.Join(pv.Spec.MountOptions, ","),
+		crdv2beta.FieldWorkloadFSGroup:      fsGroup,
+		crdv2beta.FieldAuthenticationSource: authSource,
 	}
 
 	if authSource == credentialprovider.AuthenticationSourcePod {
-		fieldFilters[crdv1beta.FieldWorkloadNamespace] = workloadPod.Namespace
-		fieldFilters[crdv1beta.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
-		fieldFilters[crdv1beta.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
+		fieldFilters[crdv2beta.FieldWorkloadNamespace] = workloadPod.Namespace
+		fieldFilters[crdv2beta.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
+		fieldFilters[crdv2beta.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
 	}
 
 	return fieldFilters
@@ -291,8 +291,8 @@ func (r *Reconciler) getFSGroup(workloadPod *corev1.Pod) string {
 // - The matching MountpointS3PodAttachment if exactly one is found
 // - nil if no matching resource is found
 // - An error if multiple matching resources are found or if the list operation fails
-func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields) (*crdv1beta.MountpointS3PodAttachment, error) {
-	s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
+func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields) (*crdv2beta.MountpointS3PodAttachment, error) {
+	s3paList := &crdv2beta.MountpointS3PodAttachmentList{}
 	if err := r.List(ctx, s3paList, fieldFilters); err != nil {
 		return nil, fmt.Errorf("failed to list MountpointS3PodAttachments: %w", err)
 	}
@@ -308,7 +308,7 @@ func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilter
 }
 
 // handleInactivePod handles inactive workload pod.
-func (r *Reconciler) handleInactivePod(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) handleInactivePod(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	if s3pa == nil {
 		log.Info("Workload pod is not active. Did not find any MountpointS3PodAttachments.")
 		return DontRequeue, nil
@@ -322,7 +322,7 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
-	s3pa *crdv1beta.MountpointS3PodAttachment,
+	s3pa *crdv2beta.MountpointS3PodAttachment,
 	fieldFilters client.MatchingFields,
 	log logr.Logger,
 ) (bool, error) {
@@ -345,7 +345,7 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
-	s3pa *crdv1beta.MountpointS3PodAttachment,
+	s3pa *crdv2beta.MountpointS3PodAttachment,
 	log logr.Logger,
 ) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
@@ -367,7 +367,7 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return Requeue, err
 	}
-	s3pa.Spec.MountpointS3PodAttachments[mpPod.Name] = []crdv1beta.WorkloadAttachment{
+	s3pa.Spec.MountpointS3PodAttachments[mpPod.Name] = []crdv2beta.WorkloadAttachment{
 		{
 			WorkloadPodUID: string(workloadPod.UID),
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
@@ -403,7 +403,7 @@ var errNoSuitableMountpointPodForTheWorkload = errors.New("no suitable Mountpoin
 
 // assignWorkloadToAnExistingMountpointPod tries to assign given `workloadUID` to an existing Mountpoint Pod.
 // It returns `errNoSuitableMountpointPodForTheWorkload` if there isn't any suitable Mountpoint Pod to assign this new workload.
-func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	log.Info("Trying to assign workload to an existing Mountpoint Pod")
 
 	found := false
@@ -424,7 +424,7 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 			continue
 		}
 
-		s3pa.Spec.MountpointS3PodAttachments[mpPodName] = append(s3pa.Spec.MountpointS3PodAttachments[mpPodName], crdv1beta.WorkloadAttachment{
+		s3pa.Spec.MountpointS3PodAttachments[mpPodName] = append(s3pa.Spec.MountpointS3PodAttachments[mpPodName], crdv2beta.WorkloadAttachment{
 			WorkloadPodUID: workloadUID,
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
 		})
@@ -452,10 +452,10 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 
 // removeWorkloadFromS3PodAttachment removes workload UID from MountpointS3PodAttachment map.
 // It will delete MountpointS3PodAttachment if map becomes empty.
-func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	// Remove workload UID from mountpoint pods
 	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
-		filteredUIDs := []crdv1beta.WorkloadAttachment{}
+		filteredUIDs := []crdv2beta.WorkloadAttachment{}
 		found := false
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {
@@ -567,21 +567,21 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return err
 	}
-	s3pa := &crdv1beta.MountpointS3PodAttachment{
+	s3pa := &crdv2beta.MountpointS3PodAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "s3pa-",
 			Labels: map[string]string{
 				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 			},
 		},
-		Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+		Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,
 			PersistentVolumeName: pv.Name,
 			VolumeID:             pv.Spec.CSI.VolumeHandle,
 			MountOptions:         strings.Join(pv.Spec.MountOptions, ","),
 			WorkloadFSGroup:      r.getFSGroup(workloadPod),
 			AuthenticationSource: authSource,
-			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+			MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
 				mpPod.Name: {{WorkloadPodUID: string(workloadPod.UID), AttachmentTime: metav1.NewTime(time.Now().UTC())}},
 			},
 		},
@@ -815,7 +815,7 @@ func isPodRunning(p *corev1.Pod) bool {
 }
 
 // s3paContainsWorkload checks whether MountpointS3PodAttachment has `workloadUID` in it.
-func s3paContainsWorkload(s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string) bool {
+func s3paContainsWorkload(s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string) bool {
 	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {
