@@ -3,7 +3,7 @@
 > [!TIP]
 > We’re planning to release version 2.0 of the Mountpoint for Amazon S3 CSI Driver in the upcoming months.
 >
-> We released a beta today to enable wider community testing of the upcoming v2. Please note that this beta release is intended for experimental use and its adoption in production environments is not recommended.
+> We have released a v2 beta to enable wider community testing of the upcoming v2. Please note that this beta release is intended for experimental use and its adoption in production environments is not recommended.
 > This Beta release is under active development and has not completed testing and review for performance, reliability, and security. Please refer to [Unstable Releases](https://github.com/awslabs/mountpoint-s3-csi-driver?tab=readme-ov-file#unstable-releases) for more information.
 > Any testing is appreciated, however, we are especially interested in getting your feedback on how the beta CSI v2.0 driver performs with large scale workloads. The v2 beta should be tested on a fresh cluster.
 >
