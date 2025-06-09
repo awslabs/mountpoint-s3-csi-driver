@@ -16,26 +16,60 @@ kind: PersistentVolume
 metadata:
   name: s3-pv
 spec:
-  ...
-  storageClassName: "" # Required for static provisioning
-  claimRef: # To ensure no other PVCs can claim this PV
-    namespace: default # Namespace is required even though it's in "default" namespace.
-    name: s3-pvc # Name of your PVC
+  accessModes:
+    - ReadWriteMany     # Supported options: ReadWriteMany / ReadOnlyMany
+  capacity:
+    storage: 1200Gi     # Value is ignored but required by Kubernetes
+  storageClassName: ""  # Empty string required for static provisioning
+  claimRef:             # To ensure no other PVCs can claim this PV
+    namespace: default  # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc        # Name of your PVC
+  mountOptions:         # Optional: Configure Mountpoint for Amazon S3 flags
+    - region us-east-1  # See https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md for all options
   csi:
     driver: s3.csi.aws.com
-    volumeHandle: s3-csi-driver-volume # Must be unique
-    ...
+    volumeHandle: s3-csi-driver-volume  # Must be unique
     volumeAttributes:
-      bucketName: amzn-s3-demo-bucket # Replace with your bucket name
+      # ----- BUCKET CONFIGURATION -----
+      bucketName: amzn-s3-demo-bucket   # Required: S3 bucket name or ARN (for Outpost)
+
+      # ----- AUTHENTICATION CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CONFIGURATION.md#aws-credentials
+      authenticationSource: driver      # Optional: Authentication source [driver (default) | pod]
+      stsRegion: us-east-1              # Optional: Region for AWS STS endpoint when using pod-level identity with IRSA
+
+      # ----- LOCAL CACHE CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
+      cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
+      
+      # emptyDir cache options:
+      cacheEmptyDirSizeLimit: 1Gi       # Optional: Maximum size for emptyDir cache
+      cacheEmptyDirMedium: ""           # Optional: Storage medium ["" (default) | Memory]
+      
+      # ephemeral cache options (both required if `cache: ephemeral`):
+      cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
+      cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
+
+      # ----- RESOURCE CONFIGURATION -----
+      # Optional: Configure Mountpoint container resource requests/limits
+      mountpointContainerResourcesRequestsCpu: 500m
+      mountpointContainerResourcesRequestsMemory: 1Gi
+      mountpointContainerResourcesLimitsCpu: 500m
+      mountpointContainerResourcesLimitsMemory: 1Gi
+
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: s3-pvc
+  name: s3-pvc         # Must match name referenced in PV's claimRef
 spec:
-  ...
-  storageClassName: "" # Required for static provisioning
-  volumeName: s3-pv # Name of your PV
+  accessModes:
+    - ReadWriteMany    # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Empty string required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi  # Value is ignored but required by Kubernetes
+  volumeName: s3-pv    # Must match the name of your PV
 ```
 
 See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.

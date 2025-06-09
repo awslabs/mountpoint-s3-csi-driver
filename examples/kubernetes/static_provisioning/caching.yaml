@@ -12,15 +12,17 @@ spec:
     namespace: default # Namespace is required even though it's in "default" namespace.
     name: s3-pvc # Name of your PVC
   mountOptions:
-    - cache /tmp/s3-pv1-cache # specify cache directory, relative to root host filesystem
-                              # the directory must be unique per mount on a host
-    - metadata-ttl 3 # 3 second time to live
+    # See more details in https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#caching-configuration
+    - metadata-ttl 3 # 3 second time to live for metadata cache
     - max-cache-size 500 # 500 MB maximum size
   csi:
     driver: s3.csi.aws.com # required
     volumeHandle: s3-csi-driver-volume # Must be unique
     volumeAttributes:
       bucketName: s3-csi-driver
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
+      cache: emptyDir # Use emptyDir volume for cache
+      cacheEmptyDirSizeLimit: 500Mi # 500Mi size limit for emptyDir cache volume
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
