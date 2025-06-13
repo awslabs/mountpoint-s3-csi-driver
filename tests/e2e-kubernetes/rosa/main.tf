@@ -20,6 +20,10 @@ provider "aws" {
   region  = var.aws_region
 }
 
+provider "rhcs" {
+  token = var.rhcs_token
+}
+
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
   version = "1.6.8"
