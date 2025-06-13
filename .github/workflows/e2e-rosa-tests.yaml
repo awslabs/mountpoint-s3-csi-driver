@@ -59,7 +59,7 @@ jobs:
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-cluster-rosa"
-          TF_VAR_rhcs_token: "${{ vars.ROSATOKEN }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
           TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
         run: |
