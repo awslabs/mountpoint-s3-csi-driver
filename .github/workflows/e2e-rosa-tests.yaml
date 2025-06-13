@@ -19,6 +19,7 @@ env:
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
   BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
 jobs:
+  # TODO: Add build, push to ECR steps
   create_cluster:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -69,3 +70,7 @@ jobs:
       - name: Validate kubectl is working
         run: |
           kubectl get pods
+
+  # TODO: Add install CSI driver
+  # TODO: Run e2e tests
+  # TODO: Delete cluster 
