@@ -53,8 +53,7 @@ resource "aws_secretsmanager_secret_version" "secret_version" {
 }
 
 module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "5.1.2"
+  source  = "terraform-redhat/rosa-hcp/rhcs//modules/vpc"
 
   name_prefix              = "${var.cluster_name}-vpc"
   azs             = ["us-east-1a"]

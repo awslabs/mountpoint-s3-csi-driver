@@ -20,7 +20,7 @@ env:
   BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
 jobs:
   # TODO: Add build, push to ECR steps
-  create_cluster:
+  create_cluster: # TODO: This takes ~30min. Consider creating it once instead of on every PR/commit
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
@@ -68,6 +68,12 @@ jobs:
             -backend-config="bucket=$TERRAFORM_BUCKET" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=$TF_VAR_aws_region"
+          if terraform apply --auto-approve; then
+            echo "cluster_id=$(terraform output -raw cluster_id)" >> $GITHUB_OUTPUT
+            echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+          else
+            terraform destroy --auto-approve && exit 1
+          fi
       - name: Validate kubectl is working
         run: |
           kubectl get pods
