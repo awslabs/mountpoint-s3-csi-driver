@@ -1,0 +1,67 @@
+name: Manual ROSA cluster create
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Github Environment"
+
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+
+env:
+  IMAGE_NAME: "s3-csi-driver"
+  BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
+jobs:
+  create_cluster:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: "${{ vars.AWS_REGION }}"
+      TF_VAR_cluster_name: "s3-csi-cluster-rosa"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+      - name: Get ROSA Token
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            TF_VAR_rhcs_token,RosaToken
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Create ROSA cluster
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-cluster-rosa"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+          TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform init \
+            -backend-config="bucket=$TERRAFORM_BUCKET" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=$TF_VAR_aws_region"
+      - name: Validate kubectl is working
+        run: |
+          kubectl get pods
