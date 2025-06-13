@@ -60,4 +60,5 @@ module "vpc" {
   source  = "terraform-redhat/rosa-hcp/rhcs//modules/vpc"
 
   name_prefix              = "${var.cluster_name}-vpc"
+  availability_zones_count = 3
 }
