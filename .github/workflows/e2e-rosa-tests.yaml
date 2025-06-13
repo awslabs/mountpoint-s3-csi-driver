@@ -52,7 +52,7 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
-            ,RosaToken
+            RosaToken
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Create ROSA cluster
