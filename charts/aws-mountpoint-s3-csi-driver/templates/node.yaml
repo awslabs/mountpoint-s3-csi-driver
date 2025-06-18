@@ -155,7 +155,8 @@ spec:
               mountPropagation: HostToContainer
               {{- end }}
             - name: systemd-bus
-              mountPath: /run/systemd/private
+              mountPath: /run/systemd
+              mountPropagation: HostToContainer
             - name: host-dev
               mountPath: /host/dev
           ports:
@@ -236,8 +237,8 @@ spec:
             type: DirectoryOrCreate
         - name: systemd-bus
           hostPath:
-            path: /run/systemd/private
-            type: Socket
+            path: /run/systemd
+            type: DirectoryOrCreate
         - name: kubelet-dir
           hostPath:
             path: {{ .Values.node.kubeletPath }}

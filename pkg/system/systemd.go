@@ -54,8 +54,9 @@ type DbusExecStart struct {
 // SystemdOsConnection is a low level api thinly wrapping the systemd dbus calls
 // See https://www.freedesktop.org/wiki/Software/systemd/dbus/ for the DBus API
 type SystemdOsConnection struct {
-	Conn   DbusConn
-	Object DbusObject
+	Conn     DbusConn
+	Object   DbusObject
+	isClosed bool
 }
 
 // Connect to the systemd dbus socket and return a SystemdOsConnection
@@ -75,13 +76,19 @@ func NewSystemdOsConnection() (*SystemdOsConnection, error) {
 	systemd := conn.Object("org.freedesktop.systemd1", dbus.ObjectPath("/org/freedesktop/systemd1"))
 
 	return &SystemdOsConnection{
-		Conn:   conn,
-		Object: systemd,
+		Conn:     conn,
+		Object:   systemd,
+		isClosed: false,
 	}, nil
 }
 
 func (sc *SystemdOsConnection) Close() error {
+	// TODO: set isClosed flag?
 	return sc.Conn.Close()
+}
+
+func (sc *SystemdOsConnection) IsClosed() bool {
+	return sc.isClosed
 }
 
 func (sc *SystemdOsConnection) Signal(ch chan<- *dbus.Signal) {
@@ -131,6 +138,10 @@ func (sc *SystemdOsConnection) callDbus(ctx context.Context, method string, ret 
 	select {
 	case call := <-ch:
 		if call.Err != nil {
+			if call.Err == dbus.ErrClosed {
+				klog.V(4).ErrorS(call.Err, "Detected that connection was closed")
+				sc.isClosed = true
+			}
 			return fmt.Errorf("Failed StartTransientUnit with Call.Err: %w", call.Err)
 		}
 		err := call.Store(ret)
@@ -151,6 +162,7 @@ type SystemdConnection interface {
 		props []DbusProperty) (dbus.ObjectPath, error)
 	Signal(ch chan<- *dbus.Signal)
 	Close() error
+	IsClosed() bool
 }
 
 type ExecConfig struct {
@@ -194,6 +206,7 @@ type UnitProperties struct {
 
 type SystemdSupervisor struct {
 	conn               SystemdConnection
+	conn_mu            sync.Mutex // protects connection, since it may be re-created
 	pts                Pts
 	serviceWatchers    map[string][]chan<- *UnitProperties
 	watchersMutex      sync.Mutex
@@ -227,6 +240,19 @@ func (s *SystemdSupervisor) Start() {
 	go s.pollSignals()
 }
 
+// Recreate the connection to systemd and start a new pollSignals goroutine
+func (s *SystemdSupervisor) Restart() error {
+	conn, err := NewSystemdOsConnection()
+	if err != nil {
+		return err
+	}
+	s.conn_mu.Lock() // acquire the lock to replace the connection
+	s.conn = conn
+	s.conn_mu.Unlock()
+	go s.pollSignals() // TODO: this may start later than we try creating a unit
+	return nil
+}
+
 func (s *SystemdSupervisor) Stop() error {
 	return s.conn.Close()
 }
@@ -254,11 +280,16 @@ func (s *SystemdSupervisor) RemoveServiceWatcher(serviceName string, ch chan<- *
 
 func (s *SystemdSupervisor) pollSignals() {
 	signals := make(chan *dbus.Signal, signalBufferSize)
+	s.conn_mu.Lock()
 	s.conn.Signal(signals)
+	s.conn_mu.Unlock()
 
 	for sig := range signals {
 		s.dispatchSignal(sig)
 	}
+
+	klog.V(4).ErrorS(nil, "pollSignals finished") // goroutine terminates when underlying connection gets closed
+	// todo: detect that connection is closed here?
 }
 
 func (s *SystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
@@ -340,7 +371,11 @@ func (sd *SystemdSupervisor) StartService(ctx context.Context, config *ExecConfi
 }
 
 func (sd *SystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig) (string, error) {
-	defer sd.conn.StopUnit(ctx, config.Name)
+	defer func() {
+		sd.conn_mu.Lock()
+		sd.conn.StopUnit(ctx, config.Name)
+		sd.conn_mu.Unlock()
+	}()
 
 	return sd.runUnit(ctx, config, "oneshot", func(props *UnitProperties) (bool, error) {
 		if props.ExecMainCode == 0 {
@@ -378,7 +413,20 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 	sd.AddServiceWatcher(config.Name, unitUpdates)
 	defer sd.RemoveServiceWatcher(config.Name, unitUpdates)
 
+	// TODO: refactor this locking
+	sd.conn_mu.Lock()
+	is_closed := sd.conn.IsClosed()
+	sd.conn_mu.Unlock()
+	if is_closed {
+		klog.V(4).ErrorS(nil, "Systemd connection was closed, re-create it")
+		err := sd.Restart()
+		if err != nil {
+			return "", fmt.Errorf("Failed to re-create connection to systemd: %w", err)
+		}
+	}
+	sd.conn_mu.Lock()
 	job, err := sd.conn.StartTransientUnit(ctx, config.Name, "fail", props)
+	sd.conn_mu.Unlock()
 	if err != nil {
 		return "", fmt.Errorf("Failed to start transient systemd service: %w", err)
 	}
