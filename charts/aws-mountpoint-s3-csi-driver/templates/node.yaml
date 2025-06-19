@@ -238,7 +238,7 @@ spec:
         - name: systemd-bus
           hostPath:
             path: /run/systemd
-            type: DirectoryOrCreate
+            type: Directory
         - name: kubelet-dir
           hostPath:
             path: {{ .Values.node.kubeletPath }}
