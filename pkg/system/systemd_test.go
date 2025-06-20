@@ -285,8 +285,7 @@ func TestSystemdSupervisorWatchers(t *testing.T) {
 	})
 
 	unitProps := make(chan *system.UnitProperties)
-	mockPts := mock_system.NewMockPts(mockCtl)
-	supervisor := system.NewSystemdSupervisor(mockConn, mockPts)
+	supervisor := system.NewOsSystemdSupervisor(mockConn)
 	defer supervisor.Stop()
 	supervisor.AddServiceWatcher(serviceName, unitProps)
 	supervisor.Start()
@@ -378,7 +377,7 @@ func TestSystemdNew(t *testing.T) {
 	if !isRoot() {
 		t.Skip("Skipping test, not root")
 	}
-	wd, err := system.StartOsSystemdSupervisor()
+	wd, err := system.OsSystemdSupervisorFactory{}.StartSupervisor()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +391,7 @@ func TestSystemdStartServiceFailure(t *testing.T) {
 	if !isRoot() {
 		t.Skip("Skipping test, not root")
 	}
-	sysd, err := system.StartOsSystemdSupervisor()
+	sysd, err := system.OsSystemdSupervisorFactory{}.StartSupervisor()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +420,7 @@ func TestSystemdRunOneshotSuccess(t *testing.T) {
 	if !isRoot() {
 		t.Skip("Skipping test, not root")
 	}
-	sysd, err := system.StartOsSystemdSupervisor()
+	sysd, err := system.OsSystemdSupervisorFactory{}.StartSupervisor()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +451,7 @@ func TestSystemdRunOneshotFailure(t *testing.T) {
 	if !isRoot() {
 		t.Skip("Skipping test, not root")
 	}
-	sysd, err := system.StartOsSystemdSupervisor()
+	sysd, err := system.OsSystemdSupervisorFactory{}.StartSupervisor()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,7 @@ type SystemdMounter struct {
 }
 
 func NewSystemdMounter(credProvider *credentialprovider.Provider, mpMounter *mpmounter.Mounter, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
-	runner, err := system.StartOsSystemdSupervisor()
+	runner, err := system.StartSystemdRunner(system.OsSystemdSupervisorFactory{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
