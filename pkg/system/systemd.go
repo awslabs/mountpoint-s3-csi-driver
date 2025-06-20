@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"k8s.io/klog/v2"
@@ -14,7 +16,8 @@ import (
 
 const (
 	systemdSocket    = "unix:path=/run/systemd/private"
-	signalBufferSize = 4096 // Messages are dropped if the buffer fills, so make it large
+	signalBufferSize = 4096            // Messages are dropped if the buffer fills, so make it large
+	runUnitTimeout   = 5 * time.Minute // Maximum time to wait for unit updates
 
 	UnitNewMethod           = "org.freedesktop.systemd1.Manager.UnitNew"
 	UnitRemovedMethod       = "org.freedesktop.systemd1.Manager.UnitRemoved"
@@ -53,11 +56,10 @@ type DbusExecStart struct {
 
 // SystemdOsConnection is a low level api thinly wrapping the systemd dbus calls
 // See https://www.freedesktop.org/wiki/Software/systemd/dbus/ for the DBus API
-// SystemdOsConnection is **not** thread-safe. Callers must synchronize access using a mutex.
 type SystemdOsConnection struct {
 	Conn     DbusConn
 	Object   DbusObject
-	isClosed bool // not thread-safe
+	isClosed atomic.Bool
 }
 
 // Connect to the systemd dbus socket and return a SystemdOsConnection
@@ -77,19 +79,18 @@ func NewSystemdOsConnection() (*SystemdOsConnection, error) {
 	systemd := conn.Object("org.freedesktop.systemd1", dbus.ObjectPath("/org/freedesktop/systemd1"))
 
 	return &SystemdOsConnection{
-		Conn:     conn,
-		Object:   systemd,
-		isClosed: false,
+		Conn:   conn,
+		Object: systemd,
 	}, nil
 }
 
 func (sc *SystemdOsConnection) Close() error {
-	sc.isClosed = true
+	sc.isClosed.Store(true)
 	return sc.Conn.Close()
 }
 
 func (sc *SystemdOsConnection) IsClosed() bool {
-	return sc.isClosed
+	return sc.isClosed.Load()
 }
 
 func (sc *SystemdOsConnection) Signal(ch chan<- *dbus.Signal) {
@@ -141,7 +142,7 @@ func (sc *SystemdOsConnection) callDbus(ctx context.Context, method string, ret 
 		if call.Err != nil {
 			if call.Err == dbus.ErrClosed {
 				klog.V(5).Infof("Detected that connection was closed\n")
-				sc.isClosed = true
+				sc.isClosed.Store(true)
 			}
 			return fmt.Errorf("Failed StartTransientUnit with Call.Err: %w", call.Err)
 		}
@@ -205,31 +206,40 @@ type UnitProperties struct {
 	ExecMainStatus int
 }
 
-type SystemdSupervisor struct {
-	conn               SystemdConnection
-	connMutex          sync.Mutex // protects connection, since it's not thread safe and may be recreated
-	pts                Pts
-	serviceWatchers    map[string][]chan<- *UnitProperties
-	watchersMutex      sync.Mutex
-	dbusServiceNameMap map[string]string
+type SystemdSupervisorFactory interface {
+	StartSupervisor() (SystemdSupervisor, error)
 }
 
-func StartOsSystemdSupervisor() (*SystemdSupervisor, error) {
+type OsSystemdSupervisorFactory struct{}
+
+func (s OsSystemdSupervisorFactory) StartSupervisor() (SystemdSupervisor, error) {
 	conn, err := NewSystemdOsConnection()
 	if err != nil {
 		return nil, err
 	}
 
-	supervisor := NewSystemdSupervisor(conn, NewOsPts())
+	supervisor := NewOsSystemdSupervisor(conn)
 	supervisor.Start()
 	return supervisor, nil
 }
 
-func NewSystemdSupervisor(conn SystemdConnection, pts Pts) *SystemdSupervisor {
+type SystemdSupervisor interface {
+	StartService(ctx context.Context, config *ExecConfig) (string, error)
+	RunOneshot(ctx context.Context, config *ExecConfig) (string, error)
+	IsConnectionClosed() bool
+	Stop() error
+}
 
-	s := &SystemdSupervisor{
+type OsSystemdSupervisor struct {
+	conn               SystemdConnection
+	serviceWatchers    map[string][]chan<- *UnitProperties
+	watchersMutex      sync.Mutex
+	dbusServiceNameMap map[string]string
+}
+
+func NewOsSystemdSupervisor(conn SystemdConnection) *OsSystemdSupervisor {
+	s := &OsSystemdSupervisor{
 		conn:               conn,
-		pts:                pts,
 		serviceWatchers:    map[string][]chan<- *UnitProperties{},
 		dbusServiceNameMap: map[string]string{},
 	}
@@ -237,67 +247,38 @@ func NewSystemdSupervisor(conn SystemdConnection, pts Pts) *SystemdSupervisor {
 	return s
 }
 
-func (s *SystemdSupervisor) Start() {
+func (s *OsSystemdSupervisor) IsConnectionClosed() bool {
+	return s.conn.IsClosed()
+}
+
+func (s *OsSystemdSupervisor) Start() {
 	// ensure signals channel is registered before we return from this call
 	signals := s.startListeningSignals()
 	// processing goroutine may start after we return, which is fine
 	go s.processSignals(signals)
 }
 
-// Recreate the connection to systemd and start a new pollSignals goroutine
-func (s *SystemdSupervisor) Restart() error {
-	// close prev connection
-	s.connMutex.Lock()
-	err := s.conn.Close()
-	if err != nil {
-		klog.V(4).ErrorS(err, "SystemdSupervisor failed to close the disrupted connection")
-	}
-	s.connMutex.Unlock()
-
-	// close and forget all service watchers (we may miss signals during disruption, avoid blocking reader forever in [SystemdSupervisor::runUnit]):
-	// - [SystemdSupervisor::runUnit] will treat corresponding units as failed, and will report mount/umount operation as failed
-	// - mount/umount may actually succeed but we don't know it for sure
-	// - reporting failure will result in retrying NodePublishVolume/NodeUnpublishVolume and then we'll find out if operation actually succeeded
-	// - in rare cases mount/umount may still be running and we will issue a duplicate mount/umount which will fail
-	// - the duplicate operation will fail, but eventually NodePublishVolume/NodeUnpublishVolume will detect that mount/umount succeeded
+func (s *OsSystemdSupervisor) Stop() error {
+	// close all watchers to signal [runUnit] that it should return
 	s.watchersMutex.Lock()
+	defer s.watchersMutex.Unlock()
 	for serviceName, chans := range s.serviceWatchers {
 		for _, ch := range chans {
 			close(ch)
-			klog.V(5).Infof("SystemdSupervisor closed watcher: serviceName=%s\n", serviceName)
+			klog.V(5).Infof("OsSystemdSupervisor closed watcher: serviceName=%s\n", serviceName)
 		}
 	}
-	s.serviceWatchers = make(map[string][]chan<- *UnitProperties)
-	s.dbusServiceNameMap = make(map[string]string)
-	s.watchersMutex.Unlock()
-
-	// create and set new connection
-	conn, err := NewSystemdOsConnection()
-	if err != nil {
-		return err
-	}
-	s.connMutex.Lock()
-	s.conn = conn
-	s.connMutex.Unlock()
-
-	// start listening for signals
-	signals := s.startListeningSignals()
-	go s.processSignals(signals)
-
-	return nil
-}
-
-func (s *SystemdSupervisor) Stop() error {
+	// close the dbus connection, this also triggers termination of [processSignals] goroutine
 	return s.conn.Close()
 }
 
-func (s *SystemdSupervisor) AddServiceWatcher(serviceName string, ch chan<- *UnitProperties) {
+func (s *OsSystemdSupervisor) AddServiceWatcher(serviceName string, ch chan<- *UnitProperties) {
 	s.watchersMutex.Lock()
 	defer s.watchersMutex.Unlock()
 	s.serviceWatchers[serviceName] = append(s.serviceWatchers[serviceName], ch)
 }
 
-func (s *SystemdSupervisor) RemoveServiceWatcher(serviceName string, ch chan<- *UnitProperties) {
+func (s *OsSystemdSupervisor) RemoveServiceWatcher(serviceName string, ch chan<- *UnitProperties) {
 	s.watchersMutex.Lock()
 	defer s.watchersMutex.Unlock()
 	watchers, ok := s.serviceWatchers[serviceName]
@@ -312,23 +293,21 @@ func (s *SystemdSupervisor) RemoveServiceWatcher(serviceName string, ch chan<- *
 	}
 }
 
-func (s *SystemdSupervisor) startListeningSignals() <-chan *dbus.Signal {
+func (s *OsSystemdSupervisor) startListeningSignals() <-chan *dbus.Signal {
 	signals := make(chan *dbus.Signal, signalBufferSize)
-	s.connMutex.Lock()
 	s.conn.Signal(signals)
-	s.connMutex.Unlock()
 	return signals
 }
 
-func (s *SystemdSupervisor) processSignals(signals <-chan *dbus.Signal) {
+func (s *OsSystemdSupervisor) processSignals(signals <-chan *dbus.Signal) {
 	// dbus package closes the [signals] channel when the [s.conn] gets closed
 	for sig := range signals {
 		s.dispatchSignal(sig)
 	}
-	klog.V(5).Infof("SystemdSupervisor pollSignals finished\n")
+	klog.V(5).Info("Systemd D-Bus signal channel closed — OsSystemdSupervisor stopped processing systemd signals")
 }
 
-func (s *SystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
+func (s *OsSystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
 	switch signal.Name {
 	case UnitNewMethod, UnitRemovedMethod:
 		if len(signal.Body) != 2 {
@@ -346,13 +325,13 @@ func (s *SystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
 		defer s.watchersMutex.Unlock()
 		if signal.Name == UnitNewMethod {
 			if _, ok := s.serviceWatchers[unitName]; ok {
-				klog.V(5).Infof("SystemdSupervisor %s unit: %s dbusAddress: %v\n", signal.Name, unitName, dbusAddress)
+				klog.V(5).Infof("OsSystemdSupervisor %s unit: %s dbusAddress: %v\n", signal.Name, unitName, dbusAddress)
 				s.dbusServiceNameMap[string(dbusAddress)] = unitName
 			}
 		} else {
 			watchers, ok := s.serviceWatchers[unitName]
 			if ok {
-				klog.V(5).Infof("SystemdSupervisor %s unit: %s dbusAddress: %v\n", signal.Name, unitName, dbusAddress)
+				klog.V(5).Infof("OsSystemdSupervisor %s unit: %s dbusAddress: %v\n", signal.Name, unitName, dbusAddress)
 				for _, w := range watchers {
 					close(w)
 				}
@@ -399,18 +378,14 @@ func (s *SystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
 	}
 }
 
-func (sd *SystemdSupervisor) StartService(ctx context.Context, config *ExecConfig) (string, error) {
+func (sd *OsSystemdSupervisor) StartService(ctx context.Context, config *ExecConfig) (string, error) {
 	return sd.runUnit(ctx, config, "forking", func(props *UnitProperties) (bool, error) {
 		return props.ActiveState == "active", nil
 	})
 }
 
-func (sd *SystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig) (string, error) {
-	defer func() {
-		sd.connMutex.Lock()
-		sd.conn.StopUnit(ctx, config.Name)
-		sd.connMutex.Unlock()
-	}()
+func (sd *OsSystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig) (string, error) {
+	defer sd.conn.StopUnit(ctx, config.Name)
 
 	return sd.runUnit(ctx, config, "oneshot", func(props *UnitProperties) (bool, error) {
 		if props.ExecMainCode == 0 {
@@ -423,7 +398,16 @@ func (sd *SystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfig)
 	})
 }
 
-func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, serviceType string,
+// runUnit instructs systemd to start a transient unit with the given configuration.
+// It then waits for one of the following to occur:
+// - The provided doneFunc returns true, based on systemd unit property updates
+// - The systemd D-Bus connection is closed (indicated by a nil update)
+// - The context is cancelled
+// - A timeout occurs after 5 minute (runUnitTimeout)
+//
+// While the unit is running, its output is captured from the pseudo-terminal (pts)
+// and returned as a flattened string in case of error or completion.
+func (sd *OsSystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, serviceType string,
 	doneFunc func(*UnitProperties) (bool, error)) (string, error) {
 
 	// Create pts to get standard output
@@ -444,33 +428,19 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 
 	props := config.ToDbus(ptsN, serviceType)
 
-	// TODO: refactor this locking
-	sd.connMutex.Lock()
-	isClosed := sd.conn.IsClosed()
-	sd.connMutex.Unlock()
-	if isClosed {
-		klog.V(5).Infof("Systemd connection was closed, re-create it: service=%s\n", config.Name)
-		// restart resets watchers, so doing it before AddServiceWatcher
-		err := sd.Restart()
-		if err != nil {
-			return "", fmt.Errorf("Failed to re-create connection to systemd: %w", err)
-		}
-	}
-
 	unitUpdates := make(chan *UnitProperties, 32)
 	sd.AddServiceWatcher(config.Name, unitUpdates)
 	defer sd.RemoveServiceWatcher(config.Name, unitUpdates)
 
-	sd.connMutex.Lock()
 	job, err := sd.conn.StartTransientUnit(ctx, config.Name, "fail", props)
-	sd.connMutex.Unlock()
 	if err != nil {
 		return "", fmt.Errorf("Failed to start transient systemd service: %w", err)
 	}
 	klog.V(5).Infof("Started service %s, job: %s\n", config.Name, string(job))
 
-	defer klog.V(5).Infof("runUnit done: service=%s job=%s\n", config.Name, string(job))
+	defer klog.V(5).Infof("Done running a unit: service=%s job=%s\n", config.Name, string(job))
 	started := false
+	timeoutTimer := time.After(runUnitTimeout)
 	for !started {
 		select {
 		case u := <-unitUpdates:
@@ -485,6 +455,9 @@ func (sd *SystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, se
 
 		case <-ctx.Done():
 			return readOutput(), fmt.Errorf("Failed to start systemd unit, context cancelled")
+
+		case <-timeoutTimer:
+			return readOutput(), fmt.Errorf("Timed out waiting for systemd unit to start after %v", runUnitTimeout)
 		}
 	}
 	return readOutput(), nil
