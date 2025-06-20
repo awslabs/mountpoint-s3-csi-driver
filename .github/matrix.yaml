@@ -1,7 +1,7 @@
 matrix:
   cluster-type: [ "eksctl", "kops" ]
   arch: [ "x86", "arm" ]
-  family: [ "AmazonLinux2", "Bottlerocket" ]
+  family: [ "AmazonLinux2", "AmazonLinux2023", "Bottlerocket" ]
   kubernetes-version: [ "1.28.13", "1.29.8", "1.30.4", "1.31.0", "1.32.1" ]
   include:
     # Ubuntu2004 supported for EKS <= 1.29 and Ubuntu2204 supported for EKS >= 1.29.
@@ -46,7 +46,7 @@ matrix:
       family: "Bottlerocket"
     # Our tests are failing on clusters created with kops 1.29+.
     # Until we fix that issue, we use kops 1.28 which only supports k8s versions up to 1.28.
-    # So, we only run our tests in k8s versions 1.29 and 1.30 on eksctl.
+    # So, we only run our tests in k8s versions 1.29+ on eksctl.
     - cluster-type: "kops"
       kubernetes-version: "1.29.8"
     - cluster-type: "kops"
@@ -55,3 +55,7 @@ matrix:
       kubernetes-version: "1.31.0"
     - cluster-type: "kops"
       kubernetes-version: "1.32.1"
+    # Also disable kops on 1.28.13 for AL2023 as it's also failing.
+    - cluster-type: "kops"
+      kubernetes-version: "1.28.13"
+      family: "AmazonLinux2023"
