@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/godbus/dbus/v5"
 	"k8s.io/klog/v2"
@@ -16,8 +15,7 @@ import (
 
 const (
 	systemdSocket    = "unix:path=/run/systemd/private"
-	signalBufferSize = 4096            // Messages are dropped if the buffer fills, so make it large
-	runUnitTimeout   = 5 * time.Minute // Maximum time to wait for unit updates
+	signalBufferSize = 4096 // Messages are dropped if the buffer fills, so make it large
 
 	UnitNewMethod           = "org.freedesktop.systemd1.Manager.UnitNew"
 	UnitRemovedMethod       = "org.freedesktop.systemd1.Manager.UnitRemoved"
@@ -305,6 +303,7 @@ func (s *OsSystemdSupervisor) processSignals(signals <-chan *dbus.Signal) {
 		s.dispatchSignal(sig)
 	}
 	klog.V(5).Info("Systemd D-Bus signal channel closed — OsSystemdSupervisor stopped processing systemd signals")
+	s.conn.Close()
 }
 
 func (s *OsSystemdSupervisor) dispatchSignal(signal *dbus.Signal) {
@@ -403,7 +402,6 @@ func (sd *OsSystemdSupervisor) RunOneshot(ctx context.Context, config *ExecConfi
 // - The provided doneFunc returns true, based on systemd unit property updates
 // - The systemd D-Bus connection is closed (indicated by a nil update)
 // - The context is cancelled
-// - A timeout occurs after 5 minute (runUnitTimeout)
 //
 // While the unit is running, its output is captured from the pseudo-terminal (pts)
 // and returned as a flattened string in case of error or completion.
@@ -440,7 +438,6 @@ func (sd *OsSystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, 
 
 	defer klog.V(5).Infof("Done running a unit: service=%s job=%s\n", config.Name, string(job))
 	started := false
-	timeoutTimer := time.After(runUnitTimeout)
 	for !started {
 		select {
 		case u := <-unitUpdates:
@@ -455,9 +452,6 @@ func (sd *OsSystemdSupervisor) runUnit(ctx context.Context, config *ExecConfig, 
 
 		case <-ctx.Done():
 			return readOutput(), fmt.Errorf("Failed to start systemd unit, context cancelled")
-
-		case <-timeoutTimer:
-			return readOutput(), fmt.Errorf("Timed out waiting for systemd unit to start after %v", runUnitTimeout)
 		}
 	}
 	return readOutput(), nil

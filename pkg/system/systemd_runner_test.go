@@ -64,17 +64,25 @@ func TestSystemdRunnerRecreateConnection(t *testing.T) {
 		Description: "Test service",
 	}
 
-	// First supervisor reports closed connection and gets stopped
-	mockSupervisor1.EXPECT().IsConnectionClosed().Return(true)
-	mockSupervisor1.EXPECT().IsConnectionClosed().Return(true)
-	mockSupervisor1.EXPECT().Stop()
-
 	// Create second supervisor that will handle the service start
 	mockSupervisor2 := mock_system.NewMockSystemdSupervisor(ctrl)
-	mockFactory.EXPECT().StartSupervisor().Return(mockSupervisor2, nil)
 
-	// Second supervisor handles service start
-	mockSupervisor2.EXPECT().StartService(ctx, config).Return("test output", nil)
+	// Expectation sequence: enforce call order strictly
+	gomock.InOrder(
+		// First supervisor reports closed connection twice (fast + slow path)
+		mockSupervisor1.EXPECT().IsConnectionClosed().Return(true),
+		mockSupervisor1.EXPECT().IsConnectionClosed().Return(true),
+
+		// First supervisor is stopped
+		mockSupervisor1.EXPECT().Stop(),
+
+		// Second supervisor created
+		mockFactory.EXPECT().StartSupervisor().Return(mockSupervisor2, nil),
+
+		// This expectation ensures that only mockSupervisor2 is allowed to handle StartService.
+		// If mockSupervisor1.StartService(...) is called instead, the test will fail.
+		mockSupervisor2.EXPECT().StartService(ctx, config).Return("test output", nil),
+	)
 
 	output, err := runner.StartService(ctx, config)
 	if err != nil {
