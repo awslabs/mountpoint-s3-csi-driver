@@ -106,7 +106,7 @@ func (s *SystemdRunner) ensureConnectionOpen() (SystemdSupervisor, error) {
 		return current, nil // another goroutine already fixed it
 	}
 
-	klog.V(5).Info("SystemdRunner: systemd connection was closed, re-creating systemd supervisor")
+	klog.V(4).Info("SystemdRunner: systemd connection was closed, re-creating systemd supervisor")
 	current.Stop()
 
 	newSupervisor, err := s.supervisorFactory.StartSupervisor()
