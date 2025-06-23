@@ -19,7 +19,7 @@ spec:
     driver: s3.csi.aws.com # Required
     volumeHandle: s3-csi-driver-volume # Must be unique
     volumeAttributes:
-      bucketName: "arn:aws:s3-outposts:region:accountid:outpost/outpost-id/accesspoint/accesspoint-name" # Replace with your Outpost Access point ARN and not the Bucket ARN
+      bucketName: "arn:aws:s3-outposts:region:accountid:outpost/outpost-id/accesspoint/accesspoint-name" # Use your S3 on Outposts Access Point ARN or Access Point Alias in place of bucket
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
