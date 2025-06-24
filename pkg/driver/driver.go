@@ -138,7 +138,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Infoln("Using systemd mounter")
 	}
 
-	nodeServer := node.NewS3NodeServer(nodeID, mounterImpl)
+	nodeServer := node.NewS3NodeServer(nodeID, mounterImpl, clientset)
 
 	return &Driver{
 		Endpoint:   endpoint,
@@ -193,6 +193,10 @@ func (d *Driver) Run() error {
 	csi.RegisterNodeServer(d.Srv, d.NodeServer)
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
+
+	// Start taint removal when gRPC server is ready to accept connections
+	go node.RemoveTaintInBackground(d.NodeServer.Clientset)
+
 	return d.Srv.Serve(listener)
 }
 
