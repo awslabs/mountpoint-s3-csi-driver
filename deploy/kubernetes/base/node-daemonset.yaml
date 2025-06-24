@@ -113,7 +113,8 @@ spec:
               # without needing to mount "/proc/mounts" from host.
               mountPropagation: HostToContainer
             - name: systemd-bus
-              mountPath: /run/systemd/private
+              mountPath: /run/systemd
+              mountPropagation: HostToContainer
             - name: host-dev
               mountPath: /host/dev
           ports:
@@ -201,8 +202,8 @@ spec:
             type: DirectoryOrCreate
         - name: systemd-bus
           hostPath:
-            path: /run/systemd/private
-            type: Socket
+            path: /run/systemd
+            type: Directory
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet
