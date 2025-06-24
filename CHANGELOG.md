@@ -1,8 +1,13 @@
 # Unreleased
 
+# v1.15.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.15.0/README.md)
+
 ### Notable changes
 * Support Mountpoint [version 1.19.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.19.0)
   * Mountpoint for Amazon S3 adds support for renaming files using the RenameObject API when mounting directory buckets in S3 Express One Zone. ([mountpoint-s3#1468](https://github.com/awslabs/mountpoint-s3/pull/1468))
+* Re-create dbus connection to systemd when connection is lost. ([#512](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/512))
 
 # v1.14.1
 
