@@ -1,7 +1,8 @@
 # Unreleased
 
 ### Notable changes
-* Support Mountpoint [version 1.18.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.18.0)
+* Support Mountpoint [version 1.19.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.19.0)
+  * Mountpoint for Amazon S3 adds support for renaming files using the RenameObject API when mounting directory buckets in S3 Express One Zone. ([mountpoint-s3#1468](https://github.com/awslabs/mountpoint-s3/pull/1468))
 
 # v1.14.1
 
