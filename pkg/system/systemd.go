@@ -4,6 +4,7 @@ package system
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sync"
@@ -138,8 +139,8 @@ func (sc *SystemdOsConnection) callDbus(ctx context.Context, method string, ret 
 	select {
 	case call := <-ch:
 		if call.Err != nil {
-			if call.Err == dbus.ErrClosed {
-				klog.V(5).Infof("Detected that connection was closed\n")
+			if errors.Is(call.Err, dbus.ErrClosed) {
+				klog.V(5).Info("Detected that connection was closed")
 				sc.isClosed.Store(true)
 			}
 			return fmt.Errorf("Failed StartTransientUnit with Call.Err: %w", call.Err)
