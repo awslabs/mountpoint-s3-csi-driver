@@ -109,10 +109,8 @@ This project has adopted the [Amazon Open Source Code of Conduct](https://aws.gi
 
 ## License
 
-This project is licensed under the Apache-2.0 License. It builds on a number of other awesome projects with open source licenses, and licenses for other projects can be found under:
+This project is licensed under the Apache-2.0 License. It builds on a number of other awesome projects with open source licenses, and licenses for other projects can be found under the following locations in the CSI Driver's container image:
 
 - Linux packages under `/usr/share/licenses/*`
 - The CSI Driver's Go dependencies under `/LICENSES/*` (starting from v1.15.0)
 - Mountpoint's Rust dependencies under `/mountpoint-s3/THIRD_PARTY_LICENSES`
-
-of the CSI Driver's container image.
