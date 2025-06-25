@@ -62,6 +62,10 @@ matrix:
       kubernetes-version: "1.32.1"
     - cluster-type: "kops"
       kubernetes-version: "1.33.2"
+    # AL2 is not supported by Kubernetes 1.33.
+    - cluster-type: "eksctl"
+      family: "AmazonLinux2"
+      kubernetes-version: "1.33.2"
     # Also disable kops on 1.28.13 for AL2023 as it's also failing.
     - cluster-type: "kops"
       kubernetes-version: "1.28.13"
