@@ -27,10 +27,11 @@ matrix:
       arch: "arm"
       family: "Ubuntu2204"
       kubernetes-version: "1.32.1"
-    - cluster-type: "eksctl"
-      arch: "arm"
-      family: "Ubuntu2204"
-      kubernetes-version: "1.33.2"
+    # TODO: Enable this once EKS 1.33 Ubuntu AMI is available.
+    # - cluster-type: "eksctl"
+    #   arch: "arm"
+    #   family: "Ubuntu2204"
+    #   kubernetes-version: "1.33.2"
     # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
     # field rather than trying to exclude all other variants.
     - cluster-type: "kops"
