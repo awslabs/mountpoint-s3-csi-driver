@@ -10,12 +10,12 @@ for more details on the architecture of the CSI Driver.
 
 The controller component is responsible for spawning or assigning Mountpoint Pods to your workloads.
 If for some reason the controller fails to perform this operation,
-you might get a `Failed to find corresponding MountpointS3PodAttachment custom resource ...` error in your workload.
+you might get a `Failed to find corresponding MountpointS3PodAttachment custom resource ...` error in your workload, or your workload might stuck in `ContainerCreating` status.
 
 In that case you can get the logs of the controller component by running:
 
 ```bash
-$ kubectl logs -n kube-system -lapp=s3-csi-controller
+$ kubectl logs -n kube-system -l app=s3-csi-controller
 ```
 
 See [architecture of the controller component](./ARCHITECTURE.md#the-controller-component-aws-s3-csi-controller) for more details.
@@ -32,14 +32,14 @@ If your workload fails to start, you can check the logs of the node component fo
 You can get the logs of all node components in your cluster by running:
 
 ```bash
-$ kubectl logs -n kube-system -c s3-plugin -lapp=s3-csi-node
+$ kubectl logs -n kube-system -c s3-plugin -l app=s3-csi-node
 ```
 
 Alternatively, you can get the logs on a specific node by running:
 
 ```bash
 $ NODE_NAME=my-node
-$ DRIVER_POD=$(kubectl get pods -n kube-system -lapp=s3-csi-node --field-selector spec.nodeName=${NODE_NAME} --no-headers -o custom-columns=":metadata.name")
+$ DRIVER_POD=$(kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=${NODE_NAME} --no-headers -o custom-columns=":metadata.name")
 $ kubectl logs -n kube-system -c s3-plugin ${DRIVER_POD}
 ```
 
@@ -74,7 +74,7 @@ done
 You can find the name of the Mountpoint Pod you want to get logs for from the output and use the following to get Mountpoint logs for that specific instance:
 
 ```bash
-$ kubectl logs -n mount-s3 mp-6ldhl
+$ kubectl logs -n mount-s3 mp-...
 ```
 
 For more details about Mountpoint logging and the configuration options available, please refer to [Mountpoint's logging documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/LOGGING.md).
