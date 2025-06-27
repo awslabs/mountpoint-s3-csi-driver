@@ -20,6 +20,7 @@ var (
 	ClusterName   string
 	BucketPrefix  string
 	Performance   bool
+	UpgradeTests  bool
 	IMDSAvailable bool
 )
 
