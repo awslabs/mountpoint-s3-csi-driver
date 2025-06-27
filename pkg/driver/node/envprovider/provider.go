@@ -25,6 +25,7 @@ const (
 	EnvSecretAccessKey                 = "AWS_SECRET_ACCESS_KEY"
 	EnvSessionToken                    = "AWS_SESSION_TOKEN"
 	EnvMountpointCacheKey              = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
+	EnvEndpointURLSTS                  = "AWS_ENDPOINT_URL_STS"
 )
 
 // Key represents an environment variable name.
@@ -42,6 +43,7 @@ var envAllowlist = []Key{
 	EnvRegion,
 	EnvDefaultRegion,
 	EnvSTSRegionalEndpoints,
+	EnvEndpointURLSTS,
 }
 
 // Region returns detected region from environment variables `AWS_REGION` or `AWS_DEFAULT_REGION`.
