@@ -119,7 +119,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// 		2) EKS Pod Identity
 	//
 	// In our test environment we add "AmazonS3FullAccess" policy to our EC2 instances
-	// (see "eksctl-patch.json" and "kops-patch.yaml") which allows Driver-level 3) to work.
+	// (see "eksctl-patch.json") which allows Driver-level 3) to work.
 	// In order to test if other driver-level and pod-level credentials correctly work,
 	// we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
 	// in these test cases to ensure it does not fallback to Driver-level 3) credentials.
@@ -1347,9 +1347,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 	issuer, _ := configuration["issuer"].(string)
 
 	if !strings.HasPrefix(issuer, "https://oidc.") {
-		// For now, we only set up a _public_ OIDC provider via `eksctl`,
-		// with `kops` we're setting up a _local_ OIDC provider which wouldn't work with AWS IAM.
-		// So, we're ignoring non-EKS OIDC providers.
+		// For now, we only set up a _public_ OIDC provider via `eksctl`, and we're ignoring non-EKS OIDC providers.
 		return ""
 	}
 

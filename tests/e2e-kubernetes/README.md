@@ -5,10 +5,9 @@
 All of the following commands are expected to be executed from repo root:
 
 ```bash
-export KOPS_STATE_FILE="s3://vlaad-kops-state-store" # set KOPS_STATE_FILE to your bucket when running locally
 export AWS_REGION=us-east-1
 export TAG=20cb9d919704522d93ac40914b760dbd0487bcf3 # CSI Driver image tag to install
-export IMAGE_NAME="s3-csi-driver" # repository is infered from current AWS account and region
+export IMAGE_NAME="s3-csi-driver" # repository is inferred from current AWS account and region
 export SSH_KEY=/home/csiuser/.ssh/k8s.private.pub # optional
 export K8S_VERSION="1.30.0" # optional, must be a full version
 
@@ -17,10 +16,10 @@ ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh
 ACTION=update_kubeconfig tests/e2e-kubernetes/scripts/run.sh
 ACTION=install_driver  tests/e2e-kubernetes/scripts/run.sh
 
-# option 1: kubeconfig infered from CLUSTER_TYPE and ARCH
+# option 1: kubeconfig inferred from CLUSTER_TYPE and ARCH
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 # option 2: kubeconfig set explicitly
-export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.kops.1.28.0.k8s.local.kubeconfig
+export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.eksctl.1.28.0.k8s.local.kubeconfig
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 
 ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh
