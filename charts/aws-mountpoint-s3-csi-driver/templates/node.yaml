@@ -1,3 +1,4 @@
+{{- if .Values.skip-csi-driver -}}
 # Source: aws-mountpoint-s3-csi-driver/templates/node.yaml
 kind: DaemonSet
 apiVersion: apps/v1
@@ -214,3 +215,4 @@ spec:
         {{- with .Values.node.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+{{ - end -}}

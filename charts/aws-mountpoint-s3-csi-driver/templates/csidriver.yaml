@@ -1,3 +1,4 @@
+{{- if not .Values.skip-csi-driver -}}
 apiVersion: {{ ternary "storage.k8s.io/v1" "storage.k8s.io/v1beta1" (semverCompare ">=1.18.0-0" .Capabilities.KubeVersion.Version) }}
 kind: CSIDriver
 metadata:
@@ -6,3 +7,4 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   attachRequired: false
+{{- end -}}

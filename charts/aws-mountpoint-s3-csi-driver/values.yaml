@@ -1,6 +1,7 @@
 # Default values for ..
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
+skip-csi-driver: false
 
 image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
