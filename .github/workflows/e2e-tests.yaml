@@ -17,7 +17,6 @@ env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-  KOPS_STATE_FILE: "s3://${{ vars.KOPS_STATE_FILE }}"
   BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
   TAG_UNTESTED: "untested_${{ inputs.ref }}"
   TAG_PASSED: "test_passed_${{ inputs.ref }}"
@@ -127,32 +126,6 @@ jobs:
           ACTION: "run_tests"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Run Performance Tests
-        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
-        env:
-          ACTION: "run_perf"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Download previous benchmark results
-        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
-        run: |
-          mkdir -p ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}
-          aws s3 cp --region ${{ vars.BENCHMARK_RESULTS_REGION }} ${{ vars.BENCHMARK_BUCKET }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json || true
-      - name: Update benchmark result file
-        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: "customBiggerIsBetter"
-          output-file-path: tests/e2e-kubernetes/csi-test-artifacts/output.json
-          alert-threshold: "200%"
-          fail-on-alert: true
-          external-data-json-path: ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json
-          max-items-in-chart: 20
-      - name: Store benchmark result
-        if: (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'bench') && matrix.cluster-type == 'kops' && matrix.arch == 'x86'
-        run: |
-          tests/e2e-kubernetes/scripts/format_benchmark_data.py ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/benchmark-data.json ${{ env.BENCHMARK_ARTIFACTS_FOLDER }}/quicksight-data.json
-          aws s3 cp ${{ env.BENCHMARK_ARTIFACTS_FOLDER }} ${{ env.BENCHMARK_BUCKET }} --recursive
       - name: Post e2e cleanup (SystemdMounter)
         if: matrix.selinux-mode != 'enforcing' && always()
         env:
