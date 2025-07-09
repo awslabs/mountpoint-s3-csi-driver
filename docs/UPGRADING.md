@@ -1,4 +1,4 @@
-# [WIP] Upgrading Mountpoint for Amazon S3 CSI Driver from v1 to v2
+# Upgrading Mountpoint for Amazon S3 CSI Driver from v1 to v2
 
 Mountpoint CSI Driver v2 contains some breaking changes compared to v1 depending on the use-case,
 we kindly ask you to go over this list before upgrading to v2.
@@ -69,6 +69,16 @@ This architectural shift is the main reason for some breaking changes with v2.
         ```
   - Also see [the new caching configuration](CACHING.md) the CSI Driver v2 provides.
 
+### New defaults in the Helm chart/EKS add-on/Kustomization manifests
+
+- The CSI Driver Node DaemonSet Pods will tolerate all taints by default. You can opt into the old behaviour by setting `node.tolerateAllTaints=false` if that's desired.
+
+- The CSI Driver's `CSIDriver` object will have `podInfoOnMount: true` by default. The opt-in flag `node.podInfoOnMountCompat.enable` with v1 is no longer available, and there is no way to disable this behaviour with v2.
+  - This behaviour is needed for [Pod-level credentials](CONFIGURATION.md#pod-level-credentials).
+  - This field became mutable starting with Kubernetes v1.30, but if you're in an older version and if you haven't enabled this feature yet with v1, you might need to delete `CSIDriver` object before upgrading.
+    - You can delete the `CSIDriver` object by running: `kubectl delete csidriver s3.csi.aws.com`.
+    - This won't affect any existing workloads, but it would prevent new workloads from starting, we recommend doing this as part of the upgrade command to ensure a new `CSIDriver` object created immediately after the deletion.
+
 ### Mountpoint CSI Driver now supports `VOLUME_MOUNT_GROUP` and will respect `fsGroup` configured in `securityContext`
 
 See [Delegating volume permission and ownership change to CSI driver](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#delegating-volume-permission-and-ownership-change-to-csi-driver) for more details.
@@ -79,7 +89,7 @@ See [Delegating volume permission and ownership change to CSI driver](https://ku
   - Accessing Mountpoint logs via `journalctl` or log file by using `--log-directory` is no longer supported
 
 - How can I fix it?
-  - You can now access to Mountpoint logs just using `kubectl logs -n mount-s3 ...`. For example, `kubectl logs -n mount-s3 -ls3.csi.aws.com/volume-name=s3-pv` would print the logs for `s3-pv` volume.
+  - You can now access to Mountpoint logs just using `kubectl logs -n mount-s3 ...`. For example, `kubectl logs -n mount-s3 -ls3.csi.aws.com/volume-name=s3-pv` would print the logs for `s3-pv` volume. See [Logging of Mountpoint for Amazon S3 CSI Driver](LOGGING.md) for more details.
   - Using `--log-directory` to write logs to a file is not recommended, and instead users should just rely on `kubectl logs` or Kubernetes' mechanism to redirect logs to somewhere else.
 
 ### Mountpoint processes and Pods will run as non-root
@@ -93,6 +103,10 @@ See [Delegating volume permission and ownership change to CSI driver](https://ku
 ## FAQ
 
 ### How can I upgrade to v2 from v1?
+
+After making necessary changes for the breaking changes described in the [changes](#changes) section, you can follow regular [Installing Mountpoint for Amazon S3 CSI Driver](INSTALL.md) guidance to install the CSI Driver v2 with a method of your choosing.
+
+We recommend [configuring `nodeSelector` for the controller component](INSTALL.md#configuring-nodeSelector-for-the-controller-component) starting with v2.
 
 - Do I need to uninstall Mountpoint CSI Driver v1?
   - No, just upgrading Mountpoint CSI Driver to v2 should be enough. The new workloads created after the upgrade will use the new mechanism.

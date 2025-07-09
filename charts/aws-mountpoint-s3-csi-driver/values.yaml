@@ -1,6 +1,5 @@
-# Default values for ..
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+# Default values for Mountpoint for Amazon S3 CSI Driver Helm chart.
+# You can customize any values here during installation.
 
 image:
   # Our regional ECR repositories are labelled `eks/aws-s3-csi-driver`.
@@ -23,7 +22,8 @@ node:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-sa
-    # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
+    # Specify the CSI Driver SA's role ARN if want to use driver-level IRSA,
+    # see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials for more details.
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
@@ -76,6 +76,9 @@ sidecars:
     resources: {}
 
 controller:
+  # Consider deploying the controller component to special nodes for controller components, e.g.
+  # nodeSelector:
+  #   kubernetes.io/role: control-plane
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
