@@ -100,13 +100,15 @@ See [Delegating volume permission and ownership change to CSI driver](https://ku
 - How can I fix it?
   - Mountpoint CSI Driver will correctly set permissions for cache folder, respect `fsGroup` and configure `mountOptions` automatically. You shouldn't have to do anything unless you're relying on Mountpoint process to run as root, which shouldn't be needed if you previously had to set up that way. Feel free to create an issue if you still need to rely on Mountpoint process' `uid`.
 
-## FAQ
-
-### How can I upgrade to v2 from v1?
+## Upgrading to v2
 
 After making necessary changes for the breaking changes described in the [changes](#changes) section, you can follow regular [Installing Mountpoint for Amazon S3 CSI Driver](INSTALL.md) guidance to install the CSI Driver v2 with a method of your choosing.
 
 We recommend [configuring `nodeSelector` for the controller component](INSTALL.md#configuring-nodeSelector-for-the-controller-component) starting with v2.
+
+## FAQ
+
+### How can I upgrade to v2 from v1?
 
 - Do I need to uninstall Mountpoint CSI Driver v1?
   - No, just upgrading Mountpoint CSI Driver to v2 should be enough. The new workloads created after the upgrade will use the new mechanism.
