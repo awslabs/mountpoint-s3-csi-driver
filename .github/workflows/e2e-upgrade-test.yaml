@@ -1,0 +1,29 @@
+name: "E2E Upgrade Tests"
+
+on:
+  workflow_dispatch:
+    inputs:
+      old_version:
+        description: "Previous version to upgrade from (e.g., 1.14.1)"
+        required: true
+      new_version:
+        description: "New version to upgrade to (e.g., 2.0.0-beta)"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.old_version }}"
+  MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.new_version }}"
+
+jobs:
+  e2e:
+    name: E2E Upgrade Tests
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      environment: "trusted"
+      ref: ${{ github.ref }}
+      run_upgrade_tests: true
+    secrets: inherit
