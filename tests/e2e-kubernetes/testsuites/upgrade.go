@@ -186,17 +186,17 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		chartPath := pullCSIDriver(settings, cfg, helmChartPreviousVersion)
 		installCSIDriver(cfg, helmChartPreviousVersion, chartPath)
 
-		// Configure driver-level IRSA with "S3FullAccess" policy
-		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3FullAccess)
+		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
+		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
 		// Create two SAs for pod-level IRSA with "S3FullAccess" and "S3ReadOnlyAccess" policies
 		pliFullAccessSA, pliReadOnlyAccessSA := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess), createServiceAccountWithPolicy(ctx, iamPolicyS3ReadOnlyAccess)
 
 		// Create three workloads with different SAs
-		dliFullAccessPod := createPod(ctx, "default")
+		dliReadOnlyAccessPod := createPod(ctx, "default")
 		pliFullAccessPod := createPod(enablePLI(ctx), pliFullAccessSA.Name)
 		pliReadOnlyAccessPod := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
 
-		fullAccessPods, readOnlyAccessPods := []*v1.Pod{dliFullAccessPod, pliFullAccessPod}, []*v1.Pod{pliReadOnlyAccessPod}
+		fullAccessPods, readOnlyAccessPods := []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
 
 		// Write a sample files to writeable pods
 		seed := time.Now().UTC().UnixNano()
@@ -224,12 +224,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		upgradeCSIDriver(cfg, helmChartNewVersion, chartPath)
 
 		// Create new workloads after the upgrade
-		dliFullAccessPodNewVersion := createPod(ctx, "default")
+		dliReadOnlyAccessPodNewVersion := createPod(ctx, "default")
 		pliFullAccessPodNewVersion := createPod(enablePLI(ctx), pliFullAccessSA.Name)
 		pliReadOnlyAccessPodNewVersion := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
-		fullAccessPods = append(fullAccessPods, dliFullAccessPodNewVersion, pliFullAccessPodNewVersion)
-		readOnlyAccessPods = append(readOnlyAccessPods, pliReadOnlyAccessPodNewVersion)
-		for _, pod := range []*v1.Pod{dliFullAccessPodNewVersion, pliFullAccessPodNewVersion} {
+		fullAccessPods = append(fullAccessPods, pliFullAccessPodNewVersion)
+		readOnlyAccessPods = append(readOnlyAccessPods, dliReadOnlyAccessPodNewVersion, pliReadOnlyAccessPodNewVersion)
+		for _, pod := range []*v1.Pod{pliFullAccessPodNewVersion} {
 			checkWriteToPath(f, pod, testFile, testWriteSize, seed)
 			checkReadFromPath(f, pod, testFile, testWriteSize, seed)
 		}
