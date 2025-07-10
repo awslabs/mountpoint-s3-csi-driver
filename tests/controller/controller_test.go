@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,10 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/awslabs/aws-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 var _ = Describe("Mountpoint Controller", func() {
@@ -78,6 +79,29 @@ var _ = Describe("Mountpoint Controller", func() {
 
 				waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
 				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
+			})
+
+			It("should not create S3PodAttachment or Mountpoint Pod for an already Running workload pod", func() {
+				vol := createVolume()
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				// Simulate systemd mount from v1 by marking Pod as Running and deleting previously created s3pa and MP Pod
+				s3pa, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+				Expect(k8sClient.Delete(ctx, s3pa)).To(Succeed())
+				waitForObjectToDisappear(s3pa)
+				pod.Pod.Status.Phase = corev1.PodRunning
+				Expect(k8sClient.Status().Update(ctx, pod.Pod)).To(Succeed())
+				waitForObject(pod.Pod, func(g Gomega, pod *corev1.Pod) {
+					g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+				})
+
+				// Verify that no S3PodAttachment was created
+				expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol.pv))
 			})
 		})
 
@@ -701,7 +725,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 
@@ -736,7 +760,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
@@ -774,7 +798,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
@@ -958,6 +982,161 @@ var _ = Describe("Mountpoint Controller", func() {
 
 			mountpointPod.succeed()
 			waitForObjectToDisappear(mountpointPod.Pod)
+		})
+
+		Context("Caching configuration", func() {
+			It("should configure emptyDir cache through mount options", func() {
+				vol := createVolume(withMountOptions([]string{"cache /mp-cache-dir"}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should configure emptyDir cache with size limit and memory medium", func() {
+				sizeLimit := "1Gi"
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                  "emptyDir",
+					"cacheEmptyDirSizeLimit": sizeLimit,
+					"cacheEmptyDirMedium":    "Memory",
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+						Medium:    corev1.StorageMediumMemory,
+					},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should configure ephemeral cache", func() {
+				storageClassName := "test-storage-class"
+				storageRequest := "1Gi"
+
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageClassName":       storageClassName,
+					"cacheEphemeralStorageResourceRequest": storageRequest,
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"s3.csi.aws.com/type": "local-ephemeral-cache",
+								},
+							},
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+								StorageClassName: &storageClassName,
+								VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse(storageRequest),
+									},
+								},
+							},
+						},
+					},
+				})
+
+				mountpointPod.succeed()
+				waitForObjectToDisappear(mountpointPod.Pod)
+			})
+
+			It("should fail if both mount options and volume attributes are used to configure cache", func() {
+				vol := createVolume(
+					withVolumeAttributes(map[string]string{
+						"cache": "emptyDir",
+					}),
+					withMountOptions([]string{"cache /mp-cache-dir"}),
+				)
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if ephemeral cache is configured without a storage class name", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageResourceRequest": "1Gi",
+					// No cacheEphemeralStorageClassName provided
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if ephemeral cache is configured without a storage resource request", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                          "ephemeral",
+					"cacheEphemeralStorageClassName": "test-storage-class",
+					// No cacheEphemeralStorageResourceRequest provided
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail if ephemeral cache is configured with invalid resource request", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache":                                "ephemeral",
+					"cacheEphemeralStorageClassName":       "test-storage-class",
+					"cacheEphemeralStorageResourceRequest": "invalid-size",
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
+
+			It("should fail with invalid cache type", func() {
+				vol := createVolume(withVolumeAttributes(map[string]string{
+					"cache": "invalid-cache-type",
+				}))
+				vol.bind()
+
+				pod := createPod(withPVC(vol.pvc))
+				pod.schedule(testNode)
+
+				expectNoS3PodAttachmentWithFields(map[string]string{"NodeName": testNode})
+			})
 		})
 
 		It("should use configured resource requests and limits in PV", func() {
@@ -1170,6 +1349,13 @@ func withVolumeAttributes(volAttributes map[string]string) volumeModifier {
 	}
 }
 
+// withMountOptions returns a `volumeModifier` that updates volume to have given mount options.
+func withMountOptions(mountOptions []string) volumeModifier {
+	return func(v *testVolume) {
+		v.pv.Spec.MountOptions = mountOptions
+	}
+}
+
 // createVolume creates a new pair of unbounded PV and PVC.
 func createVolume(modifiers ...volumeModifier) *testVolume {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
@@ -1237,7 +1423,7 @@ func waitForMountpointPodWithName(mpPodName string) *testPod {
 // expectNoS3PodAttachmentWithFields verifies that no MountpointS3PodAttachment matching specified fields exists within a time period
 func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 	Consistently(func(g Gomega) {
-		list := &crdv1beta.MountpointS3PodAttachmentList{}
+		list := &crdv2beta.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1250,7 +1436,7 @@ func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 }
 
 // expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodAttachments map
-func expectNoPodUIDInS3PodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, podUID string) {
+func expectNoPodUIDInS3PodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, podUID string) {
 	mpPodName := findMountpointPodNameForWorkload(s3pa, podUID)
 	Expect(mpPodName).To(BeEmpty(), "Found pod UID %s in S3PodAttachment when none was expected: %#v", podUID, s3pa)
 }
@@ -1262,7 +1448,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(
 	vol *testVolume,
 	pod *testPod,
 	expectedFields map[string]string,
-) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
@@ -1275,7 +1461,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	node string,
 	vol *testVolume,
 	pod *testPod,
-) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv))
 }
 
@@ -1287,7 +1473,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(
 	pod *testPod,
 	minVersion string,
 	expectedFields map[string]string,
-) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, minVersion)
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
@@ -1301,17 +1487,17 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 	vol *testVolume,
 	pod *testPod,
 	minVersion string,
-) (*crdv1beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	return waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod, minVersion, defaultExpectedFields(testNode, vol.pv))
 }
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
-func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
+func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
 	GinkgoHelper()
 
 	podUID := string(pod.UID)
 	// Wait until workload is assigned to `s3pa`
-	waitForObject(s3pa, func(g Gomega, s3pa *crdv1beta.MountpointS3PodAttachment) {
+	waitForObject(s3pa, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
 		g.Expect(findMountpointPodNameForWorkload(s3pa, podUID)).ToNot(BeEmpty())
 	})
 
@@ -1332,7 +1518,7 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv1beta.MountpointS3Pod
 
 // findMountpointPodNameForWorkload tries to found Mountpoint Pod name that `workloadUID` is assigned to in given `s3pa`,
 // it returns an empty string if not.
-func findMountpointPodNameForWorkload(s3pa *crdv1beta.MountpointS3PodAttachment, workloadUID string) string {
+func findMountpointPodNameForWorkload(s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string) string {
 	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {
@@ -1391,12 +1577,12 @@ func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
 func waitForS3PodAttachmentWithFields(
 	expectedFields map[string]string,
 	minResourceVersion string,
-	verifiers ...func(Gomega, *crdv1beta.MountpointS3PodAttachment),
-) *crdv1beta.MountpointS3PodAttachment {
-	var matchedCR *crdv1beta.MountpointS3PodAttachment
+	verifiers ...func(Gomega, *crdv2beta.MountpointS3PodAttachment),
+) *crdv2beta.MountpointS3PodAttachment {
+	var matchedCR *crdv2beta.MountpointS3PodAttachment
 
 	Eventually(func(g Gomega) {
-		list := &crdv1beta.MountpointS3PodAttachmentList{}
+		list := &crdv2beta.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1430,7 +1616,7 @@ func waitForS3PodAttachmentWithFields(
 }
 
 // matchesSpec checks whether MountpointS3PodAttachmentSpec matches `expected` fields
-func matchesSpec(spec crdv1beta.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
+func matchesSpec(spec crdv2beta.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
 	specValues := map[string]string{
 		"NodeName":                         spec.NodeName,
 		"PersistentVolumeName":             spec.PersistentVolumeName,
@@ -1475,6 +1661,44 @@ func waitForObjectToDisappear(obj client.Object) {
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Expected not found error but fond: %v", err)
 		}
 	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+}
+
+// verifyLocalCacheVolume verifies that the Mountpoint pod has a cache volume configured correctly
+func verifyLocalCacheVolume(mpPod *corev1.Pod, expected corev1.VolumeSource) {
+	GinkgoHelper()
+
+	// Verify cache volume is configured
+	cacheVol := findVolumeFromPod(mpPod, mppod.LocalCacheDirName)
+	Expect(cacheVol).NotTo(BeNil(), "pod should have a cache volume with name %q", mppod.LocalCacheDirName)
+	Expect(cacheVol.Name).To(Equal(mppod.LocalCacheDirName))
+	Expect(cacheVol.VolumeSource).To(Equal(expected))
+
+	// Verify cache volume is mounted
+	mpContainer := mpPod.Spec.Containers[0]
+	cacheMount := findVolumeMountFromContainer(mpContainer, mppod.LocalCacheDirName)
+	Expect(cacheMount).NotTo(BeNil(), "container should have a cache mount with name %q", mppod.LocalCacheDirName)
+	Expect(cacheMount.Name).To(Equal(mppod.LocalCacheDirName))
+	Expect(cacheMount.MountPath).To(Equal(filepath.Join("/", mppod.LocalCacheDirName)))
+}
+
+// findVolumeFromPod tries to find a specific volume name in pod's `Volumes`.
+func findVolumeFromPod(pod *corev1.Pod, name string) *corev1.Volume {
+	for i := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[i].Name == name {
+			return &pod.Spec.Volumes[i]
+		}
+	}
+	return nil
+}
+
+// findVolumeMountFromContainer tries to find a specific `name` in container's `VolumeMounts`.
+func findVolumeMountFromContainer(container corev1.Container, name string) *corev1.VolumeMount {
+	for i := range container.VolumeMounts {
+		if container.VolumeMounts[i].Name == name {
+			return &container.VolumeMounts[i]
+		}
+	}
+	return nil
 }
 
 // generateRandomNodeName generates random node name

@@ -115,6 +115,8 @@ spec:
             {{- if .Values.experimental.podMounter }}
             - name: MOUNTER_KIND
               value: pod
+            - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
+              value: "{{ .Values.supportLegacySystemDMounts }}"
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
@@ -153,7 +155,8 @@ spec:
               mountPropagation: HostToContainer
               {{- end }}
             - name: systemd-bus
-              mountPath: /run/systemd/private
+              mountPath: /run/systemd
+              mountPropagation: HostToContainer
             - name: host-dev
               mountPath: /host/dev
           ports:
@@ -234,8 +237,8 @@ spec:
             type: DirectoryOrCreate
         - name: systemd-bus
           hostPath:
-            path: /run/systemd/private
-            type: Socket
+            path: /run/systemd
+            type: Directory
         - name: kubelet-dir
           hostPath:
             path: {{ .Values.node.kubeletPath }}

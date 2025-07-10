@@ -22,6 +22,7 @@ const (
 	ArgFileMode        = "--file-mode"
 	ArgDebug           = "--debug"
 	ArgDebugCRT        = "--debug-crt"
+	ArgFsTab           = "-o"
 )
 
 // An ArgKey represents the key of an argument.

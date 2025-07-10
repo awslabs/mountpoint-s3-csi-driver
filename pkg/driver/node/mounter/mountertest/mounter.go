@@ -5,7 +5,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 // OpenDevNull opens `/dev/null` and returns the file handle.

@@ -5,10 +5,13 @@ Mountpoint specific configuration.
 
 ## Static Provisioning
 
-The driver only supports Static Provisioning as of today, and you need an existing S3 Bucket to use.
+The CSI driver supports only static provisioning for an existing S3 bucket.
+Supported bucket types include general purpose, directory, and Outposts buckets.
+In the 'bucketName' field, provide the full S3 bucket name.
+For Outposts buckets, only access point ARN or alias is supported.
 
-To use Static Provisioning, you should set `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (empty string).
-Also, in order to make sure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
+To use Static Provisioning, set the `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (an empty string).
+To ensure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
 
 ```yaml
 apiVersion: v1
@@ -25,6 +28,8 @@ spec:
     driver: s3.csi.aws.com
     volumeHandle: s3-csi-driver-volume # Must be unique
     ...
+    volumeAttributes:
+      bucketName: amzn-s3-demo-bucket # Replace with your bucket name
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -39,7 +44,9 @@ spec:
 See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
 
 > [!IMPORTANT]
-> You need to make sure that `volumeHandle` of your PV is unique, this is needed because Kubernetes will only process a volume once per its `volumeHandle`. If multiple PVs uses the same `volumeHandle`, only one will get processed. See [I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide for more information.
+> Ensure that your volumeHandle is unique, since Kubernetes only processes a volume once per `volumeHandle`.
+> If multiple PVs use the same `volumeHandle`, only one is processed.
+> For more information, see ["I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status"](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide.
 
 ## AWS Credentials
 

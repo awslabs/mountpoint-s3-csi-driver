@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
 	corev1 "k8s.io/api/core/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -61,7 +61,7 @@ func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
 	}
 
 	// Get all MountpointS3PodAttachments
-	s3paList := &crdv1beta.MountpointS3PodAttachmentList{}
+	s3paList := &crdv2beta.MountpointS3PodAttachmentList{}
 	if err := cm.reconciler.List(ctx, s3paList); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
 // and the attachment is older than staleAttachmentThreshold (this is to avoid race condition with reconciler).
 // If a Mountpoint Pod has zero attachments after cleanup, "s3.csi.aws.com/needs-unmount" annotation is added and its entry in S3PodAttachment is deleted.
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
-func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv1beta.MountpointS3PodAttachment, existingPods map[string]struct{}) error {
+func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, existingPods map[string]struct{}) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
 	modified := false
 
@@ -90,7 +90,7 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 
 	// Check each mountpoint pod's attachments
 	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
-		var validAttachments []crdv1beta.WorkloadAttachment
+		var validAttachments []crdv2beta.WorkloadAttachment
 
 		for _, attachment := range attachments {
 			// Check if pod exists and attachment is not too new

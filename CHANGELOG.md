@@ -1,5 +1,14 @@
 # Unreleased
 
+# v1.15.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.15.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.19.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.19.0)
+  * Mountpoint for Amazon S3 adds support for renaming files using the RenameObject API when mounting directory buckets in S3 Express One Zone. ([mountpoint-s3#1468](https://github.com/awslabs/mountpoint-s3/pull/1468))
+* Re-create dbus connection to systemd when connection is lost. ([#512](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/512))
+
 # v1.14.1
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.14.1/README.md)
@@ -145,5 +154,5 @@
 ### Notable changes
 * Initial release to support using [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3) to mount S3 buckets as a persistent volume in your kubernetes cluster
     * Mountpoint Version: 1.1.1
-* Add support for Static Provisioning ([#2](https://github.com/awslabs/aws-s3-csi-driver/pull/2), [#4](https://github.com/awslabs/aws-s3-csi-driver/pull/4))
-* Add helm install  ([#8](https://github.com/awslabs/aws-s3-csi-driver/pull/8))
+* Add support for Static Provisioning ([#2](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/2), [#4](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/4))
+* Add helm install  ([#8](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/8))

@@ -11,7 +11,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -21,7 +24,7 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes/s3client"
+	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 )
 
 const volumeName1 = "volume1"
@@ -98,7 +101,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		checkWriteToPath(f, pod, first, testWriteSize, seed)
 		checkListingPathWithEntries(f, pod, basePath, []string{"first"})
 		// Test reading multiple times to ensure cached-read works
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			checkReadFromPath(f, pod, first, testWriteSize, seed)
 		}
 
@@ -108,7 +111,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		// Ensure the data still read from the cache - without cache this would fail as its removed from underlying bucket
 		checkReadFromPath(f, pod, first, testWriteSize, seed)
 
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s", dir, dir, second))
+		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
 		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
 		checkListingPathWithEntries(f, pod, dir, []string{"second"})
 		checkListingPathWithEntries(f, pod, basePath, []string{"test-dir"})
@@ -134,28 +137,62 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		return pod, bucketName
 	}
 
+	type localCacheKind string
+	const (
+		localCacheUnspecified  localCacheKind = ""
+		localCacheMountOptions                = "localCacheMountOptions"
+		localCacheEmptyDir                    = "localCacheEmptyDir"
+		localCacheEBSEphemeral                = "localCacheEBSEphemeral"
+	)
+
 	type cacheTestConfig struct {
-		useLocalCache   bool
+		localCacheKind  localCacheKind
 		useExpressCache bool
 	}
 
 	testCache := func(config cacheTestConfig) {
 		var baseMountOptions []string
 		var basePodModifiers []func(*v1.Pod)
+		var enhanceContext func(context.Context) context.Context
 		var expressCacheBucketName string
 
 		BeforeEach(func(ctx context.Context) {
 			// Reset shared configuration on each run
 			baseMountOptions = nil
 			basePodModifiers = nil
+			enhanceContext = func(ctx context.Context) context.Context { return ctx }
 			expressCacheBucketName = ""
 
-			if config.useLocalCache {
+			switch config.localCacheKind {
+			case localCacheMountOptions:
 				cacheDir := randomCacheDir()
-				basePodModifiers = append(basePodModifiers, func(pod *v1.Pod) {
-					ensureCacheDirExistsInNode(pod, cacheDir)
-				})
+
+				if !IsPodMounter {
+					// This hacky workaround is only needed for `SystemdMounter`,
+					// `PodMounter` will automatically create cache folder within the Mountpoint Pod.
+					basePodModifiers = append(basePodModifiers, func(pod *v1.Pod) {
+						ensureCacheDirExistsInNode(pod, cacheDir)
+					})
+				}
+
 				baseMountOptions = append(baseMountOptions, fmt.Sprintf("cache %s", cacheDir))
+			case localCacheEmptyDir:
+				enhanceContext = func(ctx context.Context) context.Context {
+					return contextWithVolumeAttributes(ctx, map[string]string{
+						"cache":                  "emptyDir",
+						"cacheEmptyDirSizeLimit": "32Mi",
+						"cacheEmptyDirMedium":    "Memory",
+					})
+				}
+			case localCacheEBSEphemeral:
+				scName := createEBSCacheSC(ctx, f)
+				enhanceContext = func(ctx context.Context) context.Context {
+					return contextWithVolumeAttributes(ctx, map[string]string{
+						"cache":                                "ephemeral",
+						"cacheEphemeralStorageClassName":       scName,
+						"cacheEphemeralStorageResourceRequest": "10Mi",
+					})
+				}
 			}
 
 			if config.useExpressCache {
@@ -168,6 +205,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("basic file operations as root", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			mountOptions := append(baseMountOptions, "allow-delete")
 			podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 				pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -179,6 +218,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("basic file operations as non-root", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			mountOptions := append(baseMountOptions,
 				"allow-delete",
 				"allow-other",
@@ -191,6 +232,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		It("two containers in the same pod using the same cache", func(ctx context.Context) {
+			ctx = enhanceContext(ctx)
+
 			testFile := filepath.Join(e2epod.VolumeMountPath1, "helloworld.txt")
 
 			mountOptions := append(baseMountOptions, "allow-delete")
@@ -217,8 +260,10 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		// If we're testing multi-level cache, add two more test cases:
 		// 	1) Ensure it still works if local-cache is wiped out
 		// 	1) Ensure it still works if Express-cache is wiped out
-		if config.useLocalCache && config.useExpressCache {
+		if config.localCacheKind != localCacheUnspecified && config.useExpressCache {
 			It("should use Express cache if local cache is empty", func(ctx context.Context) {
+				ctx = enhanceContext(ctx)
+
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -234,7 +279,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				checkWriteToPath(f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 
@@ -243,12 +288,14 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				e2evolume.VerifyExecInPodSucceed(f, pod, "rm -rf /cache/*")
 
 				// Reading should still work
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 			})
 
 			It("should use local cache if Express cache is empty", func(ctx context.Context) {
+				ctx = enhanceContext(ctx)
+
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
 					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
@@ -264,7 +311,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				checkWriteToPath(f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 
@@ -273,7 +320,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 				s3client.New().WipeoutBucket(ctx, expressCacheBucketName)
 
 				// Reading should still work
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					checkReadFromPath(f, pod, first, testWriteSize, seed)
 				}
 			})
@@ -281,21 +328,71 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 	}
 
 	Describe("Cache", func() {
-		Describe("Local", func() {
-			testCache(cacheTestConfig{
-				useLocalCache: true,
+		Describe("MountOptions (Legacy)", func() {
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCacheMountOptions,
+				})
+			})
+
+			Describe("Multi-Level", Serial, func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCacheMountOptions,
+					useExpressCache: true,
+				})
+			})
+		})
+
+		Describe("EmptyDir", func() {
+			BeforeEach(func() {
+				if !IsPodMounter {
+					Skip("Skipping `emptyDir` cache tests for `SystemdMounter`")
+				}
+			})
+
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCacheEmptyDir,
+				})
+			})
+
+			Describe("Multi-Level", Serial, func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCacheEmptyDir,
+					useExpressCache: true,
+				})
+			})
+		})
+
+		Describe("EBS Ephemeral Volume", Ordered, Serial, func() {
+			BeforeAll(func(ctx context.Context) {
+				if ebsCSIDriverDaemonSet(ctx, f) == nil {
+					Skip("EBS CSI Driver is not installed, skipping EBS ephemeral volume cache tests")
+				}
+			})
+
+			BeforeEach(func() {
+				if !IsPodMounter {
+					Skip("Skipping `ephemeral` cache tests for `SystemdMounter`")
+				}
+			})
+
+			Describe("Local", func() {
+				testCache(cacheTestConfig{
+					localCacheKind: localCacheEBSEphemeral,
+				})
+			})
+
+			Describe("Multi-Level", func() {
+				testCache(cacheTestConfig{
+					localCacheKind:  localCacheEBSEphemeral,
+					useExpressCache: true,
+				})
 			})
 		})
 
 		Describe("Express", Serial, func() {
 			testCache(cacheTestConfig{
-				useExpressCache: true,
-			})
-		})
-
-		Describe("Multi-Level", Serial, func() {
-			testCache(cacheTestConfig{
-				useLocalCache:   true,
 				useExpressCache: true,
 			})
 		})
@@ -315,6 +412,46 @@ func deleteObjectFromS3(ctx context.Context, bucket string, key string) {
 
 func randomCacheDir() string {
 	return filepath.Join("/tmp/mp-cache", uuid.New().String())
+}
+
+// createEBSCacheSC creates a StorageClass to provision an EBS volume as local-cache.
+// It automatically cleans up SC after the test-case.
+func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
+	scName := f.UniqueName + "-sc"
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: scName,
+		},
+		Provisioner:       "ebs.csi.aws.com",
+		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
+		ReclaimPolicy:     ptr.To(v1.PersistentVolumeReclaimDelete),
+		Parameters: map[string]string{
+			"encrypted": "true",
+		},
+	}
+
+	framework.Logf("Creating StorageClass %s with EBS CSI Driver provisioner", scName)
+	_, err := f.ClientSet.StorageV1().StorageClasses().Create(ctx, sc, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create StorageClass for cache")
+
+	DeferCleanup(func(ctx context.Context) {
+		framework.Logf("Deleting StorageClass %s", scName)
+		err := f.ClientSet.StorageV1().StorageClasses().Delete(ctx, scName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
+	})
+
+	return scName
+}
+
+// ebsCSIDriverDaemonSet returns the DaemonSet of EBS CSI Driver if its installed in the cluster.
+func ebsCSIDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
+	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := client.Get(ctx, "ebs-csi-node", metav1.GetOptions{})
+	if err != nil {
+		return nil
+	}
+	return ds
 }
 
 // ensureCacheDirExistsInNode adds a hostPath for given `cacheDir` with `DirectoryOrCreate` type.

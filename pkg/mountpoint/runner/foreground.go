@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 )
 
 // ErrMissingBinaryPath is returned when Mountpoint binary path is empty.
@@ -24,7 +24,7 @@ type ForegroundOptions struct {
 	// Name of the S3 Bucket to mount.
 	BucketName string
 	// FUSE file descriptor for Mountpoint process to communicate with the kernel.
-	// Can be obtained using `github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter` package.
+	// Can be obtained using `github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter` package.
 	Fd int
 	// Mountpoint arguments.
 	Args mountpoint.Args
@@ -52,6 +52,7 @@ func RunInForeground(opts ForegroundOptions) (ExitCode, []byte, error) {
 	if fuseDev == nil {
 		return 0, nil, fmt.Errorf("runner: passed file descriptor %d is not a valid FUSE file descriptor", opts.Fd)
 	}
+	defer fuseDev.Close()
 
 	mountpointArgs := opts.Args
 

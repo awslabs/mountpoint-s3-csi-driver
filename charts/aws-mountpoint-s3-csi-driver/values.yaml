@@ -9,7 +9,7 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1.14.1"
+  tag: "v1.15.0"
 
 node:
   kubeletPath: /var/lib/kubelet
@@ -108,6 +108,13 @@ awsAccessSecret:
 # Source code: https://github.com/aws/eks-pod-identity-agent/blob/8bd71a236522993f02427083e485c83f6ae4fe31/configuration/config.go
 eksPodIdentityAgent:
   containerCredentialsFullURI: "http://169.254.170.23/v1/credentials"
+
+# CSI Driver v2 only: If enabled, the driver will continue supporting S3 volumes that were mounted by v1 (SystemD mounts),
+# including credential refresh, cleanup, and unmounting these legacy volumes.
+# You can set this feature to false for fresh clusters with no v1 volumes,
+# or if you've migrated all workloads using S3 volumes after upgrading to v2.
+# TODO: Remove this in v3 as systemd mount support will be discontinued
+supportLegacySystemDMounts: true
 
 experimental:
   podMounter: false

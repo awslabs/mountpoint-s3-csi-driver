@@ -13,14 +13,12 @@ env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-  KOPS_STATE_FILE: "s3://${{ vars.KOPS_STATE_FILE }}"
-  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
 jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
   delete_cluster:
-    needs: [ "build_matrix" ]
+    needs: ["build_matrix"]
     strategy:
       # Failing fast causes some resources created during the test to leak,
       # so we disable it to ensure all resources created during test are properly cleaned up.

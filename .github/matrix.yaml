@@ -1,8 +1,9 @@
 matrix:
-  cluster-type: [ "eksctl", "kops" ]
-  arch: [ "x86", "arm" ]
-  family: [ "AmazonLinux2", "Bottlerocket" ]
-  kubernetes-version: [ "1.28.13", "1.29.8", "1.30.4", "1.31.0", "1.32.1" ]
+  cluster-type: ["eksctl"]
+  arch: ["x86", "arm"]
+  family: ["AmazonLinux2", "AmazonLinux2023", "Bottlerocket"]
+  kubernetes-version:
+    ["1.28.13", "1.29.8", "1.30.4", "1.31.0", "1.32.1", "1.33.2"]
   include:
     # Ubuntu2004 supported for EKS <= 1.29 and Ubuntu2204 supported for EKS >= 1.29.
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
@@ -26,32 +27,23 @@ matrix:
       arch: "arm"
       family: "Ubuntu2204"
       kubernetes-version: "1.32.1"
+    # TODO: Enable this once EKS 1.33 Ubuntu AMI is available.
+    # - cluster-type: "eksctl"
+    #   arch: "arm"
+    #   family: "Ubuntu2204"
+    #   kubernetes-version: "1.33.2"
     # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
     # field rather than trying to exclude all other variants.
-    - cluster-type: "kops"
-      arch: "arm"
-      family: "AmazonLinux2023"
-      kubernetes-version: "1.28.13"
-      selinux-mode: "enforcing"
     - cluster-type: "eksctl"
       arch: "x86"
       family: "AmazonLinux2023"
       kubernetes-version: "1.32.1"
       selinux-mode: "enforcing"
   exclude:
-    - cluster-type: "kops"
-      family: "Bottlerocket"
     - cluster-type: "eksctl"
       arch: "arm"
       family: "Bottlerocket"
-    # Our tests are failing on clusters created with kops 1.29+.
-    # Until we fix that issue, we use kops 1.28 which only supports k8s versions up to 1.28.
-    # So, we only run our tests in k8s versions 1.29 and 1.30 on eksctl.
-    - cluster-type: "kops"
-      kubernetes-version: "1.29.8"
-    - cluster-type: "kops"
-      kubernetes-version: "1.30.4"
-    - cluster-type: "kops"
-      kubernetes-version: "1.31.0"
-    - cluster-type: "kops"
-      kubernetes-version: "1.32.1"
+    # AL2 is not supported by Kubernetes 1.33.
+    - cluster-type: "eksctl"
+      family: "AmazonLinux2"
+      kubernetes-version: "1.33.2"

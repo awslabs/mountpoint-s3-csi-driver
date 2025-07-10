@@ -1,5 +1,15 @@
 # Mountpoint for Amazon S3 CSI Driver
 
+> [!TIP]
+> We’re planning to release version 2.0 of the Mountpoint for Amazon S3 CSI Driver in the upcoming months.
+>
+> We have released a v2 beta to enable wider community testing of the upcoming v2. Please note that this beta release is intended for experimental use and its adoption in production environments is not recommended.
+> This Beta release is under active development and has not completed testing and review for performance, reliability, and security. Please refer to [Unstable Releases](https://github.com/awslabs/mountpoint-s3-csi-driver?tab=readme-ov-file#unstable-releases) for more information.
+> Any testing is appreciated, however, we are especially interested in getting your feedback on how the beta CSI v2.0 driver performs with large scale workloads. The v2 beta should be tested on a fresh cluster.
+>
+> See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for more details.
+
+
 ## Overview
 The Mountpoint for Amazon S3 Container Storage Interface (CSI) Driver allows your Kubernetes applications to access Amazon S3 objects through a file system interface. Built on [Mountpoint for Amazon S3](https://github.com/awslabs/mountpoint-s3), the Mountpoint CSI driver presents an Amazon S3 bucket as a storage volume accessible by containers in your Kubernetes cluster. The Mountpoint CSI driver implements the [CSI](https://github.com/container-storage-interface/spec/blob/master/spec.md) specification for container orchestrators (CO) to manage storage volumes.
 
@@ -14,13 +24,14 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.14.1        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.1                      |
+| v1.15.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.15.0                      |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v1.14.1        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.1                      |
 | v1.14.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.0                      |
 | v1.13.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.13.0                      |
 | v1.12.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.12.0                      |
@@ -89,10 +100,18 @@ The following table provides the support status for various distros with regards
 
 We welcome contributions to the Mountpoint for Amazon S3 CSI driver! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more information on how to report bugs or submit pull requests.
 
-### Security
+## Security
 
 If you discover a potential security issue in this project we ask that you notify AWS Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public GitHub issue.
 
-### Code of conduct
+## Code of conduct
 
 This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct). See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for more details.
+
+## License
+
+This project is licensed under the Apache-2.0 License. It builds on a number of other awesome projects with open source licenses, and licenses for other projects can be found under the following locations in the CSI Driver's container image:
+
+- Linux packages under `/usr/share/licenses/*`
+- The CSI Driver's Go dependencies under `/LICENSES/*` (starting from v1.15.0)
+- Mountpoint's Rust dependencies under `/mountpoint-s3/THIRD_PARTY_LICENSES`

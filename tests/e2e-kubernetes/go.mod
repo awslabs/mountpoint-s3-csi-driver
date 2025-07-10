@@ -1,6 +1,6 @@
-module github.com/awslabs/aws-s3-csi-driver/tests/e2e-kubernetes
+module github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes
 
-go 1.24
+go 1.24.4
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/iam v1.34.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.47.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.7
-	github.com/awslabs/aws-s3-csi-driver v1.14.0
+	github.com/awslabs/mountpoint-s3-csi-driver v1.14.0
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
@@ -20,7 +20,7 @@ require (
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 )
 
-replace github.com/awslabs/aws-s3-csi-driver => ../../
+replace github.com/awslabs/mountpoint-s3-csi-driver => ../../
 
 require (
 	github.com/NYTimes/gziphandler v1.1.1 // indirect

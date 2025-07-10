@@ -3,14 +3,14 @@ package mounter
 import (
 	"context"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type FakeCache struct {
-	TestItems []crdv1beta.MountpointS3PodAttachment
+	TestItems []crdv2beta.MountpointS3PodAttachment
 }
 
 func (f *FakeCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -18,7 +18,7 @@ func (f *FakeCache) Get(ctx context.Context, key client.ObjectKey, obj client.Ob
 }
 
 func (f *FakeCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	s3paList := list.(*crdv1beta.MountpointS3PodAttachmentList)
+	s3paList := list.(*crdv2beta.MountpointS3PodAttachmentList)
 	s3paList.Items = f.TestItems
 	return nil
 }

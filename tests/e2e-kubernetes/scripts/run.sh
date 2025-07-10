@@ -12,7 +12,6 @@ IMAGE_NAME=${IMAGE_NAME:-}
 TAG=${TAG:-}
 
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-source "${BASE_DIR}"/kops.sh
 source "${BASE_DIR}"/eksctl.sh
 source "${BASE_DIR}"/helm.sh
 
@@ -21,20 +20,17 @@ BIN_DIR=${TEST_DIR}/bin
 KUBECTL_INSTALL_PATH=/usr/local/bin
 
 HELM_BIN=${BIN_DIR}/helm
-KOPS_BIN=${BIN_DIR}/kops
 EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
-CLUSTER_TYPE=${CLUSTER_TYPE:-kops}
+CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 SELINUX_MODE=${SELINUX_MODE:-}
 
-# kops: must include patch version (e.g. 1.19.1)
 # eksctl: mustn't include patch version (e.g. 1.19)
 # 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
 K8S_VERSION=${K8S_VERSION:-1.30.4}
-K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION}}
 K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 # We need to ensure that we're using all testing matrix variables in the cluster name
@@ -45,15 +41,12 @@ if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
     CLUSTER_NAME="${CLUSTER_NAME}-${K8S_VERSION_EKSCTL/./-}"
 else
-    # In kops, cluster names must end with ".k8s.local" to use Gossip DNS.
-    # See https://kops.sigs.k8s.io/gossip/#configuring-a-cluster-to-use-gossip
-    # They also need to be valid domain names, that's why we're lowercasing "CLUSTER_NAME" and replacing "." with "-".
-    CLUSTER_NAME="${CLUSTER_NAME,,}-${K8S_VERSION_KOPS//./-}.k8s.local"
+    echo "Unsupported cluster type: ${CLUSTER_TYPE}."
+    exit 1
 fi
 
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
-KOPS_VERSION=1.28.5
 ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
 NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
@@ -66,18 +59,11 @@ fi
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
 AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
-KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-${BASE_DIR}/kops-patch.yaml}
-KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-${BASE_DIR}/kops-patch-node.yaml}
-KOPS_STATE_FILE=${KOPS_STATE_FILE:-"s3://mountpoint-s3-csi-driver-kops-state-store"}
-KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=${KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE:-${BASE_DIR}/kops-patch-node-selinux-enforcing.yaml}
-if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
-    KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE=""
-fi
 
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.202.0}
+EKSCTL_VERSION=${EKSCTL_VERSION:-0.210.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
 if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
@@ -115,10 +101,6 @@ function install_tools() {
 
   helm_install "$BIN_DIR"
 
-  kops_install \
-    "${BIN_DIR}" \
-    "${KOPS_VERSION}"
-
   eksctl_install \
     "${BIN_DIR}" \
     "${EKSCTL_VERSION}"
@@ -127,23 +109,7 @@ function install_tools() {
 }
 
 function create_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
-    kops_create_cluster \
-      "$CLUSTER_NAME" \
-      "$KOPS_BIN" \
-      "$ZONES" \
-      "$NODE_COUNT" \
-      "$INSTANCE_TYPE" \
-      "$AMI_ID" \
-      "$K8S_VERSION_KOPS" \
-      "$CLUSTER_FILE" \
-      "$KUBECONFIG" \
-      "$KOPS_PATCH_FILE" \
-      "$KOPS_PATCH_NODE_FILE" \
-      "$KOPS_STATE_FILE" \
-      "$SSH_KEY" \
-      "$KOPS_PATCH_NODE_SELINUX_ENFORCING_FILE"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
       "$REGION" \
@@ -162,13 +128,7 @@ function create_cluster() {
 }
 
 function delete_cluster() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
-    kops_delete_cluster \
-      "${KOPS_BIN}" \
-      "${CLUSTER_NAME}" \
-      "${KOPS_STATE_FILE}" \
-      "${FORCE:-}"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     eksctl_delete_cluster \
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
@@ -178,9 +138,7 @@ function delete_cluster() {
 }
 
 function update_kubeconfig() {
-  if [[ "${CLUSTER_TYPE}" == "kops" ]]; then
-    ${KOPS_BIN} export kubecfg --state "${KOPS_STATE_FILE}" "${CLUSTER_NAME}" --admin --kubeconfig "${KUBECONFIG}"
-  elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+  if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION} --kubeconfig=${KUBECONFIG}
   fi
 }

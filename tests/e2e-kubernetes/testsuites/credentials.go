@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/errors"
+	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2eevents "k8s.io/kubernetes/test/e2e/framework/events"
@@ -52,13 +53,13 @@ const (
 	// "AccessDenied" exceptions until they are in sync. We're retrying on "AccessDenied" as a workaround.
 	stsAssumeRoleTimeout              = 2 * time.Minute
 	stsAssumeRoleRetryCode            = "AccessDenied"
-	stsAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	stsAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	stsAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
 const (
 	eksauthAssumeRoleRetryCode            = "AccessDeniedException"
-	eksauthAssumeRoleRetryMaxAttemps      = 0 // This will cause SDK to retry indefinetly, but we do have a timeout on the operation
+	eksauthAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
 )
 
@@ -118,7 +119,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// 		2) EKS Pod Identity
 	//
 	// In our test environment we add "AmazonS3FullAccess" policy to our EC2 instances
-	// (see "eksctl-patch.json" and "kops-patch.yaml") which allows Driver-level 3) to work.
+	// (see "eksctl-patch.json") which allows Driver-level 3) to work.
 	// In order to test if other driver-level and pod-level credentials correctly work,
 	// we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
 	// in these test cases to ensure it does not fallback to Driver-level 3) credentials.
@@ -510,11 +511,15 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 		Describe("Pod Level", func() {
 			enablePodLevelIdentity := func(ctx context.Context) context.Context {
-				return contextWithAuthenticationSource(ctx, "pod")
+				return contextWithVolumeAttributes(ctx, map[string]string{
+					"authenticationSource": "pod",
+				})
 			}
 
 			enableDriverLevelIdentity := func(ctx context.Context) context.Context {
-				return contextWithAuthenticationSource(ctx, "driver")
+				return contextWithVolumeAttributes(ctx, map[string]string{
+					"authenticationSource": "driver",
+				})
 			}
 
 			// Helper functions related to IAM Roles for Service Accounts (IRSA)
@@ -1121,7 +1126,7 @@ func waitUntilRoleIsAssumableSTS[Input any, Output any](
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *sts.Options) {
 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, stsAssumeRoleRetryCode)
-		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, stsAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, stsAssumeRoleRetryMaxBackoffDelay)
 	})
 }
@@ -1133,7 +1138,7 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *eksauth.Options) {
 		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryCode)
-		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttemps)
+		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, eksauthAssumeRoleRetryMaxBackoffDelay)
 	})
 }
@@ -1239,11 +1244,29 @@ func deleteCredentialSecret(ctx context.Context, f *framework.Framework) error {
 
 //-- Service Account utils
 
-func annotateServiceAccountWithRole(sa *v1.ServiceAccount, roleARN string) {
-	if sa.Annotations == nil {
-		sa.Annotations = make(map[string]string)
-	}
-	sa.Annotations[roleARNAnnotation] = roleARN
+func annotateServiceAccountWithRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, error) {
+	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+	var latestSA *v1.ServiceAccount
+
+	// Need to retry on conflict because OpenShift automatically adds some annotations and labels to service accounts after creation.
+	err := k8sretry.RetryOnConflict(k8sretry.DefaultRetry, func() error {
+		// Get the latest version
+		var err error
+		latestSA, err = client.Get(ctx, sa.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if latestSA.Annotations == nil {
+			latestSA.Annotations = make(map[string]string)
+		}
+		latestSA.Annotations[roleARNAnnotation] = roleARN
+
+		latestSA, err = client.Update(ctx, latestSA, metav1.UpdateOptions{})
+		return err
+	})
+
+	return latestSA, err
 }
 
 // overrideServiceAccountRole overrides and updates given Service Account's EKS Role ARN annotation.
@@ -1252,24 +1275,15 @@ func annotateServiceAccountWithRole(sa *v1.ServiceAccount, roleARN string) {
 func overrideServiceAccountRole(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, roleARN string) (*v1.ServiceAccount, func(context.Context) error) {
 	originalRoleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Overriding ServiceAccount %s's role", sa.Name)
-
-	client := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
-	annotateServiceAccountWithRole(sa, roleARN)
-	sa, err := client.Update(ctx, sa, metav1.UpdateOptions{})
+	latestSA, err := annotateServiceAccountWithRole(ctx, f, sa, roleARN)
 	framework.ExpectNoError(err)
 
-	return sa, func(ctx context.Context) error {
-		sa, err := client.Get(ctx, sa.Name, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-
+	return latestSA, func(ctx context.Context) error {
 		framework.Logf("Restoring ServiceAccount %s's role", sa.Name)
-		annotateServiceAccountWithRole(sa, originalRoleARN)
-		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
+		_, err := annotateServiceAccountWithRole(ctx, f, sa, originalRoleARN)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 }
@@ -1333,9 +1347,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 	issuer, _ := configuration["issuer"].(string)
 
 	if !strings.HasPrefix(issuer, "https://oidc.") {
-		// For now, we only set up a _public_ OIDC provider via `eksctl`,
-		// with `kops` we're setting up a _local_ OIDC provider which wouldn't work with AWS IAM.
-		// So, we're ignoring non-EKS OIDC providers.
+		// For now, we only set up a _public_ OIDC provider via `eksctl`, and we're ignoring non-EKS OIDC providers.
 		return ""
 	}
 
@@ -1360,19 +1372,22 @@ func eksPodIdentityAgentDaemonSetForCluster(ctx context.Context, f *framework.Fr
 
 type contextKey string
 
-const authenticationSourceKey contextKey = "authenticationSource"
+const volumeAttributesKey contextKey = "volumeAttributes"
 
-// contextWithAdditionalVolumeAttributes enhances given context with given authentication source.
+// contextWithVolumeAttributes enhances given context with given volume attributes.
 // This value is used by `s3Volume.CreateVolume` and `s3Volume.GetPersistentVolumeSource`.
 //
 // This is kinda a magical way to pass values to those functions, but since Kubernetes Storage Test framework
 // does not allow us to passing extra values, this is the only way to achieve that without duplicating the framework code.
-func contextWithAuthenticationSource(ctx context.Context, authenticationSource string) context.Context {
-	return context.WithValue(ctx, authenticationSourceKey, authenticationSource)
+func contextWithVolumeAttributes(ctx context.Context, volumeAttributes map[string]string) context.Context {
+	return context.WithValue(ctx, volumeAttributesKey, volumeAttributes)
 }
 
-// AuthenticationSourceFromContext returns authentication source set for given context.
-func AuthenticationSourceFromContext(ctx context.Context) string {
-	val, _ := ctx.Value(authenticationSourceKey).(string)
+// VolumeAttributesFromContext returns volume attributes set for given context.
+func VolumeAttributesFromContext(ctx context.Context) map[string]string {
+	val, _ := ctx.Value(volumeAttributesKey).(map[string]string)
+	if val == nil {
+		val = make(map[string]string)
+	}
 	return val
 }

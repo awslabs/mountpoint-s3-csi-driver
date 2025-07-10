@@ -8,9 +8,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	credentialprovider "github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	mountpoint "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	system "github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mountpoint "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	system "github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
 )
 
@@ -106,17 +106,17 @@ func (mr *MockMounterMockRecorder) IsMountPoint(target interface{}) *gomock.Call
 }
 
 // Mount mocks base method.
-func (m *MockMounter) Mount(ctx context.Context, bucketName, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup, pvMountOptions string) error {
+func (m *MockMounter) Mount(ctx context.Context, bucketName, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Mount", ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions)
+	ret := m.ctrl.Call(m, "Mount", ctx, bucketName, target, credentialCtx, args, fsGroup)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Mount indicates an expected call of Mount.
-func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions interface{}) *gomock.Call {
+func (mr *MockMounterMockRecorder) Mount(ctx, bucketName, target, credentialCtx, args, fsGroup interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), ctx, bucketName, target, credentialCtx, args, fsGroup, pvMountOptions)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Mount", reflect.TypeOf((*MockMounter)(nil).Mount), ctx, bucketName, target, credentialCtx, args, fsGroup)
 }
 
 // Unmount mocks base method.

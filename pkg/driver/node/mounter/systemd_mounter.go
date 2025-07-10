@@ -10,11 +10,11 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/system"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
 )
 
 type SystemdMounter struct {
@@ -28,7 +28,7 @@ type SystemdMounter struct {
 }
 
 func NewSystemdMounter(credProvider *credentialprovider.Provider, mpMounter *mpmounter.Mounter, mpVersion string, kubernetesVersion string) (*SystemdMounter, error) {
-	runner, err := system.StartOsSystemdSupervisor()
+	runner, err := system.StartSystemdRunner(system.OsSystemdSupervisorFactory{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start systemd supervisor: %w", err)
 	}
@@ -58,7 +58,7 @@ func (m *SystemdMounter) IsMountPoint(target string) (bool, error) {
 //
 // This method will create the target path if it does not exist and if there is an existing corrupt
 // mount, it will attempt an unmount before attempting the mount.
-func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, _, _ string) error {
+func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, _ string) error {
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is empty")
 	}
@@ -68,6 +68,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	credentialCtx.SetAsSystemDMountpoint()
 	credentialCtx.SetWriteAndEnvPath(m.credentialWriteAndEnvPath())
 
 	cleanupDir := false
@@ -95,6 +96,7 @@ func (m *SystemdMounter) Mount(ctx context.Context, bucketName string, target st
 				WritePath: credentialCtx.WritePath,
 				PodID:     credentialCtx.WorkloadPodID,
 				VolumeID:  credentialCtx.VolumeID,
+				MountKind: credentialprovider.MountKindSystemd,
 			}); mntErr != nil {
 				return fmt.Errorf("Unable to unmount the target %q : %v, %v", target, err, mntErr)
 			}
@@ -146,6 +148,7 @@ func (m *SystemdMounter) Unmount(ctx context.Context, target string, credentialC
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	credentialCtx.SetAsSystemDMountpoint()
 	credentialCtx.WritePath, _ = m.credentialWriteAndEnvPath()
 
 	output, err := m.Runner.RunOneshot(timeoutCtx, &system.ExecConfig{

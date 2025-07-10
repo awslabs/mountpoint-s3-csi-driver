@@ -2,6 +2,7 @@
 package assert
 
 import (
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -21,5 +22,17 @@ func NoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("Expected no error, but got: %s", err)
+	}
+}
+
+// FileNotExists fails the test if the file at the given path exists.
+func FileNotExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	if err == nil {
+		t.Fatalf("Expected file %q to not exist, but it does", path)
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("Expected file %q to not exist, got unexpected error: %s", path, err)
 	}
 }

@@ -24,8 +24,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"k8s.io/klog/v2"
 )
 

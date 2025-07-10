@@ -1,15 +1,18 @@
 package credentialprovider
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/awsprofile"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -19,7 +22,7 @@ const (
 
 // provideFromDriver provides driver-level AWS credentials.
 func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
-	klog.V(4).Infof("credentialprovider: Using driver identity")
+	klog.V(4).Infof("credentialprovider: Using driver identity and %s mount kind", provideCtx.MountKind)
 
 	env := envprovider.Environment{}
 
@@ -38,13 +41,15 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 		env.Merge(longTermCredsEnv)
 	} else {
 		// Profile provider
-		// TODO: This is not officially supported and won't work by default with containerization.
-		klog.V(4).Infof("Providing credentials from driver with Profile provider")
-		configFile := os.Getenv(envprovider.EnvConfigFile)
-		sharedCredentialsFile := os.Getenv(envprovider.EnvSharedCredentialsFile)
-		if configFile != "" && sharedCredentialsFile != "" {
-			env.Set(envprovider.EnvConfigFile, configFile)
-			env.Set(envprovider.EnvSharedCredentialsFile, sharedCredentialsFile)
+		if provideCtx.IsSystemDMountpoint() {
+			// We only have this in systemd mounts and this is not officially supported
+			klog.V(4).Infof("Providing credentials from driver with Profile provider")
+			configFile := os.Getenv(envprovider.EnvConfigFile)
+			sharedCredentialsFile := os.Getenv(envprovider.EnvSharedCredentialsFile)
+			if configFile != "" && sharedCredentialsFile != "" {
+				env.Set(envprovider.EnvConfigFile, configFile)
+				env.Set(envprovider.EnvSharedCredentialsFile, sharedCredentialsFile)
+			}
 		}
 	}
 
@@ -65,7 +70,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 	// Container credential provider (EKS Pod Identity)
 	containerAuthorizationTokenFile := os.Getenv(envprovider.EnvContainerAuthorizationTokenFile)
 	containerCredentialsFullURI := os.Getenv(envprovider.EnvContainerCredentialsFullURI)
-	if util.UsePodMounter() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
+	if provideCtx.IsPodMountpoint() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
 		klog.V(4).Infof("Providing credentials from driver with Container credential provider (EKS Pod Identity)")
 		containerCredsEnv, err := provideContainerCredentialsFromDriver(provideCtx, containerAuthorizationTokenFile, containerCredentialsFullURI)
 		if err != nil {
@@ -81,10 +86,25 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 // cleanupFromDriver removes any credential files that were created for driver-level authentication via [Provider.provideFromDriver].
 func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 	prefix := driverLevelLongTermCredentialsProfilePrefix(cleanupCtx.PodID, cleanupCtx.VolumeID)
-	return awsprofile.Cleanup(awsprofile.Settings{
+	errLongTerm := awsprofile.Cleanup(awsprofile.Settings{
 		Basepath: cleanupCtx.WritePath,
 		Prefix:   prefix,
 	})
+
+	var errSTS, errEKS error
+	if cleanupCtx.IsPodMountpoint() {
+		errSTS = c.cleanupToken(cleanupCtx.WritePath, webIdentityServiceAccountTokenName)
+		if errSTS != nil {
+			errSTS = status.Errorf(codes.Internal, "Failed to cleanup driver-level service account STS token: %v", errSTS)
+		}
+
+		errEKS = c.cleanupToken(cleanupCtx.WritePath, eksPodIdentityServiceAccountTokenName)
+		if errEKS != nil {
+			errEKS = status.Errorf(codes.Internal, "Failed to cleanup driver-level service account EKS Pod Identity token: %v", errEKS)
+		}
+	}
+
+	return errors.Join(errLongTerm, errSTS, errEKS)
 }
 
 // provideStsWebIdentityCredentialsFromDriver provides credentials for STS Web Identity from the driver's service account.

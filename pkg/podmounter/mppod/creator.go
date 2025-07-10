@@ -1,16 +1,19 @@
 package mppod
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 )
 
 // Labels populated on spawned Mountpoint Pods.
@@ -38,6 +41,15 @@ const (
 	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
 )
 
+const (
+	// cacheTypeEmptyDir creates a cache unique to the Mountpoint Pod by using `emptyDir` volume type.
+	// See https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.
+	cacheTypeEmptyDir = "emptyDir"
+	// cacheTypeEphemeral creates a generic ephemeral volume unique to the Mountpoint Pod by using `ephemeral` volume type.
+	// See https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes.
+	cacheTypeEphemeral = "ephemeral"
+)
+
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
 // A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
@@ -60,15 +72,17 @@ type Config struct {
 // A Creator allows creating specification for Mountpoint Pods to schedule.
 type Creator struct {
 	config Config
+	log    logr.Logger
 }
 
 // NewCreator creates a new creator with the given `config`.
-func NewCreator(config Config) *Creator {
-	return &Creator{config: config}
+func NewCreator(config Config, log logr.Logger) *Creator {
+	return &Creator{config: config, log: log}
 }
 
 // Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
 func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	uid := c.config.ClusterVariant.MountpointPodUserID()
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
@@ -86,6 +100,9 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
 			RestartPolicy: corev1.RestartPolicyOnFailure,
+			SecurityContext: &corev1.PodSecurityContext{
+				FSGroup: uid,
+			},
 			Containers: []corev1.Container{{
 				Name:            "mountpoint",
 				Image:           c.config.Container.Image,
@@ -96,7 +113,7 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
-					RunAsUser:    c.config.ClusterVariant.MountpointPodUserID(),
+					RunAsUser:    uid,
 					RunAsNonRoot: ptr.To(true),
 					SeccompProfile: &corev1.SeccompProfile{
 						Type: corev1.SeccompProfileTypeRuntimeDefault,
@@ -151,65 +168,194 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 		},
 	}
 
-	volumeAttributes := ExtractVolumeAttributes(pv)
-
-	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
-		mpPod.Spec.ServiceAccountName = saName
-	}
-
 	mpContainer := &mpPod.Spec.Containers[0]
+	volumeAttributes := ExtractVolumeAttributes(pv)
+	mountpointArgs := mountpoint.ParseArgs(pv.Spec.MountOptions)
 
-	{
-		resourceRequestsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsCpu]
-		resourceRequestsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsMemory]
-
-		if resourceRequestsCpu != "" || resourceRequestsMemory != "" {
-			mpContainer.Resources.Requests = make(corev1.ResourceList)
-
-			if resourceRequestsCpu != "" {
-				quantity, err := resource.ParseQuantity(resourceRequestsCpu)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsCpu, resourceRequestsCpu)
-				}
-				mpContainer.Resources.Requests[corev1.ResourceCPU] = quantity
-			}
-
-			if resourceRequestsMemory != "" {
-				quantity, err := resource.ParseQuantity(resourceRequestsMemory)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsMemory, resourceRequestsMemory)
-				}
-				mpContainer.Resources.Requests[corev1.ResourceMemory] = quantity
-			}
-		}
+	if err := c.configureLocalCache(mpPod, mpContainer, mountpointArgs, volumeAttributes); err != nil {
+		return nil, err
 	}
-
-	{
-		resourceLimitsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsCpu]
-		resourceLimitsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsMemory]
-
-		if resourceLimitsCpu != "" || resourceLimitsMemory != "" {
-			mpContainer.Resources.Limits = make(corev1.ResourceList)
-
-			if resourceLimitsCpu != "" {
-				quantity, err := resource.ParseQuantity(resourceLimitsCpu)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsCpu, resourceLimitsCpu)
-				}
-				mpContainer.Resources.Limits[corev1.ResourceCPU] = quantity
-			}
-
-			if resourceLimitsMemory != "" {
-				quantity, err := resource.ParseQuantity(resourceLimitsMemory)
-				if err != nil {
-					return nil, failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsMemory, resourceLimitsMemory)
-				}
-				mpContainer.Resources.Limits[corev1.ResourceMemory] = quantity
-			}
-		}
+	c.configureServiceAccount(mpPod, volumeAttributes)
+	if err := c.configureResourceRequests(mpContainer, volumeAttributes); err != nil {
+		return nil, err
+	}
+	if err := c.configureResourceLimits(mpContainer, volumeAttributes); err != nil {
+		return nil, err
 	}
 
 	return mpPod, nil
+}
+
+// configureLocalCache configures necessary cache volumes for the pod and the container if its enabled.
+func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Container, args mountpoint.Args, volumeAttributes map[string]string) error {
+	cacheEnabledViaOptions := args.Has(mountpoint.ArgCache)
+	cacheType := volumeAttributes[volumecontext.Cache]
+	if !cacheEnabledViaOptions && cacheType == "" {
+		// Cache is not enabled
+		return nil
+	}
+
+	if cacheEnabledViaOptions {
+		if cacheType != "" {
+			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
+		}
+
+		// TODO: Create and link `CACHING.md`.
+		cacheType = cacheTypeEmptyDir
+		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see CACHING.md for more details.")
+	}
+
+	var volumeSource corev1.VolumeSource
+	var err error
+	switch cacheType {
+	case cacheTypeEmptyDir:
+		volumeSource, err = c.createCacheVolumeSourceForEmptyDir(volumeAttributes)
+	case cacheTypeEphemeral:
+		volumeSource, err = c.createCacheVolumeSourceForEphemeral(volumeAttributes)
+	default:
+		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, cacheTypeEmptyDir, cacheTypeEphemeral)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to configure %q local-cache: %w", cacheType, err)
+	}
+
+	mpContainer.VolumeMounts = append(mpContainer.VolumeMounts, corev1.VolumeMount{
+		Name:      LocalCacheDirName,
+		MountPath: filepath.Join("/", LocalCacheDirName),
+	})
+	mpPod.Spec.Volumes = append(mpPod.Spec.Volumes, corev1.Volume{
+		Name:         LocalCacheDirName,
+		VolumeSource: volumeSource,
+	})
+
+	return nil
+}
+
+// createCacheVolumeSourceForEmptyDir creates an `emptyDir` volume source to use as local-cache.
+func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
+	emptyDir := &corev1.EmptyDirVolumeSource{}
+
+	if sizeLimit := volumeAttributes[volumecontext.CacheEmptyDirSizeLimit]; sizeLimit != "" {
+		quantity, err := resource.ParseQuantity(sizeLimit)
+		if err != nil {
+			return corev1.VolumeSource{}, failedToParseQuantityError(err, volumecontext.CacheEmptyDirSizeLimit, sizeLimit)
+		}
+		emptyDir.SizeLimit = &quantity
+	}
+
+	if medium := volumeAttributes[volumecontext.CacheEmptyDirMedium]; medium != "" {
+		switch medium {
+		case string(corev1.StorageMediumMemory):
+			emptyDir.Medium = corev1.StorageMediumMemory
+		default:
+			return corev1.VolumeSource{}, fmt.Errorf("unknown value for %q: %q. Only %q supported", volumecontext.CacheEmptyDirMedium, medium, corev1.StorageMediumMemory)
+		}
+	}
+
+	return corev1.VolumeSource{EmptyDir: emptyDir}, nil
+}
+
+// createCacheVolumeSourceForEphemeral creates an `ephemeral` volume source to use as local-cache.
+func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
+	storageClassName := volumeAttributes[volumecontext.CacheEphemeralStorageClassName]
+	if storageClassName == "" {
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageClassName, cacheTypeEphemeral)
+	}
+
+	storageResourceRequestStr := volumeAttributes[volumecontext.CacheEphemeralStorageResourceRequest]
+	if storageResourceRequestStr == "" {
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageResourceRequest, cacheTypeEphemeral)
+	}
+
+	storageRequestSize, err := resource.ParseQuantity(storageResourceRequestStr)
+	if err != nil {
+		return corev1.VolumeSource{}, failedToParseQuantityError(err, volumecontext.CacheEphemeralStorageResourceRequest, storageResourceRequestStr)
+	}
+
+	return corev1.VolumeSource{
+		Ephemeral: &corev1.EphemeralVolumeSource{
+			VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"s3.csi.aws.com/type": "local-ephemeral-cache",
+					},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					StorageClassName: &storageClassName,
+					VolumeMode:       ptr.To(corev1.PersistentVolumeFilesystem),
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: storageRequestSize,
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+// configureServiceAccount configures service account of the pod if its specified in the volume attributes.
+func (c *Creator) configureServiceAccount(mpPod *corev1.Pod, volumeAttributes map[string]string) {
+	if saName := volumeAttributes[volumecontext.MountpointPodServiceAccountName]; saName != "" {
+		mpPod.Spec.ServiceAccountName = saName
+	}
+}
+
+// configureResourceRequests configures resource requests of the container if its specified in the volume attributes.
+func (c *Creator) configureResourceRequests(mpContainer *corev1.Container, volumeAttributes map[string]string) error {
+	resourceRequestsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsCpu]
+	resourceRequestsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesRequestsMemory]
+
+	if resourceRequestsCpu != "" || resourceRequestsMemory != "" {
+		mpContainer.Resources.Requests = make(corev1.ResourceList)
+
+		if resourceRequestsCpu != "" {
+			quantity, err := resource.ParseQuantity(resourceRequestsCpu)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsCpu, resourceRequestsCpu)
+			}
+			mpContainer.Resources.Requests[corev1.ResourceCPU] = quantity
+		}
+
+		if resourceRequestsMemory != "" {
+			quantity, err := resource.ParseQuantity(resourceRequestsMemory)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesRequestsMemory, resourceRequestsMemory)
+			}
+			mpContainer.Resources.Requests[corev1.ResourceMemory] = quantity
+		}
+	}
+
+	return nil
+}
+
+// configureResourceLimits configures resource limits of the container if its specified in the volume attributes.
+func (c *Creator) configureResourceLimits(mpContainer *corev1.Container, volumeAttributes map[string]string) error {
+	resourceLimitsCpu := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsCpu]
+	resourceLimitsMemory := volumeAttributes[volumecontext.MountpointContainerResourcesLimitsMemory]
+
+	if resourceLimitsCpu != "" || resourceLimitsMemory != "" {
+		mpContainer.Resources.Limits = make(corev1.ResourceList)
+
+		if resourceLimitsCpu != "" {
+			quantity, err := resource.ParseQuantity(resourceLimitsCpu)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsCpu, resourceLimitsCpu)
+			}
+			mpContainer.Resources.Limits[corev1.ResourceCPU] = quantity
+		}
+
+		if resourceLimitsMemory != "" {
+			quantity, err := resource.ParseQuantity(resourceLimitsMemory)
+			if err != nil {
+				return failedToParseQuantityError(err, volumecontext.MountpointContainerResourcesLimitsMemory, resourceLimitsMemory)
+			}
+			mpContainer.Resources.Limits[corev1.ResourceMemory] = quantity
+		}
+	}
+
+	return nil
 }
 
 // ExtractVolumeAttributes extracts volume attributes from given `pv`.

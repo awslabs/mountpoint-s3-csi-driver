@@ -37,15 +37,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/version"
-	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -64,7 +64,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(crdv1beta.AddToScheme(scheme))
+	utilruntime.Must(crdv2beta.AddToScheme(scheme))
 }
 
 type Driver struct {
@@ -227,14 +227,14 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 	}
 	if isSelectFieldsSupported {
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
-			&crdv1beta.MountpointS3PodAttachment{}: {
+			&crdv2beta.MountpointS3PodAttachment{}: {
 				Field: fields.OneTermEqualSelector("spec.nodeName", nodeID),
 			},
 		}
 	} else {
 		// TODO: We can potentially use label filter hash of nodeId for old clusters instead of field selector
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
-			&crdv1beta.MountpointS3PodAttachment{}: {},
+			&crdv2beta.MountpointS3PodAttachment{}: {},
 		}
 	}
 
@@ -243,11 +243,11 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 		klog.Fatalf("Failed to create cache: %v\n", err)
 	}
 
-	if err := crdv1beta.SetupCacheIndices(s3paCache); err != nil {
+	if err := crdv2beta.SetupCacheIndices(s3paCache); err != nil {
 		klog.Fatalf("Failed to setup field indexers: %v", err)
 	}
 
-	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv1beta.MountpointS3PodAttachment{})
+	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv2beta.MountpointS3PodAttachment{})
 	if err != nil {
 		klog.Fatalf("Failed to create informer for MountpointS3PodAttachment: %v\n", err)
 	}

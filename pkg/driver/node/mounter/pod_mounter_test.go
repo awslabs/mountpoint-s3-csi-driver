@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,17 +20,18 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/mount-utils"
 
-	crdv1beta "github.com/awslabs/aws-s3-csi-driver/pkg/api/v1beta"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/credentialprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/driver/node/mounter/mountertest"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	mpmounter "github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mounter"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 const mountpointPodNamespace = "mount-s3"
@@ -44,27 +46,30 @@ type testCtx struct {
 
 	client           *fake.Clientset
 	mount            *mount.FakeMounter
+	mockCredProvider *mock_credentialprovider.MockProviderInterface
 	s3paCache        *mounter.FakeCache
 	mountSyscall     func(target string, args mountpoint.Args) (fd int, err error)
 	mountBindSyscall func(source, target string) (err error)
 
-	bucketName     string
-	kubeletPath    string
-	sourcePath     string
-	targetPath     string
-	podUID         string
-	volumeID       string
-	pvName         string
-	nodeName       string
-	fsGroup        string
-	pvMountOptions string
-	mpPodName      string
-	mpPodUID       string
+	bucketName  string
+	kubeletPath string
+	sourcePath  string
+	targetPath  string
+	podUID      string
+	volumeID    string
+	pvName      string
+	nodeName    string
+	fsGroup     string
+	mpPodName   string
+	mpPodUID    string
 }
 
 func setup(t *testing.T) *testCtx {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
+
+	mockCtl := gomock.NewController(t)
+	mockCredProvider := mock_credentialprovider.NewMockProviderInterface(mockCtl)
 
 	kubeletPath := t.TempDir()
 	// Eval symlinks on `kubeletPath` as `mount.NewFakeMounter` also does that and we rely on
@@ -86,7 +91,6 @@ func setup(t *testing.T) *testCtx {
 	pvName := "s3-csi-driver-pv"
 	nodeName := "test-node"
 	fsGroup := "1000"
-	pvMountOptions := "--fake-mountoption"
 	s3paCache := &mounter.FakeCache{}
 	targetPath := filepath.Join(
 		kubeletPath,
@@ -103,38 +107,37 @@ func setup(t *testing.T) *testCtx {
 	fakeMounter := mount.NewFakeMounter(nil)
 
 	testCtx := &testCtx{
-		t:              t,
-		ctx:            ctx,
-		client:         client,
-		mount:          fakeMounter,
-		bucketName:     bucketName,
-		kubeletPath:    kubeletPath,
-		targetPath:     targetPath,
-		podUID:         podUID,
-		volumeID:       volumeID,
-		pvName:         pvName,
-		nodeName:       nodeName,
-		fsGroup:        fsGroup,
-		s3paCache:      s3paCache,
-		pvMountOptions: pvMountOptions,
-		mpPodName:      mpPodName,
-		mpPodUID:       mpPodUID,
-		sourcePath:     sourcePath,
+		t:                t,
+		ctx:              ctx,
+		client:           client,
+		mount:            fakeMounter,
+		mockCredProvider: mockCredProvider,
+		bucketName:       bucketName,
+		kubeletPath:      kubeletPath,
+		targetPath:       targetPath,
+		podUID:           podUID,
+		volumeID:         volumeID,
+		pvName:           pvName,
+		nodeName:         nodeName,
+		fsGroup:          fsGroup,
+		s3paCache:        s3paCache,
+		mpPodName:        mpPodName,
+		mpPodUID:         mpPodUID,
+		sourcePath:       sourcePath,
 	}
 
-	testCrd := crdv1beta.MountpointS3PodAttachment{
-		Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+	testCrd := crdv2beta.MountpointS3PodAttachment{
+		Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 			NodeName:             testCtx.nodeName,
 			PersistentVolumeName: testCtx.pvName,
 			VolumeID:             testCtx.volumeID,
 			WorkloadFSGroup:      testCtx.fsGroup,
-			MountOptions:         testCtx.pvMountOptions,
-			MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+			MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
 				testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 			},
 		},
 	}
-	testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd}
+	testCtx.s3paCache.TestItems = []crdv2beta.MountpointS3PodAttachment{testCrd}
 
 	mountSyscall := func(target string, args mountpoint.Args) (fd int, err error) {
 		if testCtx.mountSyscall != nil {
@@ -154,10 +157,6 @@ func setup(t *testing.T) *testCtx {
 		return nil
 	}
 
-	credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
-		return dummyIMDSRegion, nil
-	})
-
 	podWatcher := watcher.New(client, mountpointPodNamespace, nodeName, 10*time.Second)
 	stopCh := make(chan struct{})
 	t.Cleanup(func() {
@@ -166,7 +165,7 @@ func setup(t *testing.T) *testCtx {
 	err = podWatcher.Start(stopCh)
 	assert.NoError(t, err)
 
-	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
+	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, mockCredProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
 		mountBindSyscall, testK8sVersion, nodeName)
 	assert.NoError(t, err)
 
@@ -193,6 +192,9 @@ func TestPodMounter(t *testing.T) {
 
 				return fd, nil
 			}
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
 
@@ -202,7 +204,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					WorkloadPodID:        testCtx.podUID,
-				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
+				}, args, testCtx.fsGroup)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -234,6 +236,9 @@ func TestPodMounter(t *testing.T) {
 
 		t.Run("Waits for Mountpoint Pod", func(t *testing.T) {
 			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			go func() {
 				// Add delays to each Mountpoint Pod step
@@ -248,12 +253,15 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 		})
 
 		t.Run("Creates credential directory with group access", func(t *testing.T) {
 			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
 			mountRes := make(chan error)
@@ -262,7 +270,7 @@ func TestPodMounter(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					WorkloadPodID:        testCtx.podUID,
-				}, args, testCtx.fsGroup, testCtx.pvMountOptions)
+				}, args, testCtx.fsGroup)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -297,6 +305,10 @@ func TestPodMounter(t *testing.T) {
 				testCtx.mount.Mount(source, target, "fuse", []string{"bind"})
 				return nil
 			}
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil).
+				Times(5)
 
 			go func() {
 				mpPod := createMountpointPod(testCtx)
@@ -309,7 +321,7 @@ func TestPodMounter(t *testing.T) {
 					credentialprovider.ProvideContext{
 						VolumeID:      testCtx.volumeID,
 						WorkloadPodID: testCtx.podUID,
-					}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+					}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 				assert.NoError(t, err)
 			}
 
@@ -338,6 +350,11 @@ func TestPodMounter(t *testing.T) {
 				return nil
 			}
 
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil).
+				Times(2)
+
 			go func() {
 				mpPod := createMountpointPod(testCtx)
 				mpPod.run()
@@ -347,7 +364,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 
 			ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
@@ -369,24 +386,23 @@ func TestPodMounter(t *testing.T) {
 			assert.NoError(t, err)
 			targetPath2 = filepath.Join(parentDir, filepath.Base(targetPath2))
 			testCtx.targetPath = targetPath2
-			testCrd2 := crdv1beta.MountpointS3PodAttachment{
-				Spec: crdv1beta.MountpointS3PodAttachmentSpec{
+			testCrd2 := crdv2beta.MountpointS3PodAttachment{
+				Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 					NodeName:             testCtx.nodeName,
 					PersistentVolumeName: testCtx.pvName,
 					VolumeID:             testCtx.volumeID,
 					WorkloadFSGroup:      testCtx.fsGroup,
-					MountOptions:         testCtx.pvMountOptions,
-					MountpointS3PodAttachments: map[string][]crdv1beta.WorkloadAttachment{
+					MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
 						testCtx.mpPodName: {{WorkloadPodUID: testCtx.podUID}},
 					},
 				},
 			}
-			testCtx.s3paCache.TestItems = []crdv1beta.MountpointS3PodAttachment{testCrd2}
+			testCtx.s3paCache.TestItems = []crdv2beta.MountpointS3PodAttachment{testCrd2}
 
 			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			assert.NoError(t, err)
 
 			ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
@@ -397,8 +413,52 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, int32(2), bindMountCount.Load())
 		})
 
+		t.Run("Updates credentials for existing SystemD mounts", func(t *testing.T) {
+			testCtx := setup(t)
+			t.Setenv("SUPPORT_LEGACY_SYSTEMD_MOUNTS", "true")
+
+			ok, _ := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+			assert.Equals(t, false, ok)
+
+			// Simulate SystemD mount
+			err := os.MkdirAll(testCtx.targetPath, 0750)
+			assert.NoError(t, err)
+			testCtx.mount.Mount("mountpoint-s3", testCtx.targetPath, "fuse", nil)
+
+			ok, _ = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+			assert.Equals(t, true, ok)
+
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				t.Errorf("unexpected mount syscall")
+				return int(mountertest.OpenDevNull(t).Fd()), nil
+			}
+			testCtx.mountBindSyscall = func(source, target string) (err error) {
+				t.Errorf("unexpected bind mount syscall")
+				return nil
+			}
+
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				DoAndReturn(func(ctx context.Context, provideCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+					// Assert credential context was set correctly
+					assert.Equals(t, credentialprovider.MountKindSystemd, provideCtx.MountKind)
+					assert.Equals(t, "/var/lib/kubelet/plugins/s3.csi.aws.com/", provideCtx.WritePath)
+					assert.Equals(t, "/var/lib/kubelet/plugins/s3.csi.aws.com/", provideCtx.EnvPath)
+					return nil, credentialprovider.AuthenticationSourceDriver, nil
+				})
+
+			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+				VolumeID:      testCtx.volumeID,
+				WorkloadPodID: testCtx.podUID,
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
+			assert.NoError(t, err)
+		})
+
 		t.Run("Unmounts source if Mountpoint Pod does not receive mount options", func(t *testing.T) {
 			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			go func() {
 				mpPod := createMountpointPod(testCtx)
@@ -413,7 +473,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint does not receive the mount options")
 			}
@@ -432,6 +492,9 @@ func TestPodMounter(t *testing.T) {
 
 		t.Run("Unmounts source if Mountpoint Pod fails to start", func(t *testing.T) {
 			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
 				// Does not do real mounting
@@ -452,7 +515,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
@@ -471,6 +534,9 @@ func TestPodMounter(t *testing.T) {
 
 		t.Run("Adds a help message to see Mountpoint logs if Mountpoint Pod fails to start", func(t *testing.T) {
 			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
 				// Does not do real mounting
@@ -492,7 +558,7 @@ func TestPodMounter(t *testing.T) {
 			err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 				VolumeID:      testCtx.volumeID,
 				WorkloadPodID: testCtx.podUID,
-			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 			if err == nil {
 				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
 			}
@@ -512,6 +578,9 @@ func TestPodMounter(t *testing.T) {
 
 	t.Run("Checking if target is a mount point", func(t *testing.T) {
 		testCtx := setup(t)
+		testCtx.mockCredProvider.EXPECT().
+			Provide(testCtx.ctx, gomock.Any()).
+			Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 		ok, _ := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
 		assert.Equals(t, false, ok)
@@ -525,7 +594,7 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID:      testCtx.volumeID,
 			WorkloadPodID: testCtx.podUID,
-		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 		assert.NoError(t, err)
 
 		ok, err = testCtx.podMounter.IsMountPoint(testCtx.sourcePath)
@@ -538,6 +607,9 @@ func TestPodMounter(t *testing.T) {
 
 	t.Run("Unmounting", func(t *testing.T) {
 		testCtx := setup(t)
+		testCtx.mockCredProvider.EXPECT().
+			Provide(testCtx.ctx, gomock.Any()).
+			Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
 
 		go func() {
 			mpPod := createMountpointPod(testCtx)
@@ -548,12 +620,48 @@ func TestPodMounter(t *testing.T) {
 		err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
 			VolumeID:      testCtx.volumeID,
 			WorkloadPodID: testCtx.podUID,
-		}, mountpoint.ParseArgs(nil), testCtx.fsGroup, testCtx.pvMountOptions)
+		}, mountpoint.ParseArgs(nil), testCtx.fsGroup)
 		assert.NoError(t, err)
 
 		ok, err := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
 		assert.NoError(t, err)
 		assert.Equals(t, true, ok)
+
+		err = testCtx.podMounter.Unmount(testCtx.ctx, testCtx.targetPath, credentialprovider.CleanupContext{
+			VolumeID: testCtx.volumeID,
+			PodID:    testCtx.podUID,
+		})
+		assert.NoError(t, err)
+
+		ok, err = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+		assert.NoError(t, err)
+		assert.Equals(t, false, ok)
+	})
+
+	t.Run("Unmounting SystemD mounts", func(t *testing.T) {
+		testCtx := setup(t)
+		t.Setenv("SUPPORT_LEGACY_SYSTEMD_MOUNTS", "true")
+
+		ok, _ := testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+		assert.Equals(t, false, ok)
+
+		// Simulate SystemD mount
+		err := os.MkdirAll(testCtx.targetPath, 0750)
+		assert.NoError(t, err)
+		testCtx.mount.Mount("mountpoint-s3", testCtx.targetPath, "fuse", nil)
+
+		ok, _ = testCtx.podMounter.IsMountPoint(testCtx.targetPath)
+		assert.Equals(t, true, ok)
+
+		testCtx.mockCredProvider.EXPECT().
+			Cleanup(gomock.Any()).
+			DoAndReturn(func(provideCtx credentialprovider.CleanupContext) error {
+				// Assert credential context was set correctly
+				assert.Equals(t, "/var/lib/kubelet/plugins/s3.csi.aws.com/", provideCtx.WritePath)
+				assert.Equals(t, testCtx.volumeID, provideCtx.VolumeID)
+				assert.Equals(t, testCtx.podUID, provideCtx.PodID)
+				return nil
+			})
 
 		err = testCtx.podMounter.Unmount(testCtx.ctx, testCtx.targetPath, credentialprovider.CleanupContext{
 			VolumeID: testCtx.volumeID,

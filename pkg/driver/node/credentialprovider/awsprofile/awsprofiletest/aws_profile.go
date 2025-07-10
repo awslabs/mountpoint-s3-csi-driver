@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 func AssertCredentialsFromAWSProfile(t *testing.T, profileName string, filePerm os.FileMode, configFile, credentialsFile, accessKeyID, secretAccessKey, sessionToken string) {

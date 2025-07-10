@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"k8s.io/klog/v2"
 
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/mountoptions"
-	"github.com/awslabs/aws-s3-csi-driver/pkg/mountpoint/runner"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/runner"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 var mountErrorFileperm = fs.FileMode(0600) // only owner readable and writeable
@@ -37,11 +39,16 @@ func Run(options Options) (int, error) {
 	mountOptions := options.MountOptions
 	mountpointArgs := mountpoint.ParseArgs(mountOptions.Args)
 
-	// TODO: This is a temporary workaround to create a cache folder if caching is enabled,
-	// ideally we should create a volume (`emptyDir` by default) in the Mountpoint Pod and use that.
-	mountpointArgs, err := createCacheDir(mountpointArgs)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create cache dir: %w", err)
+	localCacheDir := filepath.Join("/", mppod.LocalCacheDirName)
+	_, localCacheEnabledViaMountOptions := mountpointArgs.Remove(mountpoint.ArgCache)
+	localCacheMounted := checkIfDirExists(localCacheDir)
+
+	if localCacheEnabledViaMountOptions && !localCacheMounted {
+		return 0, fmt.Errorf("local cache enabled via mount options but cache folder is not mounted at %q", localCacheDir)
+	}
+
+	if localCacheMounted {
+		mountpointArgs.Set(mountpoint.ArgCache, localCacheDir)
 	}
 
 	exitCode, stdErr, err := runner.RunInForeground(runner.ForegroundOptions{
@@ -80,20 +87,11 @@ func checkIfFileExists(path string) bool {
 	return err == nil
 }
 
-// createCacheDir creates a temporary directory to use as a cache directory if caching is enabled in given `args`.
-// It will replace the value of `--cache` with the created random directory.
-func createCacheDir(args mountpoint.Args) (mountpoint.Args, error) {
-	_, ok := args.Remove(mountpoint.ArgCache)
-	if !ok {
-		// Caching is not enabled
-		return args, nil
-	}
-
-	// Caching is enabled, so create a temporary directory and pass it to `args`
-	cacheDir, err := os.MkdirTemp(os.TempDir(), "mountpoint-s3-cache")
+// checkIfDirExists checks whether given directory at `path` exists.
+func checkIfDirExists(path string) bool {
+	stat, err := os.Stat(path)
 	if err != nil {
-		return args, fmt.Errorf("failed to create cache directory: %w", err)
+		return false
 	}
-	args.Set(mountpoint.ArgCache, cacheDir)
-	return args, nil
+	return stat.IsDir()
 }
