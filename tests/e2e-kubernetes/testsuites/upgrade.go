@@ -23,6 +23,16 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
+// This value defines how long the upgrade test should take.
+//
+// This needs to be at least more than 2 hours because
+//  1. We ask for service account tokens that valid for 1 hour (see `CSIDriver` object)
+//  2. Session duration of the IAM roles we assume is 1 hour
+//
+// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 2 hours+.
+// Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
+const UPGRADE_TEST_DURATION_IN_MINUTES = 150
+
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
@@ -229,7 +239,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 
 		// Ensure the workloads are still healthy
-		for range 60 {
+		for range UPGRADE_TEST_DURATION_IN_MINUTES {
 			framework.Logf("Checking if workloads are still healthy after the upgrade...")
 
 			// Check full-access pods can still write and read originally created file
