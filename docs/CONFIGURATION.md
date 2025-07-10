@@ -44,11 +44,11 @@ spec:
       # ----- LOCAL CACHE CONFIGURATION -----
       # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
       cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
-      
+
       # emptyDir cache options:
       cacheEmptyDirSizeLimit: 1Gi       # Optional: Maximum size for emptyDir cache
       cacheEmptyDirMedium: ""           # Optional: Storage medium ["" (default) | Memory]
-      
+
       # ephemeral cache options (both required if `cache: ephemeral`):
       cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
       cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
@@ -278,6 +278,9 @@ restarted to use the secret.
 
 
 ### Driver-Level Credentials with Node IAM Profiles
+
+> [!NOTE]
+> This method relies on [Instance Metadata Service (IMDS)](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html), and you need to make sure IMDS is accessible by the CSI Driver pods. See [configure the Instance Metadata Service](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html) for more details on making IMDS accessible.
 
 To use an IAM [instance profile](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html),
 attach the policy to the instance profile IAM role and turn on access to [instance metadata](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html)
