@@ -12,7 +12,7 @@
 
 ### Cluster setup (optional)
 
-If you don't have an existing cluster, you can follow these steps to setup an Amazon EKS cluster using [eksctl](https://eksctl.io/). See [eksctl documentation](https://eksctl.io/getting-started/) for more details.
+If you don't have an existing cluster, you can follow these steps to setup an Amazon EKS cluster using [eksctl](https://eksctl.io/).
 
 - Set a cluster-name and a region:
 
@@ -27,10 +27,11 @@ export REGION=us-west-2
 eksctl create cluster \
   --name $CLUSTER_NAME \
   --region $REGION \
-  --with-oidc \
-  --ssh-access \
-  --ssh-public-key <my-key>
+  --with-oidc \ # To enable IAM Roles for Service Accounts (IRSA)
+  ...
 ```
+
+See [eksctl documentation](https://eksctl.io/getting-started/) for more details on the configuration you can use while creating your cluster.
 
 - Setup kubectl context
 
@@ -46,11 +47,15 @@ aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
 Assuming you have a cluster created, the next step is to ensure the CSI Driver will be able to access Amazon S3.
 
 There's a few different options for providing credentials for the Mountpoint CSI Driver to use when accessing Amazon S3.
-See the [AWS Credentials](CONFIGURATION.md#aws-credentials) for instructions and different ways of configuring AWS credentials for accessing Amazon S3.
+See [AWS Credentials](CONFIGURATION.md#aws-credentials) for instructions and different ways of configuring AWS credentials for accessing Amazon S3.
 
 ### Deploy Mountpoint for Amazon S3 CSI Driver
 
-You may deploy the Mountpoint for Amazon S3 CSI Driver via [Helm](https://helm.sh/), [Kustomize](https://github.com/kubernetes-sigs/kustomize), or as an [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks).
+You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks), [Helm](https://helm.sh/), or [Kustomize](https://github.com/kubernetes-sigs/kustomize).
+
+#### Amazon EKS managed add-on
+
+See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
 
 #### Helm
 

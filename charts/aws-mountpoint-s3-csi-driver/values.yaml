@@ -76,7 +76,9 @@ sidecars:
     resources: {}
 
 controller:
-  # Consider deploying the controller component to special nodes for controller components, e.g.
+  # Consider deploying the controller component to special nodes for controller components.
+  # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md#configuring-nodeSelector-for-the-controller-component for more details.
+  # For example:
   # nodeSelector:
   #   kubernetes.io/role: control-plane
   serviceAccount:
