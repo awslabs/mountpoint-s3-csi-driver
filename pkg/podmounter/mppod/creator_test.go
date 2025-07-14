@@ -18,24 +18,26 @@ import (
 )
 
 const (
-	namespace         = "mount-s3"
-	mountpointVersion = "1.10.0"
-	image             = "mp-image:latest"
-	imagePullPolicy   = corev1.PullAlways
-	command           = "/bin/aws-s3-csi-mounter"
-	priorityClassName = "mount-s3-critical"
-	testNode          = "test-node"
-	testPodUID        = "test-pod-uid"
-	testVolName       = "test-vol"
-	testVolID         = "test-vol-id"
-	csiDriverVersion  = "1.12.0"
+	namespace                   = "mount-s3"
+	mountpointVersion           = "1.10.0"
+	image                       = "mp-image:latest"
+	imagePullPolicy             = corev1.PullAlways
+	command                     = "/bin/aws-s3-csi-mounter"
+	priorityClassName           = "mount-s3-critical"
+	preemptingPriorityClassName = "mount-s3-preempting-critical"
+	testNode                    = "test-node"
+	testPodUID                  = "test-pod-uid"
+	testVolName                 = "test-vol"
+	testVolID                   = "test-vol-id"
+	csiDriverVersion            = "1.12.0"
 )
 
 func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 	return mppod.Config{
-		Namespace:         namespace,
-		MountpointVersion: mountpointVersion,
-		PriorityClassName: priorityClassName,
+		Namespace:                   namespace,
+		MountpointVersion:           mountpointVersion,
+		PriorityClassName:           priorityClassName,
+		PreemptingPriorityClassName: preemptingPriorityClassName,
 		Container: mppod.ContainerConfig{
 			Image:           image,
 			ImagePullPolicy: imagePullPolicy,
@@ -49,7 +51,7 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRunAsUser *int64) {
 	creator := mppod.NewCreator(createTestConfig(clusterVariant), testr.New(t))
 
-	verifyDefaultValues := func(mpPod *corev1.Pod) {
+	verifyDefaultValues := func(mpPod *corev1.Pod, expectedPriorityClassName string) {
 		assert.Equals(t, "mp-", mpPod.GenerateName)
 		assert.Equals(t, "", mpPod.Name)
 		assert.Equals(t, namespace, mpPod.Namespace)
@@ -60,7 +62,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			mppod.LabelVolumeId:          testVolID,
 		}, mpPod.Labels)
 
-		assert.Equals(t, priorityClassName, mpPod.Spec.PriorityClassName)
+		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
 		assert.Equals(t, &corev1.Volume{
@@ -111,7 +113,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	}
 
 	t.Run("Empty PV", func(t *testing.T) {
-		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
@@ -122,15 +124,15 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 					},
 				},
 			},
-		})
+		}, mppod.DefaultPriorityClass)
 
 		assert.NoError(t, err)
-		verifyDefaultValues(mpPod)
+		verifyDefaultValues(mpPod, priorityClassName)
 	})
 
 	t.Run("Mount Options", func(t *testing.T) {
 		t.Run("With cache", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -144,10 +146,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						"cache /mnt/mp-cache",
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			})
@@ -156,7 +158,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 	t.Run("Cache Configuration", func(t *testing.T) {
 		t.Run("With emptyDir cache", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -170,10 +172,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			})
@@ -181,7 +183,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With emptyDir cache and size limit", func(t *testing.T) {
 			sizeLimit := "1Gi"
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -196,10 +198,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
 					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
@@ -208,7 +210,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With emptyDir cache and memory medium", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -223,10 +225,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
 					Medium: corev1.StorageMediumMemory,
@@ -236,7 +238,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With emptyDir cache, size limit and memory medium", func(t *testing.T) {
 			sizeLimit := "1Gi"
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -252,10 +254,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
 					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
@@ -267,7 +269,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		t.Run("With ephemeral cache", func(t *testing.T) {
 			scName := "test-cache-sc"
 			storageRequest := "1Gi"
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -283,10 +285,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				Ephemeral: &corev1.EphemeralVolumeSource{
 					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
@@ -311,7 +313,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With ephemeral cache but missing storage class name", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -326,12 +328,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With ephemeral cache but missing resource request", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -346,12 +348,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With ephemeral cache but invalid resource request", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -367,12 +369,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With invalid cache type", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -386,12 +388,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With invalid emptyDir size limit", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -406,12 +408,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With invalid emptyDir medium", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -426,12 +428,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 
 		t.Run("With both mount options cache and volume attributes cache", func(t *testing.T) {
-			_, err := creator.Create(testNode, &corev1.PersistentVolume{
+			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -448,13 +450,13 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						"cache /mnt/mp-cache",
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 			assert.Equals(t, cmpopts.AnyError, err)
 		})
 	})
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
-		mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testVolName,
 			},
@@ -468,16 +470,16 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 					},
 				},
 			},
-		})
+		}, mppod.DefaultPriorityClass)
 
 		assert.NoError(t, err)
-		verifyDefaultValues(mpPod)
+		verifyDefaultValues(mpPod, priorityClassName)
 		assert.Equals(t, "mount-s3-sa", mpPod.Spec.ServiceAccountName)
 	})
 
 	t.Run("With Container Resources specified in PV", func(t *testing.T) {
 		t.Run("With valid requests and limits", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -494,10 +496,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			mpContainer := mpPod.Spec.Containers[0]
 			assert.Equals(t, corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("1"),
@@ -510,7 +512,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With valid requests only", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -525,10 +527,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			mpContainer := mpPod.Spec.Containers[0]
 			assert.Equals(t, corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("1"),
@@ -539,7 +541,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		})
 
 		t.Run("With valid limits only", func(t *testing.T) {
-			mpPod, err := creator.Create(testNode, &corev1.PersistentVolume{
+			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testVolName,
 				},
@@ -554,10 +556,10 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 						},
 					},
 				},
-			})
+			}, mppod.DefaultPriorityClass)
 
 			assert.NoError(t, err)
-			verifyDefaultValues(mpPod)
+			verifyDefaultValues(mpPod, priorityClassName)
 			mpContainer := mpPod.Spec.Containers[0]
 			assert.Equals(t, true, mpContainer.Resources.Requests.Cpu().IsZero())
 			assert.Equals(t, true, mpContainer.Resources.Requests.Memory().IsZero())
@@ -595,7 +597,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 				},
 			} {
 				t.Run(name, func(t *testing.T) {
-					_, err := creator.Create(testNode, &corev1.PersistentVolume{
+					_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: testVolName,
 						},
@@ -606,7 +608,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 								},
 							},
 						},
-					})
+					}, mppod.DefaultPriorityClass)
 
 					assert.Equals(t, cmpopts.AnyError, err)
 				})
@@ -614,6 +616,25 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		})
 	})
+
+	t.Run("With Preempting Priority Class", func(t *testing.T) {
+		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testVolName,
+			},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
+					},
+				},
+			},
+		}, mppod.PreemptingPriorityClass)
+
+		assert.NoError(t, err)
+		verifyDefaultValues(mpPod, preemptingPriorityClassName)
+	})
+
 }
 
 func TestCreatingMountpointPods(t *testing.T) {

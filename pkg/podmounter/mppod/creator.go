@@ -52,7 +52,17 @@ const (
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
-// A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
+// A PriorityClassKind represents type of priority class to use while spawning a Mountpoint Pod.
+type PriorityClassKind uint8
+
+const (
+	// DefaultPriorityClass means using the default (ideally non-preempting) priority class while spawning a Mountpoint Pod.
+	DefaultPriorityClass PriorityClassKind = iota
+	// PreemptingPriorityClass means using the preempting priority class (in order to evict Headroom Pods) while spawning a Mountpoint Pod.
+	PreemptingPriorityClass
+)
+
+// A ContainerConfig represents configuration for containers in the spawned Mountpoint/Headroom Pods.
 type ContainerConfig struct {
 	Command         string
 	Image           string
@@ -61,12 +71,13 @@ type ContainerConfig struct {
 
 // A Config represents configuration for spawned Mountpoint Pods.
 type Config struct {
-	Namespace         string
-	MountpointVersion string
-	PriorityClassName string
-	Container         ContainerConfig
-	CSIDriverVersion  string
-	ClusterVariant    cluster.Variant
+	ClusterVariant              cluster.Variant
+	Namespace                   string
+	MountpointVersion           string
+	PriorityClassName           string
+	PreemptingPriorityClassName string
+	Container                   ContainerConfig
+	CSIDriverVersion            string
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -80,9 +91,15 @@ func NewCreator(config Config, log logr.Logger) *Creator {
 	return &Creator{config: config, log: log}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
-func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+// MountpointPod returns a new Mountpoint Pod spec to schedule for given `node`, `pv` and `priorityClassKind`.
+func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priorityClassKind PriorityClassKind) (*corev1.Pod, error) {
 	uid := c.config.ClusterVariant.MountpointPodUserID()
+
+	priorityClassName := c.config.PriorityClassName
+	if priorityClassKind == PreemptingPriorityClass {
+		priorityClassName = c.config.PreemptingPriorityClassName
+	}
+
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
@@ -126,7 +143,7 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 					},
 				},
 			}},
-			PriorityClassName: c.config.PriorityClassName,
+			PriorityClassName: priorityClassName,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
 					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod

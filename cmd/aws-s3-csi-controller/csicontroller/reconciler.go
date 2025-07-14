@@ -618,7 +618,7 @@ func (r *Reconciler) spawnMountpointPod(
 ) (*corev1.Pod, error) {
 	log.Info("Spawning Mountpoint Pod")
 
-	mpPod, err := r.mountpointPodCreator.Create(workloadPod.Spec.NodeName, pv)
+	mpPod, err := r.mountpointPodCreator.MountpointPod(workloadPod.Spec.NodeName, pv, mppod.DefaultPriorityClass)
 	if err != nil {
 		log.Error(err, "Failed to create Mountpoint Pod Spec")
 		return nil, err
