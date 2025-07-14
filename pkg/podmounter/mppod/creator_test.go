@@ -21,10 +21,12 @@ const (
 	namespace                   = "mount-s3"
 	mountpointVersion           = "1.10.0"
 	image                       = "mp-image:latest"
+	headRoomImage               = "pause:latest"
 	imagePullPolicy             = corev1.PullAlways
 	command                     = "/bin/aws-s3-csi-mounter"
 	priorityClassName           = "mount-s3-critical"
 	preemptingPriorityClassName = "mount-s3-preempting-critical"
+	headroomPriorityClassName   = "mount-s3-headroom"
 	testNode                    = "test-node"
 	testPodUID                  = "test-pod-uid"
 	testVolName                 = "test-vol"
@@ -32,14 +34,89 @@ const (
 	csiDriverVersion            = "1.12.0"
 )
 
+func TestCreatingMountpointPods(t *testing.T) {
+	createAndVerifyPod(t, cluster.DefaultKubernetes, ptr.To(int64(1000)))
+}
+
+func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
+	createAndVerifyPod(t, cluster.OpenShift, (*int64)(nil))
+}
+
+func TestCreatingHeadroomPod(t *testing.T) {
+	creator := mppod.NewCreator(createTestConfig(cluster.DefaultKubernetes), testr.New(t))
+
+	workloadPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "workload-pod",
+			Namespace: "workload-namespace",
+			UID:       "2a1d7271-dc3a-416f-8b22-4eccba5c1373",
+		},
+	}
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testVolName,
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					VolumeHandle: testVolID,
+				},
+			},
+		},
+	}
+
+	hrPod := creator.HeadroomPod(workloadPod, pv)
+
+	assert.Equals(t, "hr-f050b11ab3ce10843f3404c1f46407320ed07ab7b35f9ba40c3792e2", hrPod.Name)
+	assert.Equals(t, namespace, hrPod.Namespace)
+	assert.Equals(t, map[string]string{
+		mppod.LabelHeadroomForPod:    string(workloadPod.UID),
+		mppod.LabelHeadroomForVolume: pv.Name,
+	}, hrPod.Labels)
+	assert.Equals(t, headroomPriorityClassName, hrPod.Spec.PriorityClassName)
+	assert.Equals(t, []corev1.PodAffinityTerm{
+		{
+			LabelSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{
+						Key:      mppod.LabelHeadroomForWorkload,
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{string(workloadPod.UID)},
+					},
+				},
+			},
+			Namespaces:  []string{workloadPod.Namespace},
+			TopologyKey: "kubernetes.io/hostname",
+		},
+	}, hrPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+	assert.Equals(t, []corev1.Toleration{
+		{Operator: corev1.TolerationOpExists},
+	}, hrPod.Spec.Tolerations)
+
+	assert.Equals(t, 1, len(hrPod.Spec.Containers))
+	assert.Equals(t, "pause", hrPod.Spec.Containers[0].Name)
+	assert.Equals(t, headRoomImage, hrPod.Spec.Containers[0].Image)
+
+	assert.Equals(t, ptr.To(false), hrPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+	assert.Equals(t, &corev1.Capabilities{
+		Drop: []corev1.Capability{"ALL"},
+	}, hrPod.Spec.Containers[0].SecurityContext.Capabilities)
+	assert.Equals(t, ptr.To(true), hrPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+	assert.Equals(t, &corev1.SeccompProfile{
+		Type: corev1.SeccompProfileTypeRuntimeDefault,
+	}, hrPod.Spec.Containers[0].SecurityContext.SeccompProfile)
+}
+
 func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 	return mppod.Config{
 		Namespace:                   namespace,
 		MountpointVersion:           mountpointVersion,
 		PriorityClassName:           priorityClassName,
 		PreemptingPriorityClassName: preemptingPriorityClassName,
+		HeadroomPriorityClassName:   headroomPriorityClassName,
 		Container: mppod.ContainerConfig{
 			Image:           image,
+			HeadroomImage:   headRoomImage,
 			ImagePullPolicy: imagePullPolicy,
 			Command:         command,
 		},
@@ -635,14 +712,6 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		verifyDefaultValues(mpPod, preemptingPriorityClassName)
 	})
 
-}
-
-func TestCreatingMountpointPods(t *testing.T) {
-	createAndVerifyPod(t, cluster.DefaultKubernetes, ptr.To(int64(1000)))
-}
-
-func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
-	createAndVerifyPod(t, cluster.OpenShift, (*int64)(nil))
 }
 
 func findVolumeMountFromContainer(container corev1.Container, name string) *corev1.VolumeMount {

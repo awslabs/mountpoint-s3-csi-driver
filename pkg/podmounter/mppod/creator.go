@@ -66,16 +66,18 @@ const (
 type ContainerConfig struct {
 	Command         string
 	Image           string
+	HeadroomImage   string
 	ImagePullPolicy corev1.PullPolicy
 }
 
-// A Config represents configuration for spawned Mountpoint Pods.
+// A Config represents configuration for spawned Mountpoint/Headroom Pods.
 type Config struct {
 	ClusterVariant              cluster.Variant
 	Namespace                   string
 	MountpointVersion           string
 	PriorityClassName           string
 	PreemptingPriorityClassName string
+	HeadroomPriorityClassName   string
 	Container                   ContainerConfig
 	CSIDriverVersion            string
 }
