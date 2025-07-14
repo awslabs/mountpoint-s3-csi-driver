@@ -178,6 +178,13 @@ elif [[ "${ACTION}" == "run_tests" ]]; then
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
+elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
+  set +e
+  pushd tests/e2e-kubernetes
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
+  EXIT_CODE=$?
+  print_cluster_info
+  exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
@@ -198,6 +205,6 @@ elif [[ "${ACTION}" == "delete_cluster" ]]; then
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
   e2e_cleanup || true
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
 fi
