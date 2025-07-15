@@ -132,6 +132,11 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		return reconcile.Result{}, nil
 	}
 
+	priorityClassKind := mppod.DefaultPriorityClass
+	if needsHeadroomForMountpointPod || hasHeadroomPods {
+		priorityClassKind = mppod.PreemptingPriorityClass
+	}
+
 	var requeue bool
 	var errs []error
 
@@ -165,7 +170,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		if scheduled {
 			log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
 
-			needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv)
+			needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv, priorityClassKind)
 			requeue = requeue || needsRequeue
 			if err != nil {
 				errs = append(errs, err)
@@ -245,6 +250,7 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	workloadPod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
 	pv *corev1.PersistentVolume,
+	priorityClassKind mppod.PriorityClassKind,
 ) (bool, error) {
 	workloadUID := string(workloadPod.UID)
 	roleArn, err := r.findIRSAServiceAccountRole(ctx, workloadPod)
@@ -263,9 +269,9 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 
 	if s3pa != nil {
-		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, log)
+		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, priorityClassKind, log)
 	} else {
-		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, log)
+		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, priorityClassKind, log)
 	}
 }
 
@@ -382,6 +388,7 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	pv *corev1.PersistentVolume,
 	s3pa *crdv2beta.MountpointS3PodAttachment,
 	fieldFilters client.MatchingFields,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
@@ -394,7 +401,7 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, log)
+	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, priorityClassKind, log)
 }
 
 // addWorkloadToS3PodAttachment adds workload UID to the first suitable Mountpoint Pod in the map.
@@ -404,6 +411,7 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
 	s3pa *crdv2beta.MountpointS3PodAttachment,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
@@ -420,7 +428,7 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 	}
 
 	// There is no suitable Mountpoint Pod for the workload, we need to create a new one
-	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, log)
+	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return Requeue, err
@@ -588,6 +596,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 	pv *corev1.PersistentVolume,
 	roleArn string,
 	fieldFilters client.MatchingFields,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
@@ -603,7 +612,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, log); err != nil {
+	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log); err != nil {
 		return Requeue, err
 	}
 
@@ -617,10 +626,11 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
 	roleArn string,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) error {
 	authSource := r.getAuthSource(pv)
-	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, log)
+	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return err
@@ -672,11 +682,12 @@ func (r *Reconciler) spawnMountpointPod(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (*corev1.Pod, error) {
 	log.Info("Spawning Mountpoint Pod")
 
-	mpPod, err := r.mountpointPodCreator.MountpointPod(workloadPod.Spec.NodeName, pv, mppod.DefaultPriorityClass)
+	mpPod, err := r.mountpointPodCreator.MountpointPod(workloadPod.Spec.NodeName, pv, priorityClassKind)
 	if err != nil {
 		log.Error(err, "Failed to create Mountpoint Pod Spec")
 		return nil, err
