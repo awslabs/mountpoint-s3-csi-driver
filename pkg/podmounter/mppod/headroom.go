@@ -101,6 +101,40 @@ func HeadroomPodNameFor(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) st
 	return fmt.Sprintf("hr-%x", sha256.Sum224(fmt.Appendf(nil, "%s%s", workloadPod.UID, pv.Name)))
 }
 
+// LabelWorkloadPodForHeadroomPod adds [LabelHeadroomForWorkload] label to the `workloadPod`
+// in order to use in inter-pod affinity rules in the Headroom Pod.
+//
+// It returns whether label added.
+func LabelWorkloadPodForHeadroomPod(workloadPod *corev1.Pod) bool {
+	if WorkloadHasLabelPodForHeadroomPod(workloadPod) {
+		return false
+	}
+
+	if workloadPod.Labels == nil {
+		workloadPod.Labels = make(map[string]string)
+	}
+	workloadPod.Labels[LabelHeadroomForWorkload] = string(workloadPod.UID)
+	return true
+}
+
+// WorkloadHasLabelPodForHeadroomPod returns whether the `workloadPod` is labelled with [LabelHeadroomForWorkload].
+func WorkloadHasLabelPodForHeadroomPod(workloadPod *corev1.Pod) bool {
+	return workloadPod.Labels != nil &&
+		workloadPod.Labels[LabelHeadroomForWorkload] != ""
+}
+
+// UnlabelWorkloadPodForHeadroomPod removes [LabelHeadroomForWorkload] label from the `workloadPod`.
+//
+// It returns whether label removed.
+func UnlabelWorkloadPodForHeadroomPod(workloadPod *corev1.Pod) bool {
+	if !WorkloadHasLabelPodForHeadroomPod(workloadPod) {
+		return false
+	}
+
+	delete(workloadPod.Labels, LabelHeadroomForWorkload)
+	return true
+}
+
 // ShouldReserveHeadroomForMountpointPod returns whether the `workloadPod` wants to reserve headroom for a Mountpoint Pod.
 func ShouldReserveHeadroomForMountpointPod(workloadPod *corev1.Pod) bool {
 	return slices.ContainsFunc(workloadPod.Spec.SchedulingGates, isHeadroomScheduligGate)

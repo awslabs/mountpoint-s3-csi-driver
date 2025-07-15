@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
@@ -153,4 +154,210 @@ func TestUngateHeadroomSchedulingGateForWorkloadPod(t *testing.T) {
 			assert.Equals(t, tt.expectedGatesAfter, tt.pod.Spec.SchedulingGates)
 		})
 	}
+}
+
+func TestLabelWorkloadPodForHeadroomPod(t *testing.T) {
+	tests := []struct {
+		name           string
+		pod            *corev1.Pod
+		expectedResult bool
+		expectedLabel  string
+	}{
+		{
+			name: "pod without labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid-123",
+				},
+			},
+			expectedResult: true,
+			expectedLabel:  "test-uid-123",
+		},
+		{
+			name: "pod with existing labels but no headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid-456",
+					Labels: map[string]string{
+						"app": "test-app",
+					},
+				},
+			},
+			expectedResult: true,
+			expectedLabel:  "test-uid-456",
+		},
+		{
+			name: "pod already has headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid-789",
+					Labels: map[string]string{
+						mppod.LabelHeadroomForWorkload: "existing-value",
+					},
+				},
+			},
+			expectedResult: false,
+			expectedLabel:  "existing-value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mppod.LabelWorkloadPodForHeadroomPod(tt.pod)
+			assert.Equals(t, tt.expectedResult, result)
+			assert.Equals(t, tt.expectedLabel, tt.pod.Labels[mppod.LabelHeadroomForWorkload])
+		})
+	}
+}
+
+func TestWorkloadHasLabelPodForHeadroomPod(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name: "pod with headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						mppod.LabelHeadroomForWorkload: "test-uid",
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "pod without labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: nil,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod with other labels but no headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "test-app",
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mppod.WorkloadHasLabelPodForHeadroomPod(tt.pod)
+			assert.Equals(t, tt.expected, result)
+		})
+	}
+}
+
+func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
+	tests := []struct {
+		name           string
+		pod            *corev1.Pod
+		expectedResult bool
+		expectedLabels map[string]string
+	}{
+		{
+			name: "pod with headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						mppod.LabelHeadroomForWorkload: "test-uid",
+						"app":                          "test-app",
+					},
+				},
+			},
+			expectedResult: true,
+			expectedLabels: map[string]string{
+				"app": "test-app",
+			},
+		},
+		{
+			name: "pod with only headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						mppod.LabelHeadroomForWorkload: "test-uid",
+					},
+				},
+			},
+			expectedResult: true,
+			expectedLabels: map[string]string{},
+		},
+		{
+			name: "pod without headroom label",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "test-app",
+					},
+				},
+			},
+			expectedResult: false,
+			expectedLabels: map[string]string{
+				"app": "test-app",
+			},
+		},
+		{
+			name: "pod without labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: nil,
+				},
+			},
+			expectedResult: false,
+			expectedLabels: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mppod.UnlabelWorkloadPodForHeadroomPod(tt.pod)
+			assert.Equals(t, tt.expectedResult, result)
+			assert.Equals(t, tt.expectedLabels, tt.pod.Labels)
+		})
+	}
+}
+
+func TestHeadroomLabelingFunctions(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "test-uid",
+			Labels: map[string]string{
+				"app": "test-app",
+			},
+		},
+	}
+
+	assert.Equals(t, false, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
+
+	labeled := mppod.LabelWorkloadPodForHeadroomPod(pod)
+	assert.Equals(t, true, labeled)
+	assert.Equals(t, true, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
+	assert.Equals(t, map[string]string{
+		mppod.LabelHeadroomForWorkload: "test-uid",
+		"app":                          "test-app",
+	}, pod.Labels)
+
+	labeledAgain := mppod.LabelWorkloadPodForHeadroomPod(pod)
+	assert.Equals(t, false, labeledAgain)
+	assert.Equals(t, true, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
+
+	unlabeled := mppod.UnlabelWorkloadPodForHeadroomPod(pod)
+	assert.Equals(t, true, unlabeled)
+	assert.Equals(t, false, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
+	assert.Equals(t, map[string]string{
+		"app": "test-app",
+	}, pod.Labels)
+
+	unlabeledAgain := mppod.UnlabelWorkloadPodForHeadroomPod(pod)
+	assert.Equals(t, false, unlabeledAgain)
+	assert.Equals(t, false, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
 }
