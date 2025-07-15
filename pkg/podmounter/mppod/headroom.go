@@ -3,6 +3,7 @@ package mppod
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +20,20 @@ const (
 const (
 	LabelHeadroomForWorkload = "experimental.s3.csi.aws.com/headroom-for-workload"
 )
+
+// A scheduling gate can be used on Workload Pods using a volume backed by the CSI Driver to signal the CSI Driver
+// to reserve headroom for the Mountpoint Pod to serve volumes to workload.
+//
+// If this scheduling gate is used on a Workload Pod, the CSI Driver:
+//  1. Will label the Workload Pod with [LabelHeadroomForWorkload] equals to Workload Pod's UID
+//  2. Will create a Headroom Pod using a pause container with inter-pod affinity to the Workload Pod
+//  3. Will ungate this scheduling gate from the Workload Pod to let it scheduled (alongside the Headroom Pod)
+//  4. Will schedule Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod)
+//     into the same node as the Workload and Headroom Pods
+//  5. Mountpoint Pod will replace the Headroom Pod if there is no space in the node
+//  6. Once the Workload Pod is no longer in `Pending` state (i.e., either scheduled or terminated),
+//     the Headroom Pod will be deleted by the CSI Driver
+const SchedulingGateReserveHeadroomForMountpointPod = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
 
 // HeadroomPod returns a new Headroom Pod spec for the given `workloadPod` and `pv`.
 // This Headroom Pod serves as a capacity headroom to allow scheduling of the Mountpoint Pod alongside `workloadPod` to provide volume for `pv`.
@@ -84,4 +99,19 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 // HeadroomPodNameFor returns a consistent name for the Headroom Pod for given `workloadPod` and `pv`.
 func HeadroomPodNameFor(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) string {
 	return fmt.Sprintf("hr-%x", sha256.Sum224(fmt.Appendf(nil, "%s%s", workloadPod.UID, pv.Name)))
+}
+
+// ShouldReserveHeadroomForMountpointPod returns whether the `workloadPod` wants to reserve headroom for a Mountpoint Pod.
+func ShouldReserveHeadroomForMountpointPod(workloadPod *corev1.Pod) bool {
+	return slices.ContainsFunc(workloadPod.Spec.SchedulingGates, isHeadroomScheduligGate)
+}
+
+// UngateHeadroomSchedulingGateForWorkloadPod removes the [SchedulingGateReserveHeadroomForMountpointPod] scheduling gate from the `workloadPod`.
+func UngateHeadroomSchedulingGateForWorkloadPod(workloadPod *corev1.Pod) {
+	workloadPod.Spec.SchedulingGates = slices.DeleteFunc(workloadPod.Spec.SchedulingGates, isHeadroomScheduligGate)
+}
+
+// isHeadroomScheduligGate returns whether the `sg` equals to [SchedulingGateReserveHeadroomForMountpointPod].
+func isHeadroomScheduligGate(sg corev1.PodSchedulingGate) bool {
+	return sg.Name == SchedulingGateReserveHeadroomForMountpointPod
 }
