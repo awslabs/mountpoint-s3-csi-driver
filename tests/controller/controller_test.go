@@ -1179,13 +1179,10 @@ var _ = Describe("Mountpoint Controller", func() {
 			hrPod := waitForHeadroomPodForWorkload(pod, vol)
 			verifyHeadroomPodFor(pod, vol, hrPod)
 
-			pod.schedule(testNode)
+			pod.runOn(testNode)
 
 			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
-
-			// TODO: Assert the headroom pod is deleted after Mountpoint Pod is created
-			_ = hrPod
-			// waitForObjectToDisappear(hrPod.Pod)
+			waitForObjectToDisappear(hrPod.Pod)
 		})
 	})
 })
@@ -1195,6 +1192,22 @@ var _ = Describe("Mountpoint Controller", func() {
 // A testPod represents a Kubernetes Pod created for tests.
 type testPod struct {
 	*corev1.Pod
+}
+
+// runOn simulates `testPod` to be running on `node`.
+func (p *testPod) runOn(node string) {
+	p.schedule(node)
+	p.running()
+}
+
+// running simulates `testPod` to be in `Running` phase.
+func (p *testPod) running() {
+	p.Status.Phase = corev1.PodRunning
+	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
+
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+	})
 }
 
 // schedule simulates `testPod` to be scheduled in given node.

@@ -131,10 +131,12 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		return reconcile.Result{}, nil
 	}
 
+	hasHeadroomPods := mppod.WorkloadHasLabelPodForHeadroomPod(pod)
+
 	var requeue bool
 	var errs []error
 
-	numVolumes, numHeadroomPods := 0, 0
+	numVolumes, numHeadroomPods, numRemovedHeadroomPods := 0, 0, 0
 
 	for _, vol := range pod.Spec.Volumes {
 		podPVC := vol.PersistentVolumeClaim
@@ -170,6 +172,18 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 				errs = append(errs, err)
 				continue
 			}
+
+			if hasHeadroomPods &&
+				pod.Status.Phase != corev1.PodPending {
+				// Workload Pod past pending (i.e., either running or terminated),
+				// we no longer need the Headroom Pod
+				err := r.deleteHeadroomPodForMountpointPod(ctx, pod, pv, log)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				numRemovedHeadroomPods += 1
+			}
 		} else if needsHeadroomForMountpointPod {
 			// Label the workload pod once for headroom pods
 			if numVolumes == 1 {
@@ -200,6 +214,16 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		// Spawned all Headroom Pods needed, now ungate the Workload Pod,
 		// so it can get scheduled (alongside Headroom Pods)
 		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	if hasHeadroomPods &&
+		numVolumes == numRemovedHeadroomPods {
+		// We removed all Headroom Pods, now remove the label from the Workload Pod,
+		// so we don't try removing them again in the next cycle
+		err = r.unlabelWorkloadPodForHeadroomPod(ctx, pod, log)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
@@ -851,6 +875,26 @@ func (r *Reconciler) createHeadroomPodForMountpointPod(ctx context.Context, work
 		return err
 	}
 
+	log.Info("Headroom Pod created", "headroomPodName", hrPod.Name)
+	return nil
+}
+
+// deleteHeadroomPodForMountpointPod deletes the Headroom Pod for given `workloadPod` and `pv` if exists.
+func (r *Reconciler) deleteHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume, log logr.Logger) error {
+	hrPod, err := r.getHeadroomPodForMountpointPod(ctx, workloadPod, pv)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	err = r.Delete(ctx, hrPod)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	log.Info("Headroom Pod removed", "headroomPodName", hrPod.Name)
 	return nil
 }
 
@@ -882,6 +926,19 @@ func (r *Reconciler) labelWorkloadPodForHeadroomPod(ctx context.Context, workloa
 	}
 
 	log.Info("Labelled workload pod for headroom pods")
+	return nil
+}
+
+// unlabelWorkloadPodForHeadroomPod removes the label for headroom pods from the `workloadPod`.
+func (r *Reconciler) unlabelWorkloadPodForHeadroomPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	mppod.UnlabelWorkloadPodForHeadroomPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Unlabelled workload pod for headroom pods")
 	return nil
 }
 
