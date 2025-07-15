@@ -1167,6 +1167,27 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
 	})
+
+	Context("Reserving headroom for Mountpoint Pods", func() {
+		It("should create a Headroom Pod if the Workload Pods requests it", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.schedule(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+			// TODO: Assert the headroom pod is deleted after Mountpoint Pod is created
+			_ = hrPod
+			// waitForObjectToDisappear(hrPod.Pod)
+		})
+	})
 })
 
 //-- Utilities for tests.
@@ -1183,6 +1204,13 @@ func (p *testPod) schedule(name string) {
 
 	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
 		g.Expect(pod.Spec.NodeName).To(Equal(name))
+	})
+}
+
+// waitUntilSchedulingUngated waits until all scheduling gates are removed from `testPod` and its ready to be scheduled.
+func (p *testPod) waitUntilSchedulingUngated() {
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Spec.SchedulingGates).To(BeEmpty())
 	})
 }
 
@@ -1274,6 +1302,18 @@ func withServiceAccount(saName string) podModifier {
 func withNamespace(namespace string) podModifier {
 	return func(pod *corev1.Pod) {
 		pod.Namespace = namespace
+	}
+}
+
+// withSchedulingGates returns a `podModifier` that sets given scheduling gates.
+func withSchedulingGates(schedulingGates ...string) podModifier {
+	return func(pod *corev1.Pod) {
+		var sgs []corev1.PodSchedulingGate
+		for _, sg := range schedulingGates {
+			sgs = append(sgs, corev1.PodSchedulingGate{Name: sg})
+		}
+
+		pod.Spec.SchedulingGates = sgs
 	}
 }
 
@@ -1406,6 +1446,24 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	waitForObject(pvc)
 
 	return testVolume
+}
+
+// waitForHeadroomPodForWorkload waits and returns the Headroom Pod for the given workload.
+func waitForHeadroomPodForWorkload(pod *testPod, vol *testVolume) *testPod {
+	hrPod := &corev1.Pod{}
+
+	Eventually(func(g Gomega) {
+		var pods corev1.PodList
+		g.Expect(k8sClient.List(ctx, &pods, client.MatchingLabels{
+			mppod.LabelHeadroomForPod:    string(pod.UID),
+			mppod.LabelHeadroomForVolume: vol.pv.Name,
+		})).To(Succeed())
+
+		g.Expect(pods.Items).To(HaveLen(1))
+		hrPod = &pods.Items[0]
+	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+
+	return &testPod{Pod: hrPod}
 }
 
 // waitForMountpointPodWithName waits and returns the Mountpoint Pod scheduled for given `mpPodName`
@@ -1558,6 +1616,41 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 	Expect(mountpointPod.Spec.Containers[0].Image).To(Equal(mountpointImage))
 	Expect(mountpointPod.Spec.Containers[0].ImagePullPolicy).To(Equal(mountpointImagePullPolicy))
 	Expect(mountpointPod.Spec.Containers[0].Command).To(Equal([]string{mountpointContainerCommand}))
+}
+
+// verifyHeadroomPodFor verifies given `headroomPood` for given `pod` and `vol`.
+func verifyHeadroomPodFor(pod *testPod, vol *testVolume, headroomPod *testPod) {
+	GinkgoHelper()
+
+	Expect(headroomPod.Namespace).To(Equal(mountpointNamespace))
+
+	Expect(headroomPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelHeadroomForPod, string(pod.UID)))
+	Expect(headroomPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelHeadroomForVolume, vol.pv.Name))
+
+	Expect(headroomPod.Spec.PriorityClassName).To(Equal(headroomPodPriorityClassName))
+
+	Expect(headroomPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution).To(Equal([]corev1.PodAffinityTerm{
+		{
+			LabelSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{
+						Key:      mppod.LabelHeadroomForWorkload,
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{string(pod.UID)},
+					},
+				},
+			},
+			Namespaces:  []string{pod.Namespace},
+			TopologyKey: "kubernetes.io/hostname",
+		},
+	}))
+	Expect(headroomPod.Spec.Tolerations).To(Equal([]corev1.Toleration{
+		{
+			Operator: corev1.TolerationOpExists,
+		},
+	}))
+
+	Expect(headroomPod.Spec.Containers[0].Image).To(Equal(headroomImage))
 }
 
 // waitForObject waits until `obj` appears in the control plane.

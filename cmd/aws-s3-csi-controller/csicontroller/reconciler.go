@@ -65,7 +65,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Reconcile reconciles either a Mountpoint- or a workload-Pod.
 //
 // For Mountpoint Pods, it deletes completed Pods and logs each status change.
-// For workload Pods, it decides if it needs to spawn a Mountpoint Pod to provide a volume for the workload Pod.
+// For workload Pods, it decides if it needs to spawn a Mountpoint/Headroom Pod to provide a volume for the workload Pod.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("pod", req.NamespacedName)
 
@@ -119,18 +119,22 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("pod", types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
 
-	if pod.Spec.NodeName == "" {
-		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
-		return reconcile.Result{}, nil
-	}
-
 	if len(pod.Spec.Volumes) == 0 {
 		log.V(debugLevel).Info("Pod has no volumes - ignoring")
 		return reconcile.Result{}, nil
 	}
 
+	scheduled := pod.Spec.NodeName != ""
+	needsHeadroomForMountpointPod := mppod.ShouldReserveHeadroomForMountpointPod(pod)
+	if !scheduled && !needsHeadroomForMountpointPod {
+		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
+		return reconcile.Result{}, nil
+	}
+
 	var requeue bool
 	var errs []error
+
+	numVolumes, numHeadroomPods := 0, 0
 
 	for _, vol := range pod.Spec.Volumes {
 		podPVC := vol.PersistentVolumeClaim
@@ -155,20 +159,50 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		if csiSpec == nil {
 			continue
 		}
+		numVolumes += 1
 
-		log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
+		if scheduled {
+			log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
 
-		needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv)
-		requeue = requeue || needsRequeue
-		if err != nil {
-			errs = append(errs, err)
-			continue
+			needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv)
+			requeue = requeue || needsRequeue
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		} else if needsHeadroomForMountpointPod {
+			// Label the workload pod once for headroom pods
+			if numVolumes == 1 {
+				err = r.labelWorkloadPodForHeadroomPod(ctx, pod, log)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+			}
+
+			err = r.createHeadroomPodForMountpointPod(ctx, pod, pv, log)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+
+			numHeadroomPods += 1
 		}
 	}
 
 	err := errors.Join(errs...)
 	if err != nil {
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, err
+	}
+
+	if needsHeadroomForMountpointPod &&
+		numVolumes == numHeadroomPods {
+		// Spawned all Headroom Pods needed, now ungate the Workload Pod,
+		// so it can get scheduled (alongside Headroom Pods)
+		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	return reconcile.Result{Requeue: requeue}, nil
@@ -781,6 +815,73 @@ func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName st
 		return err
 	}
 
+	return nil
+}
+
+// ungateHeadroomSchedulingGateForWorkloadPod removes the scheduling gate for headroom pods from the `workloadPod`, making it ready for scheduling.
+func (r *Reconciler) ungateHeadroomSchedulingGateForWorkloadPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	mppod.UngateHeadroomSchedulingGateForWorkloadPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Ungated headroom scheduling gate from the workload pod")
+	return nil
+}
+
+// createHeadroomPodForMountpointPod creates a Headroom Pod if not exists for a Mountpoint Pod for given `workloadPod` and `pv`.
+func (r *Reconciler) createHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume, log logr.Logger) error {
+	hrPod, err := r.getHeadroomPodForMountpointPod(ctx, workloadPod, pv)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	hrPod = r.mountpointPodCreator.HeadroomPod(workloadPod, pv)
+	err = r.Create(ctx, hrPod)
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Headroom Pod already created for this `workloadPod` and `pv`.
+			// Since we use consistent names in the Headroom Pods,
+			// we might get this error due to eventually consistency in the control plane,
+			// but this is not an error condition.
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+// getHeadroomPodForMountpointPod returns the Headroom Pod for given `workloadPod` and `pv` if exists.
+func (r *Reconciler) getHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	name := mppod.HeadroomPodNameFor(workloadPod, pv)
+	hrPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: name}, hrPod)
+	if err != nil {
+		return nil, err
+	}
+	return hrPod, nil
+}
+
+// labelWorkloadPodForHeadroomPods labels the `workloadPod` for headroom pods.
+//
+// It returns nil if the `workloadPod` is already labelled.
+func (r *Reconciler) labelWorkloadPodForHeadroomPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	if mppod.WorkloadHasLabelPodForHeadroomPod(workloadPod) {
+		// `workloadPod` already labelled, nothing to do
+		return nil
+	}
+
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	_ = mppod.LabelWorkloadPodForHeadroomPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Labelled workload pod for headroom pods")
 	return nil
 }
 
