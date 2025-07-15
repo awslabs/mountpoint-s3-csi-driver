@@ -126,12 +126,11 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 
 	scheduled := pod.Spec.NodeName != ""
 	needsHeadroomForMountpointPod := mppod.ShouldReserveHeadroomForMountpointPod(pod)
-	if !scheduled && !needsHeadroomForMountpointPod {
+	hasHeadroomPods := mppod.WorkloadHasLabelPodForHeadroomPod(pod)
+	if !scheduled && !needsHeadroomForMountpointPod && !hasHeadroomPods {
 		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
 		return reconcile.Result{}, nil
 	}
-
-	hasHeadroomPods := mppod.WorkloadHasLabelPodForHeadroomPod(pod)
 
 	var requeue bool
 	var errs []error
@@ -172,18 +171,6 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 				errs = append(errs, err)
 				continue
 			}
-
-			if hasHeadroomPods &&
-				pod.Status.Phase != corev1.PodPending {
-				// Workload Pod past pending (i.e., either running or terminated),
-				// we no longer need the Headroom Pod
-				err := r.deleteHeadroomPodForMountpointPod(ctx, pod, pv, log)
-				if err != nil {
-					errs = append(errs, err)
-					continue
-				}
-				numRemovedHeadroomPods += 1
-			}
 		} else if needsHeadroomForMountpointPod {
 			// Label the workload pod once for headroom pods
 			if numVolumes == 1 {
@@ -201,6 +188,19 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 			}
 
 			numHeadroomPods += 1
+		}
+
+		if hasHeadroomPods &&
+			((scheduled && pod.Status.Phase != corev1.PodPending) ||
+				isPodTerminating(pod)) {
+			// Workload Pod past pending (i.e., either running or terminated),
+			// we no longer need the Headroom Pod
+			err := r.deleteHeadroomPodForMountpointPod(ctx, pod, pv, log)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			numRemovedHeadroomPods += 1
 		}
 	}
 
@@ -965,6 +965,11 @@ func isPodActive(p *corev1.Pod) bool {
 	return corev1.PodSucceeded != p.Status.Phase &&
 		corev1.PodFailed != p.Status.Phase &&
 		p.DeletionTimestamp == nil
+}
+
+// isPodTerminating returns whether given Pod is terminating.
+func isPodTerminating(p *corev1.Pod) bool {
+	return p.DeletionTimestamp != nil
 }
 
 // isPodRunning returns whether given Pod phase is `Running`.

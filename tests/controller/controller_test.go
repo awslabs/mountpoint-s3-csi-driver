@@ -1184,6 +1184,130 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
 			waitForObjectToDisappear(hrPod.Pod)
 		})
+
+		It("should create multiple Headroom Pods if the Workload Pod has multiple volumes", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume()
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			hrPod2 := waitForHeadroomPodForWorkload(pod, vol2)
+			verifyHeadroomPodFor(pod, vol2, hrPod2)
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol2, pod)
+			waitForObjectToDisappear(hrPod1.Pod)
+			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod terminates without getting scheduled", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			// Terminate the workload pod without scheduling it
+			pod.terminate()
+
+			// Headroom Pod should be deleted
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod fails", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.runOn(testNode)
+			pod.fail()
+
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod succeeds", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.runOn(testNode)
+			pod.succeed()
+
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete all Headroom Pods if the Workload Pod with multiple volumes terminates without getting scheduled", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume()
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			hrPod2 := waitForHeadroomPodForWorkload(pod, vol2)
+			verifyHeadroomPodFor(pod, vol2, hrPod2)
+
+			// Terminate the workload pod without scheduling it
+			pod.terminate()
+
+			// All Headroom Pods should be deleted
+			waitForObjectToDisappear(hrPod1.Pod)
+			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should not create Headroom Pods for volumes not backed by S3 CSI driver", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume(withCSIDriver(ebsCSIDriver))
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod)
+
+			// Should not create headroom pod for EBS volume
+			Consistently(func(g Gomega) {
+				var pods corev1.PodList
+				g.Expect(k8sClient.List(ctx, &pods, client.MatchingLabels{
+					mppod.LabelHeadroomForPod:    string(pod.UID),
+					mppod.LabelHeadroomForVolume: vol2.pv.Name,
+				})).To(Succeed())
+				g.Expect(pods.Items).To(BeEmpty())
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
+			expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
+			waitForObjectToDisappear(hrPod.Pod)
+		})
 	})
 })
 
@@ -1234,6 +1358,16 @@ func (p *testPod) succeed() {
 
 	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
 		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
+	})
+}
+
+// fail simulates `testPod` to be failed.
+func (p *testPod) fail() {
+	p.Status.Phase = corev1.PodFailed
+	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
+
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Status.Phase).To(Equal(corev1.PodFailed))
 	})
 }
 
