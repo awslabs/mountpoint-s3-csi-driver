@@ -36,6 +36,9 @@ const (
 	mountpointPodReadinessWaitDuration = 15 * time.Second
 )
 
+// TODO: Replace this with a tracking ticket.
+const unschedulableMountpointPodReference = "https://github.com/awslabs/mountpoint-s3-csi-driver/issues/534"
+
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
 
@@ -133,8 +136,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	pod, podPath, err := pm.waitForMountpointPod(ctx, mpPodName)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod %q to be ready for %q: %v. %s", mpPodName, target, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %q to be ready: %w. %s", mpPodName, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
+		klog.Errorf("Failed to wait for Mountpoint Pod %q to be ready for %q: %v. %s", mpPodName, target, err, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %q to be ready: %w. %s", mpPodName, err, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
 	}
 	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
@@ -510,7 +513,11 @@ func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) strin
 }
 
 // helpMessageForGettingMountpointPodStatus returns a help message to throubleshoot if Mountpoint Pod is not running.
-func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(mpPodName string) string {
+func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(err error, mpPodName string) string {
+	if errors.Is(err, watcher.ErrPodUnschedulable) {
+		return fmt.Sprintf("Seems like Mountpoint Pod is in 'Pending' status because it is unschedulable. This usually happens if there is no space for Mountpoint Pod in the node, see %s fore more details and some possible workarounds. You can see Mountpoint Pod's status and any potential failures by running: `kubectl describe pods -n %s %s`", unschedulableMountpointPodReference, mountpointPodNamespace, mpPodName)
+	}
+
 	return fmt.Sprintf("Seems like Mountpoint Pod is not in 'Running' status. You can see it's status and any potential failures by running: `kubectl describe pods -n %s %s`", mountpointPodNamespace, mpPodName)
 }
 
