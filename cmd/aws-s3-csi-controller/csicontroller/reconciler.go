@@ -133,8 +133,8 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	}
 
 	scheduled := isPodScheduled(pod)
-	needsHeadroomForMountpointPod := mppod.ShouldReserveHeadroomForMountpointPod(pod)
-	hasHeadroomPods := mppod.WorkloadHasLabelPodForHeadroomPod(pod)
+	needsHeadroomForMountpointPod := r.isHeadroomForMountpointPodsFeatureEnabled() && mppod.ShouldReserveHeadroomForMountpointPod(pod)
+	hasHeadroomPods := r.isHeadroomForMountpointPodsFeatureEnabled() && mppod.WorkloadHasLabelPodForHeadroomPod(pod)
 	if !scheduled && !needsHeadroomForMountpointPod && !hasHeadroomPods {
 		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
 		return reconcile.Result{}, nil
@@ -1006,6 +1006,12 @@ func (r *Reconciler) shouldDeleteHeadroomPodForTheWorkloadPod(workloadPod *corev
 // isInMountpointNamespace returns whether given `pod` is in the Mountpoint namespace.
 func (r *Reconciler) isInMountpointNamespace(pod *corev1.Pod) bool {
 	return pod.Namespace == r.mountpointPodConfig.Namespace
+}
+
+// isHeadroomForMountpointPodsFeatureEnabled returns whether the experimental feature-flag for reserving headroom for Mountpoint Pods enabled.
+func (r *Reconciler) isHeadroomForMountpointPodsFeatureEnabled() bool {
+	return r.mountpointPodConfig.HeadroomPriorityClassName != "" &&
+		r.mountpointPodConfig.PreemptingPriorityClassName != ""
 }
 
 // extractCSISpecFromPV tries to extract `CSIPersistentVolumeSource` from given `pv`.
