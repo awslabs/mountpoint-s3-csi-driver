@@ -91,3 +91,11 @@ There is also [a feature request on Mountpoint](https://github.com/awslabs/mount
 
 When using S3 Outposts, it is required to include the full ARN for your Outpost bucket in the `bucketName` field.
 See [the S3 Outposts example](../examples/kubernetes/static_provisioning/outpost_bucket.yaml).
+
+## My Pod is stuck at `ContainerCreating` with error "driver name s3.csi.aws.com not found in the list of registered CSI drivers"
+
+This error can occur due to a race condition during node startup where workload pods are scheduled before the S3 CSI driver has completed registration with kubelet.
+
+The S3 CSI driver includes a feature to prevent this race condition by using node startup taints. When a node is tainted with `s3.csi.aws.com/agent-not-ready:NoExecute`, workload pods cannot be scheduled on that node until the S3 CSI driver removes the taint after successful startup.
+
+For EKS managed node groups, add the taint to your node group configuration (more details in [this documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)). For self-managed nodes, [apply the taint using kubectl](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/) when nodes join the cluster.
