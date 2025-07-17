@@ -361,3 +361,64 @@ func TestHeadroomLabelingFunctions(t *testing.T) {
 	assert.Equals(t, false, unlabeledAgain)
 	assert.Equals(t, false, mppod.WorkloadHasLabelPodForHeadroomPod(pod))
 }
+
+func TestIsHeadroomPod(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name: "headroom pod",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "hr-abc123",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "regular pod",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "regular-pod-name",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "mountpoint pod",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "mp-abc123",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod with headroom pod prefix in middle",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-hr-name",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod with empty name",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "",
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mppod.IsHeadroomPod(tt.pod)
+			assert.Equals(t, tt.expected, result)
+		})
+	}
+}

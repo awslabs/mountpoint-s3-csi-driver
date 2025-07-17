@@ -82,7 +82,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if r.isMountpointPod(pod) {
+	if r.isInMountpointNamespace(pod) {
+		if mppod.IsHeadroomPod(pod) {
+			// Nothing to do here, `reconcileWorkloadPod` takes care of spawning and deleting Headroom Pods.
+			log.V(debugLevel).Info("Headroom Pod updated",
+				"headroomPod", pod.Name,
+				"status", pod.Status.Phase)
+			return reconcile.Result{}, nil
+		}
+
 		return r.reconcileMountpointPod(ctx, pod)
 	}
 
@@ -953,10 +961,8 @@ func (r *Reconciler) unlabelWorkloadPodForHeadroomPod(ctx context.Context, workl
 	return nil
 }
 
-// isMountpointPod returns whether given `pod` is a Mountpoint Pod.
-// It currently checks namespace of `pod`.
-func (r *Reconciler) isMountpointPod(pod *corev1.Pod) bool {
-	// TODO: Do we need to perform any additional check here?
+// isInMountpointNamespace returns whether given `pod` is in the Mountpoint namespace.
+func (r *Reconciler) isInMountpointNamespace(pod *corev1.Pod) bool {
 	return pod.Namespace == r.mountpointPodConfig.Namespace
 }
 

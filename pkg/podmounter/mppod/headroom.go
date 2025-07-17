@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +35,8 @@ const (
 //  6. Once the Workload Pod is no longer in `Pending` state (i.e., either scheduled or terminated),
 //     the Headroom Pod will be deleted by the CSI Driver
 const SchedulingGateReserveHeadroomForMountpointPod = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
+
+const headroomPodNamePrefix = "hr-"
 
 // HeadroomPod returns a new Headroom Pod spec for the given `workloadPod` and `pv`.
 // This Headroom Pod serves as a capacity headroom to allow scheduling of the Mountpoint Pod alongside `workloadPod` to provide volume for `pv`.
@@ -98,7 +101,15 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 
 // HeadroomPodNameFor returns a consistent name for the Headroom Pod for given `workloadPod` and `pv`.
 func HeadroomPodNameFor(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) string {
-	return fmt.Sprintf("hr-%x", sha256.Sum224(fmt.Appendf(nil, "%s%s", workloadPod.UID, pv.Name)))
+	return fmt.Sprintf("%s%x", headroomPodNamePrefix, sha256.Sum224(fmt.Appendf(nil, "%s%s", workloadPod.UID, pv.Name)))
+}
+
+// IsHeadroomPod returns whether given pod is a Headroom Pod.
+//
+// Note that, this function doesn't check the namespace, it's caller's responsibility to ensure
+// the pod queried is in the correct namespace for Headroom Pods.
+func IsHeadroomPod(pod *corev1.Pod) bool {
+	return strings.HasPrefix(pod.Name, headroomPodNamePrefix)
 }
 
 // LabelWorkloadPodForHeadroomPod adds [LabelHeadroomForWorkload] label to the `workloadPod`
