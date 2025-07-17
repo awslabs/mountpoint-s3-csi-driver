@@ -132,7 +132,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		return reconcile.Result{}, nil
 	}
 
-	scheduled := pod.Spec.NodeName != ""
+	scheduled := isPodScheduled(pod)
 	needsHeadroomForMountpointPod := mppod.ShouldReserveHeadroomForMountpointPod(pod)
 	hasHeadroomPods := mppod.WorkloadHasLabelPodForHeadroomPod(pod)
 	if !scheduled && !needsHeadroomForMountpointPod && !hasHeadroomPods {
@@ -145,35 +145,16 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		priorityClassKind = mppod.PreemptingPriorityClass
 	}
 
-	var requeue bool
+	volumes, requeue, err := r.getWorkloadVolumes(ctx, pod)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
 	var errs []error
+	numHeadroomPods, numRemovedHeadroomPods := 0, 0
 
-	numVolumes, numHeadroomPods, numRemovedHeadroomPods := 0, 0, 0
-
-	for _, vol := range pod.Spec.Volumes {
-		podPVC := vol.PersistentVolumeClaim
-		if podPVC == nil {
-			continue
-		}
-
-		// If PVC has no bound PVs yet, `getBoundPVForPodClaim` will return `errPVCIsNotBoundToAPV`.
-		// In this case we'll just return `reconcile.Result{Requeue: true}` here, which will bubble up to the
-		// original `Reconcile` call and will cause a retry for this Pod with an exponential backoff.
-		pvc, pv, err := r.getBoundPVForPodClaim(ctx, pod, podPVC)
-		if err != nil {
-			if errors.Is(err, errPVCIsNotBoundToAPV) {
-				requeue = true
-			} else {
-				errs = append(errs, err)
-			}
-			continue
-		}
-
-		csiSpec := extractCSISpecFromPV(pv)
-		if csiSpec == nil {
-			continue
-		}
-		numVolumes += 1
+	for i, vol := range volumes {
+		pv, pvc := vol.pv, vol.pvc
 
 		if scheduled {
 			log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
@@ -186,7 +167,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 			}
 		} else if needsHeadroomForMountpointPod {
 			// Label the workload pod once for headroom pods
-			if numVolumes == 1 {
+			if i == 0 {
 				err = r.labelWorkloadPodForHeadroomPod(ctx, pod, log)
 				if err != nil {
 					errs = append(errs, err)
@@ -203,9 +184,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 			numHeadroomPods += 1
 		}
 
-		if hasHeadroomPods &&
-			((scheduled && pod.Status.Phase != corev1.PodPending) ||
-				isPodTerminating(pod)) {
+		if hasHeadroomPods && r.shouldDeleteHeadroomPodForTheWorkloadPod(pod) {
 			// Workload Pod past pending (i.e., either running or terminated),
 			// we no longer need the Headroom Pod
 			err := r.deleteHeadroomPodForMountpointPod(ctx, pod, pv, log)
@@ -217,13 +196,13 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		}
 	}
 
-	err := errors.Join(errs...)
+	err = errors.Join(errs...)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
 	if needsHeadroomForMountpointPod &&
-		numVolumes == numHeadroomPods {
+		len(volumes) == numHeadroomPods {
 		// Spawned all Headroom Pods needed, now ungate the Workload Pod,
 		// so it can get scheduled (alongside Headroom Pods)
 		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
@@ -233,7 +212,7 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	}
 
 	if hasHeadroomPods &&
-		numVolumes == numRemovedHeadroomPods {
+		len(volumes) == numRemovedHeadroomPods {
 		// We removed all Headroom Pods, now remove the label from the Workload Pod,
 		// so we don't try removing them again in the next cycle
 		err = r.unlabelWorkloadPodForHeadroomPod(ctx, pod, log)
@@ -243,6 +222,53 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	}
 
 	return reconcile.Result{Requeue: requeue}, nil
+}
+
+// getWorkloadVolumes returns list of volumes of the workload that ready to process.
+func (r *Reconciler) getWorkloadVolumes(
+	ctx context.Context,
+	workloadPod *corev1.Pod,
+) ([]*workloadVolume, bool, error) {
+	status := DontRequeue
+
+	var errs []error
+	var volumes []*workloadVolume
+
+	for _, vol := range workloadPod.Spec.Volumes {
+		podPVC := vol.PersistentVolumeClaim
+		if podPVC == nil {
+			continue
+		}
+
+		// If PVC has no bound PVs yet, `getBoundPVForPodClaim` will return `errPVCIsNotBoundToAPV`.
+		// In this case we'll just return `reconcile.Result{Requeue: true}` here, which will bubble up to the
+		// original `Reconcile` call and will cause a retry for this Pod with an exponential backoff.
+		pvc, pv, err := r.getBoundPVForPodClaim(ctx, workloadPod, podPVC)
+		if err != nil {
+			if errors.Is(err, errPVCIsNotBoundToAPV) {
+				status = Requeue
+			} else {
+				errs = append(errs, err)
+			}
+			continue
+		}
+
+		csiSpec := extractCSISpecFromPV(pv)
+		if csiSpec == nil {
+			continue
+		}
+
+		volumes = append(volumes, &workloadVolume{pv, pvc, csiSpec})
+	}
+
+	return volumes, status, errors.Join(errs...)
+}
+
+// A workloadVolume represents a workload's volume backed by the CSI Driver.
+type workloadVolume struct {
+	pv      *corev1.PersistentVolume
+	pvc     *corev1.PersistentVolumeClaim
+	csiSpec *corev1.CSIPersistentVolumeSource
 }
 
 // spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `workloadPod` and volume if needed.
@@ -961,6 +987,22 @@ func (r *Reconciler) unlabelWorkloadPodForHeadroomPod(ctx context.Context, workl
 	return nil
 }
 
+// shouldDeleteHeadroomPodForTheWorkloadPod returns whether Headroom Pods spawned for `workloadPod` should be deleted.
+func (r *Reconciler) shouldDeleteHeadroomPodForTheWorkloadPod(workloadPod *corev1.Pod) bool {
+	if isPodTerminating(workloadPod) {
+		// Workload Pod is getting terminated, we no longer need any Headroom Pods.
+		return true
+	}
+
+	if isPodScheduled(workloadPod) {
+		// Workload Pod is scheduled, we don't need any Headroom Pods if it started running (i.e., past "Pending" state)
+		return workloadPod.Status.Phase != corev1.PodPending
+	}
+
+	// We still need Headroom Pods
+	return false
+}
+
 // isInMountpointNamespace returns whether given `pod` is in the Mountpoint namespace.
 func (r *Reconciler) isInMountpointNamespace(pod *corev1.Pod) bool {
 	return pod.Namespace == r.mountpointPodConfig.Namespace
@@ -976,7 +1018,7 @@ func extractCSISpecFromPV(pv *corev1.PersistentVolume) *corev1.CSIPersistentVolu
 	return csi
 }
 
-// isPodActive returns whether given Pod is active and not in the process of termination.
+// isPodActive returns whether given the Pod is active and not in the process of termination.
 // Copied from https://github.com/kubernetes/kubernetes/blob/8770bd58d04555303a3a15b30c245a58723d0f4a/pkg/controller/controller_utils.go#L1009-L1013.
 func isPodActive(p *corev1.Pod) bool {
 	return corev1.PodSucceeded != p.Status.Phase &&
@@ -984,9 +1026,14 @@ func isPodActive(p *corev1.Pod) bool {
 		p.DeletionTimestamp == nil
 }
 
-// isPodTerminating returns whether given Pod is terminating.
+// isPodTerminating returns whether the given Pod is terminating.
 func isPodTerminating(p *corev1.Pod) bool {
 	return p.DeletionTimestamp != nil
+}
+
+// isPodScheduled returns whether the given Pod is scheduled.
+func isPodScheduled(p *corev1.Pod) bool {
+	return p.Spec.NodeName != ""
 }
 
 // isPodRunning returns whether given Pod phase is `Running`.
