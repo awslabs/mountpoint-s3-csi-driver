@@ -40,8 +40,8 @@ const headroomPodNamePrefix = "hr-"
 
 // HeadroomPod returns a new Headroom Pod spec for the given `workloadPod` and `pv`.
 // This Headroom Pod serves as a capacity headroom to allow scheduling of the Mountpoint Pod alongside `workloadPod` to provide volume for `pv`.
-func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) *corev1.Pod {
-	return &corev1.Pod{
+func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	hrPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      HeadroomPodNameFor(workloadPod, pv),
 			Namespace: c.config.Namespace,
@@ -77,8 +77,6 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 				{
 					Name:  "pause",
 					Image: c.config.Container.HeadroomImage,
-					// TODO: Populate resources if PV specifies Mountpoint Pod resources.
-					// Resources: corev1.ResourceRequirements{},
 					SecurityContext: &corev1.SecurityContext{
 						AllowPrivilegeEscalation: ptr.To(false),
 						RunAsNonRoot:             ptr.To(true),
@@ -97,6 +95,18 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 			},
 		},
 	}
+
+	hrContainer := &hrPod.Spec.Containers[0]
+	volumeAttributes := ExtractVolumeAttributes(pv)
+
+	if err := c.configureResourceRequests(hrContainer, volumeAttributes); err != nil {
+		return nil, err
+	}
+	if err := c.configureResourceLimits(hrContainer, volumeAttributes); err != nil {
+		return nil, err
+	}
+
+	return hrPod, nil
 }
 
 // HeadroomPodNameFor returns a consistent name for the Headroom Pod for given `workloadPod` and `pv`.

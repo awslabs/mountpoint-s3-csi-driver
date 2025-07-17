@@ -134,5 +134,24 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 1))
 			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 2))
 		})
+
+		It("should get scheduled automatically after reserving headroom with resource specifications", func(ctx context.Context) {
+			vol := createVolumeResourceWithMountOptions(contextWithVolumeAttributes(ctx, map[string]string{
+				"mountpointContainerResourcesRequestsCpu":    "100m",
+				"mountpointContainerResourcesRequestsMemory": "64Mi",
+				"mountpointContainerResourcesLimitsCpu":      "200m",
+				"mountpointContainerResourcesLimitsMemory":   "128Mi",
+			}), l.config, pattern, []string{"allow-delete"})
+			deferCleanup(vol.CleanupResource)
+
+			pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
+			pod.Spec.SchedulingGates = []v1.PodSchedulingGate{{Name: headroomSchedulingGate}}
+
+			pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+			framework.ExpectNoError(err)
+			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+
+			checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
+		})
 	})
 }

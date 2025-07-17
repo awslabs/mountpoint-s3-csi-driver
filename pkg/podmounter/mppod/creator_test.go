@@ -52,59 +52,206 @@ func TestCreatingHeadroomPod(t *testing.T) {
 			UID:       "2a1d7271-dc3a-416f-8b22-4eccba5c1373",
 		},
 	}
-	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: testVolName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					VolumeHandle: testVolID,
-				},
+
+	t.Run("Basic HeadroomPod creation", func(t *testing.T) {
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testVolName,
 			},
-		},
-	}
-
-	hrPod := creator.HeadroomPod(workloadPod, pv)
-
-	assert.Equals(t, "hr-f050b11ab3ce10843f3404c1f46407320ed07ab7b35f9ba40c3792e2", hrPod.Name)
-	assert.Equals(t, namespace, hrPod.Namespace)
-	assert.Equals(t, map[string]string{
-		mppod.LabelHeadroomForPod:    string(workloadPod.UID),
-		mppod.LabelHeadroomForVolume: pv.Name,
-	}, hrPod.Labels)
-	assert.Equals(t, headroomPriorityClassName, hrPod.Spec.PriorityClassName)
-	assert.Equals(t, []corev1.PodAffinityTerm{
-		{
-			LabelSelector: &metav1.LabelSelector{
-				MatchExpressions: []metav1.LabelSelectorRequirement{
-					{
-						Key:      mppod.LabelHeadroomForWorkload,
-						Operator: metav1.LabelSelectorOpIn,
-						Values:   []string{string(workloadPod.UID)},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
 					},
 				},
 			},
-			Namespaces:  []string{workloadPod.Namespace},
-			TopologyKey: "kubernetes.io/hostname",
-		},
-	}, hrPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
-	assert.Equals(t, []corev1.Toleration{
-		{Operator: corev1.TolerationOpExists},
-	}, hrPod.Spec.Tolerations)
+		}
 
-	assert.Equals(t, 1, len(hrPod.Spec.Containers))
-	assert.Equals(t, "pause", hrPod.Spec.Containers[0].Name)
-	assert.Equals(t, headRoomImage, hrPod.Spec.Containers[0].Image)
+		hrPod, err := creator.HeadroomPod(workloadPod, pv)
+		assert.NoError(t, err)
 
-	assert.Equals(t, ptr.To(false), hrPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
-	assert.Equals(t, &corev1.Capabilities{
-		Drop: []corev1.Capability{"ALL"},
-	}, hrPod.Spec.Containers[0].SecurityContext.Capabilities)
-	assert.Equals(t, ptr.To(true), hrPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
-	assert.Equals(t, &corev1.SeccompProfile{
-		Type: corev1.SeccompProfileTypeRuntimeDefault,
-	}, hrPod.Spec.Containers[0].SecurityContext.SeccompProfile)
+		assert.Equals(t, "hr-f050b11ab3ce10843f3404c1f46407320ed07ab7b35f9ba40c3792e2", hrPod.Name)
+		assert.Equals(t, namespace, hrPod.Namespace)
+		assert.Equals(t, map[string]string{
+			mppod.LabelHeadroomForPod:    string(workloadPod.UID),
+			mppod.LabelHeadroomForVolume: pv.Name,
+		}, hrPod.Labels)
+		assert.Equals(t, headroomPriorityClassName, hrPod.Spec.PriorityClassName)
+		assert.Equals(t, []corev1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      mppod.LabelHeadroomForWorkload,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{string(workloadPod.UID)},
+						},
+					},
+				},
+				Namespaces:  []string{workloadPod.Namespace},
+				TopologyKey: "kubernetes.io/hostname",
+			},
+		}, hrPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+		assert.Equals(t, []corev1.Toleration{
+			{Operator: corev1.TolerationOpExists},
+		}, hrPod.Spec.Tolerations)
+
+		assert.Equals(t, 1, len(hrPod.Spec.Containers))
+		assert.Equals(t, "pause", hrPod.Spec.Containers[0].Name)
+		assert.Equals(t, headRoomImage, hrPod.Spec.Containers[0].Image)
+
+		assert.Equals(t, ptr.To(false), hrPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+		assert.Equals(t, &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		}, hrPod.Spec.Containers[0].SecurityContext.Capabilities)
+		assert.Equals(t, ptr.To(true), hrPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+		assert.Equals(t, &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		}, hrPod.Spec.Containers[0].SecurityContext.SeccompProfile)
+
+		// Verify no resources are set by default
+		hrContainer := hrPod.Spec.Containers[0]
+		assert.Equals(t, true, hrContainer.Resources.Requests.Cpu().IsZero())
+		assert.Equals(t, true, hrContainer.Resources.Requests.Memory().IsZero())
+		assert.Equals(t, true, hrContainer.Resources.Limits.Cpu().IsZero())
+		assert.Equals(t, true, hrContainer.Resources.Limits.Memory().IsZero())
+	})
+
+	t.Run("With Container Resources specified in PV", func(t *testing.T) {
+		t.Run("With valid requests and limits", func(t *testing.T) {
+			pv := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.MountpointContainerResourcesRequestsCpu:    "500m",
+								volumecontext.MountpointContainerResourcesRequestsMemory: "128Mi",
+								volumecontext.MountpointContainerResourcesLimitsCpu:      "1",
+								volumecontext.MountpointContainerResourcesLimitsMemory:   "256Mi",
+							},
+						},
+					},
+				},
+			}
+
+			hrPod, err := creator.HeadroomPod(workloadPod, pv)
+			assert.NoError(t, err)
+
+			hrContainer := hrPod.Spec.Containers[0]
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			}, hrContainer.Resources.Requests)
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("256Mi"),
+			}, hrContainer.Resources.Limits)
+		})
+
+		t.Run("With only requests", func(t *testing.T) {
+			pv := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.MountpointContainerResourcesRequestsCpu:    "250m",
+								volumecontext.MountpointContainerResourcesRequestsMemory: "64Mi",
+							},
+						},
+					},
+				},
+			}
+
+			hrPod, err := creator.HeadroomPod(workloadPod, pv)
+			assert.NoError(t, err)
+
+			hrContainer := hrPod.Spec.Containers[0]
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("250m"),
+				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			}, hrContainer.Resources.Requests)
+			assert.Equals(t, true, hrContainer.Resources.Limits.Cpu().IsZero())
+			assert.Equals(t, true, hrContainer.Resources.Limits.Memory().IsZero())
+		})
+
+		t.Run("With only limits", func(t *testing.T) {
+			pv := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testVolName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							VolumeHandle: testVolID,
+							VolumeAttributes: map[string]string{
+								volumecontext.MountpointContainerResourcesLimitsCpu:    "2",
+								volumecontext.MountpointContainerResourcesLimitsMemory: "512Mi",
+							},
+						},
+					},
+				},
+			}
+
+			hrPod, err := creator.HeadroomPod(workloadPod, pv)
+			assert.NoError(t, err)
+
+			hrContainer := hrPod.Spec.Containers[0]
+			assert.Equals(t, true, hrContainer.Resources.Requests.Cpu().IsZero())
+			assert.Equals(t, true, hrContainer.Resources.Requests.Memory().IsZero())
+			assert.Equals(t, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			}, hrContainer.Resources.Limits)
+		})
+
+		t.Run("With invalid resource values", func(t *testing.T) {
+			for name, volumeAttributes := range map[string]map[string]string{
+				"invalid CPU request": {
+					volumecontext.MountpointContainerResourcesRequestsCpu:    "invalid",
+					volumecontext.MountpointContainerResourcesRequestsMemory: "128Mi",
+				},
+				"invalid memory request": {
+					volumecontext.MountpointContainerResourcesRequestsCpu:    "500m",
+					volumecontext.MountpointContainerResourcesRequestsMemory: "invalid",
+				},
+				"invalid CPU limit": {
+					volumecontext.MountpointContainerResourcesLimitsCpu:    "invalid",
+					volumecontext.MountpointContainerResourcesLimitsMemory: "256Mi",
+				},
+				"invalid memory limit": {
+					volumecontext.MountpointContainerResourcesLimitsCpu:    "1",
+					volumecontext.MountpointContainerResourcesLimitsMemory: "invalid",
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					pv := &corev1.PersistentVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: testVolName,
+						},
+						Spec: corev1.PersistentVolumeSpec{
+							PersistentVolumeSource: corev1.PersistentVolumeSource{
+								CSI: &corev1.CSIPersistentVolumeSource{
+									VolumeHandle:     testVolID,
+									VolumeAttributes: volumeAttributes,
+								},
+							},
+						},
+					}
+
+					_, err := creator.HeadroomPod(workloadPod, pv)
+					assert.Equals(t, true, err != nil)
+				})
+			}
+		})
+	})
 }
 
 func createTestConfig(clusterVariant cluster.Variant) mppod.Config {

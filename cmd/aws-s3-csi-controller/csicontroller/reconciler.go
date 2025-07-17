@@ -907,7 +907,12 @@ func (r *Reconciler) createHeadroomPodForMountpointPod(ctx context.Context, work
 		return err
 	}
 
-	hrPod = r.mountpointPodCreator.HeadroomPod(workloadPod, pv)
+	hrPod, err = r.mountpointPodCreator.HeadroomPod(workloadPod, pv)
+	if err != nil {
+		log.Error(err, "Failed to create Headroom Pod Spec")
+		return err
+	}
+
 	err = r.Create(ctx, hrPod)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
