@@ -73,4 +73,6 @@ spec:
               value: {{ .Values.mountpointPod.preemptingPriorityClassName }}
             - name: MOUNTPOINT_HEADROOM_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.headroomPriorityClassName }}
+            - name: MOUNTPOINT_HEADROOM_IMAGE
+              value: {{ .Values.experimental.headroomPodImage }}
             {{- end }}

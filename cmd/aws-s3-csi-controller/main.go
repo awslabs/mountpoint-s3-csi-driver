@@ -33,6 +33,7 @@ var mountpointPriorityClassName = flag.String("mountpoint-priority-class-name", 
 var mountpointPreemptingPriorityClassName = flag.String("mountpoint-preempting-priority-class-name", os.Getenv("MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME"), "Preempting priority class name of the Mountpoint Pods.")
 var mountpointHeadroomPriorityClassName = flag.String("mountpoint-headroom-priority-class-name", os.Getenv("MOUNTPOINT_HEADROOM_PRIORITY_CLASS_NAME"), "Priority class name of the Headroom Pods.")
 var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAGE"), "Image of Mountpoint to use in spawned Mountpoint Pods.")
+var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 
@@ -73,10 +74,9 @@ func main() {
 		PreemptingPriorityClassName: *mountpointPreemptingPriorityClassName,
 		HeadroomPriorityClassName:   *mountpointHeadroomPriorityClassName,
 		Container: mppod.ContainerConfig{
-			Command: *mountpointContainerCommand,
-			Image:   *mountpointImage,
-			// TODO: Make it configurable?
-			HeadroomImage:   "public.ecr.aws/eks-distro/kubernetes/pause:3.10",
+			Command:         *mountpointContainerCommand,
+			Image:           *mountpointImage,
+			HeadroomImage:   *headroomImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
