@@ -2,9 +2,9 @@ name: Controller tests
 
 on:
   push:
-    branches: ["main", "v2", "feature/*"]
+    branches: ["main", "feature/*"]
   pull_request:
-    branches: ["main", "v2", "feature/*"]
+    branches: ["main", "feature/*"]
   merge_group:
     types: ["checks_requested"]
 
