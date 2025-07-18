@@ -1,43 +1,80 @@
-# Logging
+# Logging of Mountpoint for Amazon S3 CSI Driver
 
-There are two types of logging you can use for troubleshooting. The first set of logs are from the CSI Driver, and the other are from Mountpoint.
+The CSI Driver consists of three main components deployed to your cluster.
+This document explains which component you should look at in different scenarios,
+and it also explains how to obtain logs for these components.
+See [Architecture of Mountpoint for Amazon S3 CSI Driver](./ARCHITECTURE.md)
+for more details on the architecture of the CSI Driver.
 
-## CSI Driver logs
+## The Controller Component (`aws-s3-csi-controller`)
 
-By default, CSI Driver logs are written to the driver pod’s `stderr` and those are captured by Kubernetes and may be retrieved with a corresponding API call:
+The controller component is responsible for spawning or assigning Mountpoint Pods to your workloads.
+If for some reason the controller fails to perform this operation,
+you might get a `Failed to find corresponding MountpointS3PodAttachment custom resource ...` error in your workload, or your workload might stuck in `ContainerCreating` status.
 
-    POD_NAME=s3-app
-    NODE_NAME=$(kubectl get pod ${POD_NAME} -o=custom-columns=NODE:.spec.nodeName --no-headers | tail -1)
-    DRIVER_POD=$(kubectl get pods -n kube-system --field-selector spec.nodeName=${NODE_NAME} -o=custom-columns=NAME:.metadata.name | grep s3-csi-node)
-    kubectl logs ${DRIVER_POD} -n kube-system --container s3-plugin
+In that case you can get the logs of the controller component by running:
 
-## Mountpoint logs
+```bash
+$ kubectl logs -n kube-system -l app=s3-csi-controller
+```
 
-Mountpoint logs are written in a node which your application pods are running. The location of the logs may vary by your operating systems, but they usually are written to host’s systemd journal. To fetch these logs, first you need to find the pod UID and node name for the pod.
+See [architecture of the controller component](./ARCHITECTURE.md#the-controller-component-aws-s3-csi-controller) for more details.
 
-    POD_NAME=s3-app
-    kubectl get pods ${POD_NAME} -o=custom-columns=POD_UID:.metadata.uid,NODE:.spec.nodeName
+## The Node Component (`aws-s3-csi-driver`)
 
-Note down the pod UID and node name.
+The node component is responsible for communication with kubelet running on the node
+by implementing [CSI Node Service RPC](https://github.com/container-storage-interface/spec/blob/master/spec.md#node-service-rpc).
+It links the Mountpoint Pod spawned by the controller component with the corresponding workloads.
+The node component is also responsible for updating AWS credentials periodically.
 
-Next, connect to the Kubernetes node with the name discovered in the previous step. If you are using EKS with EC2 instances as worker nodes, you can find more details about how to connect to your nodes in the [AWS documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-linux-instance.html).
+If your workload fails to start, you can check the logs of the node component for potential errors.
 
-Once you have a session on the node itself, use the UID noted earlier to find the corresponding Mountpoint logs.
+You can get the logs of all node components in your cluster by running:
 
-    POD_UID=f1015626-32ed-46e6-9634-c739c3a31312
-    PV_NAME=s3-pv
-    echo "MOUNT_PID: $(ps -ef | grep "$POD_UID.*$PV_NAME" | grep -v "grep" | awk '{print $2}')"
+```bash
+$ kubectl logs -n kube-system -c s3-plugin -l app=s3-csi-node
+```
 
-If Mountpoint is no longer running since it was unable to mount or possibly died later, there may no longer be an active process to search for. If a value for `MOUNT_PID` was emitted meaning that the Mountpoint process is still running, note that down.
+Alternatively, you can get the logs on a specific node by running:
 
-If Mountpoint is still running, use the following to grab logs just from that Mountpoint process updating the value for `MOUNT_PID`:
+```bash
+$ NODE_NAME=my-node
+$ DRIVER_POD=$(kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=${NODE_NAME} --no-headers -o custom-columns=":metadata.name")
+$ kubectl logs -n kube-system -c s3-plugin ${DRIVER_POD}
+```
 
-    MOUNT_PID=<MOUNT_PID>
-    UNIT=$(systemctl status $MOUNT_PID | grep --only-matching "mount-s3-.*\.service" | tail -1)
-    journalctl --unit $UNIT
+See [architecture of the node component](./ARCHITECTURE.md#the-node-component-aws-s3-csi-driver) for more details.
 
-If Mountpoint is no longer running, you can use the following to get logs from all Mountpoint processes that have been executed since boot. This may include logs from multiple Mountpoint processes.
+## The Mounter Component / Mountpoint Pod (`aws-s3-csi-mounter`)
 
-    journalctl --boot -t mount-s3
+The Mountpoint Pod runs the Mountpoint instance to provide the filesystem for your Amazon S3 bucket.
+If for some reason you get an error while accessing your filesystem,
+for example because of an AWS credential issue or unsupported filesystem operation,
+you can inspect Mountpoint logs to understand what's going on.
+
+Due to [Mountpoint Pod Sharing feature of Mountpoint for Amazon S3 CSI Driver](./MOUNTPOINT_POD_SHARING.md),
+multiple workloads can share a single Mountpoint Pod and instance.
+
+The following script prints Mountpoint Pods and the workloads and the volumes they provide:
+
+```bash
+# This script uses `jq` and `kubectl`
+echo -e "ATTACHMENT                     VOLUME NAME                   MOUNTPOINT POD       WORKLOAD POD"
+echo -e "-----------------------------  ----------------------------  ------------------   ------------------------------"
+pods=$(kubectl get pods --all-namespaces -o json)
+kubectl get s3pa -o json | jq -r '.items[] | .metadata.name as $s3paName | .spec.persistentVolumeName as $volumeName | .spec.mountpointS3PodAttachments | to_entries[] |
+    $s3paName as $attachment | $volumeName as $volume | .key as $mppod |
+    .value[] | [$attachment, $volume, $mppod, .workloadPodUID] | @tsv' |
+while IFS=$'\t' read -r s3pa_name volume_name mppod_name workload_uid; do
+  workload_info=$(echo -E "$pods" | jq -r ".items[] | select(.metadata.uid==\"$workload_uid\") | .metadata.namespace + \"/\" + .metadata.name")
+  printf "%-30s %-30s %-20s %s\n" "$s3pa_name" "$volume_name" "$mppod_name" "$workload_info"
+done
+```
+
+You can find the name of the Mountpoint Pod you want to get logs for from the output and use the following to get Mountpoint logs for that specific instance:
+
+```bash
+$ kubectl logs -n mount-s3 mp-...
+```
 
 For more details about Mountpoint logging and the configuration options available, please refer to [Mountpoint's logging documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/LOGGING.md).

@@ -19,26 +19,60 @@ kind: PersistentVolume
 metadata:
   name: s3-pv
 spec:
-  ...
-  storageClassName: "" # Required for static provisioning
-  claimRef: # To ensure no other PVCs can claim this PV
-    namespace: default # Namespace is required even though it's in "default" namespace.
-    name: s3-pvc # Name of your PVC
+  accessModes:
+    - ReadWriteMany     # Supported options: ReadWriteMany / ReadOnlyMany
+  capacity:
+    storage: 1200Gi     # Value is ignored but required by Kubernetes
+  storageClassName: ""  # Empty string required for static provisioning
+  claimRef:             # To ensure no other PVCs can claim this PV
+    namespace: default  # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc        # Name of your PVC
+  mountOptions:         # Optional: Configure Mountpoint for Amazon S3 flags
+    - region us-east-1  # See https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md for all options
   csi:
     driver: s3.csi.aws.com
-    volumeHandle: s3-csi-driver-volume # Must be unique
-    ...
+    volumeHandle: s3-csi-driver-volume  # Must be unique
     volumeAttributes:
-      bucketName: amzn-s3-demo-bucket # Replace with your bucket name
+      # ----- BUCKET CONFIGURATION -----
+      bucketName: amzn-s3-demo-bucket   # Required: S3 bucket name or ARN (for Outpost)
+
+      # ----- AUTHENTICATION CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CONFIGURATION.md#aws-credentials
+      authenticationSource: driver      # Optional: Authentication source [driver (default) | pod]
+      stsRegion: us-east-1              # Optional: Region for AWS STS endpoint when using pod-level identity with IRSA
+
+      # ----- LOCAL CACHE CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
+      cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
+
+      # emptyDir cache options:
+      cacheEmptyDirSizeLimit: 1Gi       # Optional: Maximum size for emptyDir cache
+      cacheEmptyDirMedium: ""           # Optional: Storage medium ["" (default) | Memory]
+
+      # ephemeral cache options (both required if `cache: ephemeral`):
+      cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
+      cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
+
+      # ----- RESOURCE CONFIGURATION -----
+      # Optional: Configure Mountpoint container resource requests/limits
+      mountpointContainerResourcesRequestsCpu: 500m
+      mountpointContainerResourcesRequestsMemory: 1Gi
+      mountpointContainerResourcesLimitsCpu: 500m
+      mountpointContainerResourcesLimitsMemory: 1Gi
+
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: s3-pvc
+  name: s3-pvc         # Must match name referenced in PV's claimRef
 spec:
-  ...
-  storageClassName: "" # Required for static provisioning
-  volumeName: s3-pv # Name of your PV
+  accessModes:
+    - ReadWriteMany    # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Empty string required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi  # Value is ignored but required by Kubernetes
+  volumeName: s3-pv    # Must match the name of your PV
 ```
 
 See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
@@ -67,22 +101,66 @@ Kubernetes cluster, or using credentials assigned to pods.
 By setting driver-level credentials, the whole cluster uses the same set of credentials.
 
 Using this configuration, the credentials that are used are set at installation time, either using Service
-Accounts, or using K8s secrets.
+Accounts, or using Kubernetes secrets.
 
 The CSI Driver uses the following load order for credentials:
 
-1. K8s secrets (not recommended)
-2. Driver-Level IRSA
-3. Instance profiles
+1. Kubernetes secrets (not recommended)
+2. Driver-Level IAM Roles for Service Accounts (IRSA)
+3. Driver-Level EKS Pod Identity
+4. Instance profiles
 
+### Driver-Level Credentials with EKS Pod Identity
+
+Configuring [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) is the recommended way to set up the CSI Driver if you want to use Driver-Level credentials in an EKS Cluster.
+For non-EKS clusters, see [Driver-Level Credentials with IRSA](#driver-level-credentials-with-irsa).
+
+This approach associates your AWS IAM role to a Service Account used by the CSI Driver. The role is then assumed by the Mountpoint Pod for all volumes with a `driver` authentication source.
+
+```mermaid
+graph LR;
+    CSI[CSI Driver]
+
+    P["`Application Pod
+    *Driver IAM Credentials*`"]
+
+    SA_D[Service Account - Driver]
+
+    IAM_D[IAM Credentials - Driver]
+
+    PV[Persistent Volume]
+    PVC[Persistent Volume Claim]
+
+    P --> PVC
+
+    PVC --> PV
+
+    PV --> CSI
+
+    CSI --> SA_D
+
+    SA_D --> IAM_D
+
+    style IAM_D stroke:#0000ff,fill:#ccccff,color:#0000ff
+    style P stroke:#0000ff,fill:#ccccff,color:#0000ff
+```
+
+#### Service Account configuration for EKS Clusters
+
+EKS allows using Kubernetes service accounts to authenticate requests to S3 using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html).
+This is supported for both [driver-level identity](#driver-level-credentials-with-eks-pod-identity) and [pod-level identity](#pod-level-credentials).
+
+To create the supporting resources for EKS Pod Identity with driver-level identity:
+1. [Set up the Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html)
+2. Create a Pod Identity association for the service account `s3-csi-driver-sa` by following the [Assign an IAM role to a Kubernetes service account](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-association.html) documentation.
+3. [Configure Pods to access AWS services with service accounts](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-configure-pods.html)
 
 ### Driver-Level Credentials with IRSA
 
-Configuring [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA)
-is the recommended way to set up the CSI Driver if you want to use Driver-Level credentials.
+Configuring [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) is the recommended way to set up the CSI Driver if you want to use Driver-Level credentials in a non-EKS Cluster.
+For EKS clusters, see [Driver-Level Credentials with EKS Pod Identity](#driver-level-credentials-with-eks-pod-identity).
 
-This approach associates your AWS role to a Service Account used by the CSI Driver.
-The role is then assumed by the CSI Driver for all volumes with a `driver` authentication source.
+This approach associates your AWS role to a Service Account used by the CSI Driver. The role is then assumed by the CSI Driver for all volumes with a `driver` authentication source.
 
 ```mermaid
 graph LR;
@@ -115,10 +193,9 @@ graph LR;
 #### Service Account configuration for EKS Clusters
 
 EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
-This is supported for both [driver-level identity](#driver-level-credentials-with-irsa)
-and [pod-level identity](#pod-level-credentials).
+This is supported for both [driver-level identity](#driver-level-credentials-with-irsa) and [pod-level identity](#pod-level-credentials).
 
-The following sections describe how to create the supporting resources for IRSA with driver-level identity.
+The following section describes how to create the supporting resources for IRSA with driver-level identity.
 
 ##### Create an IAM role for use by the CSI driver's service account
 
@@ -142,13 +219,12 @@ eksctl create iamserviceaccount \
     --role-only
 ```
 
-### Driver-Level Credentials with K8s Secrets
+### Driver-Level Credentials with Kubernetes Secrets
 
-Where IAM Roles for Service Accounts (IRSA) isn't a viable option, Mountpoint CSI Driver also supports sourcing static
-AWS credentials from K8s secrets.
+For cases where EKS Pod Identity and IAM Roles for Service Accounts (IRSA) are not viable options, Mountpoint CSI Driver also supports sourcing static AWS credentials from Kubernetes secrets.
 
 > [!WARNING]
-> We do not recommend using long-term AWS credentials. Instead, we recommend using short-term credentials with IRSA.
+> We do not recommend using long-term AWS credentials. Instead, we recommend using short-term credentials with EKS Pod Identity or IRSA.
 
 
 ```mermaid
@@ -156,9 +232,9 @@ graph LR;
     CSI[CSI Driver]
 
     P["`Application Pod
-    *K8s Secret Credentials*`"]
+    *Kubernetes Secret Credentials*`"]
 
-    K8sS[K8s Secret]
+    KubernetesS[Kubernetes Secret]
 
     IAM_LT["Long Term IAM Credentials"]
 
@@ -171,16 +247,16 @@ graph LR;
 
     PV --> CSI
 
-    CSI --> K8sS
+    CSI --> KubernetesS
 
-    K8sS --> IAM_LT
+    KubernetesS --> IAM_LT
 
 
     style IAM_LT stroke:#0000ff,fill:#ccccff,color:#0000ff
     style P stroke:#0000ff,fill:#ccccff,color:#0000ff
 ```
 
-The CSI driver will read K8s secrets at `aws-secret.key_id` and `aws-secret.access_key` to pass keys to the driver.
+The CSI driver will read Kubernetes secrets at `aws-secret.key_id` and `aws-secret.access_key` to pass keys to the driver.
 The secret name configurable if installing with helm: `awsAccessSecret.name`, and the installation namespace is
 configurable with the `--namespace` helm parameter.
 
@@ -194,14 +270,17 @@ kubectl create secret generic aws-secret \
     --from-literal "access_key=${AWS_SECRET_ACCESS_KEY}"
 ```
 
-To use K8s secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be
+To use Kubernetes secrets for authentication, the secret must exist before installation, or the CSI Driver pods must be
 restarted to use the secret.
 
 > [!WARNING]
-> K8s secrets are not refreshed once read. To update long term credentials stored in K8s secrets, restart the CSI Driver pods.
+> Kubernetes secrets are not refreshed once read. To update long term credentials stored in Kubernetes secrets, restart the CSI Driver pods.
 
 
 ### Driver-Level Credentials with Node IAM Profiles
+
+> [!NOTE]
+> This method relies on [Instance Metadata Service (IMDS)](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html), and you need to make sure IMDS is accessible by the CSI Driver pods. See [configure the Instance Metadata Service](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html) for more details on making IMDS accessible.
 
 To use an IAM [instance profile](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html),
 attach the policy to the instance profile IAM role and turn on access to [instance metadata](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html)
@@ -217,7 +296,7 @@ graph LR;
     IAM_Instance["Instance IAM Credentials"]
 
     PV[Persistent Volume]
-    PVC[PVC]
+    PVC[Persistent Volume Claim]
 
     P --> PVC
 
@@ -235,16 +314,14 @@ graph LR;
 
 ### Pod-Level Credentials
 
-> [!WARNING]
-> To enable Pod-Level credentials on K8s clusters <1.30, you need to pass `node.podInfoOnMountCompat.enable=true` into
-> your Helm installation.
-
 You can configure Mountpoint CSI Driver to use the credentials associated with the pod's Service Account rather than the
 driver's own credentials.
 
-With this approach, a multi-tenant architecture is possible using [IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (IRSA).
-Using Pod-Level Credentials with IRSA authentication allows the Mountpoint CSI Driver to use multiple credentials for
-each pod.
+With this approach, a multi-tenant architecture is possible using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) or [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+Using Pod-Level Credentials with EKS Pod Identity or IRSA authentication allows the Mountpoint CSI Driver to use multiple credentials for each pod.
+
+Configuring [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) is the recommended way to set up the CSI Driver if you want to use Pod-Level credentials in an EKS Cluster.
+For non-EKS clusters, [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) can be used instead.
 
 
 > [!NOTE]
@@ -252,7 +329,7 @@ each pod.
 
 
 > [!NOTE]
-> Only IRSA is supported with Pod-Level credentials. You cannot configure K8s secrets or use instance profiles.
+> Only EKS Pod Identity and IRSA are supported with Pod-Level credentials. You cannot configure Kubernetes secrets or use instance profiles.
 
 
 
@@ -268,7 +345,7 @@ graph LR;
     IAM_P[IAM Credentials - Pod]
 
     PV[Persistent Volume]
-    PVC[PVC]
+    PVC[Persistent Volume Claim]
 
     P --> PVC
 
@@ -307,18 +384,20 @@ spec:
       authenticationSource: pod # <-- HERE
 ```
 
-Pods mounting the specified PV will use the pod's own Service Account for IRSA authentication.
+Pods mounting the specified PV will use the pod's own Service Account for EKS Pod Identity or IRSA authentication.
 
 
 #### Pod-Level Identity Service Account configuration for EKS Clusters
 
-EKS allows using Kubernetes service accounts to authenticate requests to S3 using [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
-This is supported for both [driver-level identity](#driver-level-credentials-with-irsa)
-and [pod-level identity](#pod-level-credentials).
+EKS allows using Kubernetes service accounts to authenticate requests to S3 using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) or [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+This is supported for both [driver-level identity](#driver-level-credentials-with-eks-pod-identity) and [pod-level identity](#pod-level-credentials).
 
-The following sections describe how to create the supporting resources for IRSA with pod-level identity.
+To setup the supporting resources for EKS Pod Identity with pod-level identity:
+1. [Set up the Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html)
+2. Create a Pod Identity association for the pod's service account by following the [Assign an IAM role to a Kubernetes service account](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-association.html) documentation.
+3. [Configure Pods to access AWS services with service accounts](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-configure-pods.html)
 
-##### Create an IAM role for use by the pod's service account
+To setup the supporting resources for IRSA with pod-level identity, create an IAM role for use by the pod's service account:
 
 The following command will use `eksctl` to create the IAM role that will be used by the pod's service account.
 The service account is not created by this command, only the IAM role due to the `--role-only` option.
@@ -335,11 +414,11 @@ eksctl create iamserviceaccount \
     --role-only
 ```
 
-See the [example spec for pod-level identity](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning/pod_level_identity.yaml) for how to set up pod-level identity with IRSA.
+See the [example spec for pod-level identity](https://github.com/awslabs/mountpoint-s3-csi-driver/tree/main/examples/kubernetes/static_provisioning/pod_level_identity.yaml) for how to set up pod-level identity.
 
 ### Configuring the STS region
 
-In order to use Pod-Level credentials, the CSI Driver needs to know the STS region to request AWS credentials from.
+In order to use Pod-Level credentials with IRSA, the CSI Driver needs to know the STS region to request AWS credentials from.
 The CSI Driver can normally automatically detect the current region to use as the STS region, but in case it can't,
 either troubleshoot the automatic setup, or manually configure the volume's STS region.
 
@@ -403,13 +482,13 @@ flowchart LR
 | AWS Account B | 444455556666        |
 | S3 Bucket     | amzn-s3-demo-bucket |
 
-You can either use bucket policies or cross-account IRSA to access the bucket.
+You can either use bucket policies or cross-account EKS Pod Identity/IRSA to access the bucket.
 
 ### Cross-account bucket access using bucket policies
 You can grant access Amazon S3 buckets from different AWS accounts using [bucket policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html).
 
 1. Allow Pod A in AWS Account A (`111122223333`) to access S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`)
-  - Ensure Pod A and its Service Account have IRSA configured
+  - Ensure Pod A and its Service Account have EKS Pod Identity or IRSA configured
     ```yaml
     apiVersion: v1
     kind: ServiceAccount
@@ -488,9 +567,15 @@ You can grant access Amazon S3 buckets from different AWS accounts using [bucket
     ]
 }
 ```
-This policy only allows `arn:aws:iam::111122223333:role/pod-a-role` when it's assumed with `AssumeRoleWithWebIdentity` (i.e., IRSA),
+This policy only allows `arn:aws:iam::111122223333:role/pod-a-role` when it's assumed with `AssumeRoleWithWebIdentity` (i.e., EKS Pod Identity, IRSA),
 assuming only Pod A in AWS Account A (`111122223333`) is allowed to assume this role, it only allows Pod A in AWS Account A (`111122223333`) to access this bucket.
 See [AWS global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html) for more details on conditions you can use.
+
+
+### Cross-account bucket access using EKS Pod Identity
+You can grant access Amazon S3 buckets from different AWS accounts by using EKS Pod Identity.
+See "How to perform cross account access with Amazon EKS Pod Identity" section in [Amazon EKS Pod Identity: a new way for applications on EKS to obtain IAM credentials](https://aws.amazon.com/blogs/containers/amazon-eks-pod-identity-a-new-way-for-applications-on-eks-to-obtain-iam-credentials) for more details.
+
 
 ### Cross-account bucket access using IRSA with an identity provider from a different account
 You can grant access Amazon S3 buckets from different AWS accounts by using IRSA.

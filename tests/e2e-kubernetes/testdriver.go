@@ -20,8 +20,8 @@ var (
 	ClusterName   string
 	BucketPrefix  string
 	Performance   bool
+	UpgradeTests  bool
 	IMDSAvailable bool
-	IsPodMounter  bool
 )
 
 type s3Driver struct {

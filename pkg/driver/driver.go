@@ -45,7 +45,6 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -107,38 +106,28 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	stopCh := make(chan struct{})
 
-	var mounterImpl mounter.Mounter
 	mpMounter := mpmounter.New()
-	if util.UsePodMounter() {
-		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
-		err = podWatcher.Start(stopCh)
-		if err != nil {
-			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
-		}
-
-		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
-
-		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
-
-		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
-
-		go unmounter.StartPeriodicCleanup(stopCh)
-
-		mounterImpl, err = mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-			kubernetesVersion, nodeID)
-		if err != nil {
-			klog.Fatalln(err)
-		}
-		klog.Infoln("Using pod mounter")
-	} else {
-		mounterImpl, err = mounter.NewSystemdMounter(credProvider, mpMounter, mpVersion, kubernetesVersion)
-		if err != nil {
-			klog.Fatalln(err)
-		}
-		klog.Infoln("Using systemd mounter")
+	podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
+	err = podWatcher.Start(stopCh)
+	if err != nil {
+		klog.Fatalf("Failed to start Pod watcher: %v\n", err)
 	}
 
-	nodeServer := node.NewS3NodeServer(nodeID, mounterImpl)
+	s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
+
+	unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
+
+	podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
+
+	go unmounter.StartPeriodicCleanup(stopCh)
+
+	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
+		kubernetesVersion, nodeID)
+	if err != nil {
+		klog.Fatalln(err)
+	}
+
+	nodeServer := node.NewS3NodeServer(nodeID, podMounter)
 
 	return &Driver{
 		Endpoint:   endpoint,
