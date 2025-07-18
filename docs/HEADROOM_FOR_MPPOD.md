@@ -19,8 +19,8 @@ When the CSI Driver detects a Workload Pod using the scheduling gate to enable t
   1. Labels the Workload Pod to use inter-pod affinity rules in the Headroom Pods
   2. Creates Headroom Pods using a pause container with inter-pod affinity rule to the Workload Pod - since node autoscalers like [Karpenter supports inter-pod affinity rules](https://karpenter.sh/docs/concepts/scheduling/#pod-affinityanti-affinity), this should help them to choose a right instance type
   3. Ungates the scheduling gate from the Workload Pod to let it scheduled - alongside the Headroom Pods if possible
-  4. Schedules Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod) into the same node as the Workload and Headroom Pods
-  5. Mountpoint Pod preempts the Headroom Pods if there is no space in the node - as the Headroom Pods uses a negative priority, or just gets scheduled if there is enough space for all pods
+  4. Schedules Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod) into the same node as the Workload and Headroom Pods using a preempting priority class
+  5. Mountpoint Pod most likely preempts the Headroom Pods if there is no space in the node - as the Headroom Pods uses a negative priority -, or just gets scheduled if there is enough space for all pods
   6. Deletes the Headroom Pods as soon as the Workload Pod is running or terminated - as Mountpoint Pods are already scheduled or no longer needed
 
 ## What are the limitations of this feature?
@@ -36,6 +36,10 @@ Features like [Karpenter's consolidation](https://karpenter.sh/docs/concepts/dis
 As noted in [Kubernetes's documentation](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity), inter-pod affinity rules require substantial amounts of processing which can slow down scheduling in large clusters significantly, and it's not recommended in clusters larger than several hundred nodes.
 
 Additionally, inter-pod affinity rules are insufficient to capture the intent of "all-or-nothing" scheduling (also known as [co-scheduling](https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/pkg/coscheduling/README.md), [gang scheduling](https://yunikorn.apache.org/docs/user_guide/gang_scheduling/), or group scheduling) requirements. Therefore, the Kubernetes Scheduler may still schedule a Workload Pod without considering its associated Headroom Pod.
+
+### Preempting incorrect pods
+
+Even though the CSI Driver spawns Headroom Pods with a negative priority, there is still a chance that Mountpoint Pods might evict some other pods in case if Headroom Pods got evicted by some other high priority pod and there is no Headroom Pod for Mountpoint Pod to evict.
 
 ## How is it used?
 

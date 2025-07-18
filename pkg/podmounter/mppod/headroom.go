@@ -26,14 +26,12 @@ const (
 // to reserve headroom for the Mountpoint Pod to serve volumes to workload.
 //
 // If this scheduling gate is used on a Workload Pod, the CSI Driver:
-//  1. Will label the Workload Pod with [LabelHeadroomForWorkload] equals to Workload Pod's UID
-//  2. Will create a Headroom Pod using a pause container with inter-pod affinity to the Workload Pod
-//  3. Will ungate this scheduling gate from the Workload Pod to let it scheduled (alongside the Headroom Pod)
-//  4. Will schedule Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod)
-//     into the same node as the Workload and Headroom Pods
-//  5. Mountpoint Pod will replace the Headroom Pod if there is no space in the node
-//  6. Once the Workload Pod is no longer in `Pending` state (i.e., either scheduled or terminated),
-//     the Headroom Pod will be deleted by the CSI Driver
+//  1. Labels the Workload Pod to use inter-pod affinity rules in the Headroom Pods
+//  2. Creates Headroom Pods using a pause container with inter-pod affinity rule to the Workload Pod
+//  3. Ungates the scheduling gate from the Workload Pod to let it scheduled - alongside the Headroom Pods if possible
+//  4. Schedules Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod) into the same node as the Workload and Headroom Pods using a preempting priority class
+//  5. Mountpoint Pod most likely preempts the Headroom Pods if there is no space in the node - as the Headroom Pods uses a negative priority -, or just gets scheduled if there is enough space for all pods
+//  6. Deletes the Headroom Pods as soon as the Workload Pod is running or terminated - as Mountpoint Pods are already scheduled or no longer needed
 const SchedulingGateReserveHeadroomForMountpointPod = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
 
 const headroomPodNamePrefix = "hr-"
