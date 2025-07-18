@@ -36,8 +36,7 @@ const (
 	mountpointPodReadinessWaitDuration = 15 * time.Second
 )
 
-// TODO: Replace this with a tracking ticket.
-const unschedulableMountpointPodReference = "https://github.com/awslabs/mountpoint-s3-csi-driver/issues/534"
+const unschedulableMountpointPodReference = "https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543"
 
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
