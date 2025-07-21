@@ -20,7 +20,7 @@ spec:
     volumeHandle: s3-csi-driver-volume # Must be unique
     volumeAttributes:
       bucketName: s3-csi-driver
-      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md
       cache: emptyDir # Use emptyDir volume for cache
       cacheEmptyDirSizeLimit: 500Mi # 500Mi size limit for emptyDir cache volume
 ---

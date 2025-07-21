@@ -37,12 +37,12 @@ spec:
       bucketName: amzn-s3-demo-bucket   # Required: S3 bucket name or ARN (for Outpost)
 
       # ----- AUTHENTICATION CONFIGURATION -----
-      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CONFIGURATION.md#aws-credentials
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials
       authenticationSource: driver      # Optional: Authentication source [driver (default) | pod]
       stsRegion: us-east-1              # Optional: Region for AWS STS endpoint when using pod-level identity with IRSA
 
       # ----- LOCAL CACHE CONFIGURATION -----
-      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md
       cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
 
       # emptyDir cache options:

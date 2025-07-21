@@ -202,7 +202,7 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 
 		// TODO: Update `CACHING.md` link to `main` after v2 stable release.
 		cacheType = cacheTypeEmptyDir
-		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md for more details.")
+		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md for more details.")
 	}
 
 	var volumeSource corev1.VolumeSource
