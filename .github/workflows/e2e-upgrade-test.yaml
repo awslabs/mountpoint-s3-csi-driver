@@ -24,6 +24,6 @@ jobs:
     uses: ./.github/workflows/e2e-tests.yaml
     with:
       environment: "trusted"
-      ref: ${{ github.ref }}
+      ref: ${{ github.sha }}
       run_upgrade_tests: true
     secrets: inherit
