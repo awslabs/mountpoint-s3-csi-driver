@@ -506,21 +506,21 @@ func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
 	return tp.VolumeID, nil
 }
 
-// helpMessageForGettingMountpointLogs returns a help message to throubleshoot Mountpoint failures.
+// helpMessageForGettingMountpointLogs returns a help message to troubleshoot Mountpoint failures.
 func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) string {
 	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
 }
 
-// helpMessageForGettingMountpointPodStatus returns a help message to throubleshoot if Mountpoint Pod is not running.
+// helpMessageForGettingMountpointPodStatus returns a help message to troubleshoot if Mountpoint Pod is not running.
 func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(err error, mpPodName string) string {
 	if errors.Is(err, watcher.ErrPodUnschedulable) {
-		return fmt.Sprintf("Seems like Mountpoint Pod is in 'Pending' status because it is unschedulable. This usually happens if there is no space for Mountpoint Pod in the node, see %s fore more details and some possible workarounds. You can see Mountpoint Pod's status and any potential failures by running: `kubectl describe pods -n %s %s`", unschedulableMountpointPodReference, mountpointPodNamespace, mpPodName)
+		return fmt.Sprintf("Seems like Mountpoint Pod is in 'Pending' status because it is unschedulable. This usually happens if there is no space for Mountpoint Pod in the node, see %s for more details and some possible workarounds. You can see Mountpoint Pod's status and any potential failures by running: `kubectl describe pods -n %s %s`", unschedulableMountpointPodReference, mountpointPodNamespace, mpPodName)
 	}
 
 	return fmt.Sprintf("Seems like Mountpoint Pod is not in 'Running' status. You can see it's status and any potential failures by running: `kubectl describe pods -n %s %s`", mountpointPodNamespace, mpPodName)
 }
 
-// helpMessageForGettingControllerLogs returns a help message to throubleshoot if the `MountpointS3PodAttachment` is not created/updated.
+// helpMessageForGettingControllerLogs returns a help message to troubleshoot if the `MountpointS3PodAttachment` is not created/updated.
 func (pm *PodMounter) helpMessageForGettingControllerLogs() string {
 	return "You can see the controller logs by running `kubectl logs -n kube-system -lapp=s3-csi-controller`."
 }

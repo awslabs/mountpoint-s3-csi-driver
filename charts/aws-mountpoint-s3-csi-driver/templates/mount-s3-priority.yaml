@@ -23,7 +23,7 @@ globalDefault: false
 description: >-
     Preempting priority class for Mountpoint Pods.
     It has the highest possible value for non-builtin PriorityClasses to ensure Mountpoint Pods get scheduled quickly and not evicted first in case of a resource pressure.
-    Mountpoint Pods spawned with this priority class by default if "Reserving headroom for Mountpoint Pods" feature is enabled.
+    Mountpoint Pods are spawned with this priority class by default if "Reserving headroom for Mountpoint Pods" feature is enabled.
     See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
 
 ---
@@ -39,4 +39,3 @@ description: >-
     See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
 
 {{- end }}
-

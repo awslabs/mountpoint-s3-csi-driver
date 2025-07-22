@@ -156,15 +156,15 @@ func UnlabelWorkloadPodForHeadroomPod(workloadPod *corev1.Pod) bool {
 
 // ShouldReserveHeadroomForMountpointPod returns whether the `workloadPod` wants to reserve headroom for a Mountpoint Pod.
 func ShouldReserveHeadroomForMountpointPod(workloadPod *corev1.Pod) bool {
-	return slices.ContainsFunc(workloadPod.Spec.SchedulingGates, isHeadroomScheduligGate)
+	return slices.ContainsFunc(workloadPod.Spec.SchedulingGates, isHeadroomSchedulingGate)
 }
 
 // UngateHeadroomSchedulingGateForWorkloadPod removes the [SchedulingGateReserveHeadroomForMountpointPod] scheduling gate from the `workloadPod`.
 func UngateHeadroomSchedulingGateForWorkloadPod(workloadPod *corev1.Pod) {
-	workloadPod.Spec.SchedulingGates = slices.DeleteFunc(workloadPod.Spec.SchedulingGates, isHeadroomScheduligGate)
+	workloadPod.Spec.SchedulingGates = slices.DeleteFunc(workloadPod.Spec.SchedulingGates, isHeadroomSchedulingGate)
 }
 
-// isHeadroomScheduligGate returns whether the `sg` equals to [SchedulingGateReserveHeadroomForMountpointPod].
-func isHeadroomScheduligGate(sg corev1.PodSchedulingGate) bool {
+// isHeadroomSchedulingGate returns whether the `sg` equals to [SchedulingGateReserveHeadroomForMountpointPod].
+func isHeadroomSchedulingGate(sg corev1.PodSchedulingGate) bool {
 	return sg.Name == SchedulingGateReserveHeadroomForMountpointPod
 }
