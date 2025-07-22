@@ -67,7 +67,7 @@ metadata:
   name: workload
 spec:
   schedulingGates:
-    - name: experimental.s3.csi.aws.com/reserve-headroom-for-mppod # <-- HERE
+    - name: s3.csi.aws.com/reserve-headroom-for-mppod # <-- HERE
   containers:
     # ...
   volumes:

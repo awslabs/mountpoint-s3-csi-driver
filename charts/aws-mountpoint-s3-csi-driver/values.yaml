@@ -117,7 +117,7 @@ eksPodIdentityAgent:
 supportLegacySystemDMounts: true
 
 experimental:
-  # Enables support for `experimental.s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
+  # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
   reserveHeadroomForMountpointPods: false
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10

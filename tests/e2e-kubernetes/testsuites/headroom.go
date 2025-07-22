@@ -20,9 +20,9 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
-const labelHeadroomForPod = "experimental.s3.csi.aws.com/headroom-for-pod"
-const labelHeadroomForVolume = "experimental.s3.csi.aws.com/headroom-for-volume"
-const headroomSchedulingGate = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
+const labelHeadroomForPod = "s3.csi.aws.com/headroom-for-pod"
+const labelHeadroomForVolume = "s3.csi.aws.com/headroom-for-volume"
+const headroomSchedulingGate = "s3.csi.aws.com/reserve-headroom-for-mppod"
 const headroomPriorityClass = "mount-s3-headroom"
 
 type s3CSIHeadroomTestSuite struct {

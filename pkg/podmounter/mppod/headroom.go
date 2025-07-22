@@ -13,13 +13,13 @@ import (
 
 // Labels populated on spawned Headroom Pods.
 const (
-	LabelHeadroomForPod    = "experimental.s3.csi.aws.com/headroom-for-pod"
-	LabelHeadroomForVolume = "experimental.s3.csi.aws.com/headroom-for-volume"
+	LabelHeadroomForPod    = "s3.csi.aws.com/headroom-for-pod"
+	LabelHeadroomForVolume = "s3.csi.aws.com/headroom-for-volume"
 )
 
 // Labels populated on Workload Pods requesting Headroom Pods.
 const (
-	LabelHeadroomForWorkload = "experimental.s3.csi.aws.com/headroom-for-workload"
+	LabelHeadroomForWorkload = "s3.csi.aws.com/headroom-for-workload"
 )
 
 // A scheduling gate can be used on Workload Pods using a volume backed by the CSI Driver to signal the CSI Driver
@@ -32,7 +32,7 @@ const (
 //  4. Schedules Mountpoint Pod if necessary (i.e., the CSI Driver cannot share an existing Mountpoint Pod) into the same node as the Workload and Headroom Pods using a preempting priority class
 //  5. Mountpoint Pod most likely preempts the Headroom Pods if there is no space in the node - as the Headroom Pods uses a negative priority -, or just gets scheduled if there is enough space for all pods
 //  6. Deletes the Headroom Pods as soon as the Workload Pod is running or terminated - as Mountpoint Pods are already scheduled or no longer needed
-const SchedulingGateReserveHeadroomForMountpointPod = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
+const SchedulingGateReserveHeadroomForMountpointPod = "s3.csi.aws.com/reserve-headroom-for-mppod"
 
 const headroomPodNamePrefix = "hr-"
 

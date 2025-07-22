@@ -104,4 +104,4 @@ $ kubectl logs -n kube-system -l app=s3-csi-controller
 
 See [logging guide](./LOGGING.md#the-controller-component-aws-s3-csi-controller) for more details.
 
-Another thing to ensure is that you're using correct scheduling gate, the CSI Driver expects the scheduling gate to be `experimental.s3.csi.aws.com/reserve-headroom-for-mppod`, and would ignore any other scheduling gates. See [configuration guide of Reserving headroom for Mountpoint Pods](./HEADROOM_FOR_MPPOD.md#how-is-it-used) feature for more details.
+Another thing to ensure is that you're using correct scheduling gate, the CSI Driver expects the scheduling gate to be `s3.csi.aws.com/reserve-headroom-for-mppod`, and would ignore any other scheduling gates. See [configuration guide of Reserving headroom for Mountpoint Pods](./HEADROOM_FOR_MPPOD.md#how-is-it-used) feature for more details.
