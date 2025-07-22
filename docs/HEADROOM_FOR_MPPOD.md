@@ -27,7 +27,7 @@ When the CSI Driver detects a Workload Pod using the scheduling gate to enable t
 
 ### Overprovisioning
 
-This feature may cause overprovisioning (i.e., autoscalers may create larger instance types than needed to host pending workloads), which could result in allocating more resources than the cluster requires. This occurs because the CSI Driver allocates one Headroom Pod per volume, but in some cases that capacity may not be needed due to the Mountpoint Pod sharing feature.
+This feature may cause overprovisioning (i.e., autoscalers may create larger instance types than needed to host pending workloads), which could result in allocating more resources than the cluster requires. This occurs because the CSI Driver allocates one Headroom Pod per volume, but in some cases that capacity may not be needed due to the Mountpoint Pod sharing feature. This might also cause Workload Pods might deploy more sparsely - reducing the utilization of Mountpoint Pod sharing feature overall.
 
 Features like [Karpenter's consolidation](https://karpenter.sh/docs/concepts/disruption/#consolidation) mechanisms may help the cluster settle on more appropriately sized instance types after all pods are scheduled, but this would still consume additional resources and time since autoscalers were not aware of the exact number of workloads in advance.
 
