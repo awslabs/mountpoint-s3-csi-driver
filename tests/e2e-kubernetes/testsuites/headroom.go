@@ -11,6 +11,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -19,6 +20,8 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
+const labelHeadroomForPod = "experimental.s3.csi.aws.com/headroom-for-pod"
+const labelHeadroomForVolume = "experimental.s3.csi.aws.com/headroom-for-volume"
 const headroomSchedulingGate = "experimental.s3.csi.aws.com/reserve-headroom-for-mppod"
 const headroomPriorityClass = "mount-s3-headroom"
 
@@ -48,7 +51,11 @@ func (t *s3CSIHeadroomTestSuite) SkipUnsupportedTests(_ storageframework.TestDri
 }
 
 func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
-	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"cache", storageframework.GetDriverTimeouts(driver))
+	// The tests in this suite are mainly for sanity checks that the CSI Driver correctly ungates workloads, deletes Headroom Pods,
+	// and the volumes are accessible as usual without any problem.
+	// We don't use any node autoscalers in these tests to ensure it helps with that case yet.
+
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"headroom", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	type local struct {
@@ -77,6 +84,30 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 		l.config = driver.PrepareTest(ctx, f)
 		DeferCleanup(cleanup)
 	})
+
+	ensureHeadroomPodForWorkloadIsDeleted := func(ctx context.Context, workloadPod *v1.Pod, vol *storageframework.VolumeResource) {
+		client := f.ClientSet.CoreV1().Pods(mountpointNamespace)
+		pods, err := client.List(ctx, metav1.ListOptions{
+			LabelSelector: fields.AndSelectors(
+				fields.OneTermEqualSelector(labelHeadroomForPod, string(workloadPod.UID)),
+				fields.OneTermEqualSelector(labelHeadroomForVolume, vol.Pv.Name),
+			).String(),
+		})
+		framework.ExpectNoError(err)
+
+		if len(pods.Items) == 0 {
+			framework.Logf("No Headroom Pod found for pod %s and volume %s", workloadPod.Name, vol.Pv.Name)
+			return
+		}
+
+		if len(pods.Items) > 1 {
+			framework.Failf("There shouldn't be more than one Headroom Pod for a given pod-volume pair, but found %d for pod %s and volume %s", len(pods.Items), workloadPod.Name, vol.Pv.Name)
+		}
+
+		hrPod := pods.Items[0]
+		framework.Logf("Waiting Headroom Pod %s for pod %s and volume %s to terminate", hrPod.Name, workloadPod.Name, vol.Pv.Name)
+		e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, hrPod.Name, hrPod.Namespace, 1*time.Minute)
+	}
 
 	checkBasicFileOperations := func(pod *v1.Pod, volPath string) {
 		seed := time.Now().UTC().UnixNano()
@@ -115,6 +146,8 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 			framework.ExpectNoError(err)
 			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
+			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
+
 			checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
 		})
 
@@ -131,8 +164,29 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 			framework.ExpectNoError(err)
 			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
+			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol1)
+			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol2)
+
 			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 1))
 			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 2))
+		})
+
+		It("should get scheduled automatically after reserving headroom for multiple workloads sharing a volume", func(ctx context.Context) {
+			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
+			deferCleanup(vol.CleanupResource)
+
+			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, vol, func(index int, pod *v1.Pod) {
+				pod.Spec.SchedulingGates = []v1.PodSchedulingGate{{Name: headroomSchedulingGate}}
+			})
+			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, vol.Pv))
+			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
+
+			for _, pod := range pods {
+				ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
+				checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
+			}
+
+			checkCrossReadWrite(f, pods[0], pods[1])
 		})
 
 		It("should get scheduled automatically after reserving headroom with resource specifications", func(ctx context.Context) {
@@ -150,6 +204,8 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 			pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
 			framework.ExpectNoError(err)
 			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+
+			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
 
 			checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
 		})
