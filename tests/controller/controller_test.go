@@ -395,7 +395,7 @@ var _ = Describe("Mountpoint Controller", func() {
 
 						expectedFields := defaultExpectedFields(testNode, vol.pv)
 						expectedFields["WorkloadFSGroup"] = "1111"
-						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields, mountpointPriorityClassName)
 						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
 						pod2.schedule(testNode)
@@ -428,9 +428,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol, mountpointPriorityClassName)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol, mountpointPriorityClassName)
 
 						Expect(s3pa1.Name).NotTo(Equal(s3pa2.Name), "S3PodAttachment should not have the same name")
 						Expect(s3pa1.Name).NotTo(Equal(s3pa3.Name), "S3PodAttachment should not have the same name")
@@ -465,7 +465,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["AuthenticationSource"] = "pod"
 						expectedFields["WorkloadServiceAccountName"] = sa.Name
 						expectedFields["WorkloadNamespace"] = defaultNamespace
-						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields, mountpointPriorityClassName)
 						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
 						pod2.schedule(testNode)
@@ -501,7 +501,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadServiceAccountName"] = sa.Name
 						expectedFields["WorkloadNamespace"] = defaultNamespace
 						expectedFields["WorkloadServiceAccountIAMRoleARN"] = "test-role"
-						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields)
+						s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(testNode, vol, pod1, expectedFields, mountpointPriorityClassName)
 						expectNoPodUIDInS3PodAttachment(s3pa, string(pod2.UID))
 
 						pod2.schedule(testNode)
@@ -559,9 +559,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol, mountpointPriorityClassName)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol, mountpointPriorityClassName)
 
 						Expect(s3pa1.Name).NotTo(Equal(s3pa2.Name), "S3PodAttachment should not have the same name")
 						Expect(s3pa1.Name).NotTo(Equal(s3pa3.Name), "S3PodAttachment should not have the same name")
@@ -613,9 +613,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
 						Expect(len(s3pa3.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol, mountpointPriorityClassName)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa3, pod3, vol, mountpointPriorityClassName)
 
 						Expect(s3pa1.Name).NotTo(Equal(s3pa2.Name), "S3PodAttachment should not have the same name")
 						Expect(s3pa1.Name).NotTo(Equal(s3pa3.Name), "S3PodAttachment should not have the same name")
@@ -677,7 +677,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadServiceAccountName"] = sa1.Name
 						s3pa1 := waitForS3PodAttachmentWithFields(expectedFields, "")
 						Expect(len(s3pa1.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa1, pod1, vol, mountpointPriorityClassName)
 
 						pod2 := createPod(withPVC(pvc2), withServiceAccount(sa1.Name), withNamespace(ns.Name))
 						vol2.bind()
@@ -686,7 +686,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						expectedFields["WorkloadNamespace"] = ns.Name
 						s3pa2 := waitForS3PodAttachmentWithFields(expectedFields, "")
 						Expect(len(s3pa2.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa2, pod2, vol, mountpointPriorityClassName)
 
 						Expect(s3pa1.Name).NotTo(Equal(s3pa2.Name), "S3PodAttachment should not have the same name")
 						Expect(mpPod1.Name).NotTo(Equal(mpPod2.Name), "Mountpoint Pods should not have the same name")
@@ -708,8 +708,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
 
 						// Now terminate the workloads for `mpPod1` (which is the same as `mpPod2`)
@@ -730,7 +730,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						})
 
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
 					})
 
@@ -748,8 +748,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
 
 						// Now patch `mpPod1` as it was created with a different CSI Driver version
@@ -769,7 +769,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).NotTo(BeEmpty())
 
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
 					})
 
@@ -787,8 +787,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol)
-						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol)
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
 
 						// Now annotate `mpPod1` with "no-new-workload"
@@ -807,7 +807,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).NotTo(BeEmpty())
 
 						// Verify `pod3` has been assigned to a new Mountpoint Pod
-						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol)
+						mpPod3 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod3, vol, mountpointPriorityClassName)
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
 					})
 				})
@@ -1167,6 +1167,148 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
 	})
+
+	Context("Reserving headroom for Mountpoint Pods", func() {
+		It("should create a Headroom Pod if the Workload Pods requests it", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol, pod)
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should create multiple Headroom Pods if the Workload Pod has multiple volumes", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume()
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			hrPod2 := waitForHeadroomPodForWorkload(pod, vol2)
+			verifyHeadroomPodFor(pod, vol2, hrPod2)
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol1, pod)
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol2, pod)
+			waitForObjectToDisappear(hrPod1.Pod)
+			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod terminates without getting scheduled", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			// Terminate the workload pod without scheduling it
+			pod.terminate()
+
+			// Headroom Pod should be deleted
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod fails", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.runOn(testNode)
+			pod.fail()
+
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete Headroom Pods if the Workload Pod succeeds", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+			verifyHeadroomPodFor(pod, vol, hrPod)
+
+			pod.runOn(testNode)
+			pod.succeed()
+
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should delete all Headroom Pods if the Workload Pod with multiple volumes terminates without getting scheduled", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume()
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			hrPod2 := waitForHeadroomPodForWorkload(pod, vol2)
+			verifyHeadroomPodFor(pod, vol2, hrPod2)
+
+			// Terminate the workload pod without scheduling it
+			pod.terminate()
+
+			// All Headroom Pods should be deleted
+			waitForObjectToDisappear(hrPod1.Pod)
+			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should not create Headroom Pods for volumes not backed by S3 CSI driver", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume(withCSIDriver(ebsCSIDriver))
+			vol2.bind()
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod)
+
+			// Should not create headroom pod for EBS volume
+			Consistently(func(g Gomega) {
+				var pods corev1.PodList
+				g.Expect(k8sClient.List(ctx, &pods, client.MatchingLabels{
+					mppod.LabelHeadroomForPod:    string(pod.UID),
+					mppod.LabelHeadroomForVolume: vol2.pv.Name,
+				})).To(Succeed())
+				g.Expect(pods.Items).To(BeEmpty())
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol1, pod)
+			expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+	})
 })
 
 //-- Utilities for tests.
@@ -1174,6 +1316,22 @@ var _ = Describe("Mountpoint Controller", func() {
 // A testPod represents a Kubernetes Pod created for tests.
 type testPod struct {
 	*corev1.Pod
+}
+
+// runOn simulates `testPod` to be running on `node`.
+func (p *testPod) runOn(node string) {
+	p.schedule(node)
+	p.running()
+}
+
+// running simulates `testPod` to be in `Running` phase.
+func (p *testPod) running() {
+	p.Status.Phase = corev1.PodRunning
+	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
+
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+	})
 }
 
 // schedule simulates `testPod` to be scheduled in given node.
@@ -1186,6 +1344,13 @@ func (p *testPod) schedule(name string) {
 	})
 }
 
+// waitUntilSchedulingUngated waits until all scheduling gates are removed from `testPod` and its ready to be scheduled.
+func (p *testPod) waitUntilSchedulingUngated() {
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Spec.SchedulingGates).To(BeEmpty())
+	})
+}
+
 // succeed simulates `testPod` to be succeeded running.
 func (p *testPod) succeed() {
 	p.Status.Phase = corev1.PodSucceeded
@@ -1193,6 +1358,16 @@ func (p *testPod) succeed() {
 
 	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
 		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
+	})
+}
+
+// fail simulates `testPod` to be failed.
+func (p *testPod) fail() {
+	p.Status.Phase = corev1.PodFailed
+	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
+
+	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
+		g.Expect(pod.Status.Phase).To(Equal(corev1.PodFailed))
 	})
 }
 
@@ -1274,6 +1449,18 @@ func withServiceAccount(saName string) podModifier {
 func withNamespace(namespace string) podModifier {
 	return func(pod *corev1.Pod) {
 		pod.Namespace = namespace
+	}
+}
+
+// withSchedulingGates returns a `podModifier` that sets given scheduling gates.
+func withSchedulingGates(schedulingGates ...string) podModifier {
+	return func(pod *corev1.Pod) {
+		var sgs []corev1.PodSchedulingGate
+		for _, sg := range schedulingGates {
+			sgs = append(sgs, corev1.PodSchedulingGate{Name: sg})
+		}
+
+		pod.Spec.SchedulingGates = sgs
 	}
 }
 
@@ -1408,6 +1595,24 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	return testVolume
 }
 
+// waitForHeadroomPodForWorkload waits and returns the Headroom Pod for the given workload.
+func waitForHeadroomPodForWorkload(pod *testPod, vol *testVolume) *testPod {
+	hrPod := &corev1.Pod{}
+
+	Eventually(func(g Gomega) {
+		var pods corev1.PodList
+		g.Expect(k8sClient.List(ctx, &pods, client.MatchingLabels{
+			mppod.LabelHeadroomForPod:    string(pod.UID),
+			mppod.LabelHeadroomForVolume: vol.pv.Name,
+		})).To(Succeed())
+
+		g.Expect(pods.Items).To(HaveLen(1))
+		hrPod = &pods.Items[0]
+	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+
+	return &testPod{Pod: hrPod}
+}
+
 // waitForMountpointPodWithName waits and returns the Mountpoint Pod scheduled for given `mpPodName`
 func waitForMountpointPodWithName(mpPodName string) *testPod {
 	mountpointPod := &corev1.Pod{
@@ -1448,10 +1653,11 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(
 	vol *testVolume,
 	pod *testPod,
 	expectedFields map[string]string,
+	expectedPriorityClass string,
 ) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
+	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol, expectedPriorityClass)
 	return s3pa, mpPod
 }
 
@@ -1462,7 +1668,17 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	vol *testVolume,
 	pod *testPod,
 ) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
-	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv))
+	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv), mountpointPriorityClassName)
+}
+
+// waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass waits and verifies that MountpointS3PodAttachment and Mountpoint Pod
+// are created for given `node`, `vol` and `pod`, with the preempting priority class.
+func waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(
+	node string,
+	vol *testVolume,
+	pod *testPod,
+) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv), preemptingPodPriorityClassName)
 }
 
 // waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField waits and verifies that MountpointS3PodAttachment with `minVersion` and Mountpoint Pod
@@ -1476,7 +1692,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(
 ) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, minVersion)
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
-	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol)
+	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol, mountpointPriorityClassName)
 	return s3pa, mpPod
 }
 
@@ -1492,7 +1708,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 }
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
-func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume) *testPod {
+func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume, expectedPriorityClass string) *testPod {
 	GinkgoHelper()
 
 	podUID := string(pod.UID)
@@ -1511,7 +1727,7 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3Pod
 	))
 
 	mountpointPod := waitForMountpointPodWithName(mpPodName)
-	verifyMountpointPodFor(pod, vol, mountpointPod)
+	verifyMountpointPodFor(pod, vol, mountpointPod, expectedPriorityClass)
 
 	return mountpointPod
 }
@@ -1530,7 +1746,7 @@ func findMountpointPodNameForWorkload(s3pa *crdv2beta.MountpointS3PodAttachment,
 }
 
 // verifyMountpointPodFor verifies given `mountpointPod` for given `pod` and `vol`.
-func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPod) {
+func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPod, expectedPriorityClass string) {
 	GinkgoHelper()
 
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelMountpointVersion, mountpointVersion))
@@ -1553,11 +1769,46 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 			Operator: corev1.TolerationOpExists,
 		},
 	}))
-	Expect(mountpointPod.Spec.PriorityClassName).To(Equal(mountpointPriorityClassName))
+	Expect(mountpointPod.Spec.PriorityClassName).To(Equal(expectedPriorityClass))
 
 	Expect(mountpointPod.Spec.Containers[0].Image).To(Equal(mountpointImage))
 	Expect(mountpointPod.Spec.Containers[0].ImagePullPolicy).To(Equal(mountpointImagePullPolicy))
 	Expect(mountpointPod.Spec.Containers[0].Command).To(Equal([]string{mountpointContainerCommand}))
+}
+
+// verifyHeadroomPodFor verifies given `headroomPood` for given `pod` and `vol`.
+func verifyHeadroomPodFor(pod *testPod, vol *testVolume, headroomPod *testPod) {
+	GinkgoHelper()
+
+	Expect(headroomPod.Namespace).To(Equal(mountpointNamespace))
+
+	Expect(headroomPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelHeadroomForPod, string(pod.UID)))
+	Expect(headroomPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelHeadroomForVolume, vol.pv.Name))
+
+	Expect(headroomPod.Spec.PriorityClassName).To(Equal(headroomPodPriorityClassName))
+
+	Expect(headroomPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution).To(Equal([]corev1.PodAffinityTerm{
+		{
+			LabelSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{
+						Key:      mppod.LabelHeadroomForWorkload,
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{string(pod.UID)},
+					},
+				},
+			},
+			Namespaces:  []string{pod.Namespace},
+			TopologyKey: "kubernetes.io/hostname",
+		},
+	}))
+	Expect(headroomPod.Spec.Tolerations).To(Equal([]corev1.Toleration{
+		{
+			Operator: corev1.TolerationOpExists,
+		},
+	}))
+
+	Expect(headroomPod.Spec.Containers[0].Image).To(Equal(headroomImage))
 }
 
 // waitForObject waits until `obj` appears in the control plane.

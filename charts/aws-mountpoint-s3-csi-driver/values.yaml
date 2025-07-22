@@ -89,6 +89,8 @@ controller:
 mountpointPod:
   namespace: mount-s3
   priorityClassName: mount-s3-critical
+  preemptingPriorityClassName: mount-s3-preempting-critical
+  headroomPriorityClassName: mount-s3-headroom
 
 nameOverride: ""
 fullnameOverride: ""
@@ -113,3 +115,9 @@ eksPodIdentityAgent:
 # or if you've migrated all workloads using S3 volumes after upgrading to v2.
 # TODO: Remove this in v3 as systemd mount support will be discontinued
 supportLegacySystemDMounts: true
+
+experimental:
+  # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
+  # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
+  reserveHeadroomForMountpointPods: false
+  headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10

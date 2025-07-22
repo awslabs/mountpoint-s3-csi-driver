@@ -49,6 +49,7 @@ function helm_install_driver() {
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
+    --set experimental.reserveHeadroomForMountpointPods=true \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG

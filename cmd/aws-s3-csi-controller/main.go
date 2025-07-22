@@ -30,7 +30,10 @@ import (
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
 var mountpointVersion = flag.String("mountpoint-version", os.Getenv("MOUNTPOINT_VERSION"), "Version of Mountpoint within the given Mountpoint image.")
 var mountpointPriorityClassName = flag.String("mountpoint-priority-class-name", os.Getenv("MOUNTPOINT_PRIORITY_CLASS_NAME"), "Priority class name of the Mountpoint Pods.")
+var mountpointPreemptingPriorityClassName = flag.String("mountpoint-preempting-priority-class-name", os.Getenv("MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME"), "Preempting priority class name of the Mountpoint Pods.")
+var mountpointHeadroomPriorityClassName = flag.String("mountpoint-headroom-priority-class-name", os.Getenv("MOUNTPOINT_HEADROOM_PRIORITY_CLASS_NAME"), "Priority class name of the Headroom Pods.")
 var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAGE"), "Image of Mountpoint to use in spawned Mountpoint Pods.")
+var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 
@@ -65,12 +68,15 @@ func main() {
 	}
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
-		Namespace:         *mountpointNamespace,
-		MountpointVersion: *mountpointVersion,
-		PriorityClassName: *mountpointPriorityClassName,
+		Namespace:                   *mountpointNamespace,
+		MountpointVersion:           *mountpointVersion,
+		PriorityClassName:           *mountpointPriorityClassName,
+		PreemptingPriorityClassName: *mountpointPreemptingPriorityClassName,
+		HeadroomPriorityClassName:   *mountpointHeadroomPriorityClassName,
 		Container: mppod.ContainerConfig{
 			Command:         *mountpointContainerCommand,
 			Image:           *mountpointImage,
+			HeadroomImage:   *headroomImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
