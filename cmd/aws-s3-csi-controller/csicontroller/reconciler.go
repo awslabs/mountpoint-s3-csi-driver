@@ -170,8 +170,8 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 			if i == 0 {
 				err = r.labelWorkloadPodForHeadroomPod(ctx, pod, log)
 				if err != nil {
-					errs = append(errs, err)
-					continue
+					log.Error(err, "Failed to label Workload Pod for Headroom Pods")
+					return reconcile.Result{}, err
 				}
 			}
 
