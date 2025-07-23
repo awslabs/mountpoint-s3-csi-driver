@@ -36,7 +36,7 @@ const UPGRADE_TEST_DURATION_IN_MINUTES = 150
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
-const helmReleaseName = "aws-mountpoint-s3-csi-driver"
+const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
