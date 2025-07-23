@@ -9,8 +9,8 @@ AWS_PARTITION=$(aws sts get-caller-identity --query Arn --output text | cut -d: 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
-REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 TAG=${TAG:-}
+export REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${BASE_DIR}"/eksctl.sh
