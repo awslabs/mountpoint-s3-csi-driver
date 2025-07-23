@@ -34,7 +34,7 @@ import (
 const UPGRADE_TEST_DURATION_IN_MINUTES = 150
 
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
-const helmChartSource = "charts/aws-mountpoint-s3-csi-driver" // This assumes the test script will run from the project root.
+const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
 const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
@@ -339,7 +339,7 @@ func upgradeCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := upgradeClient.RunWithContext(context.Background(), helmChartName, chart, map[string]any{})
+	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, map[string]any{})
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)
