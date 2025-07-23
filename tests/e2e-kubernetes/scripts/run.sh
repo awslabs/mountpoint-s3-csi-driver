@@ -182,7 +182,7 @@ elif [[ "${ACTION}" == "run_tests" ]]; then
 elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

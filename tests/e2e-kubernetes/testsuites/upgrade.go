@@ -11,6 +11,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
@@ -221,7 +222,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			// Otherwise just install a released version
 			chartPath = pullCSIDriver(settings, cfg, helmChartNewVersion)
 		}
-		upgradeCSIDriver(cfg, helmChartNewVersion, chartPath)
+		upgradeCSIDriver(cfg, f, helmChartNewVersion, chartPath)
 
 		// Create new workloads after the upgrade
 		dliReadOnlyAccessPodNewVersion := createPod(ctx, "default")
@@ -329,7 +330,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 }
 
 // upgradeCSIDriver upgrades the CSI Driver's Helm chart to the new version.
-func upgradeCSIDriver(cfg *action.Configuration, version string, chartPath string) {
+func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version string, chartPath string) {
 	upgradeClient := action.NewUpgrade(cfg)
 	upgradeClient.Namespace = helmReleaseNamespace
 	upgradeClient.Version = version
@@ -343,6 +344,8 @@ func upgradeCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)
+
+	framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(context.Background(), f))
 }
 
 // uninstallCSIDriver uninstalls the CSI Driver's Helm chart from the testing cluster.
@@ -373,4 +376,29 @@ func initHelmClient() (*cli.EnvSettings, *action.Configuration) {
 	framework.ExpectNoError(err)
 
 	return settings, actionConfig
+}
+
+// waitForCSIDriverDaemonSetRollout waits until the CSI Driver's DaemonSet is ready after an upgrade.
+func waitForCSIDriverDaemonSetRollout(ctx context.Context, f *framework.Framework) error {
+	framework.Logf("Waiting for %q to ready", csiDriverDaemonSetName)
+
+	err := framework.Gomega().
+		Eventually(ctx, (func(ctx context.Context) error {
+			ds := csiDriverDaemonSet(ctx, f)
+
+			desired, scheduled, ready := ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled, ds.Status.NumberReady
+			if desired != scheduled && desired != ready {
+				return fmt.Errorf("DaemonSet is not ready. DesiredScheduled: %d, CurrentScheduled: %d, Ready: %d", desired, scheduled, ready)
+			}
+
+			return nil
+		})).
+		WithTimeout(1 * time.Minute).
+		WithPolling(10 * time.Second).
+		Should(gomega.BeNil())
+	if err != nil {
+		return err
+	}
+	framework.Logf("%q is ready", csiDriverDaemonSetName)
+	return nil
 }
