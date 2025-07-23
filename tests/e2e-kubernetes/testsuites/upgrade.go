@@ -34,7 +34,7 @@ import (
 const UPGRADE_TEST_DURATION_IN_MINUTES = 150
 
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
-const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
+const helmChartSource = "charts/aws-mountpoint-s3-csi-driver" // This assumes the test script will run from the project root.
 const helmChartName = "aws-mountpoint-s3-csi-driver"
 const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
