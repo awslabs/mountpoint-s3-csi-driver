@@ -19,7 +19,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
@@ -98,25 +97,25 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		seed := time.Now().UTC().UnixNano()
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPath(f, pod, first, testWriteSize, seed)
-		checkListingPathWithEntries(f, pod, basePath, []string{"first"})
+		checkWriteToPath(ctx, f, pod, first, testWriteSize, seed)
+		checkListingPathWithEntries(ctx, f, pod, basePath, []string{"first"})
 		// Test reading multiple times to ensure cached-read works
 		for range 3 {
-			checkReadFromPath(f, pod, first, testWriteSize, seed)
+			checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 		}
 
 		// Now remove the file from S3
 		deleteObjectFromS3(ctx, bucketName, "first")
 
 		// Ensure the data still read from the cache - without cache this would fail as its removed from underlying bucket
-		checkReadFromPath(f, pod, first, testWriteSize, seed)
+		checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
-		checkListingPathWithEntries(f, pod, dir, []string{"second"})
-		checkListingPathWithEntries(f, pod, basePath, []string{"test-dir"})
-		checkDeletingPath(f, pod, first)
-		checkDeletingPath(f, pod, second)
+		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
+		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
+		checkListingPathWithEntries(ctx, f, pod, dir, []string{"second"})
+		checkListingPathWithEntries(ctx, f, pod, basePath, []string{"test-dir"})
+		checkDeletingPath(ctx, f, pod, first)
+		checkDeletingPath(ctx, f, pod, second)
 	}
 
 	createPod := func(ctx context.Context, mountOptions []string, podModifiers ...func(*v1.Pod)) (*v1.Pod, string) {
@@ -245,7 +244,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 
 			pod, _ := createPod(ctx, mountOptions, podModifiers...)
-			e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("cat %s | grep -q 'hello world!'", testFile))
+			e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'hello world!'", testFile))
 		})
 
 		// If we're testing multi-level cache, add two more test cases:
@@ -268,19 +267,19 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				first := filepath.Join(e2epod.VolumeMountPath1, "first")
 
-				checkWriteToPath(f, pod, first, testWriteSize, seed)
+				checkWriteToPath(ctx, f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
 				for range 3 {
-					checkReadFromPath(f, pod, first, testWriteSize, seed)
+					checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 				}
 
 				// Now remove the file from S3 and wipe out local cache
 				deleteObjectFromS3(ctx, bucketName, "first")
-				e2evolume.VerifyExecInPodSucceed(f, pod, "rm -rf /cache/*")
+				e2epod.VerifyExecInPodSucceed(ctx, f, pod, "rm -rf /cache/*")
 
 				// Reading should still work
 				for range 3 {
-					checkReadFromPath(f, pod, first, testWriteSize, seed)
+					checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 				}
 			})
 
@@ -300,10 +299,10 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				first := filepath.Join(e2epod.VolumeMountPath1, "first")
 
-				checkWriteToPath(f, pod, first, testWriteSize, seed)
+				checkWriteToPath(ctx, f, pod, first, testWriteSize, seed)
 				// Initial read should work and populate both local and Express cache
 				for range 3 {
-					checkReadFromPath(f, pod, first, testWriteSize, seed)
+					checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 				}
 
 				// Now remove the file from S3 and wipe out Express cache
@@ -312,7 +311,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				// Reading should still work
 				for range 3 {
-					checkReadFromPath(f, pod, first, testWriteSize, seed)
+					checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 				}
 			})
 		}

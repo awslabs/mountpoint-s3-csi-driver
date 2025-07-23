@@ -107,13 +107,13 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 
 		pod1WritesTo := filepath.Join(path, "file1.txt")
 		seed := time.Now().UTC().UnixNano()
-		checkWriteToPath(f, pods[0], pod1WritesTo, toWrite, seed)
-		checkReadFromPath(f, pods[1], pod1WritesTo, toWrite, seed)
+		checkWriteToPath(ctx, f, pods[0], pod1WritesTo, toWrite, seed)
+		checkReadFromPath(ctx, f, pods[1], pod1WritesTo, toWrite, seed)
 
 		pod2WritesTo := filepath.Join(path, "file2.txt")
 		seed = time.Now().UTC().UnixNano()
-		checkWriteToPath(f, pods[1], pod2WritesTo, toWrite, seed)
-		checkReadFromPath(f, pods[0], pod2WritesTo, toWrite, seed)
+		checkWriteToPath(ctx, f, pods[1], pod2WritesTo, toWrite, seed)
+		checkReadFromPath(ctx, f, pods[0], pod2WritesTo, toWrite, seed)
 	}
 
 	testOnePodTwoVolumes := func(ctx context.Context, pvcs []*v1.PersistentVolumeClaim, seed int64, doWrite bool) {
@@ -129,10 +129,10 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 			volSeed := seed + int64(i)
 			if doWrite {
 				ginkgo.By(fmt.Sprintf("Checking write to volume #%d", i))
-				checkWriteToPath(f, pod, fileInVol, toWrite, volSeed)
+				checkWriteToPath(ctx, f, pod, fileInVol, toWrite, volSeed)
 			}
 			ginkgo.By(fmt.Sprintf("Checking read from volume #%d", i))
-			checkReadFromPath(f, pod, fileInVol, toWrite, volSeed)
+			checkReadFromPath(ctx, f, pod, fileInVol, toWrite, volSeed)
 		}
 	}
 

@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
@@ -96,7 +95,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should share Mountpoint Pod if pods have the same fsGroup", func(ctx context.Context) {
@@ -116,7 +115,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, expectedFields)
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should not share Mountpoint Pod if pods have different fsGroup", func(ctx context.Context) {
@@ -137,7 +136,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			})
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should not share Mountpoint Pod if mountOptions are different", func(ctx context.Context) {
@@ -177,7 +176,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			})
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should share Mountpoint Pod if pod namespaces and service accounts are the same (authenticationSource=pod)", func(ctx context.Context) {
@@ -205,7 +204,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, expectedFields)
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should not share Mountpoint Pod if pod service accounts are the different (authenticationSource=pod)", func(ctx context.Context) {
@@ -240,7 +239,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			})
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		ginkgo.It("should allow read-only mount from a shared read-write Mountpoint Pod", func(ctx context.Context) {
@@ -264,11 +263,11 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			secondFile := "/mnt/volume1/file2.txt"
 			seed := time.Now().UTC().UnixNano()
 			// pods[0] should get a read-write mount
-			checkWriteToPath(f, pods[0], firstFile, toWrite, seed)
+			checkWriteToPath(ctx, f, pods[0], firstFile, toWrite, seed)
 
 			// pods[1] should get a read-only mount
-			checkReadFromPath(f, pods[1], firstFile, toWrite, seed)
-			checkWriteToPathFails(f, pods[1], secondFile, toWrite, seed)
+			checkReadFromPath(ctx, f, pods[1], firstFile, toWrite, seed)
+			checkWriteToPathFails(ctx, f, pods[1], secondFile, toWrite, seed)
 		})
 
 		ginkgo.It("should allow read-only PVC mount from a shared read-write Mountpoint Pod", func(ctx context.Context) {
@@ -291,11 +290,11 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			secondFile := "/mnt/volume1/file2.txt"
 			seed := time.Now().UTC().UnixNano()
 			// pods[0] should get a read-write mount
-			checkWriteToPath(f, pods[0], firstFile, toWrite, seed)
+			checkWriteToPath(ctx, f, pods[0], firstFile, toWrite, seed)
 
 			// pods[1] should get a read-only mount
-			checkReadFromPath(f, pods[1], firstFile, toWrite, seed)
-			checkWriteToPathFails(f, pods[1], secondFile, toWrite, seed)
+			checkReadFromPath(ctx, f, pods[1], firstFile, toWrite, seed)
+			checkWriteToPathFails(ctx, f, pods[1], secondFile, toWrite, seed)
 		})
 
 		ginkgo.It("should keep Mountpoint Pod serving second workload after first workload termination", func(ctx context.Context) {
@@ -307,7 +306,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 
 			ginkgo.By("Deleting the first pod")
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[0]))
@@ -316,8 +315,8 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			toWrite := 1024 // 1KB
 			path := "/mnt/volume1/new-file-after-pod1-terminated.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPath(f, pods[1], path, toWrite, seed)
-			checkReadFromPath(f, pods[1], path, toWrite, seed)
+			checkWriteToPath(ctx, f, pods[1], path, toWrite, seed)
+			checkReadFromPath(ctx, f, pods[1], path, toWrite, seed)
 		})
 
 		ginkgo.It("should keep Mountpoint Pod running during graceful termination period", func(ctx context.Context) {
@@ -345,7 +344,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 
 			ginkgo.By("Deleting the first and the second pod")
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[0]))
@@ -355,7 +354,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames = verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			e2evolume.VerifyExecInPodSucceed(f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
+			e2epod.VerifyExecInPodSucceed(ctx, f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
 		})
 
 	})
@@ -565,23 +564,23 @@ func defaultExpectedFields(nodeName string, pv *v1.PersistentVolume) map[string]
 	}
 }
 
-func checkCrossReadWrite(f *framework.Framework, pod1, pod2 *v1.Pod) {
+func checkCrossReadWrite(ctx context.Context, f *framework.Framework, pod1, pod2 *v1.Pod) {
 	toWrite := 1024 // 1KB
 	path := "/mnt/volume1"
 
 	// Check write from pod1 and read from pod2
-	checkPodWriteAndOtherPodRead(f, pod1, pod2, path, "file1.txt", toWrite)
+	checkPodWriteAndOtherPodRead(ctx, f, pod1, pod2, path, "file1.txt", toWrite)
 
 	// Check write from pod2 and read from pod1
-	checkPodWriteAndOtherPodRead(f, pod2, pod1, path, "file2.txt", toWrite)
+	checkPodWriteAndOtherPodRead(ctx, f, pod2, pod1, path, "file2.txt", toWrite)
 }
 
-func checkPodWriteAndOtherPodRead(f *framework.Framework, writerPod, readerPod *v1.Pod, basePath, filename string, size int) {
+func checkPodWriteAndOtherPodRead(ctx context.Context, f *framework.Framework, writerPod, readerPod *v1.Pod, basePath, filename string, size int) {
 	filePath := filepath.Join(basePath, filename)
 	seed := time.Now().UTC().UnixNano()
 
-	checkWriteToPath(f, writerPod, filePath, size, seed)
-	checkReadFromPath(f, readerPod, filePath, size, seed)
+	checkWriteToPath(ctx, f, writerPod, filePath, size, seed)
+	checkReadFromPath(ctx, f, readerPod, filePath, size, seed)
 }
 
 type podLevelIdentityConfig struct {
