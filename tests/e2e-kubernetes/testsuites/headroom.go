@@ -109,17 +109,17 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 		e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, hrPod.Name, hrPod.Namespace, 1*time.Minute)
 	}
 
-	checkBasicFileOperations := func(pod *v1.Pod, volPath string) {
+	checkBasicFileOperations := func(ctx context.Context, pod *v1.Pod, volPath string) {
 		seed := time.Now().UTC().UnixNano()
 		filename := fmt.Sprintf("test-%d.txt", seed)
 		path := filepath.Join(volPath, filename)
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPath(f, pod, path, testWriteSize, seed)
-		checkReadFromPath(f, pod, path, testWriteSize, seed)
-		checkListingPathWithEntries(f, pod, volPath, []string{filename})
-		checkDeletingPath(f, pod, path)
-		checkListingPathWithEntries(f, pod, volPath, []string{})
+		checkWriteToPath(ctx, f, pod, path, testWriteSize, seed)
+		checkReadFromPath(ctx, f, pod, path, testWriteSize, seed)
+		checkListingPathWithEntries(ctx, f, pod, volPath, []string{filename})
+		checkDeletingPath(ctx, f, pod, path)
+		checkListingPathWithEntries(ctx, f, pod, volPath, []string{})
 	}
 
 	Describe("Headroom", Ordered, func() {
@@ -148,7 +148,7 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 
 			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
 
-			checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
+			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 		})
 
 		It("should get scheduled automatically after reserving headroom for multiple volumes", func(ctx context.Context) {
@@ -167,8 +167,8 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol1)
 			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol2)
 
-			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 1))
-			checkBasicFileOperations(pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 2))
+			checkBasicFileOperations(ctx, pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 1))
+			checkBasicFileOperations(ctx, pod, fmt.Sprintf(e2epod.VolumeMountPathTemplate, 2))
 		})
 
 		It("should get scheduled automatically after reserving headroom for multiple workloads sharing a volume", func(ctx context.Context) {
@@ -183,10 +183,10 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 
 			for _, pod := range pods {
 				ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
-				checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
+				checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 			}
 
-			checkCrossReadWrite(f, pods[0], pods[1])
+			checkCrossReadWrite(ctx, f, pods[0], pods[1])
 		})
 
 		It("should get scheduled automatically after reserving headroom with resource specifications", func(ctx context.Context) {
@@ -207,7 +207,7 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 
 			ensureHeadroomPodForWorkloadIsDeleted(ctx, pod, vol)
 
-			checkBasicFileOperations(pod, e2epod.VolumeMountPath1)
+			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 		})
 	})
 }

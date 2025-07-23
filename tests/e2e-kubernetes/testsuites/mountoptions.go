@@ -176,7 +176,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		}()
 		volPath := "/mnt/volume1"
 		ginkgo.By("Checking file group owner")
-		_, stderr, err := e2epod.ExecCommandInContainerWithFullOutput(f, pod.Name, fmt.Sprintf("ls %s", volPath))
+		_, stderr, err := e2epod.ExecShellInPodWithFullOutput(ctx, f, pod.Name, fmt.Sprintf("ls %s", volPath))
 		gomega.Expect(err).To(gomega.HaveOccurred())
 		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"))
 	}
