@@ -13,6 +13,14 @@ on:
         required: false
         type: boolean
         description: "If true, only upgrade tests will run."
+      upgrade_tests_old_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the old version to test upgrade from."
+      upgrade_tests_new_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the new version to test upgrade to."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
@@ -81,6 +89,8 @@ jobs:
       TAG: "untested_${{ inputs.ref }}"
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
+      MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
+      MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
