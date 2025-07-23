@@ -9,6 +9,7 @@ AWS_PARTITION=$(aws sts get-caller-identity --query Arn --output text | cut -d: 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
+REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 TAG=${TAG:-}
 
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")

@@ -41,7 +41,7 @@ const helmReleaseNamespace = "kube-system"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
-var helmChartContainerRepository = os.Getenv("REGISTRY")
+var helmChartContainerRepository = os.Getenv("REPOSITORY")
 var helmChartContainerTag = os.Getenv("TAG")
 
 type s3CSIUpgradeTestSuite struct {
@@ -271,7 +271,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 // packageHelmChartFromSource creates a Helm package from the CSI Driver's source.
 func packageHelmChartFromSource(version string) string {
 	if helmChartContainerRepository == "" || helmChartContainerTag == "" {
-		Fail("Please set container repository and tag using `REGISTRY` and `TAG` environment variables if you want to test a source build")
+		Fail("Please set container repository and tag using `REPOSITORY` and `TAG` environment variables if you want to test a source build")
 	}
 
 	out := GinkgoT().TempDir()
