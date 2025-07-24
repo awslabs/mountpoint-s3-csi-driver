@@ -109,7 +109,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-duration-seconds: ${{ inputs.run_upgrade_tests && 7200 || 14400 }}
+          role-duration-seconds: ${{ inputs.run_upgrade_tests && 14400 || 7200 }}
       - name: Install tools
         env:
           ACTION: "install_tools"
