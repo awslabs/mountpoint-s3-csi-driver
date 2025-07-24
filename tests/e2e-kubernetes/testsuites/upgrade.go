@@ -323,7 +323,13 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := installClient.RunWithContext(context.Background(), chart, map[string]any{})
+	release, err := installClient.RunWithContext(context.Background(), chart, map[string]any{
+		"node": map[string]any{
+			"podInfoOnMountCompat": map[string]any{
+				"enable": "true",
+			},
+		},
+	})
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q created", release.Name)
