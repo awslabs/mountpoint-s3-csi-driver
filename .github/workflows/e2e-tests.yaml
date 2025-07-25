@@ -13,6 +13,14 @@ on:
         required: false
         type: boolean
         description: "If true, only upgrade tests will run."
+      upgrade_tests_old_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the old version to test upgrade from."
+      upgrade_tests_new_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the new version to test upgrade to."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
@@ -81,6 +89,8 @@ jobs:
       TAG: "untested_${{ inputs.ref }}"
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
+      MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
+      MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,7 +109,10 @@ jobs:
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-duration-seconds: 7200
+          # Upgrade tests takes around 3 hours to run to ensure they hit multiple credential refresh cycles.
+          # That's why we're increasing the AWS credential duration here compared to regular end-to-end tests.
+          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade.go`.
+          role-duration-seconds: ${{ inputs.run_upgrade_tests && 14400 || 7200 }}
       - name: Install tools
         env:
           ACTION: "install_tools"
@@ -121,6 +134,13 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
+        # The CSI Driver v1 doesn't support running on SELinux enabled hosts,
+        # so we're skipping upgrade tests from v1 if SELinux is enabled.
+        # TODO: Delete this after 2.0.0 release as we wouldn't need to run upgrade tests from 1.x afterward.
+        if: |
+          matrix.selinux-mode != 'enforcing' ||
+          !inputs.run_upgrade_tests ||
+          !startsWith(inputs.upgrade_tests_old_version, '1.')
         env:
           ACTION: "${{ inputs.run_upgrade_tests && 'run_upgrade_tests' || 'run_tests' }}"
         run: |

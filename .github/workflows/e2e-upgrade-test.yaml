@@ -14,16 +14,14 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.old_version }}"
-  MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.new_version }}"
-
 jobs:
   e2e:
     name: E2E Upgrade Tests
     uses: ./.github/workflows/e2e-tests.yaml
     with:
       environment: "trusted"
-      ref: ${{ github.ref }}
+      ref: ${{ github.sha }}
       run_upgrade_tests: true
+      upgrade_tests_old_version: "${{ inputs.old_version }}"
+      upgrade_tests_new_version: "${{ inputs.new_version }}"
     secrets: inherit

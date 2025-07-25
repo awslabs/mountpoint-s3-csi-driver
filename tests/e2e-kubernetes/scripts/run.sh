@@ -10,6 +10,7 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
 TAG=${TAG:-}
+export REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${BASE_DIR}"/eksctl.sh
@@ -181,7 +182,7 @@ elif [[ "${ACTION}" == "run_tests" ]]; then
 elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

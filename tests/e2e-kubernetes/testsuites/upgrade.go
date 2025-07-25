@@ -11,6 +11,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
@@ -36,13 +37,13 @@ const UPGRADE_TEST_DURATION_IN_MINUTES = 150
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
-const helmReleaseName = "aws-mountpoint-s3-csi-driver"
+const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
-var helmChartContainerRepository = os.Getenv("MOUNTPOINT_CSI_DRIVER_CONTAINER_REPOSITORY")
-var helmChartContainerTag = os.Getenv("MOUNTPOINT_CSI_DRIVER_CONTAINER_TAG")
+var helmChartContainerRepository = os.Getenv("REPOSITORY")
+var helmChartContainerTag = os.Getenv("TAG")
 
 type s3CSIUpgradeTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -221,7 +222,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			// Otherwise just install a released version
 			chartPath = pullCSIDriver(settings, cfg, helmChartNewVersion)
 		}
-		upgradeCSIDriver(cfg, helmChartNewVersion, chartPath)
+		upgradeCSIDriver(cfg, f, helmChartNewVersion, chartPath)
 
 		// Create new workloads after the upgrade
 		dliReadOnlyAccessPodNewVersion := createPod(ctx, "default")
@@ -271,7 +272,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 // packageHelmChartFromSource creates a Helm package from the CSI Driver's source.
 func packageHelmChartFromSource(version string) string {
 	if helmChartContainerRepository == "" || helmChartContainerTag == "" {
-		Fail("Please set container repository and tag using `MOUNTPOINT_CSI_DRIVER_CONTAINER_REPOSITORY` and `MOUNTPOINT_CSI_DRIVER_CONTAINER_TAG` environment variables if you want to test a source build")
+		Fail("Please set container repository and tag using `REPOSITORY` and `TAG` environment variables if you want to test a source build")
 	}
 
 	out := GinkgoT().TempDir()
@@ -322,14 +323,20 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := installClient.RunWithContext(context.Background(), chart, map[string]any{})
+	release, err := installClient.RunWithContext(context.Background(), chart, map[string]any{
+		"node": map[string]any{
+			"podInfoOnMountCompat": map[string]any{
+				"enable": "true",
+			},
+		},
+	})
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q created", release.Name)
 }
 
 // upgradeCSIDriver upgrades the CSI Driver's Helm chart to the new version.
-func upgradeCSIDriver(cfg *action.Configuration, version string, chartPath string) {
+func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version string, chartPath string) {
 	upgradeClient := action.NewUpgrade(cfg)
 	upgradeClient.Namespace = helmReleaseNamespace
 	upgradeClient.Version = version
@@ -339,10 +346,12 @@ func upgradeCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := upgradeClient.RunWithContext(context.Background(), helmChartName, chart, map[string]any{})
+	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, map[string]any{})
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)
+
+	framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(context.Background(), f))
 }
 
 // uninstallCSIDriver uninstalls the CSI Driver's Helm chart from the testing cluster.
@@ -373,4 +382,29 @@ func initHelmClient() (*cli.EnvSettings, *action.Configuration) {
 	framework.ExpectNoError(err)
 
 	return settings, actionConfig
+}
+
+// waitForCSIDriverDaemonSetRollout waits until the CSI Driver's DaemonSet is ready after an upgrade.
+func waitForCSIDriverDaemonSetRollout(ctx context.Context, f *framework.Framework) error {
+	framework.Logf("Waiting for %q to ready", csiDriverDaemonSetName)
+
+	err := framework.Gomega().
+		Eventually(ctx, (func(ctx context.Context) error {
+			ds := csiDriverDaemonSet(ctx, f)
+
+			desired, scheduled, ready := ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled, ds.Status.NumberReady
+			if desired != scheduled && desired != ready {
+				return fmt.Errorf("DaemonSet is not ready. DesiredScheduled: %d, CurrentScheduled: %d, Ready: %d", desired, scheduled, ready)
+			}
+
+			return nil
+		})).
+		WithTimeout(1 * time.Minute).
+		WithPolling(10 * time.Second).
+		Should(gomega.BeNil())
+	if err != nil {
+		return err
+	}
+	framework.Logf("%q is ready", csiDriverDaemonSetName)
+	return nil
 }
