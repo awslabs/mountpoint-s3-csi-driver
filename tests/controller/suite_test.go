@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -70,7 +70,7 @@ var _ = BeforeSuite(func() {
 
 	By("Bootstrapping test environment")
 
-	crdv2beta.AddToScheme(scheme.Scheme)
+	crdv2.AddToScheme(scheme.Scheme)
 	testEnv = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
 			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
@@ -90,7 +90,7 @@ var _ = BeforeSuite(func() {
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
 
-	if err := crdv2beta.SetupManagerIndices(k8sManager); err != nil {
+	if err := crdv2.SetupManagerIndices(k8sManager); err != nil {
 		Expect(err).NotTo(HaveOccurred())
 	}
 

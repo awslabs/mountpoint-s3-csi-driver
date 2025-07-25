@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
@@ -725,7 +725,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 
@@ -760,7 +760,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
@@ -798,7 +798,7 @@ var _ = Describe("Mountpoint Controller", func() {
 						pod3.schedule(testNode)
 
 						// Wait until `pod3` is assigned
-						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
 							Expect(findMountpointPodNameForWorkload(s3pa, string(pod3.UID))).ToNot(BeEmpty())
 						})
 						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(2))
@@ -1628,7 +1628,7 @@ func waitForMountpointPodWithName(mpPodName string) *testPod {
 // expectNoS3PodAttachmentWithFields verifies that no MountpointS3PodAttachment matching specified fields exists within a time period
 func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 	Consistently(func(g Gomega) {
-		list := &crdv2beta.MountpointS3PodAttachmentList{}
+		list := &crdv2.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1641,7 +1641,7 @@ func expectNoS3PodAttachmentWithFields(expectedFields map[string]string) {
 }
 
 // expectNoPodUIDInS3PodAttachment validates that pod UID does not exist in MountpointS3PodAttachments map
-func expectNoPodUIDInS3PodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, podUID string) {
+func expectNoPodUIDInS3PodAttachment(s3pa *crdv2.MountpointS3PodAttachment, podUID string) {
 	mpPodName := findMountpointPodNameForWorkload(s3pa, podUID)
 	Expect(mpPodName).To(BeEmpty(), "Found pod UID %s in S3PodAttachment when none was expected: %#v", podUID, s3pa)
 }
@@ -1654,7 +1654,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(
 	pod *testPod,
 	expectedFields map[string]string,
 	expectedPriorityClass string,
-) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol, expectedPriorityClass)
@@ -1667,7 +1667,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPod(
 	node string,
 	vol *testVolume,
 	pod *testPod,
-) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2.MountpointS3PodAttachment, *testPod) {
 	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv), mountpointPriorityClassName)
 }
 
@@ -1677,7 +1677,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(
 	node string,
 	vol *testVolume,
 	pod *testPod,
-) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2.MountpointS3PodAttachment, *testPod) {
 	return waitAndVerifyS3PodAttachmentAndMountpointPodWithExpectedFields(node, vol, pod, defaultExpectedFields(node, vol.pv), preemptingPodPriorityClassName)
 }
 
@@ -1689,7 +1689,7 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(
 	pod *testPod,
 	minVersion string,
 	expectedFields map[string]string,
-) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2.MountpointS3PodAttachment, *testPod) {
 	s3pa := waitForS3PodAttachmentWithFields(expectedFields, minVersion)
 	Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
 	mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol, mountpointPriorityClassName)
@@ -1703,17 +1703,17 @@ func waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersion(
 	vol *testVolume,
 	pod *testPod,
 	minVersion string,
-) (*crdv2beta.MountpointS3PodAttachment, *testPod) {
+) (*crdv2.MountpointS3PodAttachment, *testPod) {
 	return waitAndVerifyS3PodAttachmentAndMountpointPodWithMinVersionAndExpectedField(testNode, vol, pod, minVersion, defaultExpectedFields(testNode, vol.pv))
 }
 
 // waitAndVerifyMountpointPodFromPodAttachment waits and verifies Mountpoint Pod scheduled for given `s3pa`, `pod` and `vol.`
-func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3PodAttachment, pod *testPod, vol *testVolume, expectedPriorityClass string) *testPod {
+func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2.MountpointS3PodAttachment, pod *testPod, vol *testVolume, expectedPriorityClass string) *testPod {
 	GinkgoHelper()
 
 	podUID := string(pod.UID)
 	// Wait until workload is assigned to `s3pa`
-	waitForObject(s3pa, func(g Gomega, s3pa *crdv2beta.MountpointS3PodAttachment) {
+	waitForObject(s3pa, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
 		g.Expect(findMountpointPodNameForWorkload(s3pa, podUID)).ToNot(BeEmpty())
 	})
 
@@ -1734,7 +1734,7 @@ func waitAndVerifyMountpointPodFromPodAttachment(s3pa *crdv2beta.MountpointS3Pod
 
 // findMountpointPodNameForWorkload tries to found Mountpoint Pod name that `workloadUID` is assigned to in given `s3pa`,
 // it returns an empty string if not.
-func findMountpointPodNameForWorkload(s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string) string {
+func findMountpointPodNameForWorkload(s3pa *crdv2.MountpointS3PodAttachment, workloadUID string) string {
 	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {
@@ -1828,12 +1828,12 @@ func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
 func waitForS3PodAttachmentWithFields(
 	expectedFields map[string]string,
 	minResourceVersion string,
-	verifiers ...func(Gomega, *crdv2beta.MountpointS3PodAttachment),
-) *crdv2beta.MountpointS3PodAttachment {
-	var matchedCR *crdv2beta.MountpointS3PodAttachment
+	verifiers ...func(Gomega, *crdv2.MountpointS3PodAttachment),
+) *crdv2.MountpointS3PodAttachment {
+	var matchedCR *crdv2.MountpointS3PodAttachment
 
 	Eventually(func(g Gomega) {
-		list := &crdv2beta.MountpointS3PodAttachmentList{}
+		list := &crdv2.MountpointS3PodAttachmentList{}
 		g.Expect(k8sClient.List(ctx, list)).To(Succeed())
 
 		for i := range list.Items {
@@ -1867,7 +1867,7 @@ func waitForS3PodAttachmentWithFields(
 }
 
 // matchesSpec checks whether MountpointS3PodAttachmentSpec matches `expected` fields
-func matchesSpec(spec crdv2beta.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
+func matchesSpec(spec crdv2.MountpointS3PodAttachmentSpec, expected map[string]string) bool {
 	specValues := map[string]string{
 		"NodeName":                         spec.NodeName,
 		"PersistentVolumeName":             spec.PersistentVolumeName,

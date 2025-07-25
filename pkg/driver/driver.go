@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -63,7 +63,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(crdv2beta.AddToScheme(scheme))
+	utilruntime.Must(crdv2.AddToScheme(scheme))
 }
 
 type Driver struct {
@@ -216,14 +216,14 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 	}
 	if isSelectFieldsSupported {
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
-			&crdv2beta.MountpointS3PodAttachment{}: {
+			&crdv2.MountpointS3PodAttachment{}: {
 				Field: fields.OneTermEqualSelector("spec.nodeName", nodeID),
 			},
 		}
 	} else {
 		// TODO: We can potentially use label filter hash of nodeId for old clusters instead of field selector
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
-			&crdv2beta.MountpointS3PodAttachment{}: {},
+			&crdv2.MountpointS3PodAttachment{}: {},
 		}
 	}
 
@@ -232,11 +232,11 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 		klog.Fatalf("Failed to create cache: %v\n", err)
 	}
 
-	if err := crdv2beta.SetupCacheIndices(s3paCache); err != nil {
+	if err := crdv2.SetupCacheIndices(s3paCache); err != nil {
 		klog.Fatalf("Failed to setup field indexers: %v", err)
 	}
 
-	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv2beta.MountpointS3PodAttachment{})
+	s3podAttachmentInformer, err := s3paCache.GetInformer(context.Background(), &crdv2.MountpointS3PodAttachment{})
 	if err != nil {
 		klog.Fatalf("Failed to create informer for MountpointS3PodAttachment: %v\n", err)
 	}
