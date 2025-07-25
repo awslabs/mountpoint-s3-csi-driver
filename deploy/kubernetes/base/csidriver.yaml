@@ -1,13 +1,17 @@
 ---
-
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
   name: s3.csi.aws.com
+  labels:
+    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+    app.kubernetes.io/component: csi-driver
 spec:
   attachRequired: false
   podInfoOnMount: true
   tokenRequests:
     - audience: "sts.amazonaws.com"
+      expirationSeconds: 3600
+    - audience: "pods.eks.amazonaws.com"
       expirationSeconds: 3600
   requiresRepublish: true
