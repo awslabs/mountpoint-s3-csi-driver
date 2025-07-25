@@ -1,0 +1,46 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: s3-csi-controller
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+    app.kubernetes.io/component: csi-driver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-csi-controller
+      app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+  template:
+    metadata:
+      labels:
+        app: s3-csi-controller
+        app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
+        app.kubernetes.io/component: csi-driver
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      serviceAccountName: s3-csi-driver-controller-sa
+      priorityClassName: system-cluster-critical
+      containers:
+        - name: s3-csi-controller
+          image: csi-driver
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/aws-s3-csi-controller"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          env:
+            # `MOUNTPOINT_IMAGE` env variable will be replaced with real image path as part of the overlay.
+            # See `/deploy/kubernetes/overlays/stable/kustomization.yaml`.
+            - name: MOUNTPOINT_IMAGE
+              value: MOUNTPOINT_IMAGE_PLACEHOLDER
+            - name: MOUNTPOINT_IMAGE_PULL_POLICY
+              value: IfNotPresent
+            - name: MOUNTPOINT_NAMESPACE
+              value: mount-s3
+            - name: MOUNTPOINT_PRIORITY_CLASS_NAME
+              value: mount-s3-critical

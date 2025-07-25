@@ -1,0 +1,8 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mount-s3
+  labels:
+    name: mount-s3
+    pod-security.kubernetes.io/enforce: restricted
