@@ -33,7 +33,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v2beta
+    name: v2
     schema:
       openAPIV3Schema:
         description: MountpointS3PodAttachment is the Schema for the mountpoints3podattachments

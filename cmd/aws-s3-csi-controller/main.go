@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -43,7 +43,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(crdv2beta.AddToScheme(scheme))
+	utilruntime.Must(crdv2.AddToScheme(scheme))
 }
 
 func main() {
@@ -62,7 +62,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := crdv2beta.SetupManagerIndices(mgr); err != nil {
+	if err := crdv2.SetupManagerIndices(mgr); err != nil {
 		log.Error(err, "Failed to setup field indexers")
 		os.Exit(1)
 	}
