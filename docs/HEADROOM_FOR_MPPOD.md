@@ -6,7 +6,7 @@ This feature causes overprovisioning in [node autoscalers](https://kubernetes.io
 
 ## Why is it needed?
 
-The CSI Driver v2 spawns Mountpoint Pods into the same nodes as the workloads to provide volumes. The CSI Driver spawns these Mountpoint Pods _after_ the workloads are assigned to nodes. This approach is taken because we might be able to [share an existing Mountpoint Pod](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/MOUNTPOINT_POD_SHARING.md) on a specific node, eliminating the need to spawn a new one. Therefore, the CSI Driver needs to wait until a workload is scheduled to a specific node before deciding whether to share an existing Mountpoint Pod or spawn a new one.
+The CSI Driver v2 spawns Mountpoint Pods into the same nodes as the workloads to provide volumes. The CSI Driver spawns these Mountpoint Pods _after_ the workloads are assigned to nodes. This approach is taken because we might be able to [share an existing Mountpoint Pod](./MOUNTPOINT_POD_SHARING.md) on a specific node, eliminating the need to spawn a new one. Therefore, the CSI Driver needs to wait until a workload is scheduled to a specific node before deciding whether to share an existing Mountpoint Pod or spawn a new one.
 
 This dynamic spawning of Mountpoint Pods on specific nodes creates a problem with node autoscalers like Karpenter. Since autoscalers are not aware of Mountpoint Pod requirements when making scaling decisions, they may make suboptimal choices. As a result, there may not be enough space for a Mountpoint Pod on the specific node where the workload is deployed.
 
