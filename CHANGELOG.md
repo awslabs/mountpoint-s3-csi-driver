@@ -1,5 +1,12 @@
 # Unreleased
 
+# v2.0.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/README.md)
+
+### Notable changes
+See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for new features, and [Upgrading Mountpoint for Amazon S3 CSI Driver from v1 to v2](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/UPGRADING_TO_V2.md) for more details on breaking changes and necessary steps for upgrading to v2.
+
 # v1.15.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.15.0/README.md)
@@ -114,7 +121,7 @@
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.5.0/README.md)
 
 ### Notable changes
-* Support Mountpoint [version 1.5.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.5.0), including negative cahcing
+* Support Mountpoint [version 1.5.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.5.0), including negative caching
 
 # v1.4.0
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.4.0/README.md)
