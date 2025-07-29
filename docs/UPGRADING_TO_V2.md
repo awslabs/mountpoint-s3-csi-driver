@@ -102,6 +102,10 @@ See [Delegating volume permission and ownership change to CSI driver](https://ku
 
 ## Upgrading to v2
 
+> [!NOTE]
+> Please note that the CSI Driver v2 has some constrains with node autoscalers like [Karpenter](https://karpenter.sh/) and [Cluster Autoscaler](https://docs.aws.amazon.com/eks/latest/best-practices/cas.html).
+> For more details please see [this GitHub issue](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543).
+
 After making necessary changes for the breaking changes described in the [changes](#changes) section, you can follow regular [Installing Mountpoint for Amazon S3 CSI Driver](INSTALL.md) guidance to install the CSI Driver v2 with a method of your choosing.
 
 We recommend [configuring `nodeSelector` for the controller component](INSTALL.md#configuring-nodeSelector-for-the-controller-component) starting with v2.
@@ -124,12 +128,14 @@ We recommend [configuring `nodeSelector` for the controller component](INSTALL.m
   - You can see the associated workloads with:
     - ```bash
       # This script uses `jq` and `kubectl`
-      echo -e "ATTACHMENT                     MOUNTPOINT POD       WORKLOAD POD"
-      echo -e "-----------------------------  ------------------   ------------------------------"
+      echo -e "ATTACHMENT                     VOLUME NAME                   MOUNTPOINT POD       WORKLOAD POD"
+      echo -e "-----------------------------  ----------------------------  ------------------   ------------------------------"
       pods=$(kubectl get pods --all-namespaces -o json)
-      kubectl get s3pa -o json | jq -r '.items[] | .metadata.name as $s3paName | .spec.mountpointS3PodAttachments | to_entries[] | [$s3paName, .key, .value[0].workloadPodUID] | @tsv' |
-      while IFS=$'\t' read -r s3pa_name mppod_name workload_uid; do
+      kubectl get s3pa -o json | jq -r '.items[] | .metadata.name as $s3paName | .spec.persistentVolumeName as $volumeName | .spec.mountpointS3PodAttachments | to_entries[] |
+          $s3paName as $attachment | $volumeName as $volume | .key as $mppod |
+          .value[] | [$attachment, $volume, $mppod, .workloadPodUID] | @tsv' |
+      while IFS=$'\t' read -r s3pa_name volume_name mppod_name workload_uid; do
         workload_info=$(echo -E "$pods" | jq -r ".items[] | select(.metadata.uid==\"$workload_uid\") | .metadata.namespace + \"/\" + .metadata.name")
-        printf "%-30s %-20s %s\n" "$s3pa_name" "$mppod_name" "$workload_info"
+        printf "%-30s %-30s %-20s %s\n" "$s3pa_name" "$volume_name" "$mppod_name" "$workload_info"
       done
       ```
