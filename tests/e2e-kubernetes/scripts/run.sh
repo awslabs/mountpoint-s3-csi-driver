@@ -64,7 +64,6 @@ CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.212.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
 if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
@@ -95,9 +94,7 @@ function install_tools() {
 
   helm_install "$BIN_DIR"
 
-  eksctl_install \
-    "${BIN_DIR}" \
-    "${EKSCTL_VERSION}"
+  eksctl_install "${BIN_DIR}"
 
   go install github.com/onsi/ginkgo/v2/ginkgo
 }
