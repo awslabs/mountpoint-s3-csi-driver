@@ -1,11 +1,11 @@
 matrix:
   cluster-type: ["eksctl"]
   arch: ["x86", "arm"]
-  family: ["AmazonLinux2", "AmazonLinux2023", "Bottlerocket"]
+  family: ["AmazonLinux2", "AmazonLinux2023", "Bottlerocket", "Ubuntu2204"]
   kubernetes-version:
     ["1.28.13", "1.29.8", "1.30.4", "1.31.0", "1.32.1", "1.33.2"]
   include:
-    # Ubuntu2004 supported for EKS <= 1.29 and Ubuntu2204 supported for EKS >= 1.29.
+    # Ubuntu2004 supported for EKS <= 1.29
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
     - cluster-type: "eksctl"
       arch: "x86"
@@ -15,29 +15,9 @@ matrix:
       arch: "arm"
       family: "Ubuntu2004"
       kubernetes-version: "1.29.8"
-    - cluster-type: "eksctl"
-      arch: "x86"
-      family: "Ubuntu2204"
-      kubernetes-version: "1.30.4"
-    - cluster-type: "eksctl"
-      arch: "arm"
-      family: "Ubuntu2204"
-      kubernetes-version: "1.31.0"
-    - cluster-type: "eksctl"
-      arch: "arm"
-      family: "Ubuntu2204"
-      kubernetes-version: "1.32.1"
-    # TODO: Enable this once EKS 1.33 Ubuntu AMI is available.
-    # - cluster-type: "eksctl"
-    #   arch: "arm"
-    #   family: "Ubuntu2204"
-    #   kubernetes-version: "1.33.2"
-    # Since we only enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
+    # Enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
     # field rather than trying to exclude all other variants.
-    - cluster-type: "eksctl"
-      arch: "x86"
-      family: "AmazonLinux2023"
-      kubernetes-version: "1.32.1"
+    - family: "AmazonLinux2023"
       selinux-mode: "enforcing"
   exclude:
     - cluster-type: "eksctl"
@@ -47,3 +27,8 @@ matrix:
     - cluster-type: "eksctl"
       family: "AmazonLinux2"
       kubernetes-version: "1.33.2"
+    # Ubuntu2204 only supported for EKS >= 1.29.
+    # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
+    - cluster-type: "eksctl"
+      family: "Ubuntu2204"
+      kubernetes-version: "1.28.13"
