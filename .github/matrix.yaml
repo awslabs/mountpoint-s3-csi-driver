@@ -1,11 +1,18 @@
 matrix:
   cluster-type: ["eksctl"]
   arch: ["x86", "arm"]
-  family: ["AmazonLinux2", "AmazonLinux2023", "Bottlerocket", "Ubuntu2204"]
+  family:
+    [
+      "AmazonLinux2",
+      "AmazonLinux2023",
+      "Bottlerocket",
+      "Ubuntu2204",
+      "Ubuntu2404",
+    ]
   kubernetes-version:
     ["1.28.13", "1.29.8", "1.30.4", "1.31.0", "1.32.1", "1.33.2"]
   include:
-    # Ubuntu2004 supported for EKS <= 1.29
+    # Ubuntu2004 is only supported on EKS <= 1.29.
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
     - cluster-type: "eksctl"
       arch: "x86"
@@ -27,8 +34,22 @@ matrix:
     - cluster-type: "eksctl"
       family: "AmazonLinux2"
       kubernetes-version: "1.33.2"
-    # Ubuntu2204 only supported for EKS >= 1.29.
+    # Ubuntu2204 is only supported on EKS >= 1.29 && EKS < 1.33.
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
     - cluster-type: "eksctl"
       family: "Ubuntu2204"
       kubernetes-version: "1.28.13"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2204"
+      kubernetes-version: "1.33.2"
+    # Ubuntu2404 is only supported on EKS >= 1.31.
+    # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
+    - cluster-type: "eksctl"
+      family: "Ubuntu2404"
+      kubernetes-version: "1.28.13"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2404"
+      kubernetes-version: "1.29.8"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2404"
+      kubernetes-version: "1.30.4"
