@@ -1,9 +1,9 @@
-// WIP: Part of https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279.
-//
 // `aws-s3-csi-mounter` is the entrypoint binary running on Mountpoint Pods.
 // It is responsible for receiving mount options from the CSI Driver Node Pod,
 // and spawning a Mountpoint instance in turn.
 // It will then wait until Mountpoint process terminates (which normally happens as a result of `unmount`).
+//
+// See /docs/ARCHITECTURE.md for more details.
 package main
 
 import (

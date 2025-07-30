@@ -1,9 +1,9 @@
-// WIP: Part of https://github.com/awslabs/mountpoint-s3-csi-driver/issues/279.
-//
 // `aws-s3-csi-controller` is the entrypoint binary for the CSI Driver's controller component.
 // It is responsible for acting on cluster events and spawning Mountpoint Pods when necessary.
 // It is also responsible for managing Mountpoint Pods, for example it ensures that completed Mountpoint Pods gets deleted.
 // It doesn't implement CSI's controller service as of today.
+//
+// See /docs/ARCHITECTURE.md for more details.
 package main
 
 import (
