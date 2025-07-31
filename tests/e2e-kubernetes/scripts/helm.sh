@@ -76,7 +76,7 @@ function helm_validate_driver() {
   echo "Validating $RELEASE_NAME on the server side..."
 
   # Get all installed manifests and validate them on the server side
-  $HELM_BIN get manifest --namespace kube-system $RELEASE_NAME | \
+  $HELM_BIN get manifest --namespace kube-system --kubeconfig ${KUBECONFIG} $RELEASE_NAME | \
     $KUBECTL_BIN replace --kubeconfig $KUBECONFIG --dry-run=server --validate=strict --warnings-as-errors -f -
 }
 
