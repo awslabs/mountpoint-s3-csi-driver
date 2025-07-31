@@ -52,19 +52,15 @@ ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region $
 NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 else
   INSTANCE_TYPE_DEFAULT=m7g.large
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 fi
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
-AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.210.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
 if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
@@ -95,9 +91,7 @@ function install_tools() {
 
   helm_install "$BIN_DIR"
 
-  eksctl_install \
-    "${BIN_DIR}" \
-    "${EKSCTL_VERSION}"
+  eksctl_install "${BIN_DIR}"
 
   go install github.com/onsi/ginkgo/v2/ginkgo
 }
