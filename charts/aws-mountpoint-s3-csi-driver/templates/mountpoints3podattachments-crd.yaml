@@ -124,8 +124,10 @@ spec:
             - workloadFSGroup
             type: object
         type: object
+    {{- if semverCompare ">=1.32.0-0" .Capabilities.KubeVersion.Version }}
     selectableFields:
     - jsonPath: .spec.nodeName
+    {{- end }}
     served: true
     storage: true
     subresources:

@@ -195,6 +195,7 @@ TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments
 generate: controller-gen
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
 	$(CONTROLLER_GEN) crd paths="./pkg/api/..." output:crd:dir=./hack/
+	patch $(TMP_POD_ATTACHMENT_CRD_FILE) < ./hack/patches/selectablefields-k8s-version.patch
 	echo '# Auto-generated file via `make generate`. Do not edit.' > $(HELM_POD_ATTACHMENT_CRD_FILE)
 	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(HELM_POD_ATTACHMENT_CRD_FILE)
 	rm $(TMP_POD_ATTACHMENT_CRD_FILE)

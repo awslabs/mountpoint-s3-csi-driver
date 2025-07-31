@@ -1,0 +1,13 @@
+--- ./hack/s3.csi.aws.com_mountpoints3podattachments.yaml.orig	2025-07-31 14:45:10
++++ ./hack/s3.csi.aws.com_mountpoints3podattachments.yaml	2025-07-31 14:45:42
+@@ -123,8 +123,10 @@
+             - workloadFSGroup
+             type: object
+         type: object
++    {{- if semverCompare ">=1.32.0-0" .Capabilities.KubeVersion.Version }}
+     selectableFields:
+     - jsonPath: .spec.nodeName
++    {{- end }}
+     served: true
+     storage: true
+     subresources:
