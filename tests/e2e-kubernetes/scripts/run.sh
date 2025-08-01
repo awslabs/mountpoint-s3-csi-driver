@@ -2,6 +2,9 @@
 
 set -euox pipefail
 
+export AWS_RETRY_MODE=standard
+export AWS_MAX_ATTEMPTS=10
+
 ACTION=${ACTION:-}
 REGION=${AWS_REGION}
 
@@ -169,14 +172,14 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -vv -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

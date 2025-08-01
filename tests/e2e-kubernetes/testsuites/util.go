@@ -316,7 +316,7 @@ func awsConfig(ctx context.Context) aws.Config {
 		config.WithRegion(DefaultRegion),
 		config.WithRetryer(func() aws.Retryer {
 			return retry.NewStandard(func(opts *retry.StandardOptions) {
-				opts.MaxAttempts = 5
+				opts.MaxAttempts = 10
 				opts.MaxBackoff = 2 * time.Minute
 			})
 		}))
