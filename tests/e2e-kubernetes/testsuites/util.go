@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
@@ -311,7 +312,14 @@ func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.Serv
 }
 
 func awsConfig(ctx context.Context) aws.Config {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(DefaultRegion))
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(DefaultRegion),
+		config.WithRetryer(func() aws.Retryer {
+			return retry.NewStandard(func(opts *retry.StandardOptions) {
+				opts.MaxAttempts = 5
+				opts.MaxBackoff = 2 * time.Minute
+			})
+		}))
 	framework.ExpectNoError(err)
 	return cfg
 }
