@@ -21,10 +21,15 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -38,7 +43,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
@@ -64,6 +68,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(crdv2.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsclientsetscheme.AddToScheme(scheme))
 }
 
 type Driver struct {
@@ -210,17 +215,20 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 		SyncPeriod:                  &podWatcherResyncPeriod,
 		ReaderFailOnMissingInformer: true,
 	}
-	isSelectFieldsSupported, err := cluster.IsSelectableFieldsSupported(kubernetesVersion)
+
+	isSelectFieldsSupported, err := checkIfMountpointS3PodAttachmentHasNodeNameSelectableFieldInCurrentVersion(context.TODO(), config)
 	if err != nil {
 		klog.Fatalf("Failed to check support for selectable fields in the cluster %v\n", err)
 	}
 	if isSelectFieldsSupported {
+		klog.Info("Using `spec.nodeName` filter for caching MountpointS3PodAttachment as the cluster supports it")
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
 			&crdv2.MountpointS3PodAttachment{}: {
 				Field: fields.OneTermEqualSelector("spec.nodeName", nodeID),
 			},
 		}
 	} else {
+		klog.Info("Cluster doesn't support selectable fields, falling back to client-side filtering")
 		// TODO: We can potentially use label filter hash of nodeId for old clusters instead of field selector
 		options.ByObject = map[client.Object]ctrlcache.ByObject{
 			&crdv2.MountpointS3PodAttachment{}: {},
@@ -252,4 +260,31 @@ func setupS3PodAttachmentCache(config *rest.Config, stopCh <-chan struct{}, node
 	}
 
 	return s3paCache
+}
+
+// checkIfMountpointS3PodAttachmentHasNodeNameSelectableFieldInCurrentVersion returns whether
+// MountpointS3PodAttachment CRD definition contains `spec.nodeName` as a `selectableField` in its current version.
+func checkIfMountpointS3PodAttachmentHasNodeNameSelectableFieldInCurrentVersion(ctx context.Context, config *rest.Config) (bool, error) {
+	client, err := apiextensionsclientset.NewForConfig(config)
+	if err != nil {
+		return false, fmt.Errorf("failed to create api extensions client: %w", err)
+	}
+
+	crd, err := client.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crdv2.MountpointS3PodAttachmentsCRDName, metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to get CRD %q: %w", crdv2.MountpointS3PodAttachmentsCRDName, err)
+	}
+
+	idx := slices.IndexFunc(crd.Spec.Versions,
+		func(version apiextensionsv1.CustomResourceDefinitionVersion) bool {
+			return version.Name == crdv2.GroupVersion.Version
+		})
+	if idx == -1 {
+		return false, fmt.Errorf("failed to find CRD version %q of %q", crdv2.GroupVersion.Version, crdv2.MountpointS3PodAttachmentsCRDName)
+	}
+
+	version := crd.Spec.Versions[idx]
+	return slices.ContainsFunc(version.SelectableFields, func(selectableField apiextensionsv1.SelectableField) bool {
+		return selectableField.JSONPath == crdv2.SelectableFieldNodeNameJSONPath
+	}), nil
 }

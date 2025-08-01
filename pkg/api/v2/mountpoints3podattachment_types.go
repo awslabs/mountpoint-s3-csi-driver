@@ -4,6 +4,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var MountpointS3PodAttachmentsCRDName = "mountpoints3podattachments." + GroupVersion.Group
+
+const SelectableFieldNodeNameJSONPath = ".spec.nodeName"
+
 // The following fields are used as matching criteria to determine if a mountpoint s3 pod can be shared by having the same MountpointS3PodAttachment resource:
 const (
 	FieldNodeName                         = "spec.nodeName"
