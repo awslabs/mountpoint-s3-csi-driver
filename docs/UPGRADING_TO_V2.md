@@ -106,6 +106,9 @@ See [Delegating volume permission and ownership change to CSI driver](https://ku
 > Please note that the CSI Driver v2 has some constraints with node autoscalers like [Karpenter](https://karpenter.sh/) and [Cluster Autoscaler](https://docs.aws.amazon.com/eks/latest/best-practices/cas.html).
 > For more details please see [this GitHub issue](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543).
 
+> [!NOTE]
+> Mountpoint for Amazon S3 CSI Driver v2.0.0 EKS add-on is not available yet, but we're actively working to release it. In the meantime, if you want to use v2 features, you can consider using our Helm chart or Kustomization manifests.
+
 After making necessary changes for the breaking changes described in the [changes](#changes) section, you can follow regular [Installing Mountpoint for Amazon S3 CSI Driver](INSTALL.md) guidance to install the CSI Driver v2 with a method of your choosing.
 
 We recommend [configuring `nodeSelector` for the controller component](INSTALL.md#configuring-nodeSelector-for-the-controller-component) starting with v2.
