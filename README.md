@@ -1,13 +1,11 @@
 # Mountpoint for Amazon S3 CSI Driver
 
 > [!TIP]
-> We’re planning to release version 2.0 of the Mountpoint for Amazon S3 CSI Driver in the upcoming months.
+> [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) is available!
 >
-> We have released a v2 beta to enable wider community testing of the upcoming v2. Please note that this beta release is intended for experimental use and its adoption in production environments is not recommended.
-> This Beta release is under active development and has not completed testing and review for performance, reliability, and security. Please refer to [Unstable Releases](https://github.com/awslabs/mountpoint-s3-csi-driver?tab=readme-ov-file#unstable-releases) for more information.
-> Any testing is appreciated, however, we are especially interested in getting your feedback on how the beta CSI v2.0 driver performs with large scale workloads. The v2 beta should be tested on a fresh cluster.
+> The v2 introduces [Mountpoint Pod sharing](docs/MOUNTPOINT_POD_SHARING.md), [EKS Pod Identity support](docs/CONFIGURATION.md#driver-level-credentials-with-eks-pod-identity), support for running on SELinux-enabled environments like [ROSA](https://aws.amazon.com/rosa/), [simplified caching configuration](docs/CACHING.md) and more!
 >
-> See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for more details.
+> See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for new features, and [Upgrading Mountpoint for Amazon S3 CSI Driver from v1 to v2](docs/UPGRADING_TO_V2.md) for more details on breaking changes and necessary steps for upgrading to v2.
 
 
 ## Overview
@@ -76,7 +74,7 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.8.0. The driver supports **x86-64** and **arm64** architectures.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
 
 ## Distros Support Matrix
 
