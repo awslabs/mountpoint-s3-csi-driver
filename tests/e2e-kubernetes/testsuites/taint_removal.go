@@ -212,57 +212,6 @@ func removeAgentNotReadyTaint(ctx context.Context, client clientset.Interface, n
 	return nil
 }
 
-// waitForTaintRemoval waits for the agent-not-ready taint to be removed from the specified node
-func waitForTaintRemoval(ctx context.Context, client clientset.Interface, nodeName string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		taintFound := false
-		for _, taint := range node.Spec.Taints {
-			if taint.Key == agentNotReadyTaintKey {
-				taintFound = true
-				break
-			}
-		}
-
-		if !taintFound {
-			framework.Logf("Taint %s successfully removed from node %s", agentNotReadyTaintKey, nodeName)
-			return nil // Taint removed
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-
-	return fmt.Errorf("timeout waiting for taint %s to be removed from node %s", agentNotReadyTaintKey, nodeName)
-}
-
-// verifyTaintExists verifies that the agent-not-ready taint exists on the specified node with retry logic
-func verifyTaintExists(ctx context.Context, client clientset.Interface, nodeName string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		for _, taint := range node.Spec.Taints {
-			if taint.Key == agentNotReadyTaintKey {
-				framework.Logf("Verified taint %s exists on node %s", agentNotReadyTaintKey, nodeName)
-				return nil
-			}
-		}
-
-		framework.Logf("Taint %s not yet found on node %s, retrying...", agentNotReadyTaintKey, nodeName)
-		time.Sleep(5 * time.Second)
-	}
-
-	return fmt.Errorf("timeout waiting for taint %s to appear on node %s", agentNotReadyTaintKey, nodeName)
-}
-
 // waitForCSIDriverReady waits for CSI driver pods to be ready after restart
 func waitForCSIDriverReady(ctx context.Context, f *framework.Framework) {
 	framework.Logf("Waiting for CSI driver pods to be ready")
