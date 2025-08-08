@@ -66,6 +66,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3CSICacheTestSuite,
 	custom_testsuites.InitS3CSIPodSharingTestSuite,
 	custom_testsuites.InitS3HeadroomTestSuite,
+	custom_testsuites.InitS3TaintRemovalTestSuite,
 }
 
 // This executes testSuites for csi volumes.

@@ -78,6 +78,8 @@ type Driver struct {
 
 	NodeServer *node.S3NodeServer
 
+	Clientset kubernetes.Interface
+
 	stopCh chan struct{}
 }
 
@@ -138,6 +140,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		Endpoint:   endpoint,
 		NodeID:     nodeID,
 		NodeServer: nodeServer,
+		Clientset:  clientset,
 		stopCh:     stopCh,
 	}, nil
 }
@@ -187,6 +190,11 @@ func (d *Driver) Run() error {
 	csi.RegisterNodeServer(d.Srv, d.NodeServer)
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
+
+	// Start taint watcher when gRPC server is ready to accept connections
+	if d.Clientset != nil {
+		go node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
+	}
 	return d.Srv.Serve(listener)
 }
 
