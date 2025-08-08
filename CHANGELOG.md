@@ -1,5 +1,8 @@
 # Unreleased
 
+### Notable changes
+* Add removal of node `s3.csi.aws.com/agent-not-ready` taint after the CSI driver completes registration with kubelet for readiness detection
+
 # v2.0.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/README.md)

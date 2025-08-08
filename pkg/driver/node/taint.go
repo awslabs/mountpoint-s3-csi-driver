@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -59,14 +58,13 @@ type JSONPatch struct {
 
 // StartNotReadyTaintWatcher checks for and removes the s3.csi.aws.com/agent-not-ready taint
 // from the current node after verifying the CSI driver is properly registered.
-func StartNotReadyTaintWatcher(clientset kubernetes.Interface, maxWatchDuration time.Duration) {
-	nodeName := os.Getenv("CSI_NODE_NAME")
-	if nodeName == "" {
-		klog.V(4).Infof("CSI_NODE_NAME missing, skipping taint watcher")
+func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, maxWatchDuration time.Duration) {
+	if nodeID == "" {
+		klog.V(4).Infof("nodeID is empty, skipping taint watcher")
 		return
 	}
 
-	klog.Infof("Starting taint watcher for node %s (max duration: %v)", nodeName, maxWatchDuration)
+	klog.Infof("Starting taint watcher for node %s (max duration: %v)", nodeID, maxWatchDuration)
 
 	attemptTaintRemoval := func(n *corev1.Node) {
 		if !hasNotReadyTaint(n) {
@@ -105,9 +103,9 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, maxWatchDuration 
 		}
 	}
 
-	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeID, metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Failed to get node %s: %v", nodeName, err)
+		klog.Errorf("Failed to get node %s: %v", nodeID, err)
 		return
 	}
 
@@ -142,7 +140,7 @@ func checkDriverRegistered(ctx context.Context, clientset kubernetes.Interface, 
 
 // removeNotReadyTaint removes the taint s3.csi.aws.com/agent-not-ready from the local node
 // This taint can be optionally applied by users to prevent startup race conditions as described in:
-// https://github.com/awslabs/mountpoint-s3-csi-driver/edit/main/docs/TROUBLESHOOTING.md#my-pod-is-stuck-at-containercreating-with-error-driver-name-s3csiawscom-not-found-in-the-list-of-registered-csi-drivers
+// https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-pod-is-stuck-at-containercreating-with-error-driver-name-s3csiawscom-not-found-in-the-list-of-registered-csi-drivers
 func removeNotReadyTaint(ctx context.Context, clientset kubernetes.Interface, node *corev1.Node) error {
 	if clientset == nil {
 		klog.V(4).Infof("Kubernetes clientset is nil, skipping taint removal")

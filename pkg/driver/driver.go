@@ -189,7 +189,9 @@ func (d *Driver) Run() error {
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
 
 	// Start taint watcher when gRPC server is ready to accept connections
-	go node.StartNotReadyTaintWatcher(d.NodeServer.Clientset, node.TaintWatcherDuration)
+	if d.NodeServer.Clientset != nil {
+		go node.StartNotReadyTaintWatcher(d.NodeServer.Clientset, d.NodeID, node.TaintWatcherDuration)
+	}
 
 	return d.Srv.Serve(listener)
 }
