@@ -26,7 +26,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
@@ -40,15 +42,6 @@ const (
 	TaintWatcherDuration = 1 * time.Minute
 )
 
-var (
-	// taintRemovalBackoff is the exponential backoff configuration for node taint removal
-	taintRemovalBackoff = wait.Backoff{
-		Duration: 500 * time.Millisecond,
-		Factor:   2,
-		Steps:    10, // Max delay = 0.5 seconds * 2^9 = ~4 minutes
-	}
-)
-
 // Struct for JSON patch operations
 type JSONPatch struct {
 	OP    string      `json:"op,omitempty"`
@@ -56,8 +49,8 @@ type JSONPatch struct {
 	Value interface{} `json:"value"`
 }
 
-// StartNotReadyTaintWatcher checks for and removes the s3.csi.aws.com/agent-not-ready taint
-// from the current node after verifying the CSI driver is properly registered.
+// StartNotReadyTaintWatcher launches a short-lived Node informer that removes the
+// s3.csi.aws.com/agent-not-ready taint. The informer is stopped after maxWatchDuration.
 func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, maxWatchDuration time.Duration) {
 	if nodeID == "" {
 		klog.V(4).Infof("nodeID is empty, skipping taint watcher")
@@ -65,6 +58,15 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 	}
 
 	klog.Infof("Starting taint watcher for node %s (max duration: %v)", nodeID, maxWatchDuration)
+
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		clientset,
+		0, // No resync
+		informers.WithTweakListOptions(func(lo *metav1.ListOptions) {
+			lo.FieldSelector = "metadata.name=" + nodeID
+		}),
+	)
+	informer := factory.Core().V1().Nodes().Informer()
 
 	attemptTaintRemoval := func(n *corev1.Node) {
 		if !hasNotReadyTaint(n) {
@@ -95,6 +97,7 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 				return false, nil // Continue retrying
 			}
 			klog.Infof("Successfully removed agent-not-ready taint from node %s", n.Name)
+			klog.Infof("Successfully removed agent-not-ready taint; stopping watcher")
 			return true, nil
 		})
 
@@ -103,13 +106,42 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 		}
 	}
 
-	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeID, metav1.GetOptions{})
-	if err != nil {
-		klog.Errorf("Failed to get node %s: %v", nodeID, err)
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			if n, ok := obj.(*corev1.Node); ok {
+				attemptTaintRemoval(n)
+			}
+		},
+		UpdateFunc: func(_, newObj interface{}) {
+			if n, ok := newObj.(*corev1.Node); ok {
+				attemptTaintRemoval(n)
+			}
+		},
+	}); err != nil {
+		klog.Errorf("Taint-watcher: failed to add event handler: %v", err)
 		return
 	}
 
-	attemptTaintRemoval(node)
+	stopCh := make(chan struct{})
+
+	go func() {
+		factory.Start(stopCh)
+
+		if ok := cache.WaitForCacheSync(stopCh, informer.HasSynced); !ok {
+			klog.Errorf("Taint-watcher: cache sync failed")
+		}
+
+		// Immediate scan in case the taint is already present and no event fires.
+		if obj, exists, err := informer.GetStore().GetByKey(nodeID); err == nil && exists {
+			if n, ok := obj.(*corev1.Node); ok {
+				attemptTaintRemoval(n)
+			}
+		}
+
+		<-time.After(maxWatchDuration)
+		klog.V(8).Infof("Taint-watcher timeout reached; stopping")
+		close(stopCh)
+	}()
 }
 
 func hasNotReadyTaint(n *corev1.Node) bool {
