@@ -23,9 +23,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/container-storage-interface/spec/lib/go/csi"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -37,14 +34,11 @@ import (
 const (
 	AgentNotReadyNodeTaintKey = "s3.csi.aws.com/agent-not-ready" // key of taints to be removed on driver startup
 
-	// CSI driver readiness checking configuration
+	// CSI driver name for registration verification
 	csiDriverName = "s3.csi.aws.com"
-	csiSocketPath = "/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock"
 
-	// Default timeouts for CSI driver readiness checking
-	defaultReadinessTimeout      = 30 * time.Second
-	defaultReadinessPollInterval = 500 * time.Millisecond
-	csiCallTimeout               = 2 * time.Second
+	// TaintWatcherDuration is the maximum duration for the not-ready taint watcher to run.
+	TaintWatcherDuration = 1 * time.Minute
 )
 
 var (
@@ -63,111 +57,96 @@ type JSONPatch struct {
 	Value interface{} `json:"value"`
 }
 
-// isCSIDriverReady checks if the CSI driver is ready to handle requests
-// This verifies the CSI socket exists and the driver responds correctly to gRPC calls
-func isCSIDriverReady() bool {
-	// Check if CSI socket exists
-	if _, err := os.Stat(csiSocketPath); err != nil {
-		klog.V(4).Infof("taint: CSI socket not found: %v", err)
-		return false
+// StartNotReadyTaintWatcher checks for and removes the s3.csi.aws.com/agent-not-ready taint
+// from the current node after verifying the CSI driver is properly registered.
+func StartNotReadyTaintWatcher(clientset kubernetes.Interface, maxWatchDuration time.Duration) {
+	nodeName := os.Getenv("CSI_NODE_NAME")
+	if nodeName == "" {
+		klog.V(4).Infof("CSI_NODE_NAME missing, skipping taint watcher")
+		return
 	}
 
-	// Try to connect to the CSI socket
-	conn, err := grpc.NewClient("unix://"+csiSocketPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		klog.V(4).Infof("taint: Failed to connect to CSI socket: %v", err)
-		return false
-	}
-	defer conn.Close()
+	klog.Infof("Starting taint watcher for node %s (max duration: %v)", nodeName, maxWatchDuration)
 
-	// Test CSI driver responsiveness with GetPluginInfo call
-	client := csi.NewIdentityClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), csiCallTimeout)
-	defer cancel()
+	attemptTaintRemoval := func(n *corev1.Node) {
+		if !hasNotReadyTaint(n) {
+			klog.V(4).Infof("No agent-not-ready taint found on node %s, skipping taint removal", n.Name)
+			return
+		}
 
-	resp, err := client.GetPluginInfo(ctx, &csi.GetPluginInfoRequest{})
-	if err != nil {
-		klog.V(4).Infof("taint: GetPluginInfo failed: %v", err)
-		return false
-	}
+		klog.Infof("Found agent-not-ready taint on node %s, attempting removal", n.Name)
 
-	if resp.GetName() != csiDriverName {
-		klog.V(4).Infof("taint: Unexpected driver name: got %s, expected %s", resp.GetName(), csiDriverName)
-		return false
-	}
+		backoff := wait.Backoff{
+			Duration: 2 * time.Second,
+			Factor:   1.5,
+			Steps:    5,
+		}
 
-	klog.V(4).Infof("taint: CSI driver %s is ready and responsive", csiDriverName)
-	return true
-}
+		ctx, cancel := context.WithTimeout(context.Background(), maxWatchDuration)
+		defer cancel()
 
-// waitForCSIDriverReady polls the CSI socket until the driver is ready or timeout occurs
-func waitForCSIDriverReady() error {
-	klog.Infof("taint: Waiting for CSI driver readiness (socket: %s)", csiSocketPath)
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultReadinessTimeout)
-	defer cancel()
-
-	ticker := time.NewTicker(defaultReadinessPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for CSI driver readiness after %v", defaultReadinessTimeout)
-		case <-ticker.C:
-			if isCSIDriverReady() {
-				klog.Infof("taint: CSI driver is ready")
-				return nil
+		err := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
+			// First check if driver is registered
+			if err := checkDriverRegistered(ctx, clientset, n.Name); err != nil {
+				klog.V(4).Infof("CSI driver not yet registered, retrying for node %s: %v", n.Name, err)
+				return false, nil // Continue retrying
 			}
+
+			if err := removeNotReadyTaint(ctx, clientset, n); err != nil {
+				klog.Errorf("Failed to remove agent-not-ready taint, retrying for node %s: %v", n.Name, err)
+				return false, nil // Continue retrying
+			}
+			klog.Infof("Successfully removed agent-not-ready taint from node %s", n.Name)
+			return true, nil
+		})
+
+		if err != nil {
+			klog.Errorf("Timed out trying to remove agent-not-ready taint from node %s: %v", n.Name, err)
 		}
 	}
+
+	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Failed to get node %s: %v", nodeName, err)
+		return
+	}
+
+	attemptTaintRemoval(node)
 }
 
-// RemoveTaintInBackground is a goroutine that waits for CSI driver registration and then removes the taint
-func RemoveTaintInBackground(clientset kubernetes.Interface) {
-	klog.Infof("taint: Starting taint removal process")
-
-	// Wait for CSI driver to be ready by actively checking the socket
-	if err := waitForCSIDriverReady(); err != nil {
-		klog.Errorf("taint: CSI driver readiness check failed: %v", err)
-		klog.Infof("taint: Proceeding with taint removal anyway to avoid blocking indefinitely")
-	} else {
-		klog.Infof("taint: CSI driver readiness confirmed, proceeding with taint removal")
-	}
-
-	// Remove the taint with exponential backoff
-	backoffErr := wait.ExponentialBackoff(taintRemovalBackoff, func() (bool, error) {
-		err := removeNotReadyTaint(clientset)
-		if err != nil {
-			klog.Errorf("taint: Failed to remove taint: %v", err)
-			return false, nil
+func hasNotReadyTaint(n *corev1.Node) bool {
+	for _, t := range n.Spec.Taints {
+		if t.Key == AgentNotReadyNodeTaintKey {
+			return true
 		}
-		return true, nil
-	})
-
-	if backoffErr != nil {
-		klog.Errorf("taint: Retries exhausted, giving up taint removal: %v", backoffErr)
 	}
+	return false
+}
+
+// checkDriverRegistered verifies that the CSI driver is registered in the CSINode object
+func checkDriverRegistered(ctx context.Context, clientset kubernetes.Interface, nodeName string) error {
+	csiNode, err := clientset.StorageV1().CSINodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get CSINode for %s: %w", nodeName, err)
+	}
+
+	for _, driver := range csiNode.Spec.Drivers {
+		if driver.Name == csiDriverName {
+			klog.V(4).Infof("CSI driver %s found in CSINode for node %s", csiDriverName, nodeName)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("CSI driver %s not found in CSINode for node %s", csiDriverName, nodeName)
 }
 
 // removeNotReadyTaint removes the taint s3.csi.aws.com/agent-not-ready from the local node
 // This taint can be optionally applied by users to prevent startup race conditions as described in:
 // https://github.com/awslabs/mountpoint-s3-csi-driver/edit/main/docs/TROUBLESHOOTING.md#my-pod-is-stuck-at-containercreating-with-error-driver-name-s3csiawscom-not-found-in-the-list-of-registered-csi-drivers
-func removeNotReadyTaint(clientset kubernetes.Interface) error {
-	nodeName := os.Getenv("CSI_NODE_NAME")
-	if nodeName == "" {
-		klog.V(4).Infof("CSI_NODE_NAME missing, skipping taint removal")
-		return nil
-	}
-
+func removeNotReadyTaint(ctx context.Context, clientset kubernetes.Interface, node *corev1.Node) error {
 	if clientset == nil {
 		klog.V(4).Infof("Kubernetes clientset is nil, skipping taint removal")
 		return nil
-	}
-
-	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
-	if err != nil {
-		return err
 	}
 
 	var taintsToKeep []corev1.Taint
@@ -175,7 +154,7 @@ func removeNotReadyTaint(clientset kubernetes.Interface) error {
 		if taint.Key != AgentNotReadyNodeTaintKey {
 			taintsToKeep = append(taintsToKeep, taint)
 		} else {
-			klog.V(4).Infof("Queued taint for removal", "key", taint.Key, "effect", taint.Effect)
+			klog.V(4).Infof("Queued taint for removal: key=%s, effect=%s", taint.Key, taint.Effect)
 		}
 	}
 
@@ -202,10 +181,10 @@ func removeNotReadyTaint(clientset kubernetes.Interface) error {
 		return err
 	}
 
-	_, err = clientset.CoreV1().Nodes().Patch(context.Background(), nodeName, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+	_, err = clientset.CoreV1().Nodes().Patch(ctx, node.Name, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
-	klog.Infof("taint: Removed taint(s) from local node: %s", nodeName)
+	klog.Infof("Removed taint(s) from local node %s", node.Name)
 	return nil
 }
