@@ -26,7 +26,7 @@ type nodeServerTestEnv struct {
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	server := node.NewS3NodeServer("test-nodeID", mockMounter)
+	server := node.NewS3NodeServer("test-nodeID", mockMounter, nil) // clientset not needed for tests
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,

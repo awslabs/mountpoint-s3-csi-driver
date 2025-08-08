@@ -132,7 +132,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Fatalln(err)
 	}
 
-	nodeServer := node.NewS3NodeServer(nodeID, podMounter)
+	nodeServer := node.NewS3NodeServer(nodeID, podMounter, clientset)
 
 	return &Driver{
 		Endpoint:   endpoint,
@@ -187,6 +187,10 @@ func (d *Driver) Run() error {
 	csi.RegisterNodeServer(d.Srv, d.NodeServer)
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
+
+	// Start taint removal when gRPC server is ready to accept connections
+	go node.RemoveTaintInBackground(d.NodeServer.Clientset)
+
 	return d.Srv.Serve(listener)
 }
 

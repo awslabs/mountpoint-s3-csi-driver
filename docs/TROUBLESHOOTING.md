@@ -105,3 +105,11 @@ $ kubectl logs -n kube-system -l app=s3-csi-controller
 See [logging guide](./LOGGING.md#the-controller-component-aws-s3-csi-controller) for more details.
 
 Another thing to ensure is that you're using correct scheduling gate, the CSI Driver expects the scheduling gate to be `s3.csi.aws.com/reserve-headroom-for-mppod`, and would ignore any other scheduling gates. See [configuration guide of Reserving headroom for Mountpoint Pods](./HEADROOM_FOR_MPPOD.md#how-is-it-used) feature for more details.
+
+## My Pod is stuck at `ContainerCreating` with error "driver name s3.csi.aws.com not found in the list of registered CSI drivers"
+
+This error can occur due to a race condition during node startup where workload pods are scheduled before the S3 CSI driver has completed registration with kubelet.
+
+The S3 CSI driver includes a feature to prevent this race condition by using node startup taints. When a node is tainted with `s3.csi.aws.com/agent-not-ready:NoExecute`, workload pods cannot be scheduled on that node until the S3 CSI driver removes the taint after successful startup.
+
+For EKS managed node groups, add the taint to your node group configuration (more details in [this documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)). For self-managed nodes, [apply the taint using kubectl](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/) when nodes join the cluster.
