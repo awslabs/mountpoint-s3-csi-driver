@@ -25,7 +25,6 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -63,13 +62,12 @@ const (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID    string
-	Mounter   mounter.Mounter
-	Clientset kubernetes.Interface
+	NodeID  string
+	Mounter mounter.Mounter
 }
 
-func NewS3NodeServer(nodeID string, mounter mounter.Mounter, clientset kubernetes.Interface) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, Clientset: clientset}
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter) *S3NodeServer {
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {

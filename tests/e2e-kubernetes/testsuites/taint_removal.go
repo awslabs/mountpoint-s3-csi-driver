@@ -92,7 +92,7 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 		checkListingPathWithEntries(ctx, f, pod, volPath, []string{})
 	}
 
-	FDescribe("Taint Removal", Ordered, func() {
+	Describe("Taint Removal", Ordered, func() {
 		BeforeEach(func(ctx context.Context) {
 			framework.Logf("Waiting 1 minute for any existing taint watchers to timeout")
 			time.Sleep(1 * time.Minute)

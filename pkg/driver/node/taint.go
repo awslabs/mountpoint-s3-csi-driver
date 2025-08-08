@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
@@ -57,24 +58,24 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 		return
 	}
 
-	klog.Infof("Starting taint watcher for node %s (max duration: %v)", nodeID, maxWatchDuration)
+	klog.Infof("Starting taint watcher for taint %s in node %s (max duration: %v)", AgentNotReadyNodeTaintKey, nodeID, maxWatchDuration)
 
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
 		0, // No resync
 		informers.WithTweakListOptions(func(lo *metav1.ListOptions) {
-			lo.FieldSelector = "metadata.name=" + nodeID
+			lo.FieldSelector = fields.OneTermEqualSelector("metadata.name", nodeID).String()
 		}),
 	)
 	informer := factory.Core().V1().Nodes().Informer()
 
 	attemptTaintRemoval := func(n *corev1.Node) {
 		if !hasNotReadyTaint(n) {
-			klog.V(4).Infof("No agent-not-ready taint found on node %s, skipping taint removal", n.Name)
+			klog.V(5).Infof("No %q taint found on node %q, skipping taint removal", AgentNotReadyNodeTaintKey, n.Name)
 			return
 		}
 
-		klog.Infof("Found agent-not-ready taint on node %s, attempting removal", n.Name)
+		klog.Infof("Found %q taint on node %q, attempting removal", AgentNotReadyNodeTaintKey, n.Name)
 
 		backoff := wait.Backoff{
 			Duration: 2 * time.Second,
@@ -96,8 +97,7 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 				klog.Errorf("Failed to remove agent-not-ready taint, retrying for node %s: %v", n.Name, err)
 				return false, nil // Continue retrying
 			}
-			klog.Infof("Successfully removed agent-not-ready taint from node %s", n.Name)
-			klog.Infof("Successfully removed agent-not-ready taint; stopping watcher")
+			klog.Infof("Successfully removed %q taint from node %q, stopping the watcher", AgentNotReadyNodeTaintKey, n.Name)
 			return true, nil
 		})
 
