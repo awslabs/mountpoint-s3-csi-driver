@@ -40,7 +40,7 @@ const (
 	csiDriverName = "s3.csi.aws.com"
 
 	// TaintWatcherDuration is the maximum duration for the not-ready taint watcher to run.
-	TaintWatcherDuration = 1 * time.Minute
+	TaintWatcherDuration = 10 * time.Minute
 )
 
 // Struct for JSON patch operations
@@ -62,7 +62,7 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		clientset,
-		0, // No resync
+		5*time.Second, // Resync every 5 seconds in case of networking or other rare issue
 		informers.WithTweakListOptions(func(lo *metav1.ListOptions) {
 			lo.FieldSelector = fields.OneTermEqualSelector("metadata.name", nodeID).String()
 		}),

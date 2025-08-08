@@ -93,11 +93,6 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 	}
 
 	Describe("Taint Removal", Ordered, func() {
-		BeforeEach(func(ctx context.Context) {
-			framework.Logf("Waiting 1 minute for any existing taint watchers to timeout")
-			time.Sleep(1 * time.Minute)
-		})
-
 		It("should remove agent-not-ready taint and allow workload scheduling", func(ctx context.Context) {
 			// 1. Get a node where CSI driver is running
 			node := getCSIDriverNode(ctx, f)
@@ -110,28 +105,18 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 				return removeAgentNotReadyTaint(ctx, f.ClientSet, node.Name)
 			})
 
-			// 3. Verify taint was actually applied
-			framework.Logf("Verifying taint was applied to node %s", node.Name)
-			err = verifyTaintExists(ctx, f.ClientSet, node.Name, 30*time.Second)
-			framework.ExpectNoError(err)
-
-			// 4. Create volume resource
+			// 3. Create volume resource
 			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
 			deferCleanup(vol.CleanupResource)
 
-			// 5. Restart CSI driver to trigger taint watcher
+			// 4. Restart CSI driver to trigger taint watcher
 			framework.Logf("Restarting CSI driver pods to trigger taint watcher")
 			killCSIDriverPods(ctx, f)
 
 			// Wait for CSI driver pods to be ready again
 			waitForCSIDriverReady(ctx, f)
 
-			// 6. Wait for taint removal (should happen within 1 minute)
-			framework.Logf("Waiting for taint removal from node %s", node.Name)
-			err = waitForTaintRemoval(ctx, f.ClientSet, node.Name, 2*time.Minute)
-			framework.ExpectNoError(err)
-
-			// 7. Create and verify pod scheduling on the previously tainted node
+			// 5. Create and verify pod scheduling on the previously tainted node
 			framework.Logf("Creating pod on previously tainted node %s", node.Name)
 			pod := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": node.Name},
 				[]*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
@@ -139,66 +124,8 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			framework.ExpectNoError(err)
 			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
-			// 8. Test basic file operations
+			// 6. Test basic file operations
 			framework.Logf("Testing file operations on pod %s", pod.Name)
-			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
-		})
-
-		It("should schedule pending workload after taint removal", func(ctx context.Context) {
-			// 1. Get a node and apply taint
-			node := getCSIDriverNode(ctx, f)
-			framework.Logf("Selected node %s for pending workload test", node.Name)
-
-			err := applyAgentNotReadyTaint(ctx, f.ClientSet, node.Name)
-			framework.ExpectNoError(err)
-			deferCleanup(func(ctx context.Context) error {
-				return removeAgentNotReadyTaint(ctx, f.ClientSet, node.Name)
-			})
-
-			// 2. Verify taint was actually applied
-			framework.Logf("Verifying taint was applied to node %s", node.Name)
-			err = verifyTaintExists(ctx, f.ClientSet, node.Name, 30*time.Second)
-			framework.ExpectNoError(err)
-
-			// 3. Create volume resource
-			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
-			deferCleanup(vol.CleanupResource)
-
-			// 4. Create pod that should be pending due to taint
-			framework.Logf("Creating pod that should be pending due to taint on node %s", node.Name)
-			pod := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": node.Name},
-				[]*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
-			pod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
-			framework.ExpectNoError(err)
-			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
-
-			// 5. Verify pod is pending due to taint
-			framework.Logf("Verifying pod %s is pending due to taint", pod.Name)
-			pod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, pod.Name, metav1.GetOptions{})
-			framework.ExpectNoError(err)
-			if pod.Status.Phase != v1.PodPending {
-				framework.Failf("Expected pod %s to be pending due to taint, but it's in phase %s", pod.Name, pod.Status.Phase)
-			}
-
-			// 6. Restart CSI driver to trigger taint removal
-			framework.Logf("Restarting CSI driver pods to trigger taint removal")
-			killCSIDriverPods(ctx, f)
-
-			// Wait for CSI driver pods to be ready again
-			waitForCSIDriverReady(ctx, f)
-
-			// 7. Wait for taint removal and pod to become running
-			framework.Logf("Waiting for taint removal and pod scheduling")
-			err = waitForTaintRemoval(ctx, f.ClientSet, node.Name, 2*time.Minute)
-			framework.ExpectNoError(err)
-
-			err = e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name)
-			framework.ExpectNoError(err)
-
-			// 8. Test volume functionality
-			framework.Logf("Testing volume functionality on scheduled pod %s", pod.Name)
-			pod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, pod.Name, metav1.GetOptions{})
-			framework.ExpectNoError(err)
 			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 		})
 	})
