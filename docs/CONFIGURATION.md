@@ -455,6 +455,11 @@ Alternatively, the CSI Driver will detect the `--region` argument specified in t
 Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
 
+## Configure node startup taint
+There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
+
+This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
+
 ## Cross-account bucket access
 You can grant access Amazon S3 buckets from different AWS accounts.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
