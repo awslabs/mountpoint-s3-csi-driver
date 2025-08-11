@@ -1,0 +1,53 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: mp-dev-cluster
+  region: eu-west-2
+  version: "1.33"
+
+iam:
+  # To use IRSA, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#driver-level-credentials-with-irsa
+  withOIDC: true
+
+  # To use EKS Pod Identity with a preconfigured association giving "full access" to S3
+  podIdentityAssociations:
+    - namespace: kube-system
+      serviceAccountName: s3-csi-driver-sa
+      permissionPolicyARNs:
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      permissionPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3express:*"
+            Resource: "*"
+
+nodeGroups:
+  - name: ng-1
+    instanceType: c5a.xlarge
+    desiredCapacity: 1
+    amiFamily: AmazonLinux2023
+    ssh:
+      allow: true # Will use ~/.ssh/id_rsa.pub as the default ssh key
+      # publicKeyPath: ~/.ssh/id_ed25519.pub # or you can also configure a custom key
+
+# Enable if you want to also install Karpenter, see https://eksctl.io/usage/eksctl-karpenter/
+# karpenter:
+#   version: "1.6.0"
+
+addons:
+  # To use EKS Pod Identity, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#driver-level-credentials-with-eks-pod-identity
+  - name: eks-pod-identity-agent
+
+  # To get metrics and logs to CloudWatch
+  - name: amazon-cloudwatch-observability
+    podIdentityAssociations:
+      - serviceAccountName: cloudwatch-agent
+        namespace: amazon-cloudwatch
+        permissionPolicyARNs:
+          - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+
+  # Enable if you want to test "ephemeral" cache type, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md#using-ebs-csi-driver-to-provision-an-ebs-volume-dynamically
+  # - name: aws-ebs-csi-driver
