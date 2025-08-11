@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
-	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	corev1 "k8s.io/api/core/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 const (
@@ -28,24 +30,27 @@ func NewStaleAttachmentCleaner(reconciler *Reconciler) *StaleAttachmentCleaner {
 
 // Start begins the periodic cleanup process
 func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
+	log := logf.FromContext(ctx)
+	log.Info("Starting stale attachment cleaner")
+
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("Completed stale attachment cleaner")
 			return nil
 		case <-ticker.C:
-			if err := cm.runCleanup(ctx); err != nil {
-				log := logf.FromContext(ctx)
+			if err := cm.RunCleanup(ctx); err != nil {
 				log.Error(err, "Failed to run cleanup")
 			}
 		}
 	}
 }
 
-// runCleanup performs cleanup operation
-func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
+// RunCleanup cleans up stale attachments and Headroom/Mountpoint Pods.
+func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 	log := logf.FromContext(ctx)
 
 	// Get all pods in the cluster
@@ -55,9 +60,15 @@ func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
 	}
 
 	// Create a map of existing pod UIDs for quick lookup
-	existingPods := make(map[string]struct{})
+	existingPods := make(map[string]*corev1.Pod)
 	for _, pod := range podList.Items {
-		existingPods[string(pod.UID)] = struct{}{}
+		existingPods[string(pod.UID)] = &pod
+	}
+
+	if cm.reconciler.isHeadroomForMountpointPodsFeatureEnabled() {
+		if err := cm.cleanupStaleHeadroomPods(ctx, existingPods); err != nil {
+			log.Error(err, "Error cleaning up stale Headroom Pods")
+		}
 	}
 
 	// Get all MountpointS3PodAttachments
@@ -82,7 +93,7 @@ func (cm *StaleAttachmentCleaner) runCleanup(ctx context.Context) error {
 // and the attachment is older than staleAttachmentThreshold (this is to avoid race condition with reconciler).
 // If a Mountpoint Pod has zero attachments after cleanup, "s3.csi.aws.com/needs-unmount" annotation is added and its entry in S3PodAttachment is deleted.
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
-func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]struct{}) error {
+func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
 	modified := false
 
@@ -124,6 +135,44 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 			return cm.reconciler.Delete(ctx, s3pa)
 		}
 		return cm.reconciler.Update(ctx, s3pa)
+	}
+
+	return nil
+}
+
+// cleanupStaleHeadroomPods removes stale Headroom Pods.
+//
+// A Headroom Pod is considered stale if the Workload Pod referenced by the [mppod.LabelHeadroomForPod] label
+// no longer exists in the cluster, or it is past scheduling (see [Reconciler.shouldDeleteHeadroomPodForTheWorkloadPod]).
+func (cm *StaleAttachmentCleaner) cleanupStaleHeadroomPods(ctx context.Context, existingPods map[string]*corev1.Pod) error {
+	log := logf.FromContext(ctx)
+
+	for _, pod := range existingPods {
+		// Skip if not in Mountpoint namespace or not a Headroom Pod
+		if !cm.reconciler.isInMountpointNamespace(pod) || !mppod.IsHeadroomPod(pod) {
+			continue
+		}
+
+		workloadPodUID, _ := pod.Labels[mppod.LabelHeadroomForPod]
+		if workloadPodUID == "" {
+			log.Info("Headroom Pod missing workload pod UID label, skipping",
+				"headroomPod", pod.Name)
+			continue
+		}
+
+		workloadPod, exists := existingPods[workloadPodUID]
+		if !exists || cm.reconciler.shouldDeleteHeadroomPodForTheWorkloadPod(workloadPod) {
+			log.Info("Deleting stale Headroom Pod",
+				"headroomPod", pod.Name,
+				"workloadPodUID", workloadPodUID)
+
+			if err := cm.reconciler.Delete(ctx, pod); err != nil {
+				log.Error(err, "Failed to delete stale Headroom Pod",
+					"headroomPod", pod.Name,
+					"workloadPodUID", workloadPodUID)
+				continue
+			}
+		}
 	}
 
 	return nil
