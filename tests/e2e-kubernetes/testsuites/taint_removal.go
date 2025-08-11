@@ -92,7 +92,11 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 		checkListingPathWithEntries(ctx, f, pod, volPath, []string{})
 	}
 
-	Describe("Taint Removal", Ordered, func() {
+	// Since we're modifying cluster-wide resources in credential tests,
+	// we shouldn't run them in parallel with other tests.
+	//                          |
+	//                        ------
+	Describe("Taint Removal", Serial, func() {
 		It("should remove agent-not-ready taint and allow workload scheduling", func(ctx context.Context) {
 			// 1. Get a node where CSI driver is running
 			node := getCSIDriverNode(ctx, f)
