@@ -9,12 +9,13 @@ usage() {
     echo "available commands:"
     echo "  deploy-helm-chart        deploy the Helm chart from source"
     echo "  deploy-containers        build the containers from source, push to ECR, and restart the Csi Driver pods"
+    echo "                              --build-mountpoint: use Dockerfile.local instead of Dockerfile to build Mountpoint from source"
     echo "  deploy                   deploy both Helm chart and containers from source"
     echo "  help                     show this help message"
     echo ""
     echo "required environment variables:"
-    echo "  MOUNTPOINT_CSI_DEV_ECR_REPOSITORY  ECR repository URL (e.g., 111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev)"
-    echo "  MOUNTPOINT_CSI_DEV_REGION          AWS region for the dev stack (e.g., eu-west-2)"
+    echo "  MOUNTPOINT_CSI_DEV_ECR_REPOSITORY  ECR repository URL (e.g., 111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev)"
+    echo "  MOUNTPOINT_CSI_DEV_REGION          AWS region for the dev stack (e.g., eu-north-1)"
     exit 1
 }
 
@@ -54,6 +55,22 @@ deploy_helm_chart() {
 deploy_containers() {
     validate_env_vars "MOUNTPOINT_CSI_DEV_ECR_REPOSITORY" "MOUNTPOINT_CSI_DEV_REGION"
 
+    local dockerfile="Dockerfile"
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --build-mountpoint)
+                dockerfile="Dockerfile.local"
+                echo "will build Mountpoint from source, customize Dockerfile.local for specifying the branch and the build arguments"
+                shift
+                ;;
+            *)
+                echo "error: unknown argument '$1' for deploy-containers"
+                exit 1
+                ;;
+        esac
+    done
+
     echo "deploying containers..."
 
     # Extract registry and image name from the ECR repository URL
@@ -69,6 +86,7 @@ deploy_containers() {
     IMAGE_NAME="${image_name}" \
     ALL_ARCH_linux="amd64" \
     TAG="latest" \
+    DOCKERFILE="${dockerfile}" \
       make login_registry all-push
 
     # Restart the node and controller pods
@@ -79,7 +97,7 @@ deploy_containers() {
 deploy() {
     echo "running full deployment..."
     deploy_helm_chart
-    deploy_containers
+    deploy_containers "$@"
     echo "deployment complete!"
 }
 
@@ -94,10 +112,12 @@ main() {
             deploy_helm_chart
             ;;
         deploy-containers)
-            deploy_containers
+            shift
+            deploy_containers "$@"
             ;;
         deploy)
-            deploy
+            shift
+            deploy "$@"
             ;;
         help|--help|-h)
             usage

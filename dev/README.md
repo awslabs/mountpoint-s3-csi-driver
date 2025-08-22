@@ -232,11 +232,11 @@ $ pwd
 
 $ eksctl create cluster -f dev/mp-dev-cluster.yaml
 2025-08-20 16:40:21 [ℹ]  eksctl version 0.208.0
-2025-08-20 16:40:21 [ℹ]  using region eu-west-2
-2025-08-20 16:40:22 [ℹ]  setting availability zones to [eu-west-2b eu-west-2c eu-west-2a]
+2025-08-20 16:40:21 [ℹ]  using region eu-north-1
+2025-08-20 16:40:22 [ℹ]  setting availability zones to [eu-north-1b eu-north-1c eu-north-1a]
 ...
 2025-08-20 16:57:04 [ℹ]  kubectl command should work with "/Users/burakvar/.kube/config", try 'kubectl get nodes'
-2025-08-20 16:57:04 [✔]  EKS cluster "mp-dev-cluster" in "eu-west-2" region is ready
+2025-08-20 16:57:04 [✔]  EKS cluster "mp-dev-cluster" in "eu-north-1" region is ready
 ```
 
 It might take around 15-20 minutes to create the cluster, at the end it should configure your kubectl to access to your cluster.
@@ -244,7 +244,7 @@ You can verify this by running:
 ```bash
 $ kubectl get no
 NAME                                           STATUS   ROLES    AGE   VERSION
-ip-192-168-26-202.eu-west-2.compute.internal   Ready    <none>   13m   v1.33.3-eks-3abbec1
+ip-192-168-26-202.eu-north-1.compute.internal   Ready    <none>   13m   v1.33.3-eks-3abbec1
 ```
 
 Now you should also get [Container Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ContainerInsights.html) enabled for your cluster for metrics and logs.
@@ -304,14 +304,14 @@ We can use [Amazon Elastic Container Registry (ECR)](https://aws.amazon.com/ecr/
 ```bash
 # Same region as the cluster, see "./mp-dev-cluster.yaml"
 $ aws ecr create-repository \
-    --region eu-west-2 \
+    --region eu-north-1 \
     --repository-name mp-dev
 {
     "repository": {
-        "repositoryArn": "arn:aws:ecr:eu-west-2:111122223333:repository/mp-dev",
+        "repositoryArn": "arn:aws:ecr:eu-north-1:111122223333:repository/mp-dev",
         "registryId": "111122223333",
         "repositoryName": "mp-dev",
-        "repositoryUri": "111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev",
+        "repositoryUri": "111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev",
         "createdAt": "2025-08-21T11:21:54.653000+01:00",
         "imageTagMutability": "MUTABLE",
         "imageScanningConfiguration": {
@@ -347,20 +347,20 @@ $ pwd
 $ rm -f .image-latest-linux-amd64-amazon
 
 # "REGISTRY", "IMAGE_NAME", and "REGION" are from the previous step.
-$ REGISTRY="111122223333.dkr.ecr.eu-west-2.amazonaws.com" \
-  REGION="eu-west-2" \
+$ REGISTRY="111122223333.dkr.ecr.eu-north-1.amazonaws.com" \
+  REGION="eu-north-1" \
   IMAGE_NAME="mp-dev" \
   ALL_ARCH_linux="amd64" \
   TAG="latest" \
   make login_registry all-push
 ...
-=> [internal] pushing 111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev:latest
+=> [internal] pushing 111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev:latest
 ```
 
 You can verify that the image is pushed to your ECR repository by running:
 ```bash
 $ aws ecr list-images \
-   --region eu-west-2 \
+   --region eu-north-1 \
    --repository-name mp-dev
 {
    "imageIds": [
@@ -389,7 +389,7 @@ $ pwd
 # "image.pullPolicy=Always" disables this caching behaviour and ensures Kubernetes would always pull the latest image each time it starts the CSI Driver's containers.
 $ helm upgrade --install aws-mountpoint-s3-csi-driver \
     --namespace kube-system \
-    --set image.repository="111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev" \
+    --set image.repository="111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev" \
     --set image.pullPolicy=Always \
     --set image.tag=latest \
    ./charts/aws-mountpoint-s3-csi-driver
@@ -400,11 +400,11 @@ Each time after you push a new version of the container image, you'd need to res
 ```bash
 # Node
 $ kubectl -n kube-system get po -lapp=s3-csi-node -o=jsonpath='{.items[*].status.containerStatuses[?(@.name=="s3-plugin")].imageID}'
-111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev@sha256:358796b58c8a3439a0ff60c76d6e535c4cb23e1f0d460af13a90ca053d6af065
+111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev@sha256:358796b58c8a3439a0ff60c76d6e535c4cb23e1f0d460af13a90ca053d6af065
 
 # Controller
 $ kubectl -n kube-system get po -lapp=s3-csi-controller -o=jsonpath='{.items[*].status.containerStatuses[?(@.name=="s3-csi-controller")].imageID}'
-111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev@sha256:358796b58c8a3439a0ff60c76d6e535c4cb23e1f0d460af13a90ca053d6af065
+111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev@sha256:358796b58c8a3439a0ff60c76d6e535c4cb23e1f0d460af13a90ca053d6af065
 ```
 
 When you run `helm upgrade` it would automatically restart the Pods, but after initial `helm upgrade` you can just use the following commands to restart the CSI Driver pods:
@@ -418,16 +418,84 @@ Not that this only restarts the node and the controller, but it wouldn't restart
 
 ### Building Mountpoint from source alongside the CSI Driver
 
-TODO
+> [!NOTE]
+> Building Mountpoint from source on macOS with a VM might take longer.
+> If you see warnings like
+>   ```
+>   #15 742.0 <jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+>   #15 742.0 <jemalloc>: (This is the expected behaviour if you are running under QEMU)
+>   ```
+> you might consider setting up a native Linux host and use that as your Docker host by setting `export DOCKER_HOST=ssh://my@linux-host` for a better building speed.
+
+By default, the CSI Driver bundles a released version of Mountpoint, you can see the version as `MOUNTPOINT_VERSION` in the [Dockerfile](/Dockerfile).
+If you're working on something that also requires a change on Mountpoint itself, it might be useful to build Mountpoint from source as well instead of using a released version.
+
+To help with that, the CSI Driver comes with a second Dockerfile called [Dockerfile.local](/Dockerfile.local) - where it also builds Mountpoint from source and bundles that Mountpoint binary instead.
+
+You can customize the following arguments to specify the repository, the branch, and the build arguments:
+```Dockerfile
+ARG MOUNTPOINT_REPOSITORY="https://github.com/awslabs/mountpoint-s3"
+ARG MOUNTPOINT_BRANCH="experimental/metrics"
+ARG MOUNTPOINT_VERSION="experimental-metrics"
+ARG MOUNTPOINT_BUILD_ARGS="" # e.g., --features express_cache
+```
+
+All `make` command uses default Dockerfile by default, you can specify to use `Dockerfile.local` instead by providing `DOCKERFILE="Dockerfile.local"` to make commands:
+
+```bash
+$ pwd
+~/mountpoint-s3-csi-driver
+
+# Our Makefile would skip building again if this file is present, make sure it is not
+$ rm -f .image-latest-linux-amd64-amazon
+
+$ REGISTRY="111122223333.dkr.ecr.eu-north-1.amazonaws.com" \
+  REGION="eu-north-1" \
+  IMAGE_NAME="mp-dev" \
+  ALL_ARCH_linux="amd64" \
+  TAG="latest" \
+  DOCKERFILE="Dockerfile.local" \
+  make login_registry all-push
+...
+#16 [mp_builder 5/5] RUN cd mountpoint-s3 &&     cargo build  --release
+#16 71.32    Compiling git2 v0.20.2
+#16 74.20    Compiling built v0.8.0
+#16 74.76    Compiling mountpoint-s3-client v0.18.0 (/mountpoint-s3/mountpoint-s3-client)
+#16 74.76    Compiling mountpoint-s3 v1.19.1 (/mountpoint-s3/mountpoint-s3)
+...
+=> [internal] pushing 111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev:latest
+```
+
+Now you can check the CSI Driver's logs to see Mountpoint version. First, restart the CSI Driver Pods so they can pick up the new image:
+
+```bash
+$ kubectl -n kube-system delete po -lapp=s3-csi-controller
+$ kubectl -n kube-system delete po -lapp=s3-csi-node
+```
+
+Now you can check the first log line of one of the node Pods:
+```bash
+$ kubectl -n kube-system logs -lapp=s3-csi-node -c=s3-plugin --tail=-1 | head -n1
+I0822 10:03:01.606349       1 driver.go:101] Driver version: 2.0.0, Git commit: f3811ade4e1e821381a2758feaad32fe0704144f, build date: 2025-08-14T16:51:35Z, nodeID: ip-192-168-26-202.eu-north-1.compute.internal, mount-s3 version: unreleased-memory-pool, kubernetes version: v1.33.3-eks-ace6451
+```
+
+You can see the Mountpoint version: `mount-s3 version: unreleased-memory-pool`.
+
+> [!TIP]
+> You can use tools like [stern](https://github.com/stern/stern) to tail logs from multiple Kubernetes containers.
+> For example, `stern -n kube-system s3-csi` would tail all logs for the CSI Driver's node and controller containers.
+> It would also automatically pickup and show restarted containers.
+
 
 ### Helper script
 
-It's good to do everything manually to understand what's going on, but it's also cumbersome to memorize all commands in a day-to-day development. To help with day-to-day tasks, the CSI Driver also has a helper script.
+It's good to do everything manually to understand what's going on, but it's also cumbersome to memorize all commands in a day-to-day development.
+To help with day-to-day tasks, the CSI Driver also has a helper script.
 
 You need to expose the following environment variables for the script to work:
 ```bash
-$ export MOUNTPOINT_CSI_DEV_ECR_REPOSITORY=111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev
-$ export MOUNTPOINT_CSI_DEV_REGION=eu-west-2
+$ export MOUNTPOINT_CSI_DEV_ECR_REPOSITORY=111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev
+$ export MOUNTPOINT_CSI_DEV_REGION=eu-north-1
 ```
 
 You would probably persist these environment variables in your shell config by putting it into `~/.zshrc`, `~/.bashrc` or somewhere.
@@ -451,7 +519,7 @@ TEST SUITE: None
 $ ./dev/mp-dev.sh deploy-containers
 deploying containers...
 ...
-=> [internal] pushing 111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev:latest
+=> [internal] pushing 111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev:latest
 pod "s3-csi-controller-844bbc987c-nhmgm" deleted
 pod "s3-csi-node-mw8gr" deleted
 
@@ -461,12 +529,13 @@ usage: ./dev/mp-dev.sh <command>
 available commands:
   deploy-helm-chart        deploy the Helm chart from source
   deploy-containers        build the containers from source, push to ECR, and restart the Csi Driver pods
+                              --build-mountpoint: use Dockerfile.local instead of Dockerfile to build Mountpoint from source
   deploy                   deploy both Helm chart and containers from source
   help                     show this help message
 
 required environment variables:
-  MOUNTPOINT_CSI_DEV_ECR_REPOSITORY  ECR repository URL (e.g., 111122223333.dkr.ecr.eu-west-2.amazonaws.com/mp-dev)
-  MOUNTPOINT_CSI_DEV_REGION          AWS region for the dev stack (e.g., eu-west-2)
+  MOUNTPOINT_CSI_DEV_ECR_REPOSITORY  ECR repository URL (e.g., 111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev)
+  MOUNTPOINT_CSI_DEV_REGION          AWS region for the dev stack (e.g., eu-north-1)
 ```
 
 ### Running tests
@@ -547,7 +616,32 @@ See [Writing controller tests](https://book.kubebuilder.io/cronjob-tutorial/writ
 
 #### End-to-end tests
 
-TODO
+The CSI Driver has a end-to-end test suite as well. These tests run against real Kubernetes clusters with [a various Kubernetes version and host matrix in the CI](/.github/matrix.yaml) for each PR.
+
+These end-to-end tests can be found in `/tests/e2e-kubernetes` folder.
+These tests simulate workloads by creating PVs, PVCs, and Pods to use S3 volumes provided by the CSI Driver using [Ginkgo](https://github.com/onsi/ginkgo) testing framework.
+
+You can also run them locally against your development Kubernetes cluster.
+Your cluster needs to have a node instance profile with S3 and S3 Express full access for tests to run properly.
+See [the CI setup](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/scripts/eksctl-patch.json) for more details.
+
+You need to have a working kubectl configuration for your cluster. After that, you can run them by:
+
+```bash
+$ pwd
+~/mountpoint-s3-csi-driver
+
+$ cd tests/e2e-kubernetes
+$ KUBECONFIG=~/.kube/config \
+    go test -ginkgo.vv -timeout 60m \
+    --bucket-region=eu-north-1 --cluster-name=mp-dev-cluster
+```
+
+The end-to-end tests sometimes depends on external tools to be configured, otherwise some tests would be skipped:
+
+  - [IAM OIDC](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html) – All [IRSA tests](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/credentials.go#L421-L450) would be skipped if its not configured. `mp-dev-cluster.yaml` configures OIDC provider by default.
+  - [Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html) – All [EKS Pod Identity tests](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/credentials.go#L452-L481) would be skipped if its not installed. `mp-dev-cluster.yaml` installs EKS Pod Identity agent by default.
+  - [Amazon Elastic Block Store (EBS) CSI driver](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html) – [Cache tests against EBS](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/cache.go#L351-L370) would be skipped if its not installed. `mp-dev-cluster.yaml` won't install EBS CSI Driver by default, but you can uncomment that line in `mp-dev-cluster.yaml` if you want to enabled.
 
 ### Development with Go
 
