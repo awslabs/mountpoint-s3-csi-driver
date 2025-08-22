@@ -15,7 +15,7 @@ installs the CSI Driver, and runs the test against the real EKS cluster.
 
 Kubernetes is a container orchestration system with the following architecture:
 
-![Kubernetes Architecture](https://kubernetes.io/images/docs/components-of-kubernetes.svg)
+![Kubernetes Architecture](assets/components-of-kubernetes.png)
 
 It consist of a [control plane](https://kubernetes.io/docs/concepts/overview/components/#control-plane-components), and some amount of [nodes](https://kubernetes.io/docs/concepts/overview/components/#node-components).
 
@@ -58,7 +58,6 @@ $ kubectl create -f pod.yaml
 This is what happens at high level when you run `kubectl create -f pod.yaml`:
 
 ```mermaid
-%%{init:{"theme":"neutral"}}%%
 sequenceDiagram
     actor me
     participant apiSrv as control plane<br><br>api-server
