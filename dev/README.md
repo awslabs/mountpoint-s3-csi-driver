@@ -492,19 +492,29 @@ You can see the Mountpoint version: `mount-s3 version: unreleased-memory-pool`.
 It's good to do everything manually to understand what's going on, but it's also cumbersome to memorize all commands in a day-to-day development.
 To help with day-to-day tasks, the CSI Driver also has a helper script.
 
-You need to expose the following environment variables for the script to work:
+The helper script has the following defaults and you can customize any of them:
 ```bash
-$ export MOUNTPOINT_CSI_DEV_ECR_REPOSITORY=111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev
 $ export MOUNTPOINT_CSI_DEV_REGION=eu-north-1
+$ export MOUNTPOINT_CSI_DEV_ECR_REPO_NAME=mp-dev
+$ export MOUNTPOINT_CSI_DEV_CLUSTER_NAME=mp-dev-cluster
 ```
 
-You would probably persist these environment variables in your shell config by putting it into `~/.zshrc`, `~/.bashrc` or somewhere.
+If you want to customize, you would probably persist these environment variables in your shell config by putting it into `~/.zshrc`, `~/.bashrc` or somewhere.
 
-Once you set these environment variables you can use the following commands to deploy the Helm chart and the container images, or both!:
+You can use the following commands to create ECR repository & EKS cluster and deploy Helm chart & the containers!
 
 ```bash
 $ pwd
 ~/mountpoint-s3-csi-driver
+
+$ ./dev/mp-dev.sh setup
+running full setup...
+checking if ECR repository 'mp-dev' exists in region 'eu-north-1'...
+creating ECR repository 'mp-dev'...
+...
+checking if EKS cluster 'mp-dev-cluster' exists in region 'eu-north-1'...
+creating EKS cluster 'mp-dev-cluster' using eksctl, this might take 15-20 minutes...
+...
 
 $ ./dev/mp-dev.sh deploy-helm-chart
 deploying Helm chart...
@@ -622,7 +632,7 @@ These end-to-end tests can be found in `/tests/e2e-kubernetes` folder.
 These tests simulate workloads by creating PVs, PVCs, and Pods to use S3 volumes provided by the CSI Driver using [Ginkgo](https://github.com/onsi/ginkgo) testing framework.
 
 You can also run them locally against your development Kubernetes cluster.
-Your cluster needs to have a node instance profile with S3 and S3 Express full access for tests to run properly.
+Your cluster needs to have a node instance profile with S3 and S3 Express full access for tests to run properly, `mp-dev-cluster.yaml` configures necessary instance profile by default.
 See [the CI setup](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/scripts/eksctl-patch.json) for more details.
 
 You need to have a working kubectl configuration for your cluster. After that, you can run them by:
@@ -642,6 +652,10 @@ The end-to-end tests sometimes depends on external tools to be configured, other
   - [IAM OIDC](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html) – All [IRSA tests](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/credentials.go#L421-L450) would be skipped if its not configured. `mp-dev-cluster.yaml` configures OIDC provider by default.
   - [Amazon EKS Pod Identity Agent](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html) – All [EKS Pod Identity tests](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/credentials.go#L452-L481) would be skipped if its not installed. `mp-dev-cluster.yaml` installs EKS Pod Identity agent by default.
   - [Amazon Elastic Block Store (EBS) CSI driver](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html) – [Cache tests against EBS](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/tests/e2e-kubernetes/testsuites/cache.go#L351-L370) would be skipped if its not installed. `mp-dev-cluster.yaml` won't install EBS CSI Driver by default, but you can uncomment that line in `mp-dev-cluster.yaml` if you want to enabled.
+
+> [!TIP]
+> You can focus on tests to run specific set of tests by adding `F` into specs, like `Fit`, `FDescribe`, and `FContext`.
+> See [Focused Specs](https://onsi.github.io/ginkgo/#focused-specs) for more details.
 
 ### Development with Go
 

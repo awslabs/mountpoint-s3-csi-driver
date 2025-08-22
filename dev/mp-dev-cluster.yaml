@@ -29,6 +29,17 @@ nodeGroups:
     instanceType: c5a.xlarge
     desiredCapacity: 1
     amiFamily: AmazonLinux2023
+    iam:
+      # These instance profile policies are for end-to-end tests:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3express:*"
+            Resource: "*"
     ssh:
       allow: true # Will use ~/.ssh/id_rsa.pub as the default ssh key
       # publicKeyPath: ~/.ssh/id_ed25519.pub # or you can also configure a custom key
