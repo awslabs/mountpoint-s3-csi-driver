@@ -121,7 +121,7 @@ The way to use PersistentVolumes (PVs) in a Pod is through [PersistentVolumeClai
 
 The [binding process](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#binding) of a PVC to a PV depends on the [provisioning mode](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#provisioning), which can be static or dynamic. With static provisoninig, the cluster admins would create PVs representing available storage to the cluster, and PVCs would only be able to claim existing PVs. With dynamic provisioning, the cluster admins would instead create [StorageClasses](https://kubernetes.io/docs/concepts/storage/storage-classes/) which basically act as templates for PVs, and the cluster would automatically provision PVs based on StorageClass definition and PVC requests. The CSI Driver only supports [static provisinonig](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#static-provisioning) as of `v2.0.0`.
 
-For example, this is how you'd use the CSI Driver to mount `amzn-s3-demo-bucket` bucket at `/data`:
+For example, this is how you'd use the CSI Driver to mount `amzn-s3-demo-bucket` bucket at `/cache`:
 
 ```yaml
 apiVersion: v1
@@ -241,7 +241,7 @@ $ eksctl create cluster -f dev/mp-dev-cluster.yaml --timeout 1h
 It might take around 15-20 minutes to create the cluster, at the end it should configure your kubectl to access to your cluster.
 You can verify this by running:
 ```bash
-$ kubectl get no
+$ kubectl get nodes
 NAME                                           STATUS   ROLES    AGE   VERSION
 ip-192-168-26-202.eu-north-1.compute.internal   Ready    <none>   13m   v1.33.3-eks-3abbec1
 ```
@@ -326,7 +326,7 @@ $ aws ecr create-repository \
 Now that we have a registry, we can now build our container image and push there.
 
 We're using [Docker CLI](https://docs.docker.com/reference/cli/docker/) and [Docker Buildx](https://github.com/docker/buildx) to build and push the container image.
-You can install [Docker Desktop](https://docs.docker.com/desktop/), [Colima](Colima) or anything to get Docker CLU up and running.
+You can install [Docker Desktop](https://docs.docker.com/desktop/), [Colima](https://github.com/abiosoft/colima) or anything to get Docker CLI up and running.
 
 We do have a [Dockerfile](/Dockerfile) for our container image and a [Makefile](/Makefile) for building images, you can read the sources for more details.
 
@@ -609,7 +609,7 @@ These controller tests can be found in `/tests/controller` folder, and can be ru
 $ pwd
 ~/mountpoint-s3-csi-driver
 
-$ make test
+$ make e2e-controller
 ...
 Ran 55 of 55 Specs in 159.773 seconds
 SUCCESS! -- 55 Passed | 0 Failed | 0 Pending | 0 Skipped

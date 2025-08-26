@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+#
+# mp-dev.sh provides utilities for day-to-day development of the CSI Driver.
+#
+# It allows developers to setup a development environment (an ECR repository and an EKS cluster) with "setup" command,
+# and also allows termination of the deveopment environment with "teradown" command.
+#
+# It also allows developers to deploy Helm chart and containers from source
+# with "deploy-helm-chart" and "deploy-containers" commands respectively.
+#
+# == Requirements ==
+# This script requires a functioning AWS CLI that can access to an AWS account
+# with permissions to create ECR repositories and EKS clusters.
+#
+# This script also uses the following binaries: "aws", "eksctl", "kubectl", "helm" and "docker".
 set -euo pipefail
 # Uncomment for debugging
 # set -x
@@ -14,8 +28,8 @@ usage() {
     echo "available commands:"
     echo "  setup                    create ECR repository, EKS cluster, and deploy everything"
     echo "  teardown                 delete ECR repository and EKS cluster"
-    echo "  deploy-helm-chart        deploy the Helm chart from source"
-    echo "  deploy-containers        build the containers from source, push to ECR, and restart the Csi Driver pods"
+    echo "  deploy-helm-chart        deploy the Helm chart from source using the ECR repository"
+    echo "  deploy-containers        build the containers images from source, push to ECR, and restart the CSI Driver pods"
     echo "                              --build-mountpoint: use Dockerfile.local instead of Dockerfile to build Mountpoint from source"
     echo "  deploy                   deploy both Helm chart and containers from source"
     echo "  help                     show this help message"
@@ -47,14 +61,10 @@ validate_env_vars() {
     fi
 }
 
-get_aws_account_id() {
-    aws sts get-caller-identity --query Account --output text
-}
-
 get_ecr_repository_url() {
     local repo_name="${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}"
     local region="${MOUNTPOINT_CSI_DEV_REGION}"
-    local account_id=$(get_aws_account_id)
+    local account_id="$(aws sts get-caller-identity --query Account --output text)"
     echo "${account_id}.dkr.ecr.${region}.amazonaws.com/${repo_name}"
 }
 
