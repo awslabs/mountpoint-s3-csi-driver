@@ -81,6 +81,7 @@ sidecars:
 initContainer:
   installMountpoint:
     resources: {}
+    env: []
 
 controller:
   serviceAccount:
