@@ -111,7 +111,7 @@ create_eks_cluster() {
         aws eks update-kubeconfig --name "${cluster_name}" --region "${region}"
     else
         echo "creating EKS cluster '${cluster_name}' using eksctl, this might take 15-20 minutes..."
-        eksctl create cluster -f dev/mp-dev-cluster.yaml
+        eksctl create cluster -f dev/mp-dev-cluster.yaml --timeout 1h
         echo "EKS cluster '${cluster_name}' created successfully"
     fi
 }

@@ -229,7 +229,7 @@ You can create a dev cluster with recommended options by running:
 $ pwd
 ~/mountpoint-s3-csi-driver
 
-$ eksctl create cluster -f dev/mp-dev-cluster.yaml
+$ eksctl create cluster -f dev/mp-dev-cluster.yaml --timeout 1h
 2025-08-20 16:40:21 [ℹ]  eksctl version 0.208.0
 2025-08-20 16:40:21 [ℹ]  using region eu-north-1
 2025-08-20 16:40:22 [ℹ]  setting availability zones to [eu-north-1b eu-north-1c eu-north-1a]
