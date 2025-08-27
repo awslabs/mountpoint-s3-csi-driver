@@ -8,8 +8,8 @@ The CSI Driver implements [Container Storage Interface (CSI)](https://github.com
 Mountpoint is based on Filesystem in Userspace (FUSE) and allows you to mount your buckets as local file systems.
 
 Even though the CSI is a generic interface, Mountpoint for Amazon S3 CSI Driver actively only test against [Kubernetes](https://kubernetes.io/).
-All end-to-end tests of the CSI Driver creates [Amazon Elastic Kubernetes Service (EKS)](https://aws.amazon.com/eks/) clusters,
-installs the CSI Driver, and runs the test against the real EKS cluster.
+All end-to-end tests of the CSI Driver create [Amazon Elastic Kubernetes Service (EKS)](https://aws.amazon.com/eks/) clusters,
+install the CSI Driver, and run the test against the real EKS cluster.
 
 ### Kubernetes primer
 
@@ -29,9 +29,9 @@ The nodes contains components:
   - [kubelet](https://kubernetes.io/docs/concepts/architecture/#kubelet) – the component that runs on each node that is responsible for running pods/containers and communicating with the control plane
   - [Container runtime](https://kubernetes.io/docs/concepts/architecture/#container-runtime) – the runtime responsible for running the containers
 
-Cluster admins would usually interact with the cluster using tools like [kubectl](https://kubernetes.io/docs/reference/kubectl/). kubectl allows you to define your [Kubernetes objects](https://kubernetes.io/docs/concepts/overview/working-with-objects/#kubernetes-objects) as YAML files, and submit these manifests to the control plane.
+Cluster admins would usually interact with the cluster using tools like [kubectl](https://kubernetes.io/docs/reference/kubectl/), which allows you to define your [Kubernetes objects](https://kubernetes.io/docs/concepts/overview/working-with-objects/#kubernetes-objects) as YAML files, and submit these manifests to the control plane.
 
-These Kubernetes objects defines the desired state, and once submitted to the control plane, multiple [Kubernetes controllers](https://kubernetes.io/docs/concepts/architecture/controller/) would try to make the current state match to the desired state.
+These Kubernetes objects define the desired state, and once submitted to the control plane, multiple [Kubernetes controllers](https://kubernetes.io/docs/concepts/architecture/controller/) would try to make the current state match to the desired state.
 
 [Pods](https://kubernetes.io/docs/concepts/workloads/pods/) are Kubernetes objects for defining one or more containers to run in your clusters with shared storage and network resources. Pods are the smallest deployable compute units you can run in Kubernetes.
 
@@ -82,11 +82,11 @@ sequenceDiagram
 
 #### Kubernetes Storage
 
-Kubernetes provide both persistent and temporary storage to the Pods via [volumes](https://kubernetes.io/docs/concepts/storage/volumes/). Pods can use any number of persistent or temporary volumes simultaneously. Temporary or [ephemeral volumes](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/) usually have a lifecycle tied to the Pods, and gets deleted alongise the Pod. [Persistent volumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) on the other hand can outlive Pods, and can be shared among multiple Pods if the [access mode](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes) of the volume allows. Kubernetes won't destroy persistent volumes at Pod termination, it is up to cluster admins to manually delete them or use external tools to manage their lifecycles.
+Kubernetes provide both persistent and temporary storage to the Pods via [volumes](https://kubernetes.io/docs/concepts/storage/volumes/). Pods can use any number of persistent or temporary volumes simultaneously. Temporary or [ephemeral volumes](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/) usually have a lifecycle tied to the Pods, and get deleted alongside the Pod. [Persistent volumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) on the other hand can outlive Pods, and can be shared among multiple Pods if the [access mode](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes) of the volume allows. Kubernetes won't destroy persistent volumes at Pod termination, it is up to cluster admins to manually delete them or use external tools to manage their lifecycles.
 
-The volumes basically represented as directories within Pods, you specify volumes to use in the Pod definition, and then you can mount these volumes within containers at the desired path. As a result, the containers would have a filesystem with the desired volumes mounted.
+The volumes are basically represented as directories within Pods, you specify volumes to use in the Pod definition, and then you can mount these volumes within containers at the desired path. As a result, the containers would have a filesystem with the desired volumes mounted.
 
-For example, this is how you'd use a [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) – an ephemeral volume created from the kubelet's backing storage medium:
+For example, this is how you'd use an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) – an ephemeral volume created from the kubelet's backing storage medium:
 
 ```yaml
 apiVersion: v1
@@ -110,18 +110,18 @@ spec:
 
 Kubernetes would automatically create the volume with 500MiB limit, and would also automatically terminate alongside the Pod.
 
-Kubernetes provides many kind of volume types out of the box, but it also provides support for [out-of-tree volume plugins](https://kubernetes.io/docs/concepts/storage/volumes/#out-of-tree-volume-plugins) – which most importantly allows CSI Drivers to provide new volume types without needing to change Kubernetes source. A CSI Driver volume can be used through three different way:
+Kubernetes provides many kinds of volume types out of the box, but it also provides support for [out-of-tree volume plugins](https://kubernetes.io/docs/concepts/storage/volumes/#out-of-tree-volume-plugins) – which most importantly allows CSI Drivers to provide new volume types without needing to change Kubernetes source. A CSI Driver volume can be used through three different ways:
   - Through a [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistent-volumes) referenced by a [`persistentVolumeClaim`](https://kubernetes.io/docs/concepts/storage/volumes/#persistentvolumeclaim)
   - Through a [generic ephemeral volumes](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes)
   - Through a [CSI ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#csi-ephemeral-volumes)
 
-Last two as you can guess from their names aims to provide ephemeral volumes where the lifecycle of the volume would be tied to a Pod. The first one aims to provide persistent volumes which is more suitable for Amazon S3 and it is the only volume type the CSI Driver supports as of `v2.0.0`.
+The last two, as you can guess from the names, aim to provide ephemeral volumes where the lifecycle of the volume would be tied to a Pod. The first one aims to provide persistent volumes which is more suitable for Amazon S3 and it is the only volume type the CSI Driver supports as of `v2.0.0`.
 
 The way to use PersistentVolumes (PVs) in a Pod is through [PersistentVolumeClaims (PVCs)](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims). The PVCs are basically ways to consumers to request or claim persistent storages with desired properties like capacities and access modes. There is a one-to-one mapping between PVCs and PVs, and a Pod using a PVC won't be ready to run until the PVC is bound to a PV.
 
 The [binding process](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#binding) of a PVC to a PV depends on the [provisioning mode](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#provisioning), which can be static or dynamic. With static provisoninig, the cluster admins would create PVs representing available storage to the cluster, and PVCs would only be able to claim existing PVs. With dynamic provisioning, the cluster admins would instead create [StorageClasses](https://kubernetes.io/docs/concepts/storage/storage-classes/) which basically act as templates for PVs, and the cluster would automatically provision PVs based on StorageClass definition and PVC requests. The CSI Driver only supports [static provisinonig](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#static-provisioning) as of `v2.0.0`.
 
-For example, this is how you'd use the CSI Driver to mount `amzn-s3-demo-bucket` bucket at `/cache`:
+For example, this is how you'd use the CSI Driver to mount `amzn-s3-demo-bucket` bucket at `/data`:
 
 ```yaml
 apiVersion: v1
@@ -164,7 +164,7 @@ spec:
   - image: busybox
     name: busybox
     volumeMounts:
-    - mountPath: /cache
+    - mountPath: /data
       name: s3-volume
 ```
 
@@ -177,13 +177,13 @@ The CSI defines three main services:
 
 As of `v2.0.0`, the CSI Driver only implements [node](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/pkg/driver/node/node.go) and [identity](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/pkg/driver/identity.go) services.
 
-For node service, the most important RPC calls the CSI Driver implement are `NodePublishVolume` and `NodeUnpublishVolume`. They are called by kubelet whenever a Pod uses a volume provided by the CSI Driver, and the calls are basically performs mounting and unmounting an S3 volume to a pod respectively.
+For node service, the most important RPC calls the CSI Driver implements are `NodePublishVolume` and `NodeUnpublishVolume`. They are called by kubelet whenever a Pod uses a volume provided by the CSI Driver, and the calls basically perform mounting and unmounting of an S3 volume to a pod, respectively.
 
 #### `NodePublishVolume`
 
 In this RPC call, the CSI Driver receives details of the volume and a target path to mount the filesystem.
 
-Most importantly, the CSI Driver receives `mountOptions` and `volumeAttributes` of the PV. These are free-form fields that the CSI Driver free to interpret or design. The CSI Driver passes `mountOptions` to Mountpoint process as-is mostly, and uses information from `volumeAttributes` to decide on credentials, cache configuration etc., and at the ends converts them to more Mountpoint options. See [`volumecontext` Go package](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/pkg/driver/node/volumecontext/volume_context.go) for set of configuration the CSI Driver accepts in `volumeAttributes`.
+Most importantly, the CSI Driver receives `mountOptions` and `volumeAttributes` of the PV. These are free-form fields that the CSI Driver is free to interpret or design. The CSI Driver passes `mountOptions` to Mountpoint process as-is mostly, and uses information from `volumeAttributes` to decide on credentials, cache configuration etc., and at the ends converts them to more Mountpoint options. See [`volumecontext` Go package](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.0.0/pkg/driver/node/volumecontext/volume_context.go) for set of configuration the CSI Driver accepts in `volumeAttributes`.
 
 ```yaml
 apiVersion: v1
@@ -323,7 +323,7 @@ $ aws ecr create-repository \
 }
 ```
 
-Now that we have a registry, we can now build our container image and push there.
+Now that we have a registry, we can now build our container image and push it there.
 
 We're using [Docker CLI](https://docs.docker.com/reference/cli/docker/) and [Docker Buildx](https://github.com/docker/buildx) to build and push the container image.
 You can install [Docker Desktop](https://docs.docker.com/desktop/), [Colima](https://github.com/abiosoft/colima) or anything to get Docker CLI up and running.
@@ -394,7 +394,7 @@ $ helm upgrade --install aws-mountpoint-s3-csi-driver \
    ./charts/aws-mountpoint-s3-csi-driver
 ```
 
-Each time after you push a new version of the container image, you'd need to restart the Pods for changes to take effect. You can verify your Pods has the up-to-date container image by checking the hash:
+Each time after you push a new version of the container image, you'd need to restart the CSI Driver Pods for changes to take effect. You can verify your Pods has the up-to-date container image by checking the hash:
 
 ```bash
 # Node
@@ -549,7 +549,7 @@ required environment variables:
 
 ### Running tests
 
-Ideally you would want to run tests before or after making any change. The CSI Driver has three different test suites:
+Ideally you would want to run tests before and after making any change. The CSI Driver has three different test suites:
 
 #### Unit tests
 The unit tests are mostly written with in-memory implementations of various external resources,
@@ -625,7 +625,7 @@ See [Writing controller tests](https://book.kubebuilder.io/cronjob-tutorial/writ
 
 #### End-to-end tests
 
-The CSI Driver has a end-to-end test suite as well. These tests run against real Kubernetes clusters with [a various Kubernetes version and host matrix in the CI](/.github/matrix.yaml) for each PR.
+The CSI Driver has an end-to-end test suite as well. These tests run against real Kubernetes clusters with [a matrix in the CI of various Kubernetes versions and hosts](/.github/matrix.yaml) for each PR.
 
 These end-to-end tests can be found in `/tests/e2e-kubernetes` folder.
 These tests simulate workloads by creating PVs, PVCs, and Pods to use S3 volumes provided by the CSI Driver using [Ginkgo](https://github.com/onsi/ginkgo) testing framework.

@@ -3,7 +3,7 @@
 # mp-dev.sh provides utilities for day-to-day development of the CSI Driver.
 #
 # It allows developers to setup a development environment (an ECR repository and an EKS cluster) with "setup" command,
-# and also allows termination of the deveopment environment with "teradown" command.
+# and also allows termination of the development environment with "teardown" command.
 #
 # It also allows developers to deploy Helm chart and containers from source
 # with "deploy-helm-chart" and "deploy-containers" commands respectively.
