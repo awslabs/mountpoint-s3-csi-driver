@@ -219,7 +219,7 @@ See [the architecture document](/docs/ARCHITECTURE.md) of Mountpoint for Amazon 
 
 ## Development
 
-First step would be creating a real Kubernetes cluster, we recommend using an Amazon EKS cluster to test any changes to the CSI Driver. [eksctl](https://eksctl.io/) is the recommended tool to manage EKS clusters.
+First step would be creating a real Kubernetes cluster, we recommend using an Amazon EKS cluster to test any changes to the CSI Driver. [eksctl](https://eksctl.io/) is the recommended tool to manage EKS clusters. This section explains creating a development environment from scratch step-by-step, and it is recommended to follow each step for the first time. For subsequent cluster creations, and day-to-day development, you can use the [helper script](#helper-script).
 
 ### Create a cluster
 
@@ -245,6 +245,8 @@ $ kubectl get nodes
 NAME                                           STATUS   ROLES    AGE   VERSION
 ip-192-168-26-202.eu-north-1.compute.internal   Ready    <none>   13m   v1.33.3-eks-3abbec1
 ```
+
+You can use any region for your development stack, but it is recommended to use a region where [S3 Express One Zone is available](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-Endpoints.html). Here we choose `eu-north-1`.
 
 Now you should also get [Container Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ContainerInsights.html) enabled for your cluster for metrics and logs.
 
@@ -289,6 +291,8 @@ You can uninstall the Helm chart by running:
 ```bash
 $ helm uninstall -n kube-system aws-mountpoint-s3-csi-driver
 ```
+
+Note that this is only needed if you want to fully uninstall the CSI Driver, if you want to upgrade the existing installation, you don't need to run `helm uninstall`. `helm upgrade` would automatically replace existing version in that case.
 
 ### Building the CSI Driver's container image from source
 

@@ -13,6 +13,7 @@
 # with permissions to create ECR repositories and EKS clusters.
 #
 # This script also uses the following binaries: "aws", "eksctl", "kubectl", "helm" and "docker".
+
 set -euo pipefail
 # Uncomment for debugging
 # set -x
