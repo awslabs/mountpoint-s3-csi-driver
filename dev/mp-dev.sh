@@ -62,26 +62,21 @@ validate_env_vars() {
 }
 
 get_ecr_repository_url() {
-    local repo_name="${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}"
-    local region="${MOUNTPOINT_CSI_DEV_REGION}"
     local account_id="$(aws sts get-caller-identity --query Account --output text)"
-    echo "${account_id}.dkr.ecr.${region}.amazonaws.com/${repo_name}"
+    echo "${account_id}.dkr.ecr.${MOUNTPOINT_CSI_DEV_REGION}.amazonaws.com/${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}"
 }
 
 create_ecr_repository() {
-    local repo_name="${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}"
-    local region="${MOUNTPOINT_CSI_DEV_REGION}"
+    echo "checking if ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' exists in region '${MOUNTPOINT_CSI_DEV_REGION}'..."
 
-    echo "checking if ECR repository '${repo_name}' exists in region '${region}'..."
-
-    if aws ecr describe-repositories --repository-names "${repo_name}" --region "${region}" >/dev/null 2>&1; then
-        echo "ECR repository '${repo_name}' already exists"
+    if aws ecr describe-repositories --repository-names "${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}" --region "${MOUNTPOINT_CSI_DEV_REGION}" >/dev/null 2>&1; then
+        echo "ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' already exists"
     else
-        echo "creating ECR repository '${repo_name}'..."
+        echo "creating ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}'..."
         aws ecr create-repository \
-            --repository-name "${repo_name}" \
-            --region "${region}"
-        echo "ECR repository '${repo_name}' created successfully"
+            --repository-name "${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}" \
+            --region "${MOUNTPOINT_CSI_DEV_REGION}"
+        echo "ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' created successfully"
     fi
 
     local ecr_url=$(get_ecr_repository_url)
@@ -89,56 +84,47 @@ create_ecr_repository() {
 }
 
 delete_ecr_repository() {
-    local repo_name="${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}"
-    local region="${MOUNTPOINT_CSI_DEV_REGION}"
-
-    echo "checking if ECR repository '${repo_name}' exists in region '${region}'..."
+    echo "checking if ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' exists in region '${MOUNTPOINT_CSI_DEV_REGION}'..."
 
     # Check if repository exists
-    if aws ecr describe-repositories --repository-names "${repo_name}" --region "${region}" >/dev/null 2>&1; then
-        echo "deleting ECR repository '${repo_name}'..."
+    if aws ecr describe-repositories --repository-names "${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}" --region "${MOUNTPOINT_CSI_DEV_REGION}" >/dev/null 2>&1; then
+        echo "deleting ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}'..."
         aws ecr delete-repository \
-            --repository-name "${repo_name}" \
-            --region "${region}" \
+            --repository-name "${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}" \
+            --region "${MOUNTPOINT_CSI_DEV_REGION}" \
             --force
-        echo "ECR repository '${repo_name}' deleted successfully"
+        echo "ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' deleted successfully"
     else
-        echo "ECR repository '${repo_name}' does not exist"
+        echo "ECR repository '${MOUNTPOINT_CSI_DEV_ECR_REPO_NAME}' does not exist"
     fi
 }
 
 create_eks_cluster() {
-    local cluster_name="${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}"
-    local region="${MOUNTPOINT_CSI_DEV_REGION}"
+    echo "checking if EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' exists in region '${MOUNTPOINT_CSI_DEV_REGION}'..."
 
-    echo "checking if EKS cluster '${cluster_name}' exists in region '${region}'..."
-
-    if aws eks describe-cluster --name "${cluster_name}" --region "${region}" >/dev/null 2>&1; then
-        echo "EKS cluster '${cluster_name}' already exists"
+    if aws eks describe-cluster --name "${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}" --region "${MOUNTPOINT_CSI_DEV_REGION}" >/dev/null 2>&1; then
+        echo "EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' already exists"
 
         # Update kubeconfig to make sure we can connect
-        echo "updating kubeconfig for cluster '${cluster_name}'..."
-        aws eks update-kubeconfig --name "${cluster_name}" --region "${region}"
+        echo "updating kubeconfig for cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}'..."
+        aws eks update-kubeconfig --name "${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}" --region "${MOUNTPOINT_CSI_DEV_REGION}"
     else
-        echo "creating EKS cluster '${cluster_name}' using eksctl, this might take 15-20 minutes..."
-        echo "EKS cluster '${cluster_name}' created successfully"
+        echo "creating EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' using eksctl, this might take 15-20 minutes..."
         eksctl create cluster -f dev/mp-dev-cluster.yaml
+        echo "EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' created successfully"
     fi
 }
 
 delete_eks_cluster() {
-    local cluster_name="${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}"
-    local region="${MOUNTPOINT_CSI_DEV_REGION}"
-
-    echo "checking if EKS cluster '${cluster_name}' exists in region '${region}'..."
+    echo "checking if EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' exists in region '${MOUNTPOINT_CSI_DEV_REGION}'..."
 
     # Check if cluster exists
-    if aws eks describe-cluster --name "${cluster_name}" --region "${region}" >/dev/null 2>&1; then
-        echo "deleting EKS cluster '${cluster_name}' using eksctl..."
+    if aws eks describe-cluster --name "${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}" --region "${MOUNTPOINT_CSI_DEV_REGION}" >/dev/null 2>&1; then
+        echo "deleting EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' using eksctl..."
         eksctl delete cluster --disable-nodegroup-eviction -f dev/mp-dev-cluster.yaml
-        echo "EKS cluster '${cluster_name}' deleted successfully"
+        echo "EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' deleted successfully"
     else
-        echo "EKS cluster '${cluster_name}' does not exist"
+        echo "EKS cluster '${MOUNTPOINT_CSI_DEV_CLUSTER_NAME}' does not exist"
     fi
 }
 
