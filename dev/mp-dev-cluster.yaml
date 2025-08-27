@@ -30,8 +30,13 @@ nodeGroups:
     desiredCapacity: 1
     amiFamily: AmazonLinux2023
     iam:
-      # These instance profile policies are for end-to-end tests:
       attachPolicyARNs:
+        # These are required for node to function,
+        # see https://eksctl.io/usage/iam-policies/#attaching-policies-by-arn
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
+        # These are for end-to-end tests:
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
       attachPolicy:
         Version: "2012-10-17"
