@@ -10,21 +10,23 @@ iam:
   # To use IRSA, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#driver-level-credentials-with-irsa
   withOIDC: true
 
-  # To use EKS Pod Identity with a preconfigured association giving "full access" to S3
-  podIdentityAssociations:
-    - namespace: kube-system
-      serviceAccountName: s3-csi-driver-sa
-      permissionPolicyARNs:
-        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-      permissionPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action:
-              - "s3express:*"
-            Resource: "*"
+  # Enable it if you want to use EKS Pod Identity instead of instance profile.
+  # Note: Without instance profile, the end-to-end tests might fail.
+  # podIdentityAssociations:
+  #   - namespace: kube-system
+  #     serviceAccountName: s3-csi-driver-sa
+  #     permissionPolicyARNs:
+  #       - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+  #     permissionPolicy:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Action:
+  #             - "s3express:*"
+  #           Resource: "*"
 
-nodeGroups:
+# See https://eksctl.io/usage/nodegroup-managed/
+managedNodeGroups:
   - name: ng-1
     instanceType: c5a.xlarge
     desiredCapacity: 1
@@ -36,6 +38,8 @@ nodeGroups:
         - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
         - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
         # These are for end-to-end tests:
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
       attachPolicy:
@@ -48,6 +52,14 @@ nodeGroups:
     ssh:
       allow: true # Will use ~/.ssh/id_rsa.pub as the default ssh key
       # publicKeyPath: ~/.ssh/id_ed25519.pub # or you can also configure a custom key
+
+# You can also create self-managed node-groups,
+# See https://eksctl.io/usage/nodegroup-unmanaged/
+# nodeGroups:
+#   - name: ng-1
+#     instanceType: c5a.xlarge
+#     desiredCapacity: 1
+#     amiFamily: AmazonLinux2023
 
 # Enable if you want to also install Karpenter, see https://eksctl.io/usage/eksctl-karpenter/
 # karpenter:

@@ -644,6 +644,17 @@ $ cd tests/e2e-kubernetes
 $ KUBECONFIG=~/.kube/config \
     go test -ginkgo.vv -timeout 60m \
     --bucket-region=eu-north-1 --cluster-name=mp-dev-cluster
+Running Suite: S3 CSI E2E Suite - /Users/burakvar/Code/mountpoint-s3-csi-driver/tests/e2e-kubernetes
+====================================================================================================
+Random Seed: 1756302193
+
+Will run 122 of 122 specs
+------------------------------
+...
+Ran 78 of 122 Specs in 2894.771 seconds
+SUCCESS! -- 78 Passed | 0 Failed | 0 Pending | 44 Skipped
+PASS
+ok      github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes        2895.849s
 ```
 
 The end-to-end tests sometimes depends on external tools to be configured, otherwise some tests would be skipped:
