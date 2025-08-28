@@ -16,7 +16,7 @@ require (
 	k8s.io/api v0.33.3
 	k8s.io/apimachinery v0.33.3
 	k8s.io/client-go v0.33.3
-	k8s.io/kubernetes v1.33.3
+	k8s.io/kubernetes v1.33.4
 	k8s.io/pod-security-admission v0.32.2
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 )
