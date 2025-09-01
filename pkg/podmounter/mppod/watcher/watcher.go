@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,9 @@ var ErrPodNotFound = errors.New("mppod/watcher: mountpoint pod not found")
 
 // ErrPodNotReady returned when the Mountpoint Pod was found but is not ready.
 var ErrPodNotReady = errors.New("mppod/watcher: mountpoint pod not ready")
+
+// ErrPodUnschedulable returned when the Mountpoint Pod was found but it is unschedulable.
+var ErrPodUnschedulable = errors.New("mppod/watcher: mountpoint pod unschedulable")
 
 // ErrCacheDesync returned when the Pod informer cache failed to synchronize within the specified timeout.
 var ErrCacheDesync = errors.New("mppod/watcher: failed to sync pod informer cache within the timeout")
@@ -80,12 +84,14 @@ func (w *Watcher) AddEventHandler(handler cache.ResourceEventHandler) (cache.Res
 func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 	// Set a watcher for Pod create & update events
 	var podFound atomic.Bool
+	var podUnschedulable atomic.Bool
 	podChan := make(chan *corev1.Pod, 1)
 	handle, err := w.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			pod := obj.(*corev1.Pod)
 			if pod.Name == name {
 				podFound.Store(true)
+				podUnschedulable.Store(w.isPodUnschedulable(pod))
 				if w.isPodReady(pod) {
 					podChan <- pod
 				}
@@ -95,6 +101,7 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 			pod := new.(*corev1.Pod)
 			if pod.Name == name {
 				podFound.Store(true)
+				podUnschedulable.Store(w.isPodUnschedulable(pod))
 				if w.isPodReady(pod) {
 					podChan <- pod
 				}
@@ -112,6 +119,7 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 	pod, err := w.lister.Get(name)
 	if err == nil {
 		podFound.Store(true)
+		podUnschedulable.Store(w.isPodUnschedulable(pod))
 		if w.isPodReady(pod) {
 			// Pod already exists and ready
 			return pod, nil
@@ -133,7 +141,14 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 		// We didn't received the Pod within the timeout
 
 		if podFound.Load() {
-			// Pod was found, but was not ready
+			// Pod was found, but was not ready...
+
+			if podUnschedulable.Load() {
+				// ... because it was unschedulable
+				return nil, ErrPodUnschedulable
+			}
+
+			// ... because of some other reason
 			return nil, ErrPodNotReady
 		}
 
@@ -144,4 +159,17 @@ func (w *Watcher) Wait(ctx context.Context, name string) (*corev1.Pod, error) {
 // isPodReady returns whether the given Mountpoint Pod is ready.
 func (w *Watcher) isPodReady(pod *corev1.Pod) bool {
 	return pod.Status.Phase == corev1.PodRunning
+}
+
+// isPodUnschedulable returns whether the given Mountpoint Pod is unschedulable.
+func (w *Watcher) isPodUnschedulable(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodPending {
+		return false
+	}
+
+	return slices.ContainsFunc(pod.Status.Conditions, func(cond corev1.PodCondition) bool {
+		return cond.Type == corev1.PodScheduled &&
+			cond.Status == corev1.ConditionFalse &&
+			cond.Reason == corev1.PodReasonUnschedulable
+	})
 }

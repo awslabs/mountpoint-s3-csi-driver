@@ -84,6 +84,30 @@ func TestGettingNotYetScheduledPod(t *testing.T) {
 	assert.Equals(t, mpPod.pod, pod)
 }
 
+func TestGettingUnschedulablePod(t *testing.T) {
+	client := fake.NewClientset()
+
+	mpPod := createMountpointPod(t, client, testMountpointPodName)
+	mpPod.unschedulable()
+
+	mpPodWatcher := createAndStartWatcher(t, client)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	pod, err := mpPodWatcher.Wait(ctx, testMountpointPodName)
+	assert.Equals(t, watcher.ErrPodUnschedulable, err)
+	if pod != nil {
+		t.Fatalf("Pod should be nil if `watcher.ErrPodUnschedulable` error returned, but got %#v", pod)
+	}
+
+	mpPod.run()
+
+	pod, err = mpPodWatcher.Wait(context.Background(), testMountpointPodName)
+	assert.NoError(t, err)
+	assert.Equals(t, mpPod.pod, pod)
+}
+
 func TestGettingPodsConcurrently(t *testing.T) {
 	client := fake.NewClientset()
 
@@ -148,6 +172,21 @@ func createMountpointPod(t *testing.T, client kubernetes.Interface, name string)
 func (mp *mountpointPod) run() {
 	mp.t.Helper()
 	mp.pod.Status.Phase = corev1.PodRunning
+	var err error
+	mp.pod, err = mp.client.CoreV1().Pods(testMountpointPodNamespace).UpdateStatus(context.Background(), mp.pod, metav1.UpdateOptions{})
+	assert.NoError(mp.t, err)
+}
+
+func (mp *mountpointPod) unschedulable() {
+	mp.t.Helper()
+	mp.pod.Status.Phase = corev1.PodPending
+	mp.pod.Status.Conditions = []corev1.PodCondition{
+		{
+			Type:   corev1.PodScheduled,
+			Status: corev1.ConditionFalse,
+			Reason: corev1.PodReasonUnschedulable,
+		},
+	}
 	var err error
 	mp.pod, err = mp.client.CoreV1().Pods(testMountpointPodNamespace).UpdateStatus(context.Background(), mp.pod, metav1.UpdateOptions{})
 	assert.NoError(mp.t, err)

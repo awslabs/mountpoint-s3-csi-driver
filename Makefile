@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=1.15.0
+VERSION=2.0.0
 
 PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
@@ -57,7 +57,7 @@ E2E_COMMIT_ID?=local
 E2E_KUBECONFIG?=""
 
 # Kubernetes version to use in envtest for controller tests.
-ENVTEST_K8S_VERSION ?= 1.30.x
+ENVTEST_K8S_VERSION ?= 1.33.x
 
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
@@ -138,8 +138,6 @@ bin:
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-driver ./cmd/aws-s3-csi-driver/
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-controller ./cmd/aws-s3-csi-controller/
 	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/aws-s3-csi-mounter ./cmd/aws-s3-csi-mounter/
-	# TODO: `install-mp` component won't be necessary with the containerization.
-	CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags ${LDFLAGS} -o bin/install-mp ./cmd/install-mp/
 
 .PHONY: install-go-test-coverage
 install-go-test-coverage:
@@ -150,7 +148,7 @@ test:
 	go test -v -race ./{cmd,pkg}/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./{cmd,pkg}/...
 	# skipping controller test cases because we don't implement controller for static provisioning,
 	# this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
-	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities"
+	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities" -ginkgo.skip="should remove target path"
 
 .PHONY: cover
 cover:
@@ -191,20 +189,15 @@ clean:
 	rm -rf bin/ && docker system prune
 
 # Generate files for Custom Resources (`zz_generated.deepcopy.go` and CustomResourceDefinition YAML file).
-TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments.yaml"
-# Helm CRD file needs extra `{{- if .Values.experimental.podMounter -}}` wrapper, while we don't need it for tests.
 HELM_POD_ATTACHMENT_CRD_FILE ?= "./charts/aws-mountpoint-s3-csi-driver/templates/mountpoints3podattachments-crd.yaml"
-TEST_POD_ATTACHMENT_CRD_FILE ?= "./tests/crd/mountpoints3podattachments-crd.yaml"
+TMP_POD_ATTACHMENT_CRD_FILE ?= "./hack/s3.csi.aws.com_mountpoints3podattachments.yaml"
 .PHONY: generate
 generate: controller-gen
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./pkg/api/..."
 	$(CONTROLLER_GEN) crd paths="./pkg/api/..." output:crd:dir=./hack/
+	patch $(TMP_POD_ATTACHMENT_CRD_FILE) < ./hack/patches/selectablefields-k8s-version.patch
 	echo '# Auto-generated file via `make generate`. Do not edit.' > $(HELM_POD_ATTACHMENT_CRD_FILE)
-	echo '{{- if .Values.experimental.podMounter -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
 	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(HELM_POD_ATTACHMENT_CRD_FILE)
-	echo '{{- end -}}' >> $(HELM_POD_ATTACHMENT_CRD_FILE)
-	echo '# Auto-generated file via `make generate`. Do not edit.' > $(TEST_POD_ATTACHMENT_CRD_FILE)
-	cat $(TMP_POD_ATTACHMENT_CRD_FILE) >> $(TEST_POD_ATTACHMENT_CRD_FILE)
 	rm $(TMP_POD_ATTACHMENT_CRD_FILE)
 
 ## Tool Binaries

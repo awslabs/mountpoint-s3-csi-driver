@@ -2,6 +2,9 @@
 
 set -euox pipefail
 
+export AWS_RETRY_MODE=standard
+export AWS_MAX_ATTEMPTS=10
+
 ACTION=${ACTION:-}
 REGION=${AWS_REGION}
 
@@ -10,6 +13,7 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGISTRY=${REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com}
 IMAGE_NAME=${IMAGE_NAME:-}
 TAG=${TAG:-}
+export REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${BASE_DIR}"/eksctl.sh
@@ -51,19 +55,15 @@ ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region $
 NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 else
   INSTANCE_TYPE_DEFAULT=m7g.large
-  AMI_ID_DEFAULT=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --region ${REGION} --query 'Parameters[0].Value' --output text)
 fi
 INSTANCE_TYPE=${INSTANCE_TYPE:-$INSTANCE_TYPE_DEFAULT}
-AMI_ID=${AMI_ID:-$AMI_ID_DEFAULT}
 CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
 
-EKSCTL_VERSION=${EKSCTL_VERSION:-0.210.0}
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
 if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
@@ -71,13 +71,6 @@ if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
 fi
 
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
-
-MOUNTER_KIND=${MOUNTER_KIND:-systemd}
-if [ "$MOUNTER_KIND" = "pod" ]; then
-  USE_POD_MOUNTER=true
-else
-  USE_POD_MOUNTER=false
-fi
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -101,9 +94,7 @@ function install_tools() {
 
   helm_install "$BIN_DIR"
 
-  eksctl_install \
-    "${BIN_DIR}" \
-    "${EKSCTL_VERSION}"
+  eksctl_install "${BIN_DIR}"
 
   go install github.com/onsi/ginkgo/v2/ginkgo
 }
@@ -177,19 +168,25 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "$HELM_RELEASE_NAME" \
     "${REGISTRY}/${IMAGE_NAME}" \
     "${TAG}" \
-    "${KUBECONFIG}" \
-    "${MOUNTER_KIND}"
+    "${KUBECONFIG}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME}
+  EXIT_CODE=$?
+  print_cluster_info
+  exit $EXIT_CODE
+elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
+  set +e
+  pushd tests/e2e-kubernetes
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --pod-mounter=${USE_POD_MOUNTER} --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --cluster-name=${CLUSTER_NAME}
   EXIT_CODE=$?
   print_cluster_info
   popd
@@ -206,6 +203,6 @@ elif [[ "${ACTION}" == "delete_cluster" ]]; then
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
   e2e_cleanup || true
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
 fi

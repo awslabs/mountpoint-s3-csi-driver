@@ -10,62 +10,8 @@ import (
 
 	credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mountpoint "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
-	system "github.com/awslabs/mountpoint-s3-csi-driver/pkg/system"
 	gomock "github.com/golang/mock/gomock"
 )
-
-// MockServiceRunner is a mock of ServiceRunner interface.
-type MockServiceRunner struct {
-	ctrl     *gomock.Controller
-	recorder *MockServiceRunnerMockRecorder
-}
-
-// MockServiceRunnerMockRecorder is the mock recorder for MockServiceRunner.
-type MockServiceRunnerMockRecorder struct {
-	mock *MockServiceRunner
-}
-
-// NewMockServiceRunner creates a new mock instance.
-func NewMockServiceRunner(ctrl *gomock.Controller) *MockServiceRunner {
-	mock := &MockServiceRunner{ctrl: ctrl}
-	mock.recorder = &MockServiceRunnerMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockServiceRunner) EXPECT() *MockServiceRunnerMockRecorder {
-	return m.recorder
-}
-
-// RunOneshot mocks base method.
-func (m *MockServiceRunner) RunOneshot(ctx context.Context, config *system.ExecConfig) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RunOneshot", ctx, config)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// RunOneshot indicates an expected call of RunOneshot.
-func (mr *MockServiceRunnerMockRecorder) RunOneshot(ctx, config interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RunOneshot", reflect.TypeOf((*MockServiceRunner)(nil).RunOneshot), ctx, config)
-}
-
-// StartService mocks base method.
-func (m *MockServiceRunner) StartService(ctx context.Context, config *system.ExecConfig) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StartService", ctx, config)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StartService indicates an expected call of StartService.
-func (mr *MockServiceRunnerMockRecorder) StartService(ctx, config interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartService", reflect.TypeOf((*MockServiceRunner)(nil).StartService), ctx, config)
-}
 
 // MockMounter is a mock of Mounter interface.
 type MockMounter struct {

@@ -8,11 +8,15 @@ CW_LOG_RETENTION_DAYS=30
 
 function eksctl_install() {
   INSTALL_PATH=${1}
-  EKSCTL_VERSION=${2}
+
+  ARCH=amd64
+  PLATFORM=$(uname -s)_$ARCH
+
   if [[ ! -e ${INSTALL_PATH}/eksctl ]]; then
-    EKSCTL_DOWNLOAD_URL="https://github.com/weaveworks/eksctl/releases/download/v${EKSCTL_VERSION}/eksctl_$(uname -s)_amd64.tar.gz"
-    curl --silent --location "${EKSCTL_DOWNLOAD_URL}" | tar xz -C "${INSTALL_PATH}"
-    chmod +x "${INSTALL_PATH}"/eksctl
+    curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+    curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
+    tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+    sudo install -m 0755 /tmp/eksctl ${INSTALL_PATH} && rm /tmp/eksctl
   fi
 }
 

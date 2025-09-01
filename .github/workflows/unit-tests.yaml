@@ -32,8 +32,7 @@ jobs:
       run: make bin
 
     - name: Test
-      # Run tests as root as we require it for systemd tests
-      run: sudo make test
+      run: make test
 
     - name: Check test coverage
       run: make cover

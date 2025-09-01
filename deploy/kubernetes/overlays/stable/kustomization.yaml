@@ -5,4 +5,18 @@ resources:
 images:
   - name: csi-driver
     newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
-    newTag: v1.15.0
+    newTag: v2.0.0
+replacements:
+  # Replace value of `MOUNTPOINT_IMAGE` env variable of the CSI Controller with the image path of the CSI Node.
+  - source:
+      kind: DaemonSet
+      namespace: kube-system
+      name: s3-csi-node
+      fieldPath: spec.template.spec.containers.[name=s3-plugin].image
+    targets:
+      - select:
+          kind: Deployment
+          namespace: kube-system
+          name: s3-csi-controller
+        fieldPaths:
+          - spec.template.spec.containers.[name=s3-csi-controller].env.[name=^MOUNTPOINT_IMAGE$].value

@@ -9,6 +9,18 @@ on:
       ref:
         required: true
         type: string
+      run_upgrade_tests:
+        required: false
+        type: boolean
+        description: "If true, only upgrade tests will run."
+      upgrade_tests_old_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the old version to test upgrade from."
+      upgrade_tests_new_version:
+        required: false
+        type: string
+        description: "Only used if `run_upgrade_tests` is true, specifies the new version to test upgrade to."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
@@ -77,6 +89,8 @@ jobs:
       TAG: "untested_${{ inputs.ref }}"
       K8S_VERSION: "${{ matrix.kubernetes-version }}"
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
+      MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
+      MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,7 +109,10 @@ jobs:
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-duration-seconds: 7200
+          # Upgrade tests takes around 3 hours to run to ensure they hit multiple credential refresh cycles.
+          # That's why we're increasing the AWS credential duration here compared to regular end-to-end tests.
+          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade.go`.
+          role-duration-seconds: ${{ inputs.run_upgrade_tests && 14400 || 7200 }}
       - name: Install tools
         env:
           ACTION: "install_tools"
@@ -111,61 +128,28 @@ jobs:
           ACTION: "update_kubeconfig"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-
-      # Test SystemdMounter
-      # SystemdMounter tests are skipped if SELinux is enabled as SystemdMounter won't work with SELinux.
-      - name: Install the driver (SystemdMounter)
-        if: matrix.selinux-mode != 'enforcing'
+      - name: Install the driver
         env:
           ACTION: "install_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Run E2E Tests (SystemdMounter)
-        if: matrix.selinux-mode != 'enforcing'
+      - name: Run E2E Tests
         env:
-          ACTION: "run_tests"
+          ACTION: "${{ inputs.run_upgrade_tests && 'run_upgrade_tests' || 'run_tests' }}"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Post e2e cleanup (SystemdMounter)
-        if: matrix.selinux-mode != 'enforcing' && always()
-        env:
-          ACTION: "e2e_cleanup"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Uninstall the driver (SystemdMounter)
-        if: matrix.selinux-mode != 'enforcing' && always()
-        env:
-          ACTION: "uninstall_driver"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-
-      # Test PodMounter
-      - name: Install the driver (PodMounter)
-        env:
-          ACTION: "install_driver"
-          MOUNTER_KIND: "pod"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Run E2E Tests (PodMounter)
-        env:
-          ACTION: "run_tests"
-          MOUNTER_KIND: "pod"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Post e2e cleanup (PodMounter)
+      - name: Post e2e cleanup
         if: always()
         env:
           ACTION: "e2e_cleanup"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Uninstall the driver (PodMounter)
+      - name: Uninstall the driver
         if: always()
         env:
           ACTION: "uninstall_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-
-      # Everything is tested, delete the cluster
       - name: Delete cluster
         if: always()
         env:

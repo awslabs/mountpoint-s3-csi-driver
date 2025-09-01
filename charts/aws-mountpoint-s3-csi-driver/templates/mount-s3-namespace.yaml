@@ -1,5 +1,3 @@
-{{- if .Values.experimental.podMounter -}}
-
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -7,5 +5,3 @@ metadata:
   labels:
     name: {{ .Values.mountpointPod.namespace }}
     pod-security.kubernetes.io/enforce: restricted
-
-{{- end -}}

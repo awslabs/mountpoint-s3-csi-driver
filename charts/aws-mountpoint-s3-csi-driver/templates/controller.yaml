@@ -1,5 +1,3 @@
-{{- if .Values.experimental.podMounter -}}
-
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -70,5 +68,11 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             - name: MOUNTPOINT_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.priorityClassName }}
-
-{{- end -}}
+            {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
+            - name: MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME
+              value: {{ .Values.mountpointPod.preemptingPriorityClassName }}
+            - name: MOUNTPOINT_HEADROOM_PRIORITY_CLASS_NAME
+              value: {{ .Values.mountpointPod.headroomPriorityClassName }}
+            - name: MOUNTPOINT_HEADROOM_IMAGE
+              value: {{ .Values.experimental.headroomPodImage }}
+            {{- end }}

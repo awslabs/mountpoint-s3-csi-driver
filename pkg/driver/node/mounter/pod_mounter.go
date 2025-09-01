@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
@@ -35,6 +35,8 @@ const (
 
 	mountpointPodReadinessWaitDuration = 15 * time.Second
 )
+
+const unschedulableMountpointPodReference = "https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543"
 
 // targetDirPerm is the permission to use while creating target directory if its not exists.
 const targetDirPerm = fs.FileMode(0755)
@@ -133,8 +135,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 
 	pod, podPath, err := pm.waitForMountpointPod(ctx, mpPodName)
 	if err != nil {
-		klog.Errorf("Failed to wait for Mountpoint Pod %q to be ready for %q: %v. %s", mpPodName, target, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
-		return fmt.Errorf("Failed to wait for Mountpoint Pod %q to be ready: %w. %s", mpPodName, err, pm.helpMessageForGettingMountpointPodStatus(mpPodName))
+		klog.Errorf("Failed to wait for Mountpoint Pod %q to be ready for %q: %v. %s", mpPodName, target, err, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
+		return fmt.Errorf("Failed to wait for Mountpoint Pod %q to be ready: %w. %s", mpPodName, err, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
 	}
 	unlockMountpointPod := lockMountpointPod(mpPodName)
 	defer unlockMountpointPod()
@@ -504,24 +506,28 @@ func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
 	return tp.VolumeID, nil
 }
 
-// helpMessageForGettingMountpointLogs returns a help message to throubleshoot Mountpoint failures.
+// helpMessageForGettingMountpointLogs returns a help message to troubleshoot Mountpoint failures.
 func (pm *PodMounter) helpMessageForGettingMountpointLogs(pod *corev1.Pod) string {
 	return fmt.Sprintf("You can see Mountpoint logs by running: `kubectl logs -n %s %s`. If the Mountpoint Pod already restarted, you can also pass `--previous` to get logs from the previous run.", pod.Namespace, pod.Name)
 }
 
-// helpMessageForGettingMountpointPodStatus returns a help message to throubleshoot if Mountpoint Pod is not running.
-func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(mpPodName string) string {
+// helpMessageForGettingMountpointPodStatus returns a help message to troubleshoot if Mountpoint Pod is not running.
+func (pm *PodMounter) helpMessageForGettingMountpointPodStatus(err error, mpPodName string) string {
+	if errors.Is(err, watcher.ErrPodUnschedulable) {
+		return fmt.Sprintf("Seems like Mountpoint Pod is in 'Pending' status because it is unschedulable. This usually happens if there is no space for Mountpoint Pod in the node, see %s for more details and some possible workarounds. You can see Mountpoint Pod's status and any potential failures by running: `kubectl describe pods -n %s %s`", unschedulableMountpointPodReference, mountpointPodNamespace, mpPodName)
+	}
+
 	return fmt.Sprintf("Seems like Mountpoint Pod is not in 'Running' status. You can see it's status and any potential failures by running: `kubectl describe pods -n %s %s`", mountpointPodNamespace, mpPodName)
 }
 
-// helpMessageForGettingControllerLogs returns a help message to throubleshoot if the `MountpointS3PodAttachment` is not created/updated.
+// helpMessageForGettingControllerLogs returns a help message to troubleshoot if the `MountpointS3PodAttachment` is not created/updated.
 func (pm *PodMounter) helpMessageForGettingControllerLogs() string {
 	return "You can see the controller logs by running `kubectl logs -n kube-system -lapp=s3-csi-controller`."
 }
 
 // getS3PodAttachmentWithRetry retrieves a MountpointS3PodAttachment resource that matches the given volume and credential context.
 // It continuously retries the operation until either a matching attachment is found or the context is canceled.
-func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv2beta.MountpointS3PodAttachment, string, error) {
+func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv2.MountpointS3PodAttachment, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, mountpointPodAttachmentWaitDuration)
 	defer cancel()
 
@@ -529,15 +535,15 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 	// mutable field in PersistentVolumes, which means it could change after the initial mount.
 	// Instead, we rely on matching the workload pod UID in the final filtering step below.
 	fieldFilters := client.MatchingFields{
-		crdv2beta.FieldNodeName:             pm.nodeID,
-		crdv2beta.FieldPersistentVolumeName: volumeName,
-		crdv2beta.FieldVolumeID:             credentialCtx.VolumeID,
-		crdv2beta.FieldWorkloadFSGroup:      fsGroup,
-		crdv2beta.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
+		crdv2.FieldNodeName:             pm.nodeID,
+		crdv2.FieldPersistentVolumeName: volumeName,
+		crdv2.FieldVolumeID:             credentialCtx.VolumeID,
+		crdv2.FieldWorkloadFSGroup:      fsGroup,
+		crdv2.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
 	}
 	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
-		fieldFilters[crdv2beta.FieldWorkloadNamespace] = credentialCtx.PodNamespace
-		fieldFilters[crdv2beta.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
+		fieldFilters[crdv2.FieldWorkloadNamespace] = credentialCtx.PodNamespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
 		// Note that we intentionally do not include `FieldWorkloadServiceAccountIAMRoleARN` to list filters because
 		// CSI Driver Node does not know which role ARN to use (if any).
 		// Role ARN is determined by reconciler and passed to node via MountpointS3PodAttachment.
@@ -550,7 +556,7 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		default:
 		}
 
-		s3paList := &crdv2beta.MountpointS3PodAttachmentList{}
+		s3paList := &crdv2.MountpointS3PodAttachmentList{}
 		err := pm.s3paCache.List(ctx, s3paList, fieldFilters)
 		if err != nil {
 			klog.Errorf("Failed to list MountpointS3PodAttachments: %v", err)
@@ -572,4 +578,12 @@ func (pm *PodMounter) getS3PodAttachmentWithRetry(ctx context.Context, volumeNam
 		case <-time.After(mountpointPodAttachmentPollInterval):
 		}
 	}
+}
+
+func hostPluginDirWithDefault() string {
+	hostPluginDir := os.Getenv("HOST_PLUGIN_DIR")
+	if hostPluginDir == "" {
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+	}
+	return hostPluginDir
 }
