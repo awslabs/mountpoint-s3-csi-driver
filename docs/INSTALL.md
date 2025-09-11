@@ -55,9 +55,6 @@ You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed a
 
 #### Amazon EKS managed add-on
 
-> [!NOTE]
-> Mountpoint for Amazon S3 CSI Driver v2.0.0 EKS add-on is not available yet, but we're actively working to release it. In the meantime, if you want to use v2 features, you can consider using our Helm chart or Kustomization manifests.
-
 See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
 
 #### Helm
