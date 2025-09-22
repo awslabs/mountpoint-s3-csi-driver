@@ -107,9 +107,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					UID:       "uid1",
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-					},
-					Labels: map[string]string{
-						mppod.LabelVolumeId: "vol1",
+						mppod.AnnotationVolumeId:     "vol1",
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -149,9 +147,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					UID:       "uid1",
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-					},
-					Labels: map[string]string{
-						mppod.LabelVolumeId: "vol1",
+						mppod.AnnotationVolumeId:     "vol1",
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -173,9 +169,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 					UID:       "uid1",
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-					},
-					Labels: map[string]string{
-						mppod.LabelVolumeId: "vol1",
+						mppod.AnnotationVolumeId:     "vol1",
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -277,9 +271,30 @@ func TestCleanupDanglingMounts(t *testing.T) {
 						UID:       "uid1",
 						Annotations: map[string]string{
 							mppod.AnnotationNeedsUnmount: "true",
+							mppod.AnnotationVolumeId:     "vol1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: nodeName,
+					},
+				},
+			},
+			expectedCalls: 1,
+		},
+		{
+			name: "pod marked for unmount with legacy label fallback",
+			pods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod1",
+						Namespace: mountpointPodNamespace,
+						UID:       "uid1",
+						Annotations: map[string]string{
+							mppod.AnnotationNeedsUnmount: "true",
+							// No AnnotationVolumeId - should fallback to legacy label
 						},
 						Labels: map[string]string{
-							mppod.LabelVolumeId: "vol1",
+							mppod.DeprecatedLabelVolumeId: "vol1-legacy",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -299,9 +314,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 						UID:       "uid1",
 						Annotations: map[string]string{
 							mppod.AnnotationNeedsUnmount: "true",
-						},
-						Labels: map[string]string{
-							mppod.LabelVolumeId: "vol1",
+							mppod.AnnotationVolumeId:     "vol1",
 						},
 					},
 					Spec: corev1.PodSpec{

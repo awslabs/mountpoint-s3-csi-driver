@@ -282,9 +282,11 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, map[string]string{
 			mppod.LabelMountpointVersion: mountpointVersion,
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
-			mppod.LabelVolumeName:        testVolName,
-			mppod.LabelVolumeId:          testVolID,
 		}, mpPod.Labels)
+		assert.Equals(t, map[string]string{
+			mppod.AnnotationVolumeName: testVolName,
+			mppod.AnnotationVolumeId:   testVolID,
+		}, mpPod.Annotations)
 
 		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)

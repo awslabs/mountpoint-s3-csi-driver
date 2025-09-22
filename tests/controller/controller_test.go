@@ -984,6 +984,28 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(mountpointPod.Pod)
 		})
 
+		It("should set AnnotationVolumeId with long volumeHandle in mountpoint pod", func() {
+			// Create a volume with a long volumeHandle to test the annotation
+			longVolumeHandle := "s3://my-very-long-bucket-name-that-exceeds-normal-length-limits-and-contains-multiple-segments-for-testing-purposes-with-additional-path-components"
+
+			vol := createVolume(withLongVolumeHandle(longVolumeHandle))
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule(testNode)
+
+			_, mountpointPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+			// Verify that the AnnotationVolumeId annotation is set correctly with the long volumeHandle
+			Expect(mountpointPod.Annotations).To(HaveKeyWithValue(mppod.AnnotationVolumeId, longVolumeHandle))
+
+			// Verify that the annotation matches the PV's VolumeHandle
+			Expect(mountpointPod.Annotations[mppod.AnnotationVolumeId]).To(Equal(vol.pv.Spec.CSI.VolumeHandle))
+
+			mountpointPod.succeed()
+			waitForObjectToDisappear(mountpointPod.Pod)
+		})
+
 		Context("Caching configuration", func() {
 			It("should configure emptyDir cache through mount options", func() {
 				vol := createVolume(withMountOptions([]string{"cache /mp-cache-dir"}))
@@ -1543,6 +1565,13 @@ func withMountOptions(mountOptions []string) volumeModifier {
 	}
 }
 
+// withLongVolumeHandle returns a `volumeModifier` that updates volume to use given long volumeHandle.
+func withLongVolumeHandle(volumeHandle string) volumeModifier {
+	return func(v *testVolume) {
+		v.pv.Spec.PersistentVolumeSource.CSI.VolumeHandle = volumeHandle
+	}
+}
+
 // createVolume creates a new pair of unbounded PV and PVC.
 func createVolume(modifiers ...volumeModifier) *testVolume {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
@@ -1750,8 +1779,10 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 	GinkgoHelper()
 
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelMountpointVersion, mountpointVersion))
-	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelVolumeName, vol.pvc.Spec.VolumeName))
 	Expect(mountpointPod.ObjectMeta.Labels).To(HaveKeyWithValue(mppod.LabelCSIDriverVersion, version.GetVersion().DriverVersion))
+
+	Expect(mountpointPod.ObjectMeta.Annotations).To(HaveKeyWithValue(mppod.AnnotationVolumeName, vol.pv.Name))
+	Expect(mountpointPod.ObjectMeta.Annotations).To(HaveKeyWithValue(mppod.AnnotationVolumeId, vol.pv.Spec.CSI.VolumeHandle))
 
 	Expect(mountpointPod.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
 
