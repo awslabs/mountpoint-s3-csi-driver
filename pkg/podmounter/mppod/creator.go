@@ -146,22 +146,9 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 				},
 			}},
 			PriorityClassName: priorityClassName,
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchFields: []corev1.NodeSelectorRequirement{{
-									Key:      metav1.ObjectNameField,
-									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{node},
-								}},
-							},
-						},
-					},
-				},
-			},
+			// Direct node assignment instead of using node affinity with labels
+			// This ensures the pod is scheduled on the specific node without relying on labels
+			NodeName: node,
 			Tolerations: []corev1.Toleration{
 				// Tolerate all taints.
 				// - "NoScheduled" – If the Workload Pod gets scheduled to a node, Mountpoint Pod should also get
