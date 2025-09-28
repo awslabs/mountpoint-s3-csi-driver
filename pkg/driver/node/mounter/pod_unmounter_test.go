@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
+	"github.com/golang/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -21,7 +23,9 @@ import (
 )
 
 const (
-	nodeName = "test-node"
+	nodeName     = "test-node"
+	testVolumeId = "vol-1"
+	testUID      = "uid1"
 )
 
 func setupPodWatcher(t *testing.T, pods ...*corev1.Pod) (*watcher.Watcher, *fake.Clientset) {
@@ -83,7 +87,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
-					UID:       "uid1",
+					UID:       testUID,
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
 					},
@@ -104,10 +108,10 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
-					UID:       "uid1",
+					UID:       testUID,
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     "vol1",
+						mppod.AnnotationVolumeId:     testVolumeId,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -126,7 +130,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
-					UID:       "uid1",
+					UID:       testUID,
 				},
 				Spec: corev1.PodSpec{
 					NodeName: nodeName,
@@ -144,10 +148,10 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
-					UID:       "uid1",
+					UID:       testUID,
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     "vol1",
+						mppod.AnnotationVolumeId:     testVolumeId,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -166,10 +170,10 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: mountpointPodNamespace,
-					UID:       "uid1",
+					UID:       testUID,
 					Annotations: map[string]string{
 						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     "vol1",
+						mppod.AnnotationVolumeId:     testVolumeId,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -252,7 +256,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
-						UID:       "uid1",
+						UID:       testUID,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: nodeName,
@@ -268,10 +272,10 @@ func TestCleanupDanglingMounts(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
-						UID:       "uid1",
+						UID:       testUID,
 						Annotations: map[string]string{
 							mppod.AnnotationNeedsUnmount: "true",
-							mppod.AnnotationVolumeId:     "vol1",
+							mppod.AnnotationVolumeId:     testVolumeId,
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -288,13 +292,13 @@ func TestCleanupDanglingMounts(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
-						UID:       "uid1",
+						UID:       testUID,
 						Annotations: map[string]string{
 							mppod.AnnotationNeedsUnmount: "true",
 							// No AnnotationVolumeId - should fallback to legacy label
 						},
 						Labels: map[string]string{
-							mppod.DeprecatedLabelVolumeId: "vol1-legacy",
+							mppod.DeprecatedLabelVolumeId: testVolumeId,
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -311,10 +315,10 @@ func TestCleanupDanglingMounts(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pod1",
 						Namespace: mountpointPodNamespace,
-						UID:       "uid1",
+						UID:       testUID,
 						Annotations: map[string]string{
 							mppod.AnnotationNeedsUnmount: "true",
-							mppod.AnnotationVolumeId:     "vol1",
+							mppod.AnnotationVolumeId:     testVolumeId,
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -358,12 +362,23 @@ func TestCleanupDanglingMounts(t *testing.T) {
 				fakeMounter.Mount("mountpoint-s3", sourcePath, "fuse", []string{})
 			}
 
-			podWatcher, client := setupPodWatcher(t, tt.pods...)
-			credProvider := credentialprovider.New(client.CoreV1(), func() (string, error) {
-				return dummyIMDSRegion, nil
-			})
+			podWatcher, _ := setupPodWatcher(t, tt.pods...)
 
-			unmounter := mounter.NewPodUnmounter(nodeName, mpmounter.NewWithMount(fakeMounter), podWatcher, credProvider)
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+			mockCredProvider := mock_credentialprovider.NewMockProviderInterface(ctrl)
+			if tt.expectedCalls > 0 {
+				mockCredProvider.EXPECT().Cleanup(gomock.Any()).Times(tt.expectedCalls).DoAndReturn(
+					func(ctx credentialprovider.CleanupContext) error {
+						assert.Equals(t, testVolumeId, ctx.VolumeID)
+						assert.Equals(t, testUID, ctx.PodID)
+						assert.Equals(t, credentialprovider.MountKindPod, ctx.MountKind)
+						return nil
+					},
+				)
+			}
+
+			unmounter := mounter.NewPodUnmounter(nodeName, mpmounter.NewWithMount(fakeMounter), podWatcher, mockCredProvider)
 			err = unmounter.CleanupDanglingMounts()
 			assert.NoError(t, err)
 

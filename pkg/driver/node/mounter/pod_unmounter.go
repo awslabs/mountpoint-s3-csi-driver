@@ -36,7 +36,7 @@ type PodUnmounter struct {
 	mount        *mpmounter.Mounter
 	kubeletPath  string
 	podWatcher   *watcher.Watcher
-	credProvider *credentialprovider.Provider
+	credProvider credentialprovider.ProviderInterface
 }
 
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
@@ -44,7 +44,7 @@ func NewPodUnmounter(
 	nodeID string,
 	mount *mpmounter.Mounter,
 	podWatcher *watcher.Watcher,
-	credProvider *credentialprovider.Provider,
+	credProvider credentialprovider.ProviderInterface,
 ) *PodUnmounter {
 	return &PodUnmounter{
 		nodeID:       nodeID,
