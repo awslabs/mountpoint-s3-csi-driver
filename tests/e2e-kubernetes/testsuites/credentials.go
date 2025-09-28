@@ -1156,7 +1156,11 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 }
 
 func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
-	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity", sa.Name)
+	// If you're seeing the following error, then it means you've made a typo in the cluster name when running the tests!
+	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 404, RequestID:
+	// ResourceNotFoundException: The token included in the request has no service account role association for it.
+
+	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity (%s, %s, %s)", sa.Name, pod.Name, pod.UID, pod.Namespace)
 
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
