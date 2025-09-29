@@ -227,8 +227,8 @@ func (u *PodUnmounter) writeExitFile(podPath string) error {
 
 // cleanupCredentials removes credentials associated with the Mountpoint Pod
 func (u *PodUnmounter) cleanupCredentials(mpPod *corev1.Pod) error {
-	volumeID := mpPod.Annotations[mppod.AnnotationVolumeId]
-	if volumeID == "" {
+	volumeID, exists := mpPod.Annotations[mppod.AnnotationVolumeId]
+	if !exists {
 		// Fallback to legacy label for backward compatibility with old MP pods (v2.0.0)
 		volumeID = mpPod.Labels[mppod.DeprecatedLabelVolumeId]
 	}
