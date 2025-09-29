@@ -18,9 +18,8 @@ import (
 
 // Labels populated on spawned Mountpoint Pods.
 const (
-	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
-	LabelVolumeName        = "s3.csi.aws.com/volume-name"
-	LabelVolumeId          = "s3.csi.aws.com/volume-id"
+	LabelMountpointVersion  = "s3.csi.aws.com/mountpoint-version"
+	DeprecatedLabelVolumeId = "s3.csi.aws.com/volume-id"
 	// LabelCSIDriverVersion specifies the CSI Driver's version used during creation of the Mountpoint Pod.
 	// The controller checks this label against the current CSI Driver version before assigning a new workload to the Mountpoint Pod,
 	// if they differ, the controller won't send new workload to the Mountpoint Pod and instead creates a new one.
@@ -39,6 +38,8 @@ const (
 	// The existing workloads won't affected with this annotation, and would keep running until termination as per their regular lifecycle.
 	// The controller ensures to not send new workload after the Mountpoint Pod annotated with this annotation.
 	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
+	AnnotationVolumeName    = "s3.csi.aws.com/volume-name"
+	AnnotationVolumeId      = "s3.csi.aws.com/volume-id"
 )
 
 const (
@@ -108,9 +109,11 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			Namespace:    c.config.Namespace,
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelVolumeName:        pv.Name,
-				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
+			},
+			Annotations: map[string]string{
+				AnnotationVolumeName: pv.Name,
+				AnnotationVolumeId:   pv.Spec.CSI.VolumeHandle,
 			},
 		},
 		Spec: corev1.PodSpec{
