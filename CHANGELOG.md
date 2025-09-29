@@ -2,6 +2,12 @@
 
 ### Notable changes
 * Add removal of node `s3.csi.aws.com/agent-not-ready` taint after the CSI driver completes registration with kubelet for readiness detection. See the [configuration guide](./docs/CONFIGURATION.md#configure-node-startup-taint) for more details
+* Support Mountpoint [version 1.20.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.20.0)
+  * Adopt a unified memory pool to reduce overall memory usage. ([mountpoint-s3#1511](https://github.com/awslabs/mountpoint-s3/pull/1511))
+  * Log messages now include the thread ID that logged the message, like "ThreadId(01)", after the level. ([mountpoint-s3#1460](https://github.com/1460))awslabs/mountpoint-s3/pull/
+  * Fix issue preventing incremental upload to handle very large write part sizes. ([mountpoint-s3#1538](https://github.com/awslabs/mountpoint-s3/pull/1538))
+  * Fix race condition that could cause Mountpoint to panic on unlink. ([mountpoint-s3#1596](https://github.com/awslabs/mountpoint-s3/pull/1596))
+  * Downgrade ioctl operation logging level from WARN to DEBUG to reduce log noise. ([mountpoint-s3#1598](https://github.com/awslabs/mountpoint-s3/pull/1598))
 
 # v2.0.0
 
