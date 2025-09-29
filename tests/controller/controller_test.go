@@ -986,7 +986,7 @@ var _ = Describe("Mountpoint Controller", func() {
 
 		It("should set AnnotationVolumeId with long volumeHandle in mountpoint pod", func() {
 			// Create a volume with a long volumeHandle to test the annotation
-			longVolumeHandle := "s3://my-very-long-bucket-name-that-exceeds-normal-length-limits-and-contains-multiple-segments-for-testing-purposes-with-additional-path-components"
+			longVolumeHandle := "s3://my-very-long-bucket-name-that-exceeds-normal-length-limits-and-contains-multiple-segments-for-testing-purposes-with-additional-path-components1"
 
 			vol := createVolume(withVolumeHandle(longVolumeHandle))
 			vol.bind()
