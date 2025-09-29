@@ -988,7 +988,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			// Create a volume with a long volumeHandle to test the annotation
 			longVolumeHandle := "s3://my-very-long-bucket-name-that-exceeds-normal-length-limits-and-contains-multiple-segments-for-testing-purposes-with-additional-path-components"
 
-			vol := createVolume(withLongVolumeHandle(longVolumeHandle))
+			vol := createVolume(withVolumeHandle(longVolumeHandle))
 			vol.bind()
 
 			pod := createPod(withPVC(vol.pvc))
@@ -1565,8 +1565,8 @@ func withMountOptions(mountOptions []string) volumeModifier {
 	}
 }
 
-// withLongVolumeHandle returns a `volumeModifier` that updates volume to use given long volumeHandle.
-func withLongVolumeHandle(volumeHandle string) volumeModifier {
+// withVolumeHandle returns a `volumeModifier` that updates volume to use given volumeHandle.
+func withVolumeHandle(volumeHandle string) volumeModifier {
 	return func(v *testVolume) {
 		v.pv.Spec.PersistentVolumeSource.CSI.VolumeHandle = volumeHandle
 	}
