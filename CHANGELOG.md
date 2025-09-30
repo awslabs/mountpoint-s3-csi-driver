@@ -1,7 +1,13 @@
-# Unreleased
+# v2.1.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.1.0/README.md)
 
 ### Notable changes
 * Add removal of node `s3.csi.aws.com/agent-not-ready` taint after the CSI driver completes registration with kubelet for readiness detection. See the [configuration guide](./docs/CONFIGURATION.md#configure-node-startup-taint) for more details
+* Fixed Mountpoint Pod creation failures with long volume handles by moving volumeID and PV name to annotations. ([#585](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/585))
+* Added cleanup of stale Headroom Pods in StaleAttachmentCleaner when workload pods no longer exist or are past scheduling. ([#560](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/560))
+* Improved selectableFields detection by querying CRD definition at runtime instead of relying on Kubernetes version checks. ([#557](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/557))
+* Fixed Kubernetes compatibility warnings by conditionally including selectableFields based on cluster version and added server-side manifest validation. ([#554](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/554))
 * Support Mountpoint [version 1.20.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.20.0)
   * Adopt a unified memory pool to reduce overall memory usage. ([mountpoint-s3#1511](https://github.com/awslabs/mountpoint-s3/pull/1511))
   * Log messages now include the thread ID that logged the message, like "ThreadId(01)", after the level. ([mountpoint-s3#1460](https://github.com/1460))awslabs/mountpoint-s3/pull/
