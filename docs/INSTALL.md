@@ -53,6 +53,9 @@ See [AWS Credentials](CONFIGURATION.md#aws-credentials) for instructions and dif
 
 You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks), [Helm](https://helm.sh/), or [Kustomize](https://github.com/kubernetes-sigs/kustomize).
 
+> [!IMPORTANT]
+> When upgrading the CSI Driver, existing [Mountpoint Pods](ARCHITECTURE.md#the-mounter-component--mountpoint-pod-aws-s3-csi-mounter) remain unchanged to avoid disrupting your active workloads. New Mountpoint Pods with the updated version are created only when workload pods are started or restarted.
+
 #### Amazon EKS managed add-on
 
 See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.

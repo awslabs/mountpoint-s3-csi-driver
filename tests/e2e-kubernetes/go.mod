@@ -1,6 +1,6 @@
 module github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes
 
-go 1.24.4
+go 1.25.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
