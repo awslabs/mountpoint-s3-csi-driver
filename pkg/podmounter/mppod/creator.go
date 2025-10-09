@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -94,8 +95,9 @@ func NewCreator(config Config, log logr.Logger) *Creator {
 	return &Creator{config: config, log: log}
 }
 
-// MountpointPod returns a new Mountpoint Pod spec to schedule for given `node`, `pv` and `priorityClassKind`.
-func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priorityClassKind PriorityClassKind) (*corev1.Pod, error) {
+// MountpointPod returns a new Mountpoint Pod spec to schedule for given
+// `workload pod`, `pv` and `priorityClassKind`.
+func (c *Creator) MountpointPod(workloadPod *v1.Pod, pv *corev1.PersistentVolume, priorityClassKind PriorityClassKind) (*corev1.Pod, error) {
 	uid := c.config.ClusterVariant.MountpointPodUserID()
 
 	priorityClassName := c.config.PriorityClassName
@@ -158,23 +160,14 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 								MatchFields: []corev1.NodeSelectorRequirement{{
 									Key:      metav1.ObjectNameField,
 									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{node},
+									Values:   []string{workloadPod.Spec.NodeName},
 								}},
 							},
 						},
 					},
 				},
 			},
-			Tolerations: []corev1.Toleration{
-				// Tolerate all taints.
-				// - "NoScheduled" – If the Workload Pod gets scheduled to a node, Mountpoint Pod should also get
-				//   scheduled into the same node to provide the volume.
-				// - "NoExecute" – If the Workload Pod tolerates a "NoExecute" taint, Mountpoint Pod should also
-				//   tolerate it to keep running and provide volume for the Workload Pod.
-				//   If the Workload Pod would get descheduled and then the corresponding Mountpoint Pod
-				//   would also get descheduled naturally due to CSI volume lifecycle.
-				{Operator: corev1.TolerationOpExists},
-			},
+			Tolerations: workloadPod.Spec.Tolerations,
 			Volumes: []corev1.Volume{
 				// This emptyDir volume is used for communication between Mountpoint Pod and the CSI Driver Node Pod
 				{
