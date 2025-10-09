@@ -22,6 +22,9 @@ jobs:
     - name: Check style
       run: make check_style
 
+    - name: Check module tidy
+      run: make check_mod_tidy
+
     - name: Check licenses
       run: make check_licenses
 
