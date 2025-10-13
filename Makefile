@@ -176,6 +176,10 @@ e2e: e2e-controller
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
 
+.PHONY: check_tidy
+check_mod_tidy:
+	test -z "$$(go mod tidy --diff | tee /dev/stderr)"
+
 .PHONY: check_licenses
 check_licenses: download_go_deps
 	go tool github.com/google/go-licenses/v2 check --allowed_licenses ${ALLOWED_LICENSES} ./...
