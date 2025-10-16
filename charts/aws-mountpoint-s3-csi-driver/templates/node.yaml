@@ -87,19 +87,19 @@ spec:
                 secretKeyRef:
                   name: {{ .name }}
                   key: {{ .keyId }}
-                  optional: true
+                  optional: {{ .optional }}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
                   key: {{ .accessKey }}
-                  optional: true
+                  optional: {{ .optional }}
             - name: AWS_SESSION_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .name }}
                   key: {{ .sessionToken }}
-                  optional: true
+                  optional: {{ .optional }}
             {{- end }}
           volumeMounts:
             - name: kubelet-dir
