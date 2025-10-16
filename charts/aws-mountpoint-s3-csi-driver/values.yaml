@@ -102,6 +102,7 @@ awsAccessSecret:
   keyId: key_id
   accessKey: access_key
   sessionToken: session_token
+  optional: true
 
 # The default IPv4 address in the credentials URI is in accordance to the references below:
 # Doc: https://docs.aws.amazon.com/eks/latest/userguide/pod-id-agent-setup.html
