@@ -47,6 +47,10 @@ jobs:
           # Get authentication token from public ECR (disable command echoing for security)
           set +x
           TOKEN=$(curl -s https://public.ecr.aws/token/ | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Error: Failed to retrieve ECR token"
+            exit 1
+          fi
           
           # Get all tags from public ECR using the HTTP API
           LATEST_TAG=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -65,10 +69,10 @@ jobs:
           echo "Latest tag: $LATEST_TAG"
           
           if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
-            echo "Updating node-driver-registrar from $CURRENT_TAG to $LATEST_TAG"
-            sed -i "s|tag: ${CURRENT_TAG}|tag: ${LATEST_TAG}|" "$VALUES_FILE"
+            echo "::notice::Updating node-driver-registrar from $CURRENT_TAG to $LATEST_TAG"
+            yq -i ".sidecars.nodeDriverRegistrar.image.tag = \"${LATEST_TAG}\"" "$VALUES_FILE"
           else
-            echo "Already at latest version"
+            echo "::notice::node-driver-registrar aAlready at latest version"
           fi
 
       - name: Update livenessprobe image tag
@@ -96,6 +100,10 @@ jobs:
           # Get authentication token from public ECR (disable command echoing for security)
           set +x
           TOKEN=$(curl -s https://public.ecr.aws/token/ | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Error: Failed to retrieve ECR token"
+            exit 1
+          fi
           
           # Get all tags from public ECR using the HTTP API
           LATEST_TAG=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -114,10 +122,10 @@ jobs:
           echo "Latest tag: $LATEST_TAG"
           
           if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
-            echo "Updating livenessprobe from $CURRENT_TAG to $LATEST_TAG"
-            sed -i "s|tag: ${CURRENT_TAG}|tag: ${LATEST_TAG}|" "$VALUES_FILE"
+            echo "::notice::Updating livenessprobe from $CURRENT_TAG to $LATEST_TAG"
+            yq -i ".sidecars.livenessProbe.image.tag = \"${LATEST_TAG}\"" "$VALUES_FILE"
           else
-            echo "Already at latest version"
+            echo "::notice::livenessprobe already at latest version"
           fi
 
       - name: Check for changes
@@ -145,18 +153,6 @@ jobs:
             **This is an automated PR created by the update-sidecar-images workflow.**
             
             Please review the changes, verify the tests pass, and merge if everything looks good.
-            
-            ---
-            
-            <details>
-            <summary>📋 Changes</summary>
-            
-            ```diff
-            ${{ steps.check_changes.outputs.diff }}
-            ```
-            
-            </details>
-          branch: update-sidecar-images
+          branch: automation/update-sidecar-images
           delete-branch: true
-          labels: |
-            dependencies
+          labels: dependencies
