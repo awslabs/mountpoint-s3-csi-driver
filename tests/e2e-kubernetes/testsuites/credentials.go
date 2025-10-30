@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -72,7 +73,7 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
 
-const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
+var serviceAccountTokenAudienceEKS = determineServiceAccountTokenAudienceEKS()
 
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
@@ -84,6 +85,16 @@ var IMDSAvailable bool
 
 type s3CSICredentialsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
+}
+
+func determineServiceAccountTokenAudienceEKS() string {
+	const envPodIdentityTokenAudience = "POD_IDENTITY_TOKEN_AUDIENCE"
+	fromEnv := strings.TrimSpace(os.Getenv(envPodIdentityTokenAudience))
+	if len(fromEnv) == 0 {
+		return "pods.eks.amazonaws.com"
+	} else {
+		return fromEnv
+	}
 }
 
 func InitS3CSICredentialsTestSuite() storageframework.TestSuite {
@@ -1013,12 +1024,12 @@ func getARNPartition(arn string) string {
 }
 
 func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDocument string, policyNames ...string) (*iamtypes.Role, func(context.Context) error) {
-	framework.Logf("Creating IAM role")
 	identity := stsCallerIdentity(ctx)
 
 	client := iam.NewFromConfig(awsConfig(ctx))
 
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
+	framework.Logf("Creating IAM role '%s' with assumeRolePolicyDocument \"%s\"", roleName, assumeRolePolicyDocument)
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
 		RoleName:                 ptr.To(roleName),
 		AssumeRolePolicyDocument: ptr.To(assumeRolePolicyDocument),
@@ -1026,7 +1037,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
-		framework.Logf("Deleting IAM role")
+		framework.Logf("Deleting IAM role '%s'", roleName)
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
 			RoleName: ptr.To(roleName),
 		})
