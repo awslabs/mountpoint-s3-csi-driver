@@ -1,3 +1,15 @@
+# v2.2.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.21.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.21.0)
+  * Mountpoint for Amazon S3 adds support for exporting metrics using OTel Protocol. See [METRICS documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/METRICS.md). ([1685](https://github.com/awslabs/mountpoint-s3/pull/1685))
+  * Change default logging level from WARN to INFO to improve visibility of Mountpoint operational messages. ([#1605](https://github.com/awslabs/mountpoint-s3/pull/1605), [#1668](https://github.com/awslabs/mountpoint-s3/pull/1668))
+  * Change FUSE and S3 request metric names in logs. ([#1630](https://github.com/awslabs/mountpoint-s3/pull/1630), [#1653](https://github.com/awslabs/mountpoint-s3/pull/1653))
+  * Change metric logging format to add metric units. ([#1677](https://github.com/awslabs/mountpoint-s3/pull/1677))
+  * Fixed "file does not exist" errors during concurrent directory listing operations. ([#1648](https://github.com/awslabs/mountpoint-s3/pull/1648))
+
 # v2.1.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.1.0/README.md)
