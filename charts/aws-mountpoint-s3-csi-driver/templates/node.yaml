@@ -81,6 +81,8 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
+            - name: POD_IDENTITY_TOKEN_AUDIENCE
+              value: pods.eks.amazonaws.com
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
