@@ -124,9 +124,11 @@ function eksctl_delete_cluster() {
   REGION=${3}
   FORCE=${4:-false}
 
+  STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
   if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
     # Try to delete CloudFormation stack even if the cluster does not exists just in case
     # if the stack is stuck in `ROLLBACK_COMPLETE` status.
+    aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
     eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
     return 0
   fi
@@ -137,6 +139,8 @@ function eksctl_delete_cluster() {
     return 0
   fi
 
+
+  aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
   ${BIN} delete cluster "${CLUSTER_NAME}"
   eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
 }
