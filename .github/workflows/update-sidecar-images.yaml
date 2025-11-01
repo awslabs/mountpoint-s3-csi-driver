@@ -1,0 +1,158 @@
+name: Update Sidecar Images
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update node-driver-registrar image tag
+        run: |
+          set -euo pipefail
+          
+          VALUES_FILE="charts/aws-mountpoint-s3-csi-driver/values.yaml"
+          REPO="eks-distro/kubernetes-csi/node-driver-registrar"
+          
+          # Get current tag and extract EKS version from it
+          CURRENT_TAG=$(yq '.sidecars.nodeDriverRegistrar.image.tag' "$VALUES_FILE")
+          echo "Current tag: $CURRENT_TAG"
+          
+          # Extract EKS version (e.g., "eks-1-29" from "v2.10.0-eks-1-29-7")
+          EKS_VERSION=$(echo "$CURRENT_TAG" | grep -oE 'eks-[0-9]+-[0-9]+')
+          
+          if [ -z "$EKS_VERSION" ]; then
+            echo "Error: Could not extract EKS version from current tag"
+            exit 1
+          fi
+          
+          echo "Detected EKS version: $EKS_VERSION"
+          echo "Fetching latest tags for $REPO with $EKS_VERSION..."
+          
+          # Get authentication token from public ECR (disable command echoing for security)
+          set +x
+          TOKEN=$(curl -s https://public.ecr.aws/token/ | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Error: Failed to retrieve ECR token"
+            exit 1
+          fi
+          
+          # Get all tags from public ECR using the HTTP API
+          LATEST_TAG=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://public.ecr.aws/v2/${REPO}/tags/list" | \
+            jq -r '.tags[]' | \
+            grep -E "^v[0-9]+\.[0-9]+\.[0-9]+-${EKS_VERSION}-[0-9]+$" | \
+            sort -V | \
+            tail -n1)
+          set -x
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Warning: Could not fetch latest tag for $EKS_VERSION, keeping current version"
+            exit 0
+          fi
+          
+          echo "Latest tag: $LATEST_TAG"
+          
+          if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
+            echo "::notice::Updating node-driver-registrar from $CURRENT_TAG to $LATEST_TAG"
+            yq -i ".sidecars.nodeDriverRegistrar.image.tag = \"${LATEST_TAG}\"" "$VALUES_FILE"
+          else
+            echo "::notice::node-driver-registrar aAlready at latest version"
+          fi
+
+      - name: Update livenessprobe image tag
+        run: |
+          set -euo pipefail
+          
+          VALUES_FILE="charts/aws-mountpoint-s3-csi-driver/values.yaml"
+          REPO="eks-distro/kubernetes-csi/livenessprobe"
+          
+          # Get current tag and extract EKS version from it
+          CURRENT_TAG=$(yq '.sidecars.livenessProbe.image.tag' "$VALUES_FILE")
+          echo "Current tag: $CURRENT_TAG"
+          
+          # Extract EKS version (e.g., "eks-1-29" from "v2.12.0-eks-1-29-7")
+          EKS_VERSION=$(echo "$CURRENT_TAG" | grep -oE 'eks-[0-9]+-[0-9]+')
+          
+          if [ -z "$EKS_VERSION" ]; then
+            echo "Error: Could not extract EKS version from current tag"
+            exit 1
+          fi
+          
+          echo "Detected EKS version: $EKS_VERSION"
+          echo "Fetching latest tags for $REPO with $EKS_VERSION..."
+          
+          # Get authentication token from public ECR (disable command echoing for security)
+          set +x
+          TOKEN=$(curl -s https://public.ecr.aws/token/ | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Error: Failed to retrieve ECR token"
+            exit 1
+          fi
+          
+          # Get all tags from public ECR using the HTTP API
+          LATEST_TAG=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://public.ecr.aws/v2/${REPO}/tags/list" | \
+            jq -r '.tags[]' | \
+            grep -E "^v[0-9]+\.[0-9]+\.[0-9]+-${EKS_VERSION}-[0-9]+$" | \
+            sort -V | \
+            tail -n1)
+          set -x
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Warning: Could not fetch latest tag for $EKS_VERSION, keeping current version"
+            exit 0
+          fi
+          
+          echo "Latest tag: $LATEST_TAG"
+          
+          if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
+            echo "::notice::Updating livenessprobe from $CURRENT_TAG to $LATEST_TAG"
+            yq -i ".sidecars.livenessProbe.image.tag = \"${LATEST_TAG}\"" "$VALUES_FILE"
+          else
+            echo "::notice::livenessprobe already at latest version"
+          fi
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if git diff --quiet charts/aws-mountpoint-s3-csi-driver/values.yaml; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff charts/aws-mountpoint-s3-csi-driver/values.yaml
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update sidecar image versions"
+          title: "chore: update sidecar image versions to latest releases"
+          body: |
+            Update the sidecar image versions in the Helm chart default values to the latest available versions.
+            
+            **This is an automated PR created by the update-sidecar-images workflow.**
+            
+            Please review the changes, verify the tests pass, and merge if everything looks good.
+          branch: automation/update-sidecar-images
+          delete-branch: true
+          labels: dependencies
