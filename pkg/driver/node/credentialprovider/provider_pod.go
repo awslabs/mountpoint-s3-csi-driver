@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/renameio"
@@ -18,11 +17,10 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
-var serviceAccountTokenAudiencePodIdentity = determineServiceAccountTokenAudienceEKS()
-
 const (
-	serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
-	serviceAccountRoleAnnotation   = "eks.amazonaws.com/role-arn"
+	serviceAccountTokenAudienceSTS         = "sts.amazonaws.com"
+	serviceAccountTokenAudiencePodIdentity = "pods.eks.amazonaws.com"
+	serviceAccountRoleAnnotation           = "eks.amazonaws.com/role-arn"
 )
 
 const podLevelCredentialsDocsPage = "https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#pod-level-credentials"
@@ -237,14 +235,4 @@ func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx Provide
 		envprovider.EnvContainerCredentialsFullURI:     eksPodIdentityAgentCredentialsURI,
 		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
 	}, nil
-}
-
-func determineServiceAccountTokenAudienceEKS() string {
-	const envPodIdentityTokenAudience = "POD_IDENTITY_TOKEN_AUDIENCE"
-	fromEnv := strings.TrimSpace(os.Getenv(envPodIdentityTokenAudience))
-	if len(fromEnv) == 0 {
-		return "pods.eks.amazonaws.com"
-	} else {
-		return fromEnv
-	}
 }
