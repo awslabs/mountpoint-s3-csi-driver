@@ -73,7 +73,10 @@ const serviceAccountTokenAudienceSTS = "sts.amazonaws.com"
 const roleARNAnnotation = "eks.amazonaws.com/role-arn"
 const credentialSecretName = "aws-secret"
 
-var serviceAccountTokenAudienceEKS = determineServiceAccountTokenAudienceEKS()
+const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
+
+// AWS Service Principal for EKS Pod Identity
+var eksPodsServicePrincipal = determineEksPodsServicePrincipal()
 
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
@@ -87,9 +90,9 @@ type s3CSICredentialsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
 }
 
-func determineServiceAccountTokenAudienceEKS() string {
-	const envPodIdentityTokenAudience = "POD_IDENTITY_TOKEN_AUDIENCE"
-	fromEnv := strings.TrimSpace(os.Getenv(envPodIdentityTokenAudience))
+func determineEksPodsServicePrincipal() string {
+	const envVarKey = "POD_IDENTITY_SERVICE_PRINCIPAL"
+	fromEnv := strings.TrimSpace(os.Getenv(envVarKey))
 	if len(fromEnv) == 0 {
 		return "pods.eks.amazonaws.com"
 	} else {
@@ -1006,7 +1009,7 @@ func eksPodIdentityRoleTrustPolicyDocument() string {
 			{
 				"Effect": "Allow",
 				"Principal": jsonMap{
-					"Service": serviceAccountTokenAudienceEKS,
+					"Service": eksPodsServicePrincipal,
 				},
 				"Action": []string{"sts:AssumeRole", "sts:TagSession"},
 			},
