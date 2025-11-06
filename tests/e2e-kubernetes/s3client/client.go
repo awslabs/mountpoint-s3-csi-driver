@@ -142,7 +142,7 @@ func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) Delete
 	bucketName := *input.Bucket
 
 	_, err := c.client.CreateBucket(ctx, input)
-	framework.ExpectNoError(err, "Failed to create S3 bucket")
+	framework.ExpectNoError(err, "Failed to create S3 bucket %s", bucketName)
 	if err == nil {
 		framework.Logf("S3 Bucket %s created", bucketName)
 	}
