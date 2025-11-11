@@ -6,6 +6,8 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize]
 
+permissions: {}
+
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -32,4 +34,4 @@ jobs:
             {
               "action": "${{ github.event.action }}",
               "url": "${{ github.event.pull_request.html_url }}"
-            } 
+            }
