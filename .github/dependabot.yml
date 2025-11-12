@@ -3,8 +3,5 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
-    # Use limit of 1 PR, checked daily, to handle rush of updates.
-    # TODO: Remove, update to weekly once the wave is over.
-    open-pull-requests-limit: 1
     schedule:
-      interval: "daily"
+      interval: "weekly"
