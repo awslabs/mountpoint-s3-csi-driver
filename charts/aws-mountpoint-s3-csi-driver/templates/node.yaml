@@ -47,12 +47,16 @@ spec:
         - name: {{ . }}
       {{- end }}
       {{- end }}
+      hostPID: true  # Support Mountpoint semantics which require PID visibility
 
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           securityContext:
             privileged: true
+            capabilities:
+              drop:
+                - KILL  # Mitigate risk of killing processes outside of container granted by `hostPID: true`
             {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
