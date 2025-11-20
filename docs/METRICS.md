@@ -23,7 +23,7 @@ This guide will assume you already have Mountpoint S3 CSI Driver v2.2 or later i
 You can install the add-on using the AWS CLI.
 
 First, you should prepare the CloudWatch Observability Add-on config in the file `cw-observability-conf.json`.
-The one below configures CloudWatch Agent to listen for HTTP OTLP requests.
+The one below is a minimal configuration that instructs CloudWatch Agent to listen for HTTP OTLP requests.
 
 ```json
 {
@@ -54,9 +54,18 @@ EKS will ensure that the add-on is installed and that CloudWatch Agent will now 
 
 ### Running your workload which uses Mountpoint with metrics
 
-There is an example of using static provisioning with Mountpoint's OTLP metrics at `examples/kubernetes/static-provisioning/mountpoint-metrics.yaml`.
-It passes options to Mountpoint via the `mountOptions` field of the persistent volume spec.
-Specifically, it specifies the OTLP endpoint for Mountpoint as the OTLP Kubernetes service created by the CloudWatch Observability add-on.
+To configure Mountpoint to emit metrics,
+you need to pass an OTLP HTTP endpoint to Mountpoint when defining the persistent volume.
+
+The add-on installation started CloudWatch Agent on the node
+and configured a Kubernetes service for the OTLP HTTP endpoint.
+Under `mountOptions`, you should specify the endpoint.
+For example: `- otlp-endpoint=http://cloudwatch-agent.amazon-cloudwatch.svc.cluster.local:4318`.
+The port will be the same as the one configured when installing the CloudWatch Observability add-on.
+
+There is an example static provisioning YAML defining a PV, PVC, and Pod spec that uses Mountpoint's OTLP metrics
+at `examples/kubernetes/static-provisioning/mountpoint-metrics.yaml`.
+It passes options, such as the OTLP endpoint, to Mountpoint via the `mountOptions` field of the persistent volume spec.
 
 Apply this to your cluster using `kubectl apply -f examples/kubernetes/static-provisioning/mountpoint-metrics.yaml`.
 
