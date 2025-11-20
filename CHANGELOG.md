@@ -1,5 +1,13 @@
 # Unreleased
 
+# v2.2.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.1/README.md)
+
+* Fix bug where writes to an open file interacting with multiple processes would complete early and result in failed writes.
+  This change updates the node daemonset to run in host PID namespace.
+  ([#632](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/632))
+
 # v2.2.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.0/README.md)
