@@ -33,10 +33,17 @@ spec:
                       - hybrid
       tolerations:
         - operator: Exists
+      hostPID: true  # Support Mountpoint semantics which require PID visibility
+
       containers:
         - name: s3-plugin
           image: csi-driver
           securityContext:
+            # `privileged: true` grants all Kernel capabilities, runs as root, etc..
+            # Required for opening FUSE device and creating mounts.
+            # It may be possible to remove this and use the `capabilities` field,
+            # but Kubernetes API validator currently enforces that this is set to `true` for bidirectional mounts.
+            # https://github.com/kubernetes/kubernetes/blob/v1.34.2/pkg/apis/core/validation/validation.go#L1410-L1413
             privileged: true
             seLinuxOptions:
               user: system_u

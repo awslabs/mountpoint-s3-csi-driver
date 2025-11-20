@@ -47,11 +47,17 @@ spec:
         - name: {{ . }}
       {{- end }}
       {{- end }}
+      hostPID: true  # Support Mountpoint semantics which require PID visibility
 
       containers:
         - name: s3-plugin
           image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
           securityContext:
+            # `privileged: true` grants all Kernel capabilities, runs as root, etc..
+            # Required for opening FUSE device and creating mounts.
+            # It may be possible to remove this and use the `capabilities` field,
+            # but Kubernetes API validator currently enforces that this is set to `true` for bidirectional mounts.
+            # https://github.com/kubernetes/kubernetes/blob/v1.34.2/pkg/apis/core/validation/validation.go#L1410-L1413
             privileged: true
             {{- with .Values.node.seLinuxOptions }}
             seLinuxOptions:
@@ -81,8 +87,6 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
-            - name: POD_IDENTITY_TOKEN_AUDIENCE
-              value: pods.eks.amazonaws.com
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

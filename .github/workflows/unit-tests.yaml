@@ -8,6 +8,9 @@ on:
   merge_group:
     types: [ "checks_requested" ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,11 +50,9 @@ jobs:
         name: cover
         path: cover.html
 
-    - name: Comment test coverage
+    - name: Post test coverage to step summary
       if: ${{ github.event_name == 'pull_request' }}
       env:
-        TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
         ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
       run: |
-        echo "### Total test coverage: ${{ env.TOTAL_COVERAGE }}%" >> $GITHUB_STEP_SUMMARY
-        echo "Download report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
+        echo "Test coverage report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY

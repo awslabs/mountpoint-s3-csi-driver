@@ -4,6 +4,10 @@ on:
       matrix:
         description: "Matrix"
         value: ${{ jobs.build_matrix.outputs.matrix }}
+
+permissions:
+  contents: read
+
 jobs:
   build_matrix:
     runs-on: ubuntu-latest

@@ -13,7 +13,6 @@ jobs:
     environment: release
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: write
     steps:
       - name: Create Release
@@ -34,6 +33,8 @@ jobs:
   helm:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -44,7 +45,7 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
+        uses: helm/chart-releaser-action@v1.7.0
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         with:
