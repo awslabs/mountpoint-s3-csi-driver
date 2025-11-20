@@ -24,13 +24,14 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v2.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.0                       |
+| v2.2.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.1                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v2.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.0                       |
 | v2.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.1.0                       |
 | v2.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.0.0                       |
 | v1.15.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.15.0                      |
