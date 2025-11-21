@@ -34,6 +34,12 @@ spec:
 
 Kubernetes will only process the mount procedure for one of the volumes, and the other volume will be stuck pending and therefore the Pod will be stuck at `ContainerCreating` status. You need to make sure `volumeHandle` is unique in each volume. See [multiple_buckets_one_pod.yaml](../examples/kubernetes/static_provisioning/multiple_pods_one_pv.yaml) example for a correct usage.
 
+When encountering this issue, you may see errors similar to the one below in `kubelet` logs:
+
+```
+E1118 09:00:04.929385    4821 pod_workers.go:1301] "Error syncing pod, skipping" err="unmounted volumes=[s3-volume-02], unattached volumes=[], failed to process volumes=[s3-volume-02]: context deadline exceeded" pod="my-namespace/my-pod" podUID="c0f72deb-0acf-401f-9f29-43ec0bb9db06"
+```
+
 ## I'm using `subPath` of a S3 volume and getting `No such file or directory` errors
 
 _This issue can also be observed as Pod getting stuck at `Terminating`/`Error` status._
@@ -113,3 +119,19 @@ This error can occur due to a race condition during node startup where workload 
 The S3 CSI driver includes a feature to prevent this race condition by using node startup taints. When a node is tainted with `s3.csi.aws.com/agent-not-ready:NoExecute`, workload pods cannot be scheduled on that node until the S3 CSI driver removes the taint after successful startup. See the [configuration guide](./CONFIGURATION.md#configure-node-startup-taint) for more details.
 
 For EKS managed node groups, add the taint to your node group configuration (more details in [this documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)). For self-managed nodes, [apply the taint using kubectl](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/) when nodes join the cluster.
+
+## Mountpoint pods are failing with "Failed to receive mount options from /comm/mount.sock"
+
+Mountpoint pods are scheduled immediately when a workload's pod is scheduled.
+Mountpoint pods wait for the CSI Driver's node service to pass options over a socket.
+
+However, sometimes there may be issues creating the workload pod resulting in the node service never receiving a request from `kubelet` to create volumes.
+This results in the Mountpoint pod failing with a log similar to the one below.
+
+```
+I0919 20:23:04.064233       1 main.go:64] Trying to receive mount options from /comm/mount.sock
+F0919 20:25:04.161506       1 main.go:45] Failed to receive mount options from /comm/mount.sock: failed to accept connection from unix socket /comm/mount.sock: accept unix /comm/mount.sock: i/o timeout
+```
+
+One well-known cause of this issue is when <a href="#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status">volumes are specified without using a unique `volumeHandle` value</a>.
+There may be other issues related to the volume or pod spec that can lead to the workload pod being stuck in `ContainerCreating`, and the Mountpoint pod failing with this error.
