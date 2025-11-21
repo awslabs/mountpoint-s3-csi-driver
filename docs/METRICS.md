@@ -59,15 +59,25 @@ you need to pass an OTLP HTTP endpoint to Mountpoint when defining the persisten
 
 The add-on installation started CloudWatch Agent on the node
 and configured a Kubernetes service for the OTLP HTTP endpoint.
-Under `mountOptions`, you should specify the endpoint.
-For example: `- otlp-endpoint=http://cloudwatch-agent.amazon-cloudwatch.svc.cluster.local:4318`.
-The port will be the same as the one configured when installing the CloudWatch Observability add-on.
+Under `mountOptions`, you should configure the endpoint with the correct port
+as specified when configuring the CloudWatch Observability Add-on.
+An example `mountOptions` entry is shown below.
+
+```yaml
+mountOptions:
+    # ...
+    - otlp-endpoint=http://cloudwatch-agent.amazon-cloudwatch.svc.cluster.local:4318
+```
 
 There is an example static provisioning YAML defining a PV, PVC, and Pod spec that uses Mountpoint's OTLP metrics
 at `examples/kubernetes/static-provisioning/mountpoint-metrics.yaml`.
-It passes options, such as the OTLP endpoint, to Mountpoint via the `mountOptions` field of the persistent volume spec.
 
 Apply this to your cluster using `kubectl apply -f examples/kubernetes/static-provisioning/mountpoint-metrics.yaml`.
 
 At this point, you should get metrics published to CloudWatch Metrics.
-You may wish to try visualizing using the [example dashboard mentioned in Mountpoint's metric documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/METRICS.md).
+It may take some time for them to appear.
+They should be published in the `CWAgent` metric namespace by default.
+You can view the [`CWAgent` namespace on the AWS Console](https://console.aws.amazon.com/cloudwatch/home#metricsV2?graph=~()&namespace=~'CWAgent).
+
+You may also try visualizing the new metrics using the
+[example dashboard in Mountpoint's metric documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/METRICS.md).
