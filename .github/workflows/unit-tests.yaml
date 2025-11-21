@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
