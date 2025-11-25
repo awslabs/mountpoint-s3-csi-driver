@@ -14,7 +14,7 @@ jobs:
     outputs:
       matrix: ${{ steps.parse_yaml.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Parse matrix.yaml file
         id: parse_yaml
         run: |
