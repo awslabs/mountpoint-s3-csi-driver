@@ -141,7 +141,7 @@ function eksctl_delete_cluster() {
 
 
   aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
-  ${BIN} delete cluster "${CLUSTER_NAME}"
+  ${BIN} delete cluster "${CLUSTER_NAME}" --wait --disable-nodegroup-eviction
   eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
 }
 

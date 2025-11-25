@@ -29,7 +29,7 @@ jobs:
       ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -39,3 +39,10 @@ jobs:
       - name: Run Controller Tests
         run: |
           make e2e-controller
+
+  post_test:
+    needs: controller_test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Controller tests completed
+        run: echo "All controller tests passed"
