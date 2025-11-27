@@ -37,9 +37,10 @@ const (
 	// AnnotationNoNewWorkload means the Mountpoint Pod shouldn't get a new workload assigned to it.
 	// The existing workloads won't affected with this annotation, and would keep running until termination as per their regular lifecycle.
 	// The controller ensures to not send new workload after the Mountpoint Pod annotated with this annotation.
-	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
-	AnnotationVolumeName    = "s3.csi.aws.com/volume-name"
-	AnnotationVolumeId      = "s3.csi.aws.com/volume-id"
+	AnnotationNoNewWorkload                = "s3.csi.aws.com/no-new-workload"
+	AnnotationVolumeName                   = "s3.csi.aws.com/volume-name"
+	AnnotationVolumeId                     = "s3.csi.aws.com/volume-id"
+	AnnotationClusterAutoscalerSafeToEvict = "cluster-autoscaler.kubernetes.io/safe-to-evict"
 )
 
 const (
@@ -114,6 +115,8 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			Annotations: map[string]string{
 				AnnotationVolumeName: pv.Name,
 				AnnotationVolumeId:   pv.Spec.CSI.VolumeHandle,
+				// It's never safe to evict the MP pod, all customer pods should be evicted first which removes MP pod.
+				AnnotationClusterAutoscalerSafeToEvict: "false",
 			},
 		},
 		Spec: corev1.PodSpec{
