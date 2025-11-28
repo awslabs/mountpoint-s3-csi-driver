@@ -1,5 +1,5 @@
 # Static Provisioning Example
-This example shows how to make a static provisioned Mountpoint for S3 persistent volume (PV) mounted inside container.
+This example shows how to make a static provisioned Mountpoint for S3 persistent volume (PV) mounted inside a container.
 
 ## Examples in this folder
 - `static_provisioning.yaml` - spawning a pod which creates a file with name as the current date/time
