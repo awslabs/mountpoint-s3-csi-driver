@@ -42,7 +42,11 @@ func main() {
 			return
 		}
 
-		klog.Fatalf("Failed to receive mount options from %s: %v\n", mountSockPath, err)
+		klog.Fatalf("Failed to receive mount options from %s: %v. "+
+			"This error is often caused by invalid config, "+
+			"see the troubleshooting doc: "+
+			"https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#mountpoint-pods-are-failing-with-failed-to-receive-mount-options-from-commmountsock\n",
+			mountSockPath, err)
 	}
 
 	exitCode, err := csimounter.Run(csimounter.Options{
