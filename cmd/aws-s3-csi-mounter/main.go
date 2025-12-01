@@ -43,8 +43,8 @@ func main() {
 		}
 
 		klog.Fatalf("Failed to receive mount options from %s: %v. "+
-			"This error is frequently caused by an invalid configuration, "+
-			"please refer to the following page for details: "+
+			"This error is often caused by invalid config, "+
+			"see the troubleshooting doc: "+
 			"https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#mountpoint-pods-are-failing-with-failed-to-receive-mount-options-from-commmountsock\n",
 			mountSockPath, err)
 	}
