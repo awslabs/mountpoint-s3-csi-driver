@@ -357,6 +357,60 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			e2epod.VerifyExecInPodSucceed(ctx, f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
 		})
 
+		// Regression test for race condition fixed in https://github.com/awslabs/mountpoint-s3-csi-driver/pull/652
+		// This test was previously failing intermittently before the fix.
+		//
+		// Race condition scenario:
+		// 1. First workload is scheduled to a node and pod attachment creation is initiated
+		// 2. First workload terminates before the creation is propagated to the reconciler
+		// 3. Reconciler deletes the pod attachment (unaware of the pending creation)
+		// 4. Subsequent workloads that should share the pod attachment wait indefinitely
+		//
+		// Fix: Clear the creation expectation when deleting the pod attachment to prevent this deadlock.
+		ginkgo.It("should successfully start second workload pod on the same node if first workload pod is terminated very quickly", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			// List all nodes and select the first one
+			ginkgo.By("Listing all nodes and selecting one for pod scheduling")
+			nodeList, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+			framework.ExpectNoError(err)
+			gomega.Expect(len(nodeList.Items)).To(gomega.BeNumerically(">", 0), "No nodes available in the cluster")
+			targetNode := nodeList.Items[0].Name
+			framework.Logf("Selected node %s for pod scheduling", targetNode)
+
+			// Create first pod on the selected node without waiting for Running status
+			ginkgo.By(fmt.Sprintf("Creating first pod on node %s without waiting for Running status", targetNode))
+			pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod1.Spec.NodeName = targetNode
+			pod1, err = createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod1)
+			framework.ExpectNoError(err)
+
+			// Terminate first pod
+			ginkgo.By(fmt.Sprintf("Deleting pod %s in namespace %s", pod1.Name, f.Namespace.Name))
+			deletePolicy := metav1.DeletePropagationForeground
+			gracePeriod := int64(0)
+			err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Delete(ctx, pod1.Name, metav1.DeleteOptions{
+				GracePeriodSeconds: &gracePeriod,
+				PropagationPolicy:  &deletePolicy,
+			})
+			framework.ExpectNoError(err)
+
+			// Create second pod on the same node
+			ginkgo.By(fmt.Sprintf("Creating second pod on node %s", targetNode))
+			pod2 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod2.Spec.NodeName = targetNode
+			pod2, err = createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err)
+
+			// Wait for second pod to reach Running status
+			ginkgo.By("Waiting for second pod to reach Running status")
+			err = e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod2.Name, f.Namespace.Name)
+			framework.ExpectNoError(err)
+
+			s3paNames, mountpointPodNames := verifyPodsShareMountpointPod(ctx, f, []*v1.Pod{pod2}, defaultExpectedFields(targetNode, resource.Pv))
+			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, []*v1.Pod{pod2}, s3paNames, mountpointPodNames)
+		})
 	})
 }
 
