@@ -1,7 +1,9 @@
 # Configuring the Mountpoint for Amazon S3 CSI Driver
 
-See [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) for
-Mountpoint specific configuration.
+This document covers how to configure the CSI driver: be it through driver install-time configuration or in the volume specs.
+
+Most Mountpoint-specific configuration can be found in [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and should be specified as `mountOptions`.
+One notable exception is for Mountpoint's local data caching, which should be specified using volume attributes. See the dedicated [Mountpoint S3 CSI driver caching documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md) for more information on cache configuration.
 
 ## Static Provisioning
 
@@ -452,7 +454,7 @@ csi:
 Alternatively, the CSI Driver will detect the `--region` argument specified in the Mountpoint options.
 
 ## Configure driver toleration settings
-Toleration of all taints is set to `false` by default. If you don't want to deploy the driver on all nodes, add
+Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
 
 ## Configure node startup taint
@@ -461,7 +463,7 @@ There are potential race conditions on node startup (especially when a node is f
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
 ## Cross-account bucket access
-You can grant access Amazon S3 buckets from different AWS accounts.
+Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
 
 For example, to achieve the following setup:
