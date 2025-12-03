@@ -173,7 +173,7 @@ func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
 	return pvc.CSI.VolumeHandle
 }
 
-func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
+func createPodWithoutWaiting(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
 	serviceAccount := pod.Spec.ServiceAccountName
 	if serviceAccount == "" {
 		serviceAccount = "default"
@@ -182,6 +182,14 @@ func createPod(ctx context.Context, client clientset.Interface, namespace string
 	pod, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %w", err)
+	}
+	return pod, nil
+}
+
+func createPod(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
+	pod, err := createPodWithoutWaiting(ctx, client, namespace, pod)
+	if err != nil {
+		return nil, err
 	}
 	// Waiting for pod to be running
 	err = e2epod.WaitForPodNameRunningInNamespace(ctx, client, pod.Name, namespace)
