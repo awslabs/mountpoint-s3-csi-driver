@@ -98,8 +98,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
+	// Translate target path from host format to container format if needed
+	target = util.TranslateKubeletPath(target)
+
 	if !strings.HasPrefix(target, kubeletPath) {
-		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
+		return nil, status.Errorf(codes.InvalidArgument, "Target path %q is not in kubelet path %q. Please ensure you have correct kubelet path configured.", target, kubeletPath)
 	}
 
 	volCap := req.GetVolumeCapability()
