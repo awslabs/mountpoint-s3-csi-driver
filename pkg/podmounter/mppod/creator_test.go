@@ -305,11 +305,13 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
 					NodeSelectorTerms: []corev1.NodeSelectorTerm{
 						{
-							MatchFields: []corev1.NodeSelectorRequirement{{
-								Key:      metav1.ObjectNameField,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{testNode},
-							}},
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      corev1.LabelHostname,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{testNode},
+								},
+							},
 						},
 					},
 				},

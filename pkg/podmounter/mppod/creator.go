@@ -151,12 +151,15 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			PriorityClassName: priorityClassName,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
-					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod
+					// Ensure the Mountpoint Pod is scheduled onto the same node as the Workload Pod.
+					// We match on the standard hostname label instead of using MatchFields on metadata.name,
+					// since some schedulers (for example EKS Auto Mode's plugin) do not support MatchFields
+					// in node selector terms.
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
 						NodeSelectorTerms: []corev1.NodeSelectorTerm{
 							{
-								MatchFields: []corev1.NodeSelectorRequirement{{
-									Key:      metav1.ObjectNameField,
+								MatchExpressions: []corev1.NodeSelectorRequirement{{
+									Key:      corev1.LabelHostname,
 									Operator: corev1.NodeSelectorOpIn,
 									Values:   []string{node},
 								}},
