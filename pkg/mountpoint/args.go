@@ -59,23 +59,25 @@ func ParseArgs(passedArgs []string) Args {
 
 	for _, a := range passedArgs {
 		var key, value string
+		trimmed := strings.Trim(a, " ")
 
-		parts := strings.SplitN(strings.Trim(a, " "), "=", 2)
-		if len(parts) == 2 {
-			// Ex: `--key=value` or `key=value`
-			key, value = parts[0], parts[1]
+		// Find positions of first space and first equals
+		spacePos := strings.Index(trimmed, " ")
+		equalsPos := strings.Index(trimmed, "=")
+
+		// Determine which separator to use based on which comes first
+		if spacePos != -1 && (equalsPos == -1 || spacePos < equalsPos) {
+			// Space comes first or equals not found - use space separator
+			parts := strings.SplitN(trimmed, " ", 2)
+			key, value = parts[0], strings.Trim(parts[1], " ")
+		} else if equalsPos != -1 {
+			// Equals comes first or space not found - use equals separator
+			parts := strings.SplitN(trimmed, "=", 2)
+			key, value = parts[0], strings.Trim(parts[1], " ")
 		} else {
-			// Ex: `--key value` or `key value`
-			// Ex: `--key` or `key`
-			parts = strings.SplitN(strings.Trim(parts[0], " "), " ", 2)
-			if len(parts) == 1 {
-				// Ex: `--key` or `key`
-				key = parts[0]
-				value = ArgNoValue
-			} else {
-				// Ex: `--key value` or `key value`
-				key, value = parts[0], strings.Trim(parts[1], " ")
-			}
+			// No separators found - just a key
+			key = trimmed
+			value = ArgNoValue
 		}
 
 		// prepend -- if it's not already there
