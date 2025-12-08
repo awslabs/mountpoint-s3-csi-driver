@@ -2,8 +2,34 @@
 
 This document covers how to configure the CSI driver: be it through driver install-time configuration or in the volume specs.
 
+## Mountpoint-specific configuration
+
 Most Mountpoint-specific configuration can be found in [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and should be specified as `mountOptions`.
 One notable exception is for Mountpoint's local data caching, which should be specified using volume attributes. See the dedicated [Mountpoint S3 CSI driver caching documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md) for more information on cache configuration.
+
+Common options that can be passed directly to Mountpoint via `mountOptions` include:
+
+- `--prefix` to mount only a specific prefix within your bucket
+- `--maximum-throughput-gbps` to hint desired bandwidth usage
+- `--write-part-size` to adjust upload part sizes
+
+Below shows an example `mountOptions` value for these options
+
+```yaml
+mountOptions:
+  - prefix hello world/
+  - maximum-throughput-gbps 25
+  - write-part-size 16777216
+```
+
+> [!IMPORTANT]
+> Mount options are passed directly to Mountpoint without shell interpretation.
+> Unlike in a shell, quoted strings like `"my value"` are treated as literal quotes,
+> not as a way to group words with spaces.
+> The `prefix` argument provided above highlights this,
+> it will be interpreted by Mountpoint similar to `--prefix="hello world/"`.
+
+See [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) for all available configuration options.
 
 ## Static Provisioning
 
