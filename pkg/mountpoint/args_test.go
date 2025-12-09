@@ -169,6 +169,7 @@ func TestParsingMountpointArgs(t *testing.T) {
 			},
 		},
 		{
+			// Mount option: prefix=kwk3-di/sub vault/ -> CLI equivalent: --prefix="kwk3-di/sub vault/"
 			name: "prefix with equals separator and space in value",
 			input: []string{
 				"allow-delete",
@@ -589,19 +590,39 @@ func TestCreatingMountpointArgsFromAlreadyParsedArgs(t *testing.T) {
 	assert.Equals(t, want, parsedArgs.SortedList())
 }
 
+type argPair struct {
+	key       string
+	value     string
+	separator string
+}
+
+func argumentGenerator() *rapid.Generator[argPair] {
+	return rapid.Custom(func(t *rapid.T) argPair {
+		key := rapid.StringMatching(`-{0,2}[a-z][a-z0-9-]*`).Draw(t, "key")
+		value := rapid.String().Draw(t, "value")
+		separator := rapid.OneOf(rapid.Just(" "), rapid.Just("=")).Draw(t, "separator")
+		return argPair{key: key, value: value, separator: separator}
+	})
+}
+
 func TestParseArgsProperties(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		key := rapid.StringMatching(`-{0,2}[a-z][a-z0-9-]*`).Draw(t, "key")
-		value := rapid.StringOf(rapid.OneOf(
-			rapid.Rune().Filter(func(r rune) bool { return r > 32 && r < 127 }),
-		)).Filter(func(s string) bool { return strings.TrimSpace(s) != "" }).Draw(t, "value")
-		separator := rapid.OneOf(rapid.Just(" "), rapid.Just("=")).Draw(t, "separator")
+		argPair := argumentGenerator().Draw(t, "argPair")
 
-		input := fmt.Sprintf("%s%s%s", key, separator, value)
+		input := fmt.Sprintf("%s%s%s", argPair.key, argPair.separator, argPair.value)
 		args := mountpoint.ParseArgs([]string{input})
 		result := args.SortedList()
 
-		if len(result) == 0 {
+		// Check if the normalized key is disallowed
+		normalizedKey := argPair.key
+		if !strings.HasPrefix(normalizedKey, "-") {
+			normalizedKey = "--" + normalizedKey
+		}
+		disallowed := normalizedKey == "--foreground" || normalizedKey == "-f" ||
+			normalizedKey == "--help" || normalizedKey == "-h" ||
+			normalizedKey == "--version" || normalizedKey == "-v"
+
+		if len(result) == 0 && !disallowed {
 			t.Fatalf("ParseArgs produced empty result for input: %q", input)
 		}
 
@@ -611,9 +632,9 @@ func TestParseArgsProperties(t *testing.T) {
 			}
 		}
 
-		parsedValue, exists := args.Value(key)
-		if exists && parsedValue != value {
-			t.Fatalf("Value not preserved: expected %q, got %q for input: %q", value, parsedValue, input)
+		parsedValue, exists := args.Value(argPair.key)
+		if exists && parsedValue != strings.Trim(argPair.value, " ") {
+			t.Fatalf("Value not preserved: expected %q, got %q for input: %q", strings.TrimSpace(argPair.value), parsedValue, input)
 		}
 
 		reparsed := mountpoint.ParseArgs(result)
