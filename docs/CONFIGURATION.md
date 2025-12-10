@@ -17,17 +17,17 @@ Below shows an example `mountOptions` value for these options
 
 ```yaml
 mountOptions:
-  - prefix hello world/
+  - prefix some-prefix/
   - maximum-throughput-gbps 25
   - write-part-size 16777216
 ```
 
 > [!IMPORTANT]
 > Mount options are passed directly to Mountpoint without shell interpretation.
-> Unlike in a shell, quoted strings like `"my value"` are treated as literal quotes,
-> not as a way to group words with spaces.
-> The `prefix` argument provided above highlights this,
-> it will be interpreted by Mountpoint similar to `--prefix="hello world/"`.
+> Unlike in a shell, quoted strings like `"my value"` are treated as a literal quoted value
+> rather than as a way to group words with spaces.
+> For example, if you wish to be pass an argument to Mountpoint like `--prefix="hello world/"`,
+> you should use the mount option `prefix hello world/`.
 
 See [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) for all available configuration options.
 
