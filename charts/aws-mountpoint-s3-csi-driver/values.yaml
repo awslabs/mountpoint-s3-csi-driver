@@ -8,7 +8,7 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v2.0.0"
+  tag: "v2.2.1"
 
 node:
   kubeletPath: /var/lib/kubelet
@@ -89,7 +89,7 @@ controller:
 mountpointPod:
   namespace: mount-s3
   # If creating the namespace yourself, review the namespace definition in this Helm chart to follow the best practices.
-  # For example, this chart enforces that pods in this namespace are bound by the 'restricted' pod security standard.
+  # For example, this chart enforces that pods in the namespace are bound by the 'restricted' pod security standard.
   # This allows us to restrict the pods that the driver's node daemon has privileges to create.
   createNamespace: true
   priorityClassName: mount-s3-critical

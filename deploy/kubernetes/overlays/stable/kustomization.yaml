@@ -5,7 +5,7 @@ resources:
 images:
   - name: csi-driver
     newName: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
-    newTag: v2.0.0
+    newTag: v2.2.1
 replacements:
   # Replace value of `MOUNTPOINT_IMAGE` env variable of the CSI Controller with the image path of the CSI Node.
   - source:

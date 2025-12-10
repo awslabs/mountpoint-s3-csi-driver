@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-ARG MOUNTPOINT_VERSION=1.19.0
+ARG MOUNTPOINT_VERSION=1.21.0
 
 # Download the mountpoint tarball and produce an installable directory
 # Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
@@ -43,7 +43,7 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
 # Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.24 as builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.25 as builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver

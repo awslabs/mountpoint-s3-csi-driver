@@ -1,7 +1,41 @@
 # Unreleased
 
+# v2.2.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.1/README.md)
+
+* Fix bug where writes to an open file interacting with multiple processes would complete early and result in failed writes.
+  This change updates the node daemonset to run in host PID namespace.
+  ([#632](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/632))
+
+# v2.2.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.0/README.md)
+
+### Notable changes
+* Support Mountpoint [version 1.21.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.21.0)
+  * Mountpoint for Amazon S3 adds support for exporting metrics using OTel Protocol. See [METRICS documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/METRICS.md). ([1685](https://github.com/awslabs/mountpoint-s3/pull/1685))
+  * Change default logging level from WARN to INFO to improve visibility of Mountpoint operational messages. ([#1605](https://github.com/awslabs/mountpoint-s3/pull/1605), [#1668](https://github.com/awslabs/mountpoint-s3/pull/1668))
+  * Change FUSE and S3 request metric names in logs. ([#1630](https://github.com/awslabs/mountpoint-s3/pull/1630), [#1653](https://github.com/awslabs/mountpoint-s3/pull/1653))
+  * Change metric logging format to add metric units. ([#1677](https://github.com/awslabs/mountpoint-s3/pull/1677))
+  * Fixed "file does not exist" errors during concurrent directory listing operations. ([#1648](https://github.com/awslabs/mountpoint-s3/pull/1648))
+
+# v2.1.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.1.0/README.md)
+
 ### Notable changes
 * Add removal of node `s3.csi.aws.com/agent-not-ready` taint after the CSI driver completes registration with kubelet for readiness detection. See the [configuration guide](./docs/CONFIGURATION.md#configure-node-startup-taint) for more details
+* Fixed Mountpoint Pod creation failures with long volume handles by moving volumeID and PV name to annotations. ([#585](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/585))
+* Added cleanup of stale Headroom Pods in StaleAttachmentCleaner when workload pods no longer exist or are past scheduling. ([#560](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/560))
+* Improved selectableFields detection by querying CRD definition at runtime instead of relying on Kubernetes version checks. ([#557](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/557))
+* Fixed Kubernetes compatibility warnings by conditionally including selectableFields based on cluster version and added server-side manifest validation. ([#554](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/554))
+* Support Mountpoint [version 1.20.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.20.0)
+  * Adopt a unified memory pool to reduce overall memory usage. ([mountpoint-s3#1511](https://github.com/awslabs/mountpoint-s3/pull/1511))
+  * Log messages now include the thread ID that logged the message, like "ThreadId(01)", after the level. ([mountpoint-s3#1460](https://github.com/1460))awslabs/mountpoint-s3/pull/
+  * Fix issue preventing incremental upload to handle very large write part sizes. ([mountpoint-s3#1538](https://github.com/awslabs/mountpoint-s3/pull/1538))
+  * Fix race condition that could cause Mountpoint to panic on unlink. ([mountpoint-s3#1596](https://github.com/awslabs/mountpoint-s3/pull/1596))
+  * Downgrade ioctl operation logging level from WARN to DEBUG to reduce log noise. ([mountpoint-s3#1598](https://github.com/awslabs/mountpoint-s3/pull/1598))
 
 # v2.0.0
 

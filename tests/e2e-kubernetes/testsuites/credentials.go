@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -74,6 +75,9 @@ const credentialSecretName = "aws-secret"
 
 const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
 
+// AWS Service Principal for EKS Pod Identity
+var eksPodsServicePrincipal = determineEksPodsServicePrincipal()
+
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
 var ClusterName string
@@ -84,6 +88,16 @@ var IMDSAvailable bool
 
 type s3CSICredentialsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
+}
+
+func determineEksPodsServicePrincipal() string {
+	const envVarKey = "POD_IDENTITY_SERVICE_PRINCIPAL"
+	fromEnv := strings.TrimSpace(os.Getenv(envVarKey))
+	if len(fromEnv) == 0 {
+		return "pods.eks.amazonaws.com"
+	} else {
+		return fromEnv
+	}
 }
 
 func InitS3CSICredentialsTestSuite() storageframework.TestSuite {
@@ -995,7 +1009,7 @@ func eksPodIdentityRoleTrustPolicyDocument() string {
 			{
 				"Effect": "Allow",
 				"Principal": jsonMap{
-					"Service": serviceAccountTokenAudienceEKS,
+					"Service": eksPodsServicePrincipal,
 				},
 				"Action": []string{"sts:AssumeRole", "sts:TagSession"},
 			},
@@ -1013,12 +1027,12 @@ func getARNPartition(arn string) string {
 }
 
 func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDocument string, policyNames ...string) (*iamtypes.Role, func(context.Context) error) {
-	framework.Logf("Creating IAM role")
 	identity := stsCallerIdentity(ctx)
 
 	client := iam.NewFromConfig(awsConfig(ctx))
 
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
+	framework.Logf("Creating IAM role '%s' with assumeRolePolicyDocument \"%s\"", roleName, assumeRolePolicyDocument)
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
 		RoleName:                 ptr.To(roleName),
 		AssumeRolePolicyDocument: ptr.To(assumeRolePolicyDocument),
@@ -1026,7 +1040,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
-		framework.Logf("Deleting IAM role")
+		framework.Logf("Deleting IAM role '%s'", roleName)
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
 			RoleName: ptr.To(roleName),
 		})
@@ -1156,7 +1170,11 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 }
 
 func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
-	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity", sa.Name)
+	// If you're seeing the following error, then it means you've made a typo in the cluster name when running the tests!
+	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 404, RequestID:
+	// ResourceNotFoundException: The token included in the request has no service account role association for it.
+
+	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity (%s, %s, %s)", sa.Name, pod.Name, pod.UID, pod.Namespace)
 
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{

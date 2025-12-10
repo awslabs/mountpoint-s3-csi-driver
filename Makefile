@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=2.0.0
+VERSION=2.2.1
 
 PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
@@ -175,6 +175,10 @@ e2e: e2e-controller
 .PHONY: check_style
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
+
+.PHONY: check_tidy
+check_mod_tidy:
+	test -z "$$(go mod tidy --diff | tee /dev/stderr)"
 
 .PHONY: check_licenses
 check_licenses: download_go_deps
