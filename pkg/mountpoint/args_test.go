@@ -622,7 +622,14 @@ func TestParseArgsProperties(t *testing.T) {
 			normalizedKey == "--help" || normalizedKey == "-h" ||
 			normalizedKey == "--version" || normalizedKey == "-v"
 
-		if len(result) == 0 && !disallowed {
+		if disallowed {
+			if len(result) != 0 {
+				t.Fatalf("Expected empty result for disallowed key, got %v for input: %q", result, input)
+			}
+			return
+		}
+
+		if len(result) == 0 {
 			t.Fatalf("ParseArgs produced empty result for input: %q", input)
 		}
 
@@ -632,9 +639,9 @@ func TestParseArgsProperties(t *testing.T) {
 			}
 		}
 
-		parsedValue, exists := args.Value(argPair.key)
-		if exists && parsedValue != strings.Trim(argPair.value, " ") {
-			t.Fatalf("Value not preserved: expected %q, got %q for input: %q", strings.TrimSpace(argPair.value), parsedValue, input)
+		parsedValue, _ := args.Value(argPair.key)
+		if parsedValue != strings.Trim(argPair.value, " ") {
+			t.Fatalf("Value not preserved: expected %q, got %q for input: %q", strings.Trim(argPair.value, " "), parsedValue, input)
 		}
 
 		reparsed := mountpoint.ParseArgs(result)
