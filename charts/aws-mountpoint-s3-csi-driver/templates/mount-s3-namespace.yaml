@@ -1,4 +1,4 @@
-{{- if .Values.mountpointPod.namespaceEnabled }}
+{{- if .Values.mountpointPod.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
