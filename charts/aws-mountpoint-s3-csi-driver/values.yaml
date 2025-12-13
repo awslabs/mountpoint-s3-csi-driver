@@ -89,6 +89,7 @@ controller:
 mountpointPod:
   namespace: mount-s3
   priorityClassName: mount-s3-critical
+  envConfigMap: ""
   preemptingPriorityClassName: mount-s3-preempting-critical
   headroomPriorityClassName: mount-s3-headroom
 
