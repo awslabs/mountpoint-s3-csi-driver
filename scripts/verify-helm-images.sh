@@ -16,10 +16,11 @@ set -euo pipefail
 #   - yq: YAML processor (https://github.com/mikefarah/yq)
 #   - crane: Container registry tool (https://github.com/google/go-containerregistry/tree/main/cmd/crane)
 #
-# Note: AWS credentials are NOT required. crane handles authentication automatically for public ECR repositories.
+# Note: AWS credentials are required, though not specific ones.
 
 CHART_DIR="charts/aws-mountpoint-s3-csi-driver"
 VALUES_FILE="${CHART_DIR}/values.yaml"
+EKS_REGISTRY="602401143452.dkr.ecr.us-east-1.amazonaws.com"
 
 echo "Checking prerequisites..."
 
@@ -52,6 +53,11 @@ fi
 
 echo "Verifying all images referenced in ${VALUES_FILE}..."
 echo ""
+
+if ! aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "${EKS_REGISTRY}"; then
+  echo "ERROR: Failed to authenticate with ECR"
+  exit 1
+fi
 
 FAILED=0
 
@@ -87,18 +93,24 @@ verify_public_ecr_image "${MAIN_REPO}:${MAIN_TAG}-amd64"
 echo "=== CSI Driver Image (ARM64) ==="
 verify_public_ecr_image "${MAIN_REPO}:${MAIN_TAG}-arm64"
 
-# Verify sidecar images
-NODE_REGISTRAR_REPO=$(yq eval '.sidecars.nodeDriverRegistrar.image.repository' "${VALUES_FILE}")
-NODE_REGISTRAR_TAG=$(yq eval '.sidecars.nodeDriverRegistrar.image.tag' "${VALUES_FILE}")
+verify_sidecar_images_in_chart() {
+  RENDERED_CHART=$(eval "$1")
 
-echo "=== Node Driver Registrar Sidecar ==="
-verify_public_ecr_image "${NODE_REGISTRAR_REPO}:${NODE_REGISTRAR_TAG}"
+  # Verify sidecar images
+  NODE_REGISTRAR=$(echo "$RENDERED_CHART" | yq '.spec.template.spec.containers[] | select(.name == "node-driver-registrar") | .image')
+  echo "=== Node Driver Registrar Sidecar ==="
+  verify_public_ecr_image "${NODE_REGISTRAR}"
 
-LIVENESS_PROBE_REPO=$(yq eval '.sidecars.livenessProbe.image.repository' "${VALUES_FILE}")
-LIVENESS_PROBE_TAG=$(yq eval '.sidecars.livenessProbe.image.tag' "${VALUES_FILE}")
+  LIVENESS_PROBE=$(echo "$RENDERED_CHART" | yq '.spec.template.spec.containers[] | select(.name == "liveness-probe") | .image')
+  echo "=== Liveness Probe Sidecar ==="
+  verify_public_ecr_image "${LIVENESS_PROBE}"
+}
 
-echo "=== Liveness Probe Sidecar ==="
-verify_public_ecr_image "${LIVENESS_PROBE_REPO}:${LIVENESS_PROBE_TAG}"
+echo "== Verifying standard images =="
+verify_sidecar_images_in_chart "helm template $CHART_DIR"
+
+echo "== Verifying EKS Addon images =="
+verify_sidecar_images_in_chart "helm template $CHART_DIR --set isEKSAddon=true --set sidecars.livenessProbe.image.containerRegistry=$EKS_REGISTRY --set sidecars.nodeDriverRegistrar.image.containerRegistry=$EKS_REGISTRY"
 
 # Verify headroom pod image (used when experimental.reserveHeadroomForMountpointPods is enabled)
 HEADROOM_IMAGE=$(yq eval '.experimental.headroomPodImage' "${VALUES_FILE}")
