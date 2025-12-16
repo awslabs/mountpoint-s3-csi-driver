@@ -1,0 +1,51 @@
+name: Verify Sidecar Images
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  verify-sidecar-images:
+    name: Verify sidecar images
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    strategy:
+      matrix:
+        helm-args:
+          - ""
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ inputs.ref }}
+        persist-credentials: false
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: ${{ vars.IAM_ROLE }}
+        aws-region: ${{ vars.AWS_REGION }}
+    - name: Login to ECR Public
+      run: |
+        aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+
+    - name: Verify sidecar images
+      run: |
+        tests/verify_sidecar_images.sh
+      env:
+        HELM_ARGS: "${{ matrix.helm-args }}"
