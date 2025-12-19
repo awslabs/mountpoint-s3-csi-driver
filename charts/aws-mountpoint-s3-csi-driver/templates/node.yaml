@@ -47,7 +47,14 @@ spec:
         - name: {{ . }}
       {{- end }}
       {{- end }}
+
+      {{- if eq (include "aws-mountpoint-s3-csi-driver.isOpenShift" .) "false" }}
       hostPID: true  # Support Mountpoint semantics which require PID visibility
+      {{- else }}
+      # hostPID is not supported by the driver when running in OpenShift.
+      # Impacts Mountpoint semantics, see tracking issue: https://github.com/awslabs/mountpoint-s3-csi-driver/issues/626
+      hostPID: false
+      {{- end }}
 
       containers:
         - name: s3-plugin
