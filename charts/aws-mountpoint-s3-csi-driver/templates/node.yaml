@@ -48,7 +48,7 @@ spec:
       {{- end }}
       {{- end }}
 
-      {{- if not (include "aws-mountpoint-s3-csi-driver.isOpenShift" .) }}
+      {{- if eq (include "aws-mountpoint-s3-csi-driver.isOpenShift" .) "false" }}
       hostPID: true  # Support Mountpoint semantics which require PID visibility
       {{- else }}
       # hostPID is not supported by the driver when running in OpenShift.
