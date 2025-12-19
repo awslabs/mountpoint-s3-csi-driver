@@ -1,5 +1,12 @@
 # Unreleased
 
+# v2.2.2
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.2/README.md)
+
+* When installing via Kustomize, or when installing via Helm on OpenShift clusters (including ROSA), rollback bug fix for where writes to an open file interacting with multiple processes would complete early and result in failed writes.
+  ([#667](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/667))
+
 # v2.2.1
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.2.1/README.md)
