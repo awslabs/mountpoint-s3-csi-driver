@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=2.2.1
+VERSION=2.2.2
 
 PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
