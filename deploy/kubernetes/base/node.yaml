@@ -33,7 +33,12 @@ spec:
                       - hybrid
       tolerations:
         - operator: Exists
-      hostPID: true  # Support Mountpoint semantics which require PID visibility
+
+      # hostPID=true is required to support Mountpoint semantics which require PID visibility
+      # Unfortunately, we cannot turn it on for OpenShift at this time.
+      # This is disabled when installing via Kustomize since it is not possible to know if the manifest is being applied to an OpenShift cluster or not.
+      # See tracking issue: https://github.com/awslabs/mountpoint-s3-csi-driver/issues/626
+      hostPID: false
 
       containers:
         - name: s3-plugin
