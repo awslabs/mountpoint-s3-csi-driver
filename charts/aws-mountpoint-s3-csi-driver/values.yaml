@@ -1,6 +1,10 @@
 # Default values for Mountpoint for Amazon S3 CSI Driver Helm chart.
 # You can customize any values here during installation.
 
+# Set to true if running on OpenShift/ROSA
+# If not set, auto-detects OpenShift
+isOpenShift: null
+
 image:
   # Our regional ECR repositories are labelled `eks/aws-s3-csi-driver`.
   # See https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html for the per-region registry list.
