@@ -1,8 +1,8 @@
 # Default values for Mountpoint for Amazon S3 CSI Driver Helm chart.
 # You can customize any values here during installation.
 
-# Set to true if running on OpenShift/ROSA
-# If not set, auto-detects OpenShift
+# Set to true if running on OpenShift/ROSA.
+# If not set, auto-detects OpenShift where possible.
 isOpenShift: null
 
 image:
