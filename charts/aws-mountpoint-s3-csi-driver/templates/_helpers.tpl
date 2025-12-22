@@ -71,3 +71,14 @@ Convert the `--extra-tags` command line arg from a map.
 {{- printf "- \"--extra-tags=%s\"" (join "," $result.pairs) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Determine if running on OpenShift (incl. ROSA)
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.isOpenShift" -}}
+{{- $isOpenShift := .Values.isOpenShift -}}
+{{- if eq $isOpenShift nil -}}
+{{- $isOpenShift = .Capabilities.APIVersions.Has "security.openshift.io/v1/SecurityContextConstraints" -}}
+{{- end -}}
+{{- $isOpenShift -}}
+{{- end -}}
