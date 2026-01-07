@@ -62,8 +62,6 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
-            - name: KUBELET_PATH
-              value: /var/lib/kubelet
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:

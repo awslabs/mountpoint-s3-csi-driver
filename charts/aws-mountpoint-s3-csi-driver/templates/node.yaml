@@ -79,15 +79,13 @@ spec:
             - --v={{ .Values.node.logLevel }}
           env:
             - name: CSI_ENDPOINT
-              value: unix:{{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
-            - name: KUBELET_PATH
-              value: {{ .Values.node.kubeletPath }}
+              value: unix:/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
             - name: MOUNTPOINT_NAMESPACE
@@ -116,7 +114,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: kubelet-dir
-              mountPath: {{ .Values.node.kubeletPath }}
+              mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
           ports:
             - name: healthz
@@ -147,7 +145,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
+              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
