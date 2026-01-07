@@ -1,4 +1,12 @@
-# Unreleased
+# v2.3.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.3.0/README.md)
+
+### Notable changes
+* Add `mountpointPod.createNamespace` flag to Helm chart to control namespace creation behavior. ([#580](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/580))
+* Fix prefix parsing for S3 bucket prefixes in volume configurations. ([#658](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/658))
+* Fix bug where workloads sharing a Mountpoint Pod could wait indefinitely if the first workload terminates before pod attachment is created. ([#652](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/652))
+* Update minimum Kubernetes version for Helm chart to 1.29.0. ([#640](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/640))
 
 # v2.2.2
 
