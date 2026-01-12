@@ -153,10 +153,17 @@ jobs:
           ACTION: "delete_cluster"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
+  verify-sidecar-images:
+    name: Verify sidecar images
+    uses: ./.github/workflows/verify-sidecar-images.yaml
+    with:
+      environment: "${{ inputs.environment }}"
+      ref: ${{ github.event.pull_request.head.sha }}
   post_test:
     if: always()
     needs:
       - test
+      - verify-sidecar-images
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
