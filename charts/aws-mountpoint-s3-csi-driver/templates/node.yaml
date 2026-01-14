@@ -86,9 +86,9 @@ spec:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
               value: /var/lib/kubelet/plugins/s3.csi.aws.com/
-            - name: KUBELET_PATH
+            - name: CONTAINER_KUBELET_PATH
               value: /var/lib/kubelet
-            - name: KUBELET_PATH_HOST
+            - name: HOST_KUBELET_PATH
               value: {{ .Values.node.kubeletPath }}
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"

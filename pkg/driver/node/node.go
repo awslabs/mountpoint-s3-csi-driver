@@ -93,16 +93,16 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
 	// Translate target path from host format to container format if needed
-	target = util.TranslateKubeletPath(target)
+	targetContainer := util.KubeletHostPathToContainerPath(targetHost)
 
-	if !strings.HasPrefix(target, kubeletPath) {
-		return nil, status.Errorf(codes.InvalidArgument, "Target path %q is not in kubelet path %q. Please ensure you have correct kubelet path configured.", target, kubeletPath)
+	if !strings.HasPrefix(targetContainer, kubeletPath) {
+		return nil, status.Errorf(codes.InvalidArgument, "Target path %q is not in kubelet path %q. Please ensure you have correct kubelet path configured.", targetContainer, kubeletPath)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -148,15 +148,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, targetContainer, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
-		os.Remove(target)
-		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup); err != nil {
+		os.Remove(targetContainer)
+		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
-	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
+	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }

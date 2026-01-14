@@ -8,21 +8,21 @@ import (
 const defaultKubeletPath = "/var/lib/kubelet"
 
 // KubeletPath returns path of the kubelet.
-// It looks for `KUBELET_PATH` variable, and returns a default path if its not defined.
+// It looks for `CONTAINER_KUBELET_PATH` variable, and returns a default path if its not defined.
 func KubeletPath() string {
-	kubeletPath := os.Getenv("KUBELET_PATH")
+	kubeletPath := os.Getenv("CONTAINER_KUBELET_PATH")
 	if kubeletPath == "" {
 		return defaultKubeletPath
 	}
 	return kubeletPath
 }
 
-// TranslateKubeletPath translates a path from host kubelet path to container kubelet path.
+// KubeletHostPathToContainerPath translates a path from host kubelet path to container kubelet path.
 // This is useful when the kubelet path on the host is different from the kubelet path in the container.
 // For example, in MicroK8s, the host path is /var/snap/microk8s/common/var/lib/kubelet
 // but the container sees it as /var/lib/kubelet.
-func TranslateKubeletPath(path string) string {
-	hostPath := os.Getenv("KUBELET_PATH_HOST")
+func KubeletHostPathToContainerPath(path string) string {
+	hostPath := os.Getenv("HOST_KUBELET_PATH")
 	containerPath := KubeletPath()
 
 	// If no host path is configured, or paths are the same, no translation needed
