@@ -7,9 +7,9 @@ import (
 
 const defaultKubeletPath = "/var/lib/kubelet"
 
-// KubeletPath returns path of the kubelet.
+// ContainerKubeletPath returns the kubelet path as seen from inside the container.
 // It looks for `CONTAINER_KUBELET_PATH` variable, and returns a default path if its not defined.
-func KubeletPath() string {
+func ContainerKubeletPath() string {
 	kubeletPath := os.Getenv("CONTAINER_KUBELET_PATH")
 	if kubeletPath == "" {
 		return defaultKubeletPath
@@ -23,7 +23,7 @@ func KubeletPath() string {
 // but the container sees it as /var/lib/kubelet.
 func KubeletHostPathToContainerPath(path string) string {
 	hostPath := os.Getenv("HOST_KUBELET_PATH")
-	containerPath := KubeletPath()
+	containerPath := ContainerKubeletPath()
 
 	// If no host path is configured, or paths are the same, no translation needed
 	if hostPath == "" || hostPath == containerPath {

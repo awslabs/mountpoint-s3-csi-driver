@@ -76,7 +76,7 @@ func NewPodMounter(
 		s3paCache:         s3paCache,
 		credProvider:      credProvider,
 		mount:             mount,
-		kubeletPath:       util.KubeletPath(),
+		kubeletPath:       util.ContainerKubeletPath(),
 		mountSyscall:      mountSyscall,
 		bindMountSyscall:  bindMountSyscall,
 		kubernetesVersion: kubernetesVersion,

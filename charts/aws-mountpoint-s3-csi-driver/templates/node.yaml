@@ -149,7 +149,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
+              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:

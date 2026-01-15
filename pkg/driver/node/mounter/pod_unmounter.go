@@ -49,7 +49,7 @@ func NewPodUnmounter(
 	return &PodUnmounter{
 		nodeID:       nodeID,
 		mount:        mount,
-		kubeletPath:  util.KubeletPath(),
+		kubeletPath:  util.ContainerKubeletPath(),
 		podWatcher:   podWatcher,
 		credProvider: credProvider,
 	}
