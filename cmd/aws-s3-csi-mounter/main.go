@@ -10,7 +10,9 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -32,6 +34,8 @@ const mountpointBin = "mount-s3"
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
+
+	_ = ignoreSIGTERM()
 
 	mountpointBinFullPath := filepath.Join(*mountpointBinDir, mountpointBin)
 	mountOptions, err := recvMountOptions()
@@ -72,4 +76,16 @@ func recvMountOptions() (mountoptions.Options, error) {
 	}
 	klog.Infof("Mount options has been received from %s", mountSockPath)
 	return options, nil
+}
+
+func ignoreSIGTERM() <-chan struct{} {
+	sigChan := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(sigChan, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		klog.Info("Received SIGTERM, ignoring and waiting for exit file mechanism")
+		close(done)
+	}()
+	return done
 }
