@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
 const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
+const untestedVersion = "0.0.0"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
@@ -160,32 +163,65 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		return contextWithVolumeAttributes(ctx, map[string]string{"authenticationSource": "pod"})
 	}
 
-	BeforeEach(func(ctx context.Context) {
-		l = local{}
-		l.config = driver.PrepareTest(ctx, f)
-		DeferCleanup(cleanup)
-	})
+	// createTestWorkloads creates workloads with different access levels
+	createTestWorkloads := func(ctx context.Context, pliFullAccessSA, pliReadOnlyAccessSA *v1.ServiceAccount) (fullAccessPods, readOnlyAccessPods []*v1.Pod) {
+		dliReadOnlyAccessPod := createPod(ctx, "default")
+		pliFullAccessPod := createPod(enablePLI(ctx), pliFullAccessSA.Name)
+		pliReadOnlyAccessPod := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
+		return []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
+	}
 
-	It("Upgrade to a new version from a previous version without interrupting the workloads", func(ctx context.Context) {
-		if helmChartPreviousVersion == "" || helmChartNewVersion == "" {
-			Fail("Please set the previous and new versions to test using `MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION` and `MOUNTPOINT_CSI_DRIVER_NEW_VERSION` environment variables")
+	// writeAndVerifyTestFile writes a test file and verifies it can be read
+	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod) (testFile string, testWriteSize int, seed int64) {
+		seed = time.Now().UTC().UnixNano()
+		testWriteSize = 1024
+		testFile = filepath.Join(e2epod.VolumeMountPath1, "test.txt")
+		for _, pod := range pods {
+			checkWriteToPath(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
 		}
+		return
+	}
 
+	// verifyReadOnlyAccess verifies pods can list but not write
+	verifyReadOnlyAccess := func(ctx context.Context, pods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
+		for _, pod := range pods {
+			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
+		}
+	}
+
+	// setupTestEnvironment prepares the test environment with OIDC and Helm
+	setupTestEnvironment := func(ctx context.Context) (*cli.EnvSettings, *action.Configuration) {
 		oidcProvider = oidcProviderForCluster(ctx, f)
 		if oidcProvider == "" {
 			Fail("Please configure OIDC provider for the testing cluster")
 		}
-
-		framework.Logf("Testing upgrade from %q to %q...", helmChartPreviousVersion, helmChartNewVersion)
-
 		settings, cfg := initHelmClient()
-
-		// Make sure to start from a clean state
 		uninstallCSIDriver(cfg)
+		return settings, cfg
+	}
 
-		// Install the previously released version from our Helm repo
-		chartPath := pullCSIDriver(settings, cfg, helmChartPreviousVersion)
-		installCSIDriver(cfg, helmChartPreviousVersion, chartPath)
+	// verifyWorkloadHealth checks if pods can perform expected operations
+	verifyWorkloadHealth := func(ctx context.Context, fullAccessPods, readOnlyPods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
+		for _, pod := range fullAccessPods {
+			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
+			checkBasicFileOperations(ctx, pod)
+		}
+		for _, pod := range readOnlyPods {
+			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
+		}
+	}
+
+	// runUpgradeTest performs the complete upgrade test workflow
+	runUpgradeTest := func(ctx context.Context, fromVersion, toVersion string, useSourceBuild bool) {
+		settings, cfg := setupTestEnvironment(ctx)
+		framework.Logf("Testing upgrade from %q to %q...", fromVersion, toVersion)
+
+		// Install the previous version
+		chartPath := pullCSIDriver(settings, cfg, fromVersion)
+		installCSIDriver(cfg, fromVersion, chartPath)
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
 		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
@@ -193,36 +229,21 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		pliFullAccessSA, pliReadOnlyAccessSA := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess), createServiceAccountWithPolicy(ctx, iamPolicyS3ReadOnlyAccess)
 
 		// Create three workloads with different SAs
-		dliReadOnlyAccessPod := createPod(ctx, "default")
-		pliFullAccessPod := createPod(enablePLI(ctx), pliFullAccessSA.Name)
-		pliReadOnlyAccessPod := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
-
-		fullAccessPods, readOnlyAccessPods := []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
+		fullAccessPods, readOnlyAccessPods := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 
 		// Write a sample files to writeable pods
-		seed := time.Now().UTC().UnixNano()
-		testWriteSize := 1024 // 1KB
-		testFile := filepath.Join(e2epod.VolumeMountPath1, "test.txt")
-		for _, pod := range fullAccessPods {
-			checkWriteToPath(ctx, f, pod, testFile, testWriteSize, seed)
-			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
-		}
+		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPods)
 
 		// Ensure read-only pods can do listing but fails to write
-		for _, pod := range readOnlyAccessPods {
-			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
-		}
+		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
 
-		// Now upgrade it to the new version
-		if strings.HasSuffix(helmChartNewVersion, "-source") {
-			// If the version ends with `-source`, do a source build
-			chartPath = packageHelmChartFromSource(helmChartNewVersion)
+		// Upgrade to the new version
+		if useSourceBuild {
+			chartPath = packageHelmChartFromSource(toVersion)
 		} else {
-			// Otherwise just install a released version
-			chartPath = pullCSIDriver(settings, cfg, helmChartNewVersion)
+			chartPath = pullCSIDriver(settings, cfg, toVersion)
 		}
-		upgradeCSIDriver(cfg, f, helmChartNewVersion, chartPath)
+		upgradeCSIDriver(cfg, f, toVersion, chartPath)
 
 		// Create new workloads after the upgrade
 		dliReadOnlyAccessPodNewVersion := createPod(ctx, "default")
@@ -230,34 +251,15 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		pliReadOnlyAccessPodNewVersion := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
 		fullAccessPods = append(fullAccessPods, pliFullAccessPodNewVersion)
 		readOnlyAccessPods = append(readOnlyAccessPods, dliReadOnlyAccessPodNewVersion, pliReadOnlyAccessPodNewVersion)
-		for _, pod := range []*v1.Pod{pliFullAccessPodNewVersion} {
-			checkWriteToPath(ctx, f, pod, testFile, testWriteSize, seed)
-			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
-		}
-		for _, pod := range readOnlyAccessPods {
-			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
-		}
+
+		// Verify new workloads
+		_, _, _ = writeAndVerifyTestFile(ctx, []*v1.Pod{pliFullAccessPodNewVersion})
+		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
 
 		// Ensure the workloads are still healthy
 		for range UPGRADE_TEST_DURATION_IN_MINUTES {
 			framework.Logf("Checking if workloads are still healthy after the upgrade...")
-
-			// Check full-access pods can still write and read originally created file
-			for _, pod := range fullAccessPods {
-				// Test reading the existing file
-				checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
-				// Test basic file operations
-				checkBasicFileOperations(ctx, pod)
-			}
-
-			// Check read-only pods can still list but fails to write
-			for _, pod := range readOnlyAccessPods {
-				checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
-				checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
-			}
-
-			// Sleep for a minute for the next cycle
+			verifyWorkloadHealth(ctx, fullAccessPods, readOnlyAccessPods, testFile, testWriteSize, seed)
 			framework.Logf("Sleeping for a minute for the next cycle...")
 			time.Sleep(1 * time.Minute)
 		}
@@ -266,7 +268,126 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		for _, pod := range slices.Concat(fullAccessPods, readOnlyAccessPods) {
 			e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
 		}
+	}
+
+	BeforeEach(func(ctx context.Context) {
+		l = local{}
+		l.config = driver.PrepareTest(ctx, f)
+		DeferCleanup(cleanup)
 	})
+
+	It("Upgrade to current commit from latest release without interrupting workloads", func(ctx context.Context) {
+		if helmChartPreviousVersion != "" || helmChartNewVersion != "" {
+			e2eskipper.Skipf("Skipping current commit upgrade test when specific versions are provided")
+		}
+
+		if helmChartContainerRepository == "" || helmChartContainerTag == "" {
+			Fail("Please set container repository and tag using `REPOSITORY` and `TAG` environment variables")
+		}
+
+		settings, cfg := setupTestEnvironment(ctx)
+		latestVersion := getLatestReleasedVersion(settings, cfg)
+		runUpgradeTest(ctx, latestVersion, untestedVersion, true)
+	})
+
+	It("Upgrade to a new version from a previous version without interrupting the workloads", func(ctx context.Context) {
+		if helmChartPreviousVersion == "" || helmChartNewVersion == "" {
+			e2eskipper.Skipf("Skipping version-to-version upgrade test when specific versions are not provided")
+		}
+
+		_, _ = setupTestEnvironment(ctx)
+		framework.Logf("Testing upgrade from %q to %q...", helmChartPreviousVersion, helmChartNewVersion)
+
+		useSourceBuild := strings.HasSuffix(helmChartNewVersion, "-source")
+		runUpgradeTest(ctx, helmChartPreviousVersion, helmChartNewVersion, useSourceBuild)
+	})
+}
+
+// buildHelmValues creates common Helm values for install/upgrade
+func buildHelmValues() map[string]any {
+	values := map[string]any{
+		"node": map[string]any{
+			"podInfoOnMountCompat": map[string]any{
+				"enable": "true",
+			},
+		},
+	}
+	if helmChartContainerRepository != "" && helmChartContainerTag != "" {
+		values["image"] = map[string]any{
+			"repository": helmChartContainerRepository,
+			"tag":        helmChartContainerTag,
+		}
+	}
+	return values
+}
+
+// getLatestReleasedVersion retrieves the latest released version from the Helm repository
+// that was available at the time of the current commit (for backport testing).
+func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configuration) string {
+	// Get current commit date
+	cmd := exec.Command("git", "log", "-1", "--format=%ct")
+	cmd.Dir = "../../" // Go to repo root
+	output, err := cmd.Output()
+	framework.ExpectNoError(err)
+	commitTimestamp, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+	framework.ExpectNoError(err)
+	commitTime := time.Unix(commitTimestamp, 0)
+	framework.Logf("Current commit date: %s", commitTime.Format(time.RFC3339))
+
+	// Ensure we have upstream tags
+	cmd = exec.Command("git", "ls-remote", "--tags", "https://github.com/awslabs/mountpoint-s3-csi-driver.git")
+	cmd.Dir = "../../"
+	output, err = cmd.Output()
+	framework.ExpectNoError(err)
+
+	// Parse remote tags and find latest before commit date
+	var latestVersion string
+	var latestTime time.Time
+	for _, line := range strings.Split(string(output), "\n") {
+		if !strings.Contains(line, "refs/tags/v") {
+			continue
+		}
+		parts := strings.Split(line, "refs/tags/")
+		if len(parts) != 2 {
+			continue
+		}
+		tag := parts[1]
+
+		// Skip non-version tags
+		if !strings.HasPrefix(tag, "v") || !strings.Contains(tag, ".") {
+			continue
+		}
+
+		// Fetch this specific tag to get its date
+		fetchCmd := exec.Command("git", "fetch", "--depth=1", "https://github.com/awslabs/mountpoint-s3-csi-driver.git", tag)
+		fetchCmd.Dir = "../../"
+		_ = fetchCmd.Run() // Ignore errors
+
+		// Get the commit date
+		dateCmd := exec.Command("git", "log", "-1", "--format=%ct", "FETCH_HEAD")
+		dateCmd.Dir = "../../"
+		dateOutput, err := dateCmd.Output()
+		if err != nil {
+			continue
+		}
+		tagTimestamp, err := strconv.ParseInt(strings.TrimSpace(string(dateOutput)), 10, 64)
+		if err != nil {
+			continue
+		}
+		tagTime := time.Unix(tagTimestamp, 0)
+
+		if (tagTime.Before(commitTime) || tagTime.Equal(commitTime)) && tagTime.After(latestTime) {
+			latestVersion = tag
+			latestTime = tagTime
+		}
+	}
+
+	if latestVersion == "" {
+		Fail("No release found before commit date")
+	}
+
+	framework.Logf("Found latest release at commit time: %s (released %s)", latestVersion, latestTime.Format(time.RFC3339))
+	return strings.TrimPrefix(latestVersion, "v")
 }
 
 // packageHelmChartFromSource creates a Helm package from the CSI Driver's source.
@@ -323,13 +444,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := installClient.RunWithContext(context.Background(), chart, map[string]any{
-		"node": map[string]any{
-			"podInfoOnMountCompat": map[string]any{
-				"enable": "true",
-			},
-		},
-	})
+	release, err := installClient.RunWithContext(context.Background(), chart, buildHelmValues())
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q created", release.Name)
@@ -346,7 +461,7 @@ func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, map[string]any{})
+	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, buildHelmValues())
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)
