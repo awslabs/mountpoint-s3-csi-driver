@@ -336,9 +336,15 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 	framework.Logf("Current chart version: %s", chartVersion)
 
 	// Fetch and parse index.yaml from Helm repository
-	resp, err := http.Get(helmRepo + "/index.yaml")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Get(helmRepo + "/index.yaml")
 	framework.ExpectNoError(err)
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		framework.Failf("Failed to fetch index.yaml: HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	framework.ExpectNoError(err)
