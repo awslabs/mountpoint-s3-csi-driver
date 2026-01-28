@@ -3,9 +3,11 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/repo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -23,6 +26,7 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
+	"sigs.k8s.io/yaml"
 )
 
 // This value defines how long the upgrade test should take.
@@ -275,31 +279,32 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		DeferCleanup(cleanup)
 	})
 
-	It("Upgrade to current commit from latest release without interrupting workloads", func(ctx context.Context) {
-		if helmChartPreviousVersion != "" || helmChartNewVersion != "" {
-			e2eskipper.Skipf("Skipping current commit upgrade test when specific versions are provided")
-		}
+	if helmChartPreviousVersion == "" && helmChartNewVersion == "" {
+		// Run upgrade to current commit test
+		It("Upgrade to current commit from latest release without interrupting workloads", func(ctx context.Context) {
+			if helmChartContainerRepository == "" || helmChartContainerTag == "" {
+				Fail("Please set container repository and tag using `REPOSITORY` and `TAG` environment variables")
+			}
 
-		if helmChartContainerRepository == "" || helmChartContainerTag == "" {
-			Fail("Please set container repository and tag using `REPOSITORY` and `TAG` environment variables")
-		}
+			settings, cfg := setupTestEnvironment(ctx)
+			latestVersion := getLatestReleasedVersion(settings, cfg)
+			// Using "0.0.0" as a placeholder version for the new commit being tested
+			runUpgradeTest(ctx, latestVersion, "0.0.0", true)
+		})
+	} else {
+		// Run version-to-version upgrade test
+		It("Upgrade between specified versions without interrupting the workloads", func(ctx context.Context) {
+			if helmChartPreviousVersion == "" || helmChartNewVersion == "" {
+				Fail("Please set the previous and new versions to test using `MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION` and `MOUNTPOINT_CSI_DRIVER_NEW_VERSION` environment variables")
+			}
 
-		settings, cfg := setupTestEnvironment(ctx)
-		latestVersion := getLatestReleasedVersion(settings, cfg)
-		runUpgradeTest(ctx, latestVersion, untestedVersion, true)
-	})
+			_, _ = setupTestEnvironment(ctx)
+			framework.Logf("Testing upgrade from %q to %q...", helmChartPreviousVersion, helmChartNewVersion)
 
-	It("Upgrade to a new version from a previous version without interrupting the workloads", func(ctx context.Context) {
-		if helmChartPreviousVersion == "" || helmChartNewVersion == "" {
-			e2eskipper.Skipf("Skipping version-to-version upgrade test when specific versions are not provided")
-		}
-
-		_, _ = setupTestEnvironment(ctx)
-		framework.Logf("Testing upgrade from %q to %q...", helmChartPreviousVersion, helmChartNewVersion)
-
-		useSourceBuild := strings.HasSuffix(helmChartNewVersion, "-source")
-		runUpgradeTest(ctx, helmChartPreviousVersion, helmChartNewVersion, useSourceBuild)
-	})
+			useSourceBuild := strings.HasSuffix(helmChartNewVersion, "-source")
+			runUpgradeTest(ctx, helmChartPreviousVersion, helmChartNewVersion, useSourceBuild)
+		})
+	}
 }
 
 // buildHelmValues creates common Helm values for install/upgrade
@@ -330,29 +335,30 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 	chartVersion := chart.Metadata.Version
 	framework.Logf("Current chart version: %s", chartVersion)
 
-	// Get all published versions
-	cmd := exec.Command("git", "ls-remote", "--tags", "https://github.com/awslabs/mountpoint-s3-csi-driver.git")
-	output, err := cmd.Output()
+	// Fetch and parse index.yaml from Helm repository
+	resp, err := http.Get(helmRepo + "/index.yaml")
+	framework.ExpectNoError(err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
 	framework.ExpectNoError(err)
 
+	var index repo.IndexFile
+	err = yaml.Unmarshal(body, &index)
+	framework.ExpectNoError(err)
+
+	// Extract all versions for our chart
 	var allVersions []string
-	for _, line := range strings.Split(string(output), "\n") {
-		if !strings.Contains(line, "refs/tags/v") {
-			continue
+	if chartVersions, ok := index.Entries[helmChartName]; ok {
+		for _, cv := range chartVersions {
+			if !strings.Contains(cv.Version, "-") {
+				allVersions = append(allVersions, cv.Version)
+			}
 		}
-		parts := strings.Split(line, "refs/tags/v")
-		if len(parts) != 2 {
-			continue
-		}
-		version := parts[1]
-		if strings.Contains(version, "-") || !strings.Contains(version, ".") {
-			continue
-		}
-		allVersions = append(allVersions, version)
 	}
 
 	if len(allVersions) == 0 {
-		Fail("No published releases found")
+		Fail("No published releases found in Helm repository")
 	}
 
 	// If chart version is published, use it
