@@ -20,3 +20,13 @@ jobs:
       environment: "trusted"
       ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha }}
     secrets: inherit
+
+  upgrade:
+    name: Upgrade Tests
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id }}
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      environment: "trusted"
+      ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha }}
+      run_upgrade_tests: true
+    secrets: inherit
