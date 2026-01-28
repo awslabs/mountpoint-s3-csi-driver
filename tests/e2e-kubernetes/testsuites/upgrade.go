@@ -44,7 +44,6 @@ const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
 const helmReleaseName = "mountpoint-s3-csi-driver"
 const helmReleaseNamespace = "kube-system"
-const untestedVersion = "0.0.0"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
