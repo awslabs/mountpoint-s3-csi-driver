@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -321,73 +320,62 @@ func buildHelmValues() map[string]any {
 	return values
 }
 
-// getLatestReleasedVersion retrieves the latest released version from the Helm repository
-// that was available at the time of the current commit (for backport testing).
+// getLatestReleasedVersion retrieves the latest published release version to upgrade from.
+// If the current chart version is published, it returns that version.
+// Otherwise, it returns the latest published release less than the current version.
 func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configuration) string {
-	// Get current commit date
-	cmd := exec.Command("git", "log", "-1", "--format=%ct")
-	cmd.Dir = "../../" // Go to repo root
+	// Load current chart version
+	chart, err := loader.Load(helmChartSource)
+	framework.ExpectNoError(err)
+	chartVersion := chart.Metadata.Version
+	framework.Logf("Current chart version: %s", chartVersion)
+
+	// Get all published versions
+	cmd := exec.Command("git", "ls-remote", "--tags", "https://github.com/awslabs/mountpoint-s3-csi-driver.git")
 	output, err := cmd.Output()
 	framework.ExpectNoError(err)
-	commitTimestamp, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
-	framework.ExpectNoError(err)
-	commitTime := time.Unix(commitTimestamp, 0)
-	framework.Logf("Current commit date: %s", commitTime.Format(time.RFC3339))
 
-	// Ensure we have upstream tags
-	cmd = exec.Command("git", "ls-remote", "--tags", "https://github.com/awslabs/mountpoint-s3-csi-driver.git")
-	cmd.Dir = "../../"
-	output, err = cmd.Output()
-	framework.ExpectNoError(err)
-
-	// Parse remote tags and find latest before commit date
-	var latestVersion string
-	var latestTime time.Time
+	var allVersions []string
 	for _, line := range strings.Split(string(output), "\n") {
 		if !strings.Contains(line, "refs/tags/v") {
 			continue
 		}
-		parts := strings.Split(line, "refs/tags/")
+		parts := strings.Split(line, "refs/tags/v")
 		if len(parts) != 2 {
 			continue
 		}
-		tag := parts[1]
-
-		// Skip non-version tags
-		if !strings.HasPrefix(tag, "v") || !strings.Contains(tag, ".") {
+		version := parts[1]
+		if strings.Contains(version, "-") || !strings.Contains(version, ".") {
 			continue
 		}
+		allVersions = append(allVersions, version)
+	}
 
-		// Fetch this specific tag to get its date
-		fetchCmd := exec.Command("git", "fetch", "--depth=1", "https://github.com/awslabs/mountpoint-s3-csi-driver.git", tag)
-		fetchCmd.Dir = "../../"
-		_ = fetchCmd.Run() // Ignore errors
+	if len(allVersions) == 0 {
+		Fail("No published releases found")
+	}
 
-		// Get the commit date
-		dateCmd := exec.Command("git", "log", "-1", "--format=%ct", "FETCH_HEAD")
-		dateCmd.Dir = "../../"
-		dateOutput, err := dateCmd.Output()
-		if err != nil {
-			continue
-		}
-		tagTimestamp, err := strconv.ParseInt(strings.TrimSpace(string(dateOutput)), 10, 64)
-		if err != nil {
-			continue
-		}
-		tagTime := time.Unix(tagTimestamp, 0)
+	// If chart version is published, use it
+	if slices.Contains(allVersions, chartVersion) {
+		framework.Logf("Chart version %s is published, using it for upgrade test", chartVersion)
+		return chartVersion
+	}
 
-		if (tagTime.Before(commitTime) || tagTime.Equal(commitTime)) && tagTime.After(latestTime) {
-			latestVersion = tag
-			latestTime = tagTime
+	// Chart version not published, find latest version less than current
+	var olderVersions []string
+	for _, v := range allVersions {
+		if v < chartVersion {
+			olderVersions = append(olderVersions, v)
 		}
 	}
 
-	if latestVersion == "" {
-		Fail("No release found before commit date")
+	if len(olderVersions) == 0 {
+		Fail(fmt.Sprintf("No published releases found older than %s", chartVersion))
 	}
 
-	framework.Logf("Found latest release at commit time: %s (released %s)", latestVersion, latestTime.Format(time.RFC3339))
-	return strings.TrimPrefix(latestVersion, "v")
+	slices.SortFunc(olderVersions, func(a, b string) int { return strings.Compare(b, a) })
+	framework.Logf("Using latest published release older than %s: v%s", chartVersion, olderVersions[0])
+	return olderVersions[0]
 }
 
 // packageHelmChartFromSource creates a Helm package from the CSI Driver's source.
