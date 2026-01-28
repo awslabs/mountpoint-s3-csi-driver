@@ -3,7 +3,7 @@
 set -euox pipefail
 
 # If the cluster is not older than this, it will be re-used.
-MAX_CLUSTER_AGE_SECONDS=$((1 * 24 * 60 * 60)) # 3 days
+MAX_CLUSTER_AGE_SECONDS=$((3 * 24 * 60 * 60)) # 3 days
 CW_LOG_RETENTION_DAYS=30
 
 function eksctl_install() {
