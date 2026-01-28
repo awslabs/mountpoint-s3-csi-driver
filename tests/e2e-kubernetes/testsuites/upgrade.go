@@ -334,37 +334,7 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 	chartVersion := chart.Metadata.Version
 	framework.Logf("Current chart version: %s", chartVersion)
 
-	// Fetch and parse index.yaml from Helm repository
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	resp, err := client.Get(helmRepo + "/index.yaml")
-	framework.ExpectNoError(err)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		framework.Failf("Failed to fetch index.yaml: HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	framework.ExpectNoError(err)
-
-	var index repo.IndexFile
-	err = yaml.Unmarshal(body, &index)
-	framework.ExpectNoError(err)
-
-	// Extract all versions for our chart
-	var allVersions []string
-	if chartVersions, ok := index.Entries[helmChartName]; ok {
-		for _, cv := range chartVersions {
-			if !strings.Contains(cv.Version, "-") {
-				allVersions = append(allVersions, cv.Version)
-			}
-		}
-	}
-
-	if len(allVersions) == 0 {
-		Fail("No published releases found in Helm repository")
-	}
+	allVersions := getAllPublishedVersions()
 
 	// If chart version is published, use it
 	if slices.Contains(allVersions, chartVersion) {
@@ -387,6 +357,41 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 	slices.SortFunc(olderVersions, func(a, b string) int { return strings.Compare(b, a) })
 	framework.Logf("Using latest published release older than %s: v%s", chartVersion, olderVersions[0])
 	return olderVersions[0]
+}
+
+// getAllPublishedVersions fetches and parses all published versions from the Helm repository.
+func getAllPublishedVersions() []string {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	resp, err := client.Get(helmRepo + "/index.yaml")
+	framework.ExpectNoError(err)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		framework.Failf("Failed to fetch index.yaml: HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	framework.ExpectNoError(err)
+
+	var index repo.IndexFile
+	err = yaml.Unmarshal(body, &index)
+	framework.ExpectNoError(err)
+
+	var allVersions []string
+	if chartVersions, ok := index.Entries[helmChartName]; ok {
+		for _, cv := range chartVersions {
+			if !strings.Contains(cv.Version, "-") {
+				allVersions = append(allVersions, cv.Version)
+			}
+		}
+	}
+
+	if len(allVersions) == 0 {
+		Fail("No published releases found in Helm repository")
+	}
+
+	return allVersions
 }
 
 // packageHelmChartFromSource creates a Helm package from the CSI Driver's source.
