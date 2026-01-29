@@ -17,7 +17,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -43,7 +43,24 @@ const (
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
 	mountpointPodCreator *mppod.Creator
-	s3paExpectations     *expectations
+
+	// s3paExpectations tracks MountpointS3PodAttachments created by this reconciler to handle eventual consistency.
+	//
+	// Problem: After creating a MountpointS3PodAttachment (S3PA), it may not immediately appear in the reconciler's
+	// informer cache because the cache relies on watch events from the API server (eventual consistency).
+	// This can cause the reconciler to miss newly created attachments, resulting in lost pod sharing opportunities.
+	//
+	// Solution: s3paExpectations maintains an in-memory map of pod attachments created by this process, allowing
+	// the reconciler to know about them before they appear in the cache.
+	//
+	// Management: We carefully manage expectations to avoid indefinite waiting:
+	// - setPending() is called in handleNewS3PodAttachment() immediately after successfully creating a new S3PA
+	// - clear() is called in two scenarios:
+	//   1. In handleExistingS3PodAttachment() when a pending S3PA is found (it appeared in the cache)
+	//   2. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	//
+	// Note: Reconcile() processes events sequentially, eliminating concurrency concerns.
+	s3paExpectations *expectations
 	client.Client
 }
 
@@ -65,7 +82,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Reconcile reconciles either a Mountpoint- or a workload-Pod.
 //
 // For Mountpoint Pods, it deletes completed Pods and logs each status change.
-// For workload Pods, it decides if it needs to spawn a Mountpoint Pod to provide a volume for the workload Pod.
+// For workload Pods, it decides if it needs to spawn a Mountpoint/Headroom Pod to provide a volume for the workload Pod.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("pod", req.NamespacedName)
 
@@ -82,7 +99,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if r.isMountpointPod(pod) {
+	if r.isInMountpointNamespace(pod) {
+		if mppod.IsHeadroomPod(pod) {
+			// Nothing to do here, `reconcileWorkloadPod` takes care of spawning and deleting Headroom Pods.
+			log.V(debugLevel).Info("Headroom Pod updated",
+				"headroomPod", pod.Name,
+				"status", pod.Status.Phase)
+			return reconcile.Result{}, nil
+		}
+
 		return r.reconcileMountpointPod(ctx, pod)
 	}
 
@@ -119,20 +144,114 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("pod", types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name})
 
-	if pod.Spec.NodeName == "" {
-		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
-		return reconcile.Result{}, nil
-	}
-
 	if len(pod.Spec.Volumes) == 0 {
 		log.V(debugLevel).Info("Pod has no volumes - ignoring")
 		return reconcile.Result{}, nil
 	}
 
-	var requeue bool
-	var errs []error
+	scheduled := isPodScheduled(pod)
+	needsHeadroomForMountpointPod := r.isHeadroomForMountpointPodsFeatureEnabled() && mppod.ShouldReserveHeadroomForMountpointPod(pod)
+	hasHeadroomPods := r.isHeadroomForMountpointPodsFeatureEnabled() && mppod.WorkloadHasLabelPodForHeadroomPod(pod)
+	if !scheduled && !needsHeadroomForMountpointPod && !hasHeadroomPods {
+		log.V(debugLevel).Info("Pod is not scheduled to a node yet - ignoring")
+		return reconcile.Result{}, nil
+	}
 
-	for _, vol := range pod.Spec.Volumes {
+	priorityClassKind := mppod.DefaultPriorityClass
+	if needsHeadroomForMountpointPod || hasHeadroomPods {
+		priorityClassKind = mppod.PreemptingPriorityClass
+	}
+
+	volumes, requeue, err := r.getWorkloadVolumes(ctx, pod)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	var errs []error
+	numHeadroomPods, numRemovedHeadroomPods := 0, 0
+
+	for i, vol := range volumes {
+		pv, pvc := vol.pv, vol.pvc
+
+		if scheduled {
+			log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
+
+			needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv, priorityClassKind)
+			requeue = requeue || needsRequeue
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		} else if needsHeadroomForMountpointPod {
+			// Label the workload pod once for headroom pods
+			if i == 0 {
+				err = r.labelWorkloadPodForHeadroomPod(ctx, pod, log)
+				if err != nil {
+					log.Error(err, "Failed to label Workload Pod for Headroom Pods")
+					return reconcile.Result{}, err
+				}
+			}
+
+			err = r.createHeadroomPodForMountpointPod(ctx, pod, pv, log)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+
+			numHeadroomPods += 1
+		}
+
+		if hasHeadroomPods && r.shouldDeleteHeadroomPodForTheWorkloadPod(pod) {
+			// Workload Pod past pending (i.e., either running or terminated),
+			// we no longer need the Headroom Pod
+			err := r.deleteHeadroomPodForMountpointPod(ctx, pod, pv, log)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			numRemovedHeadroomPods += 1
+		}
+	}
+
+	err = errors.Join(errs...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if needsHeadroomForMountpointPod &&
+		len(volumes) == numHeadroomPods {
+		// Spawned all Headroom Pods needed, now ungate the Workload Pod,
+		// so it can get scheduled (alongside Headroom Pods)
+		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	if hasHeadroomPods &&
+		len(volumes) == numRemovedHeadroomPods {
+		// We removed all Headroom Pods, now remove the label from the Workload Pod,
+		// so we don't try removing them again in the next cycle
+		err = r.unlabelWorkloadPodForHeadroomPod(ctx, pod, log)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	return reconcile.Result{Requeue: requeue}, nil
+}
+
+// getWorkloadVolumes returns list of volumes of the workload that ready to process.
+func (r *Reconciler) getWorkloadVolumes(
+	ctx context.Context,
+	workloadPod *corev1.Pod,
+) ([]*workloadVolume, bool, error) {
+	status := DontRequeue
+
+	var errs []error
+	var volumes []*workloadVolume
+
+	for _, vol := range workloadPod.Spec.Volumes {
 		podPVC := vol.PersistentVolumeClaim
 		if podPVC == nil {
 			continue
@@ -141,10 +260,10 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		// If PVC has no bound PVs yet, `getBoundPVForPodClaim` will return `errPVCIsNotBoundToAPV`.
 		// In this case we'll just return `reconcile.Result{Requeue: true}` here, which will bubble up to the
 		// original `Reconcile` call and will cause a retry for this Pod with an exponential backoff.
-		pvc, pv, err := r.getBoundPVForPodClaim(ctx, pod, podPVC)
+		pvc, pv, err := r.getBoundPVForPodClaim(ctx, workloadPod, podPVC)
 		if err != nil {
 			if errors.Is(err, errPVCIsNotBoundToAPV) {
-				requeue = true
+				status = Requeue
 			} else {
 				errs = append(errs, err)
 			}
@@ -156,22 +275,17 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 			continue
 		}
 
-		log.V(debugLevel).Info("Found bound PV for PVC", "pvc", pvc.Name, "volumeName", pv.Name)
-
-		needsRequeue, err := r.spawnOrDeleteMountpointPodIfNeeded(ctx, pod, pvc, pv)
-		requeue = requeue || needsRequeue
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
+		volumes = append(volumes, &workloadVolume{pv, pvc, csiSpec})
 	}
 
-	err := errors.Join(errs...)
-	if err != nil {
-		return reconcile.Result{}, nil
-	}
+	return volumes, status, errors.Join(errs...)
+}
 
-	return reconcile.Result{Requeue: requeue}, nil
+// A workloadVolume represents a workload's volume backed by the CSI Driver.
+type workloadVolume struct {
+	pv      *corev1.PersistentVolume
+	pvc     *corev1.PersistentVolumeClaim
+	csiSpec *corev1.CSIPersistentVolumeSource
 }
 
 // spawnOrDeleteMountpointPodIfNeeded spawns or deletes existing Mountpoint Pod for given `workloadPod` and volume if needed.
@@ -187,6 +301,7 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	workloadPod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
 	pv *corev1.PersistentVolume,
+	priorityClassKind mppod.PriorityClassKind,
 ) (bool, error) {
 	workloadUID := string(workloadPod.UID)
 	roleArn, err := r.findIRSAServiceAccountRole(ctx, workloadPod)
@@ -201,13 +316,13 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	log := r.setupLogger(ctx, workloadPod, pvc, workloadUID, fieldFilters, s3pa)
 
 	if !isPodActive(workloadPod) {
-		return r.handleInactivePod(ctx, s3pa, workloadUID, log)
+		return r.handleInactivePod(ctx, s3pa, workloadUID, fieldFilters, log)
 	}
 
 	if s3pa != nil {
-		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, log)
+		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, priorityClassKind, log)
 	} else {
-		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, log)
+		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, priorityClassKind, log)
 	}
 }
 
@@ -219,7 +334,7 @@ func (r *Reconciler) setupLogger(
 	pvc *corev1.PersistentVolumeClaim,
 	workloadUID string,
 	fieldFilters client.MatchingFields,
-	s3pa *crdv2beta.MountpointS3PodAttachment,
+	s3pa *crdv2.MountpointS3PodAttachment,
 ) logr.Logger {
 	logger := logf.FromContext(ctx).WithValues(
 		"workloadPod", types.NamespacedName{Namespace: workloadPod.Namespace, Name: workloadPod.Name},
@@ -249,18 +364,18 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 	fsGroup := r.getFSGroup(workloadPod)
 
 	fieldFilters := client.MatchingFields{
-		crdv2beta.FieldNodeName:             workloadPod.Spec.NodeName,
-		crdv2beta.FieldPersistentVolumeName: pv.Name,
-		crdv2beta.FieldVolumeID:             pv.Spec.CSI.VolumeHandle,
-		crdv2beta.FieldMountOptions:         strings.Join(pv.Spec.MountOptions, ","),
-		crdv2beta.FieldWorkloadFSGroup:      fsGroup,
-		crdv2beta.FieldAuthenticationSource: authSource,
+		crdv2.FieldNodeName:             workloadPod.Spec.NodeName,
+		crdv2.FieldPersistentVolumeName: pv.Name,
+		crdv2.FieldVolumeID:             pv.Spec.CSI.VolumeHandle,
+		crdv2.FieldMountOptions:         strings.Join(pv.Spec.MountOptions, ","),
+		crdv2.FieldWorkloadFSGroup:      fsGroup,
+		crdv2.FieldAuthenticationSource: authSource,
 	}
 
 	if authSource == credentialprovider.AuthenticationSourcePod {
-		fieldFilters[crdv2beta.FieldWorkloadNamespace] = workloadPod.Namespace
-		fieldFilters[crdv2beta.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
-		fieldFilters[crdv2beta.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
+		fieldFilters[crdv2.FieldWorkloadNamespace] = workloadPod.Namespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
+		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
 	}
 
 	return fieldFilters
@@ -291,8 +406,8 @@ func (r *Reconciler) getFSGroup(workloadPod *corev1.Pod) string {
 // - The matching MountpointS3PodAttachment if exactly one is found
 // - nil if no matching resource is found
 // - An error if multiple matching resources are found or if the list operation fails
-func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields) (*crdv2beta.MountpointS3PodAttachment, error) {
-	s3paList := &crdv2beta.MountpointS3PodAttachmentList{}
+func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields) (*crdv2.MountpointS3PodAttachment, error) {
+	s3paList := &crdv2.MountpointS3PodAttachmentList{}
 	if err := r.List(ctx, s3paList, fieldFilters); err != nil {
 		return nil, fmt.Errorf("failed to list MountpointS3PodAttachments: %w", err)
 	}
@@ -308,13 +423,13 @@ func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilter
 }
 
 // handleInactivePod handles inactive workload pod.
-func (r *Reconciler) handleInactivePod(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) handleInactivePod(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, workloadUID string, fieldFilters client.MatchingFields, log logr.Logger) (bool, error) {
 	if s3pa == nil {
 		log.Info("Workload pod is not active. Did not find any MountpointS3PodAttachments.")
 		return DontRequeue, nil
 	}
 
-	return r.removeWorkloadFromS3PodAttachment(ctx, s3pa, workloadUID, log)
+	return r.removeWorkloadFromS3PodAttachment(ctx, s3pa, workloadUID, fieldFilters, log)
 }
 
 // handleExistingS3PodAttachment handles existing S3 Pod Attachment.
@@ -322,8 +437,9 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
-	s3pa *crdv2beta.MountpointS3PodAttachment,
+	s3pa *crdv2.MountpointS3PodAttachment,
 	fieldFilters client.MatchingFields,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
@@ -336,7 +452,7 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, log)
+	return r.addWorkloadToS3PodAttachment(ctx, workloadPod, pv, s3pa, priorityClassKind, log)
 }
 
 // addWorkloadToS3PodAttachment adds workload UID to the first suitable Mountpoint Pod in the map.
@@ -345,7 +461,8 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
-	s3pa *crdv2beta.MountpointS3PodAttachment,
+	s3pa *crdv2.MountpointS3PodAttachment,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	log.Info("Adding workload UID to MountpointS3PodAttachment")
@@ -362,12 +479,12 @@ func (r *Reconciler) addWorkloadToS3PodAttachment(
 	}
 
 	// There is no suitable Mountpoint Pod for the workload, we need to create a new one
-	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, log)
+	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return Requeue, err
 	}
-	s3pa.Spec.MountpointS3PodAttachments[mpPod.Name] = []crdv2beta.WorkloadAttachment{
+	s3pa.Spec.MountpointS3PodAttachments[mpPod.Name] = []crdv2.WorkloadAttachment{
 		{
 			WorkloadPodUID: string(workloadPod.UID),
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
@@ -403,7 +520,7 @@ var errNoSuitableMountpointPodForTheWorkload = errors.New("no suitable Mountpoin
 
 // assignWorkloadToAnExistingMountpointPod tries to assign given `workloadUID` to an existing Mountpoint Pod.
 // It returns `errNoSuitableMountpointPodForTheWorkload` if there isn't any suitable Mountpoint Pod to assign this new workload.
-func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
 	log.Info("Trying to assign workload to an existing Mountpoint Pod")
 
 	found := false
@@ -424,7 +541,7 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 			continue
 		}
 
-		s3pa.Spec.MountpointS3PodAttachments[mpPodName] = append(s3pa.Spec.MountpointS3PodAttachments[mpPodName], crdv2beta.WorkloadAttachment{
+		s3pa.Spec.MountpointS3PodAttachments[mpPodName] = append(s3pa.Spec.MountpointS3PodAttachments[mpPodName], crdv2.WorkloadAttachment{
 			WorkloadPodUID: workloadUID,
 			AttachmentTime: metav1.NewTime(time.Now().UTC()),
 		})
@@ -452,10 +569,10 @@ func (r *Reconciler) assignWorkloadToAnExistingMountpointPod(ctx context.Context
 
 // removeWorkloadFromS3PodAttachment removes workload UID from MountpointS3PodAttachment map.
 // It will delete MountpointS3PodAttachment if map becomes empty.
-func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string, log logr.Logger) (bool, error) {
+func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, workloadUID string, fieldFilters client.MatchingFields, log logr.Logger) (bool, error) {
 	// Remove workload UID from mountpoint pods
 	for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
-		filteredUIDs := []crdv2beta.WorkloadAttachment{}
+		filteredUIDs := []crdv2.WorkloadAttachment{}
 		found := false
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {
@@ -518,6 +635,12 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 			log.Error(err, "Failed to delete MountpointS3PodAttachment")
 			return Requeue, err
 		}
+		log.Info("Deleted MountpointS3PodAttachment as it no longer has any attached Mountpoint Pods")
+		if r.s3paExpectations.isPending(fieldFilters) {
+			// Clear stale creation expectations to prevent indefinite waiting.
+			log.Info("Clearing stale creation expectation for deleted MountpointS3PodAttachment")
+			r.s3paExpectations.clear(fieldFilters)
+		}
 	}
 
 	return DontRequeue, nil
@@ -530,6 +653,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 	pv *corev1.PersistentVolume,
 	roleArn string,
 	fieldFilters client.MatchingFields,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (bool, error) {
 	if r.s3paExpectations.isPending(fieldFilters) {
@@ -545,7 +669,7 @@ func (r *Reconciler) handleNewS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, log); err != nil {
+	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log); err != nil {
 		return Requeue, err
 	}
 
@@ -559,29 +683,30 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
 	roleArn string,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) error {
 	authSource := r.getAuthSource(pv)
-	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, log)
+	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
 		return err
 	}
-	s3pa := &crdv2beta.MountpointS3PodAttachment{
+	s3pa := &crdv2.MountpointS3PodAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "s3pa-",
 			Labels: map[string]string{
 				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 			},
 		},
-		Spec: crdv2beta.MountpointS3PodAttachmentSpec{
+		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,
 			PersistentVolumeName: pv.Name,
 			VolumeID:             pv.Spec.CSI.VolumeHandle,
 			MountOptions:         strings.Join(pv.Spec.MountOptions, ","),
 			WorkloadFSGroup:      r.getFSGroup(workloadPod),
 			AuthenticationSource: authSource,
-			MountpointS3PodAttachments: map[string][]crdv2beta.WorkloadAttachment{
+			MountpointS3PodAttachments: map[string][]crdv2.WorkloadAttachment{
 				mpPod.Name: {{WorkloadPodUID: string(workloadPod.UID), AttachmentTime: metav1.NewTime(time.Now().UTC())}},
 			},
 		},
@@ -614,11 +739,12 @@ func (r *Reconciler) spawnMountpointPod(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pv *corev1.PersistentVolume,
+	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
 ) (*corev1.Pod, error) {
 	log.Info("Spawning Mountpoint Pod")
 
-	mpPod, err := r.mountpointPodCreator.Create(workloadPod.Spec.NodeName, pv)
+	mpPod, err := r.mountpointPodCreator.MountpointPod(workloadPod.Spec.NodeName, pv, priorityClassKind)
 	if err != nil {
 		log.Error(err, "Failed to create Mountpoint Pod Spec")
 		return nil, err
@@ -784,11 +910,136 @@ func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName st
 	return nil
 }
 
-// isMountpointPod returns whether given `pod` is a Mountpoint Pod.
-// It currently checks namespace of `pod`.
-func (r *Reconciler) isMountpointPod(pod *corev1.Pod) bool {
-	// TODO: Do we need to perform any additional check here?
+// ungateHeadroomSchedulingGateForWorkloadPod removes the scheduling gate for headroom pods from the `workloadPod`, making it ready for scheduling.
+func (r *Reconciler) ungateHeadroomSchedulingGateForWorkloadPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	mppod.UngateHeadroomSchedulingGateForWorkloadPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Ungated headroom scheduling gate from the workload pod")
+	return nil
+}
+
+// createHeadroomPodForMountpointPod creates a Headroom Pod if not exists for a Mountpoint Pod for given `workloadPod` and `pv`.
+func (r *Reconciler) createHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume, log logr.Logger) error {
+	hrPod, err := r.getHeadroomPodForMountpointPod(ctx, workloadPod, pv)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	hrPod, err = r.mountpointPodCreator.HeadroomPod(workloadPod, pv)
+	if err != nil {
+		log.Error(err, "Failed to create Headroom Pod Spec")
+		return err
+	}
+
+	err = r.Create(ctx, hrPod)
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Headroom Pod already created for this `workloadPod` and `pv`.
+			// Since we use consistent names in the Headroom Pods,
+			// we might get this error due to eventually consistency in the control plane,
+			// but this is not an error condition.
+			return nil
+		}
+		return err
+	}
+
+	log.Info("Headroom Pod created", "headroomPodName", hrPod.Name)
+	return nil
+}
+
+// deleteHeadroomPodForMountpointPod deletes the Headroom Pod for given `workloadPod` and `pv` if exists.
+func (r *Reconciler) deleteHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume, log logr.Logger) error {
+	hrPod, err := r.getHeadroomPodForMountpointPod(ctx, workloadPod, pv)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	err = r.Delete(ctx, hrPod)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	log.Info("Headroom Pod removed", "headroomPodName", hrPod.Name)
+	return nil
+}
+
+// getHeadroomPodForMountpointPod returns the Headroom Pod for given `workloadPod` and `pv` if exists.
+func (r *Reconciler) getHeadroomPodForMountpointPod(ctx context.Context, workloadPod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	name := mppod.HeadroomPodNameFor(workloadPod, pv)
+	hrPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.mountpointPodConfig.Namespace, Name: name}, hrPod)
+	if err != nil {
+		return nil, err
+	}
+	return hrPod, nil
+}
+
+// labelWorkloadPodForHeadroomPods labels the `workloadPod` for headroom pods.
+//
+// It returns nil if the `workloadPod` is already labelled.
+func (r *Reconciler) labelWorkloadPodForHeadroomPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	if mppod.WorkloadHasLabelPodForHeadroomPod(workloadPod) {
+		// `workloadPod` already labelled, nothing to do
+		return nil
+	}
+
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	_ = mppod.LabelWorkloadPodForHeadroomPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Labelled workload pod for headroom pods")
+	return nil
+}
+
+// unlabelWorkloadPodForHeadroomPod removes the label for headroom pods from the `workloadPod`.
+func (r *Reconciler) unlabelWorkloadPodForHeadroomPod(ctx context.Context, workloadPod *corev1.Pod, log logr.Logger) error {
+	patch := client.MergeFrom(workloadPod.DeepCopy())
+	mppod.UnlabelWorkloadPodForHeadroomPod(workloadPod)
+	err := r.Patch(ctx, workloadPod, patch)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Unlabelled workload pod for headroom pods")
+	return nil
+}
+
+// shouldDeleteHeadroomPodForTheWorkloadPod returns whether Headroom Pods spawned for `workloadPod` should be deleted.
+func (r *Reconciler) shouldDeleteHeadroomPodForTheWorkloadPod(workloadPod *corev1.Pod) bool {
+	if isPodTerminating(workloadPod) {
+		// Workload Pod is getting terminated, we no longer need any Headroom Pods.
+		return true
+	}
+
+	if isPodScheduled(workloadPod) {
+		// Workload Pod is scheduled, we don't need any Headroom Pods if it started running (i.e., past "Pending" state)
+		return workloadPod.Status.Phase != corev1.PodPending
+	}
+
+	// We still need Headroom Pods
+	return false
+}
+
+// isInMountpointNamespace returns whether given `pod` is in the Mountpoint namespace.
+func (r *Reconciler) isInMountpointNamespace(pod *corev1.Pod) bool {
 	return pod.Namespace == r.mountpointPodConfig.Namespace
+}
+
+// isHeadroomForMountpointPodsFeatureEnabled returns whether the experimental feature-flag for reserving headroom for Mountpoint Pods enabled.
+func (r *Reconciler) isHeadroomForMountpointPodsFeatureEnabled() bool {
+	return r.mountpointPodConfig.HeadroomPriorityClassName != "" &&
+		r.mountpointPodConfig.PreemptingPriorityClassName != ""
 }
 
 // extractCSISpecFromPV tries to extract `CSIPersistentVolumeSource` from given `pv`.
@@ -801,12 +1052,22 @@ func extractCSISpecFromPV(pv *corev1.PersistentVolume) *corev1.CSIPersistentVolu
 	return csi
 }
 
-// isPodActive returns whether given Pod is active and not in the process of termination.
+// isPodActive returns whether given the Pod is active and not in the process of termination.
 // Copied from https://github.com/kubernetes/kubernetes/blob/8770bd58d04555303a3a15b30c245a58723d0f4a/pkg/controller/controller_utils.go#L1009-L1013.
 func isPodActive(p *corev1.Pod) bool {
 	return corev1.PodSucceeded != p.Status.Phase &&
 		corev1.PodFailed != p.Status.Phase &&
 		p.DeletionTimestamp == nil
+}
+
+// isPodTerminating returns whether the given Pod is terminating.
+func isPodTerminating(p *corev1.Pod) bool {
+	return p.DeletionTimestamp != nil
+}
+
+// isPodScheduled returns whether the given Pod is scheduled.
+func isPodScheduled(p *corev1.Pod) bool {
+	return p.Spec.NodeName != ""
 }
 
 // isPodRunning returns whether given Pod phase is `Running`.
@@ -815,7 +1076,7 @@ func isPodRunning(p *corev1.Pod) bool {
 }
 
 // s3paContainsWorkload checks whether MountpointS3PodAttachment has `workloadUID` in it.
-func s3paContainsWorkload(s3pa *crdv2beta.MountpointS3PodAttachment, workloadUID string) bool {
+func s3paContainsWorkload(s3pa *crdv2.MountpointS3PodAttachment, workloadUID string) bool {
 	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
 		for _, attachment := range attachments {
 			if attachment.WorkloadPodUID == workloadUID {

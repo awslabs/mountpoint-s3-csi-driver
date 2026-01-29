@@ -18,9 +18,8 @@ import (
 
 // Labels populated on spawned Mountpoint Pods.
 const (
-	LabelMountpointVersion = "s3.csi.aws.com/mountpoint-version"
-	LabelVolumeName        = "s3.csi.aws.com/volume-name"
-	LabelVolumeId          = "s3.csi.aws.com/volume-id"
+	LabelMountpointVersion  = "s3.csi.aws.com/mountpoint-version"
+	DeprecatedLabelVolumeId = "s3.csi.aws.com/volume-id"
 	// LabelCSIDriverVersion specifies the CSI Driver's version used during creation of the Mountpoint Pod.
 	// The controller checks this label against the current CSI Driver version before assigning a new workload to the Mountpoint Pod,
 	// if they differ, the controller won't send new workload to the Mountpoint Pod and instead creates a new one.
@@ -39,6 +38,8 @@ const (
 	// The existing workloads won't affected with this annotation, and would keep running until termination as per their regular lifecycle.
 	// The controller ensures to not send new workload after the Mountpoint Pod annotated with this annotation.
 	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
+	AnnotationVolumeName    = "s3.csi.aws.com/volume-name"
+	AnnotationVolumeId      = "s3.csi.aws.com/volume-id"
 )
 
 const (
@@ -52,21 +53,34 @@ const (
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 
-// A ContainerConfig represents configuration for containers in the spawned Mountpoint Pods.
+// A PriorityClassKind represents type of priority class to use while spawning a Mountpoint Pod.
+type PriorityClassKind uint8
+
+const (
+	// DefaultPriorityClass means using the default (ideally non-preempting) priority class while spawning a Mountpoint Pod.
+	DefaultPriorityClass PriorityClassKind = iota
+	// PreemptingPriorityClass means using the preempting priority class (in order to evict Headroom Pods) while spawning a Mountpoint Pod.
+	PreemptingPriorityClass
+)
+
+// A ContainerConfig represents configuration for containers in the spawned Mountpoint/Headroom Pods.
 type ContainerConfig struct {
 	Command         string
 	Image           string
+	HeadroomImage   string
 	ImagePullPolicy corev1.PullPolicy
 }
 
-// A Config represents configuration for spawned Mountpoint Pods.
+// A Config represents configuration for spawned Mountpoint/Headroom Pods.
 type Config struct {
-	Namespace         string
-	MountpointVersion string
-	PriorityClassName string
-	Container         ContainerConfig
-	CSIDriverVersion  string
-	ClusterVariant    cluster.Variant
+	ClusterVariant              cluster.Variant
+	Namespace                   string
+	MountpointVersion           string
+	PriorityClassName           string
+	PreemptingPriorityClassName string
+	HeadroomPriorityClassName   string
+	Container                   ContainerConfig
+	CSIDriverVersion            string
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -80,18 +94,26 @@ func NewCreator(config Config, log logr.Logger) *Creator {
 	return &Creator{config: config, log: log}
 }
 
-// Create returns a new Mountpoint Pod spec to schedule for given `node` and `pv`.
-func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+// MountpointPod returns a new Mountpoint Pod spec to schedule for given `node`, `pv` and `priorityClassKind`.
+func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priorityClassKind PriorityClassKind) (*corev1.Pod, error) {
 	uid := c.config.ClusterVariant.MountpointPodUserID()
+
+	priorityClassName := c.config.PriorityClassName
+	if priorityClassKind == PreemptingPriorityClass {
+		priorityClassName = c.config.PreemptingPriorityClassName
+	}
+
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
 			Namespace:    c.config.Namespace,
 			Labels: map[string]string{
 				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelVolumeName:        pv.Name,
-				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
+			},
+			Annotations: map[string]string{
+				AnnotationVolumeName: pv.Name,
+				AnnotationVolumeId:   pv.Spec.CSI.VolumeHandle,
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -126,7 +148,7 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 					},
 				},
 			}},
-			PriorityClassName: c.config.PriorityClassName,
+			PriorityClassName: priorityClassName,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
 					// This is to making sure Mountpoint Pod gets scheduled into same node as the Workload Pod
@@ -200,9 +222,8 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
 		}
 
-		// TODO: Create and link `CACHING.md`.
 		cacheType = cacheTypeEmptyDir
-		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see CACHING.md for more details.")
+		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md for more details.")
 	}
 
 	var volumeSource corev1.VolumeSource

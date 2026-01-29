@@ -1,0 +1,8 @@
+Thank you for using Mountpoint for Amazon S3 CSI Driver v{{ .Chart.Version }}.
+
+Learn more about the file system operations Mountpoint supports: https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md
+
+{{- if .Release.IsUpgrade }}
+
+While the CSI driver has been upgraded, existing Mountpoint Pods remain unchanged to avoid disrupting your active workloads. New Mountpoint Pods with the updated version are created only when workload pods are started or restarted. You can view which pods exist created by older V2 versions of the CSI driver using `kubectl get pods -n mount-s3 --label-columns="s3.csi.aws.com/mounted-by-csi-driver-version"`.
+{{- end }}

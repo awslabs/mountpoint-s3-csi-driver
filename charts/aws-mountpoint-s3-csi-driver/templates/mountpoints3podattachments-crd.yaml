@@ -1,5 +1,4 @@
 # Auto-generated file via `make generate`. Do not edit.
-{{- if .Values.experimental.podMounter -}}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -18,7 +17,23 @@ spec:
     singular: mountpoints3podattachment
   scope: Cluster
   versions:
-  - name: v2beta
+  - additionalPrinterColumns:
+    - description: The node where the volume is mounted
+      jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - description: The persistent volume name
+      jsonPath: .spec.persistentVolumeName
+      name: PV Name
+      type: string
+    - description: Comma separated mount options
+      jsonPath: .spec.mountOptions
+      name: Mount Options
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
     schema:
       openAPIV3Schema:
         description: MountpointS3PodAttachment is the Schema for the mountpoints3podattachments
@@ -109,10 +124,11 @@ spec:
             - workloadFSGroup
             type: object
         type: object
+    {{- if semverCompare ">=1.32.0-0" .Capabilities.KubeVersion.Version }}
     selectableFields:
     - jsonPath: .spec.nodeName
+    {{- end }}
     served: true
     storage: true
     subresources:
       status: {}
-{{- end -}}

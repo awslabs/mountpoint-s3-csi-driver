@@ -3,6 +3,7 @@ kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: s3-csi-node
+  namespace: kube-system
   labels:
     app.kubernetes.io/name: aws-mountpoint-s3-csi-driver
 spec:
@@ -31,38 +32,24 @@ spec:
                       - fargate
                       - hybrid
       tolerations:
-        - key: CriticalAddonsOnly
-          operator: Exists
         - operator: Exists
-          effect: NoExecute
-          tolerationSeconds: 300
-      initContainers:
-        - name: install-mountpoint
-          image: csi-driver
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            seLinuxOptions:
-              user: system_u
-              type: super_t
-              role: system_r
-              level: s0
-          imagePullPolicy: IfNotPresent
-          command:
-            - "/bin/install-mp"
-          env:
-            - name: MOUNTPOINT_INSTALL_DIR
-              value: /target
-          volumeMounts:
-            - name: mp-install
-              mountPath: /target
+
+      # hostPID=true is required to support Mountpoint semantics which require PID visibility
+      # Unfortunately, we cannot turn it on for OpenShift at this time.
+      # This is disabled when installing via Kustomize since it is not possible to know if the manifest is being applied to an OpenShift cluster or not.
+      # See tracking issue: https://github.com/awslabs/mountpoint-s3-csi-driver/issues/626
+      hostPID: false
+
       containers:
         - name: s3-plugin
           image: csi-driver
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            privileged: false
+            # `privileged: true` grants all Kernel capabilities, runs as root, etc..
+            # Required for opening FUSE device and creating mounts.
+            # It may be possible to remove this and use the `capabilities` field,
+            # but Kubernetes API validator currently enforces that this is set to `true` for bidirectional mounts.
+            # https://github.com/kubernetes/kubernetes/blob/v1.34.2/pkg/apis/core/validation/validation.go#L1410-L1413
+            privileged: true
             seLinuxOptions:
               user: system_u
               type: super_t
@@ -75,17 +62,20 @@ spec:
           env:
             - name: CSI_ENDPOINT
               value: unix:/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
-            - name: PTMX_PATH
-              value: /host/dev/ptmx
-            # mount-s3 runs in systemd context, so this is relative to the host
-            - name: MOUNT_S3_PATH
-              value: /opt/mountpoint-s3-csi/bin/mount-s3
+            - name: KUBELET_PATH
+              value: /var/lib/kubelet
             - name: CSI_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: HOST_PLUGIN_DIR
               value: /var/lib/kubelet/plugins/s3.csi.aws.com/
+            - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
+              value: "true"
+            - name: MOUNTPOINT_NAMESPACE
+              value: mount-s3
+            - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
+              value: http://169.254.170.23/v1/credentials
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -107,18 +97,10 @@ spec:
           volumeMounts:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
-              # Currently we spawn Mountpoint instances on the host using systemd,
-              # "HostToContainer" allows any newly created mounts inside kubelet path to propagated to the container.
-              # Thanks to this, we can do "is mount point?" checks for volumes provided by the CSI Driver
-              # without needing to mount "/proc/mounts" from host.
-              mountPropagation: HostToContainer
-            - name: systemd-bus
-              mountPath: /run/systemd/private
-            - name: host-dev
-              mountPath: /host/dev
+              mountPropagation: Bidirectional
           ports:
             - name: healthz
-              containerPort: 9810
+              containerPort: 9808
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -180,7 +162,6 @@ spec:
             allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
-            - --health-port=9810
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
@@ -191,18 +172,6 @@ spec:
               cpu: 10m
               memory: 40Mi
       volumes:
-        - name: host-dev
-          hostPath:
-            path: /dev/
-            type: Directory
-        - name: mp-install
-          hostPath:
-            path: /opt/mountpoint-s3-csi/bin/
-            type: DirectoryOrCreate
-        - name: systemd-bus
-          hostPath:
-            path: /run/systemd/private
-            type: Socket
         - name: kubelet-dir
           hostPath:
             path: /var/lib/kubelet

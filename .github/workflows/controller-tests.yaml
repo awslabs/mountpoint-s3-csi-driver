@@ -8,6 +8,9 @@ on:
   merge_group:
     types: ["checks_requested"]
 
+permissions:
+  contents: read
+
 jobs:
   build_matrix:
     name: Build Matrix
@@ -26,13 +29,22 @@ jobs:
       ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
 
       - name: Run Controller Tests
         run: |
           make e2e-controller
+
+  post_test:
+    if: always()
+    needs:
+      - controller_test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify jobs succeeded
+        run: echo '${{ toJSON(needs) }}' | jq -e 'to_entries | all(.value.result == "success")'

@@ -110,7 +110,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only"})),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root"})),
 					gomock.Eq(""),
 				)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -151,7 +151,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--test=123"})),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 				)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -220,7 +220,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--test=123"})),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 				).Return(nil)
 				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
@@ -257,7 +257,6 @@ func TestNodePublishVolume(t *testing.T) {
 }
 
 func TestNodePublishVolumeForPodMounter(t *testing.T) {
-	t.Setenv("MOUNTER_KIND", "pod")
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
@@ -581,26 +580,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilitiesForSystemd(t *testing.T) {
-	nodeTestEnv := initNodeServerTestEnv(t)
-	ctx := context.Background()
-	req := &csi.NodeGetCapabilitiesRequest{}
-
-	resp, err := nodeTestEnv.server.NodeGetCapabilities(ctx, req)
-	if err != nil {
-		t.Fatalf("NodeGetCapabilities failed: %v", err)
-	}
-
-	capabilities := resp.GetCapabilities()
-	if len(capabilities) != 0 {
-		t.Fatalf("NodeGetCapabilities failed: capabilities not empty")
-	}
-
-	nodeTestEnv.mockCtl.Finish()
-}
-
 func TestNodeGetCapabilitiesForPodMounter(t *testing.T) {
-	t.Setenv("MOUNTER_KIND", "pod")
 	nodeTestEnv := initNodeServerTestEnv(t)
 	ctx := context.Background()
 	req := &csi.NodeGetCapabilitiesRequest{}

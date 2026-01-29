@@ -36,7 +36,7 @@ type PodUnmounter struct {
 	mount        *mpmounter.Mounter
 	kubeletPath  string
 	podWatcher   *watcher.Watcher
-	credProvider *credentialprovider.Provider
+	credProvider credentialprovider.ProviderInterface
 }
 
 // NewPodUnmounter creates a new PodUnmounter instance with the given parameters
@@ -44,7 +44,7 @@ func NewPodUnmounter(
 	nodeID string,
 	mount *mpmounter.Mounter,
 	podWatcher *watcher.Watcher,
-	credProvider *credentialprovider.Provider,
+	credProvider credentialprovider.ProviderInterface,
 ) *PodUnmounter {
 	return &PodUnmounter{
 		nodeID:       nodeID,
@@ -227,8 +227,14 @@ func (u *PodUnmounter) writeExitFile(podPath string) error {
 
 // cleanupCredentials removes credentials associated with the Mountpoint Pod
 func (u *PodUnmounter) cleanupCredentials(mpPod *corev1.Pod) error {
+	volumeID, exists := mpPod.Annotations[mppod.AnnotationVolumeId]
+	if !exists {
+		// Fallback to legacy label for backward compatibility with old MP pods (v2.0.0)
+		volumeID = mpPod.Labels[mppod.DeprecatedLabelVolumeId]
+	}
+
 	return u.credProvider.Cleanup(credentialprovider.CleanupContext{
-		VolumeID:  mpPod.Labels[mppod.LabelVolumeId],
+		VolumeID:  volumeID,
 		PodID:     string(mpPod.UID),
 		WritePath: mppod.PathOnHost(u.podPath(string(mpPod.UID)), mppod.KnownPathCredentials),
 		MountKind: credentialprovider.MountKindPod,

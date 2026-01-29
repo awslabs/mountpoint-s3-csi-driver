@@ -1,10 +1,13 @@
 package mountpoint_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
+	"pgregory.net/rapid"
 )
 
 func TestParsingMountpointArgs(t *testing.T) {
@@ -150,6 +153,98 @@ func TestParsingMountpointArgs(t *testing.T) {
 			want: []string{
 				"--allow-other",
 				"--read-only",
+			},
+		},
+		{
+			name: "prefix with space separator and equals in value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix kwk3-di/sub=vault/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=kwk3-di/sub=vault/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			// Mount option: prefix=kwk3-di/sub vault/ -> CLI equivalent: --prefix="kwk3-di/sub vault/"
+			name: "prefix with equals separator and space in value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix=kwk3-di/sub vault/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=kwk3-di/sub vault/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "prefix with equals in key and value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix=kwk3-di/sub=vault/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=kwk3-di/sub=vault/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "prefix with spaces in both key and value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix kwk3-di/sub vault/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=kwk3-di/sub vault/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "prefix with spaces and equals in value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix my folder/sub=test/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=my folder/sub=test/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "prefix with multiple equals in value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix env=prod/app=web/version=1.0/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=env=prod/app=web/version=1.0/",
+				"--region=us-west-2",
+			},
+		},
+		{
+			name: "prefix with spaces around equals in value",
+			input: []string{
+				"allow-delete",
+				"region us-west-2",
+				"prefix backup files = production/",
+			},
+			want: []string{
+				"--allow-delete",
+				"--prefix=backup files = production/",
+				"--region=us-west-2",
 			},
 		},
 	}
@@ -493,4 +588,80 @@ func TestCreatingMountpointArgsFromAlreadyParsedArgs(t *testing.T) {
 
 	parsedArgs := mountpoint.ParseArgs(args.SortedList())
 	assert.Equals(t, want, parsedArgs.SortedList())
+}
+
+type argPair struct {
+	key       string
+	value     string
+	separator string
+}
+
+func argumentGenerator() *rapid.Generator[argPair] {
+	return rapid.Custom(func(t *rapid.T) argPair {
+		key := rapid.StringMatching(`-{0,2}[a-z][a-z0-9-]*`).Draw(t, "key")
+		value := rapid.String().Draw(t, "value")
+		separator := rapid.OneOf(rapid.Just(" "), rapid.Just("=")).Draw(t, "separator")
+		return argPair{key: key, value: value, separator: separator}
+	})
+}
+
+func TestParseArgsProperties(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		argPair := argumentGenerator().Draw(t, "argPair")
+
+		input := fmt.Sprintf("%s%s%s", argPair.key, argPair.separator, argPair.value)
+		args := mountpoint.ParseArgs([]string{input})
+		result := args.SortedList()
+
+		// Check if the normalized key is disallowed
+		normalizedKey := argPair.key
+		if !strings.HasPrefix(normalizedKey, "-") {
+			normalizedKey = "--" + normalizedKey
+		}
+		disallowed := normalizedKey == "--foreground" || normalizedKey == "-f" ||
+			normalizedKey == "--help" || normalizedKey == "-h" ||
+			normalizedKey == "--version" || normalizedKey == "-v"
+
+		if disallowed {
+			if len(result) != 0 {
+				t.Fatalf("Expected empty result for disallowed key, got %v for input: %q", result, input)
+			}
+			return
+		}
+
+		if len(result) == 0 {
+			t.Fatalf("ParseArgs produced empty result for input: %q", input)
+		}
+
+		for _, arg := range result {
+			if !strings.HasPrefix(arg, "--") && !strings.HasPrefix(arg, "-") {
+				t.Fatalf("Key not normalized: %q from input: %q", arg, input)
+			}
+		}
+
+		parsedValue, _ := args.Value(argPair.key)
+		if parsedValue != strings.Trim(argPair.value, " ") {
+			t.Fatalf("Value not preserved: expected %q, got %q for input: %q", strings.Trim(argPair.value, " "), parsedValue, input)
+		}
+
+		reparsed := mountpoint.ParseArgs(result)
+		reparsedResult := reparsed.SortedList()
+		if len(result) != len(reparsedResult) {
+			t.Fatalf("Round-trip failed: %v != %v", result, reparsedResult)
+		}
+	})
+}
+
+func TestParseArgsNeverCrashes(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		inputs := rapid.SliceOf(rapid.String()).Draw(t, "inputs")
+
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("ParseArgs panicked on input: %v, panic: %v", inputs, r)
+			}
+		}()
+
+		_ = mountpoint.ParseArgs(inputs)
+	})
 }

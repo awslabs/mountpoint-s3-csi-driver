@@ -1,6 +1,9 @@
-# Default values for ..
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+# Default values for Mountpoint for Amazon S3 CSI Driver Helm chart.
+# You can customize any values here during installation.
+
+# Set to true if running on OpenShift/ROSA.
+# If not set, auto-detects OpenShift where possible.
+isOpenShift: null
 
 image:
   # Our regional ECR repositories are labelled `eks/aws-s3-csi-driver`.
@@ -9,11 +12,10 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1.14.1"
+  tag: "v2.3.0"
 
 node:
   kubeletPath: /var/lib/kubelet
-  mountpointInstallPath: /opt/mountpoint-s3-csi/bin/ # should end with "/"
   logLevel: 4
   seLinuxOptions:
     user: system_u
@@ -24,7 +26,8 @@ node:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-sa
-    # Specify the SA's role ARN if running in EKS. Otherwise, the the driver will be "Forbidden" from accessing s3 buckets
+    # Specify the CSI Driver SA's role ARN if want to use driver-level IRSA,
+    # see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials for more details.
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
   nodeSelector: {}
@@ -35,7 +38,7 @@ node:
     limits:
       memory: 256Mi
   # Tolerates all taints and overrides defaultTolerations
-  tolerateAllTaints: false
+  tolerateAllTaints: true
   defaultTolerations: true
   tolerations: []
   affinity:
@@ -48,8 +51,6 @@ node:
                 values:
                   - fargate
                   - hybrid
-  podInfoOnMountCompat:
-    enable: false
 
 sidecars:
   nodeDriverRegistrar:
@@ -78,11 +79,12 @@ sidecars:
         name: plugin-dir
     resources: {}
 
-initContainer:
-  installMountpoint:
-    resources: {}
-
 controller:
+  # Consider deploying the controller component to special nodes for controller components.
+  # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md#configuring-nodeSelector-for-the-controller-component for more details.
+  # For example:
+  # nodeSelector:
+  #   kubernetes.io/role: control-plane
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -90,7 +92,13 @@ controller:
 
 mountpointPod:
   namespace: mount-s3
+  # If creating the namespace yourself, review the namespace definition in this Helm chart to follow the best practices.
+  # For example, this chart enforces that pods in the namespace are bound by the 'restricted' pod security standard.
+  # This allows us to restrict the pods that the driver's node daemon has privileges to create.
+  createNamespace: true
   priorityClassName: mount-s3-critical
+  preemptingPriorityClassName: mount-s3-preempting-critical
+  headroomPriorityClassName: mount-s3-headroom
 
 nameOverride: ""
 fullnameOverride: ""
@@ -117,4 +125,7 @@ eksPodIdentityAgent:
 supportLegacySystemDMounts: true
 
 experimental:
-  podMounter: false
+  # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
+  # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
+  reserveHeadroomForMountpointPods: false
+  headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10

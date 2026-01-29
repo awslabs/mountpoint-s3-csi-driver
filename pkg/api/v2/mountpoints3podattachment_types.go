@@ -1,8 +1,12 @@
-package v2beta
+package v2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+var MountpointS3PodAttachmentsCRDName = "mountpoints3podattachments." + GroupVersion.Group
+
+const SelectableFieldNodeNameJSONPath = ".spec.nodeName"
 
 // The following fields are used as matching criteria to determine if a mountpoint s3 pod can be shared by having the same MountpointS3PodAttachment resource:
 const (
@@ -65,6 +69,10 @@ type WorkloadAttachment struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=s3pa
 // +kubebuilder:selectablefield:JSONPath=`.spec.nodeName`
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeName`,description="The node where the volume is mounted"
+// +kubebuilder:printcolumn:name="PV Name",type=string,JSONPath=`.spec.persistentVolumeName`,description="The persistent volume name"
+// +kubebuilder:printcolumn:name="Mount Options",type=string,JSONPath=`.spec.mountOptions`,description="Comma separated mount options"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // MountpointS3PodAttachment is the Schema for the mountpoints3podattachments API.
 type MountpointS3PodAttachment struct {

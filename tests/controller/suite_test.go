@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	crdv2beta "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2beta"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -35,8 +35,11 @@ const defaultContainerImage = "public.ecr.aws/docker/library/busybox:stable-musl
 const mountpointNamespace = "mount-s3"
 const mountpointVersion = "1.10.0"
 const mountpointPriorityClassName = "mount-s3-critical"
+const preemptingPodPriorityClassName = "mount-s3-preempting-critical"
+const headroomPodPriorityClassName = "mount-s3-headroom"
 const mountpointContainerCommand = "/bin/aws-s3-csi-mounter"
 const mountpointImage = "mp-image:latest"
+const headroomImage = "pause:latest"
 const mountpointImagePullPolicy = corev1.PullNever
 
 // Since most things are eventually consistent in the control plane,
@@ -67,7 +70,7 @@ var _ = BeforeSuite(func() {
 
 	By("Bootstrapping test environment")
 
-	crdv2beta.AddToScheme(scheme.Scheme)
+	crdv2.AddToScheme(scheme.Scheme)
 	testEnv = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
 			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
@@ -87,17 +90,20 @@ var _ = BeforeSuite(func() {
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
 
-	if err := crdv2beta.SetupManagerIndices(k8sManager); err != nil {
+	if err := crdv2.SetupManagerIndices(k8sManager); err != nil {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
 	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
-		Namespace:         mountpointNamespace,
-		MountpointVersion: mountpointVersion,
-		PriorityClassName: mountpointPriorityClassName,
+		Namespace:                   mountpointNamespace,
+		MountpointVersion:           mountpointVersion,
+		PriorityClassName:           mountpointPriorityClassName,
+		PreemptingPriorityClassName: preemptingPodPriorityClassName,
+		HeadroomPriorityClassName:   headroomPodPriorityClassName,
 		Container: mppod.ContainerConfig{
 			Command:         mountpointContainerCommand,
 			Image:           mountpointImage,
+			HeadroomImage:   headroomImage,
 			ImagePullPolicy: mountpointImagePullPolicy,
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
@@ -112,7 +118,7 @@ var _ = BeforeSuite(func() {
 
 	createMountpointNamespace()
 	createDefaultServiceAccount()
-	createMountpointPriorityClass()
+	createMountpointPriorityClasses()
 })
 
 var _ = AfterSuite(func() {
@@ -144,13 +150,19 @@ func createDefaultServiceAccount() {
 	waitForObject(sa)
 }
 
-// createMountpointPriorityClass creates priority class for Mountpoint Pods.
-func createMountpointPriorityClass() {
-	By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", mountpointPriorityClassName))
-	priorityClass := &schedulingv1.PriorityClass{
-		ObjectMeta: metav1.ObjectMeta{Name: mountpointPriorityClassName},
-		Value:      1000000,
+// createMountpointPriorityClasses creates priority classes for Mountpoint/Headroom Pods.
+func createMountpointPriorityClasses() {
+	for _, name := range []string{
+		mountpointPriorityClassName,
+		preemptingPodPriorityClassName,
+		headroomPodPriorityClassName,
+	} {
+		By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", name))
+		priorityClass := &schedulingv1.PriorityClass{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Value:      1000000,
+		}
+		Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
+		waitForObject(priorityClass)
 	}
-	Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
-	waitForObject(priorityClass)
 }

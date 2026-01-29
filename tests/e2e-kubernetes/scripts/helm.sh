@@ -36,31 +36,48 @@ function helm_install_driver() {
   REPOSITORY=${4}
   TAG=${5}
   KUBECONFIG=${6}
-  MOUNTER_KIND=${7}
-
-  if [ "$MOUNTER_KIND" = "pod" ]; then
-    USE_POD_MOUNTER=true
-  else
-    USE_POD_MOUNTER=false
-  fi
 
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG"
+
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
-    --set node.podInfoOnMountCompat.enable=true \
-    --set experimental.podMounter=${USE_POD_MOUNTER} \
+    --set experimental.reserveHeadroomForMountpointPods=true \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
+
+  helm_validate_driver \
+    "$HELM_BIN" \
+    "$KUBECTL_BIN" \
+    "$RELEASE_NAME" \
+    "$KUBECONFIG"
+}
+
+function helm_validate_driver() {
+  HELM_BIN=${1}
+  KUBECTL_BIN=${2}
+  RELEASE_NAME=${3}
+  KUBECONFIG=${4}
+
+  if ! driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
+    echo "Driver $RELEASE_NAME must be installed"
+    exit 1
+  fi
+
+  echo "Validating $RELEASE_NAME on the server side..."
+
+  # Get all installed manifests and validate them on the server side
+  $HELM_BIN get manifest --namespace kube-system --kubeconfig ${KUBECONFIG} $RELEASE_NAME | \
+    $KUBECTL_BIN replace --kubeconfig $KUBECONFIG --dry-run=server --validate=strict --warnings-as-errors -f -
 }
 
 function driver_installed() {

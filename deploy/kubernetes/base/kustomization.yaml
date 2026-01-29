@@ -1,12 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: kube-system
 resources:
+  - controller.yaml
   - csidriver.yaml
-  - node-daemonset.yaml
-  - node-serviceaccount.yaml
-secretGenerator:
-  - name: aws-credentials
-    behavior: create
-    literals:
-      - dummy=dummy
+  - mount-s3-namespace.yaml
+  - mount-s3-priority.yaml
+  - mountpoints3podattachments-crd.yaml
+  - node.yaml
+  - serviceaccount-csi-controller.yaml
+  - serviceaccount-csi-node.yaml

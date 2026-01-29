@@ -1,13 +1,11 @@
 # Mountpoint for Amazon S3 CSI Driver
 
 > [!TIP]
-> We’re planning to release version 2.0 of the Mountpoint for Amazon S3 CSI Driver in the upcoming months.
+> [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) is available!
 >
-> We have released a v2 beta to enable wider community testing of the upcoming v2. Please note that this beta release is intended for experimental use and its adoption in production environments is not recommended.
-> This Beta release is under active development and has not completed testing and review for performance, reliability, and security. Please refer to [Unstable Releases](https://github.com/awslabs/mountpoint-s3-csi-driver?tab=readme-ov-file#unstable-releases) for more information.
-> Any testing is appreciated, however, we are especially interested in getting your feedback on how the beta CSI v2.0 driver performs with large scale workloads. The v2 beta should be tested on a fresh cluster.
+> The v2 introduces [Mountpoint Pod sharing](docs/MOUNTPOINT_POD_SHARING.md), [EKS Pod Identity support](docs/CONFIGURATION.md#driver-level-credentials-with-eks-pod-identity), support for running on SELinux-enabled environments like [ROSA](https://aws.amazon.com/rosa/), [simplified caching configuration](docs/CACHING.md) and more!
 >
-> See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for more details.
+> See [Mountpoint for Amazon S3 CSI Driver v2](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/504) for new features, and [Upgrading Mountpoint for Amazon S3 CSI Driver from v1 to v2](docs/UPGRADING_TO_V2.md) for more details on breaking changes and necessary steps for upgrading to v2.
 
 
 ## Overview
@@ -18,19 +16,28 @@ For Amazon EKS clusters, the Mountpoint for Amazon S3 CSI driver is also availab
 ## Features
 * **Static Provisioning** - Associate an existing S3 bucket with a [PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) (PV) for consumption within Kubernetes.
 * **Mount Options** - Mount options can be specified in the PersistentVolume (PV) resource to define how the volume should be mounted. For Mountpoint-specific options, take a look at the [Mountpoint docs for configuration](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md).
+* **Mountpoint Pod Sharing** - Multiple workloads can share a single Mountpoint instance when appropriate, improving resource utilization. See [Mountpoint Pod Sharing](docs/MOUNTPOINT_POD_SHARING.md) for more details.
+* **Managed Local Cache** - Use an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) or a [generic ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes) as a local cache with Mountpoint. See [Caching Configuration](docs/CACHING.md) for more details.
 
 Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md) for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
 
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v1.14.1        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.1                      |
+| v2.3.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.3.0                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v2.2.2         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.2                       |
+| v2.2.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.1                       |
+| v2.2.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.0                       |
+| v2.1.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.1.0                       |
+| v2.0.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.0.0                       |
+| v1.15.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.15.0                      |
+| v1.14.1        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.1                      |
 | v1.14.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.14.0                      |
 | v1.13.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.13.0                      |
 | v1.12.0        | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v1.12.0                      |
@@ -72,7 +79,7 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.8.0. The driver supports **x86-64** and **arm64** architectures.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
 
 ## Distros Support Matrix
 
@@ -99,10 +106,18 @@ The following table provides the support status for various distros with regards
 
 We welcome contributions to the Mountpoint for Amazon S3 CSI driver! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more information on how to report bugs or submit pull requests.
 
-### Security
+## Security
 
 If you discover a potential security issue in this project we ask that you notify AWS Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public GitHub issue.
 
-### Code of conduct
+## Code of conduct
 
 This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct). See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for more details.
+
+## License
+
+This project is licensed under the Apache-2.0 License. It builds on a number of other awesome projects with open source licenses, and licenses for other projects can be found under the following locations in the CSI Driver's container image:
+
+- Linux packages under `/usr/share/licenses/*`
+- The CSI Driver's Go dependencies under `/LICENSES/*` (starting from v1.15.0)
+- Mountpoint's Rust dependencies under `/mountpoint-s3/THIRD_PARTY_LICENSES`
