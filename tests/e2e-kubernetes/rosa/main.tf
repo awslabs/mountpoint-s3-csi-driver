@@ -31,7 +31,7 @@ module "hcp" {
   openshift_version = "4.18.13"
   cluster_name = "${var.cluster_name}"
   compute_machine_type = "m5.xlarge"
-  replicas = 2
+  replicas = 3
   machine_cidr = module.vpc.cidr_block
   aws_availability_zones = module.vpc.availability_zones
   aws_subnet_ids = concat(module.vpc.public_subnets, module.vpc.private_subnets)
