@@ -75,8 +75,20 @@ jobs:
           fi
       - name: Validate kubectl is working
         run: |
+          rosa login --token="${{ env.ROSATOKEN }}"
+          rosa create kubeconfig --cluster="${CLUSTER_NAME}"
           kubectl get pods
+      - name: Delete cluster on validation failure
+        if: always()
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform destroy --auto-approve && exit 1
 
   # TODO: Add install CSI driver
   # TODO: Run e2e tests
-  # TODO: Delete cluster 
+  # TODO: Delete cluster

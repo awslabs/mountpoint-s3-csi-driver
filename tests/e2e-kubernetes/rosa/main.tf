@@ -27,7 +27,7 @@ provider "rhcs" {
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
   version = "1.6.8"
-  
+
   openshift_version = "4.18.13"
   cluster_name = "${var.cluster_name}"
   compute_machine_type = "m5.xlarge"
@@ -41,19 +41,6 @@ module "hcp" {
   create_operator_roles = true
   aws_billing_account_id = var.billing_account_id
   ec2_metadata_http_tokens = "required"
-}
-
-resource "aws_secretsmanager_secret" "openshift_credentials" {
-  name = "${var.cluster_name}-openshift-credentials"
-}
-
-resource "aws_secretsmanager_secret_version" "secret_version" {
-  secret_id     = aws_secretsmanager_secret.openshift_credentials.id
-  secret_string = jsonencode({
-    "openshift_username": module.hcp.cluster_admin_username
-    "openshift_password": module.hcp.cluster_admin_password
-    "openshift_server": module.hcp.cluster_api_url
-  })
 }
 
 module "vpc" {
