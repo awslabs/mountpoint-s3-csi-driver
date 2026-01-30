@@ -54,12 +54,9 @@ jobs:
             RosaToken
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
-      - name: Create ROSA cluster
+      - name: Initialize Terraform
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
-          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
-          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
-          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
           TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
         run: |
           cd tests/e2e-kubernetes/rosa/
@@ -67,12 +64,19 @@ jobs:
             -backend-config="bucket=$TERRAFORM_BUCKET" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=$TF_VAR_aws_region"
-          if terraform apply --auto-approve; then
-            echo "cluster_id=$(terraform output -raw cluster_id)" >> $GITHUB_OUTPUT
-            echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
-          else
-            terraform destroy --auto-approve && exit 1
-          fi
+      - name: Validate Terraform configuration
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform validate
+      - name: Create ROSA cluster
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform apply --auto-approve
       - name: Validate kubectl is working
         run: |
           rosa login --token="${{ env.ROSATOKEN }}"
