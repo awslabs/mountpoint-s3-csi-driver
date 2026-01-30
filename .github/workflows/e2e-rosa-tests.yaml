@@ -1,0 +1,111 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+
+env:
+  IMAGE_NAME: "s3-csi-driver"
+  BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
+jobs:
+  # TODO: Add build, push to ECR steps
+  create_cluster: # TODO: This takes ~30min. Consider creating it once instead of on every PR/commit
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: "${{ vars.AWS_REGION }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Install ROSA CLI
+        run: |
+          wget https://mirror.openshift.com/pub/cgw/rosa/latest/rosa-linux.tar.gz
+          tar -xzf rosa-linux.tar.gz
+          sudo mv rosa /usr/local/bin/
+          rosa version
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+      - name: Get ROSA Token
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            RosaToken
+      - name: Initialize Terraform
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform init \
+            -backend-config="bucket=$TERRAFORM_BUCKET" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=$TF_VAR_aws_region"
+      - name: Validate Terraform configuration
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform validate
+      - name: Create ROSA cluster
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform apply --auto-approve
+      - name: Install ROSA CLI
+        run: |
+          wget https://mirror.openshift.com/pub/openshift-v4/clients/rosa/latest/rosa-linux.tar.gz
+          tar -xzf rosa-linux.tar.gz
+          chmod +x rosa
+          sudo mv rosa /usr/local/bin/
+          rosa version
+      - name: Validate kubectl is working
+        run: |
+          rosa login --token="${{ env.ROSATOKEN }}"
+          rosa create kubeconfig --cluster="${CLUSTER_NAME}"
+          kubectl get pods
+      - name: Delete cluster on validation failure
+        if: always()
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: |
+          cd tests/e2e-kubernetes/rosa/
+          terraform destroy --auto-approve && exit 1
+
+  # TODO: Add install CSI driver
+  # TODO: Run e2e tests
+  # TODO: Delete cluster
