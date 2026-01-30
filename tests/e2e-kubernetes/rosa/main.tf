@@ -29,7 +29,7 @@ module "hcp" {
   version = "1.6.8"
   
   openshift_version = "4.18.13"
-  cluster_name = "test"
+  cluster_name = "${var.cluster_name}"
   compute_machine_type = "m5.xlarge"
   replicas = 2
   machine_cidr = module.vpc.cidr_block
