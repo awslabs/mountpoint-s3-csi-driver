@@ -41,11 +41,6 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
-      - name: Install tools
-        env:
-          ACTION: "install_tools"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Install ROSA CLI
@@ -60,6 +55,11 @@ jobs:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: 7200
+      - name: Install tools
+        env:
+          ACTION: "install_tools"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Get ROSA Token
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
