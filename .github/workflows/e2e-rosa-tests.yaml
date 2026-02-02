@@ -104,7 +104,7 @@ jobs:
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
         run: |
           cd tests/e2e-kubernetes/rosa/
-          terraform destroy --auto-approve && exit 1
+          terraform destroy --auto-approve
 
   # TODO: Add install CSI driver
   # TODO: Run e2e tests
