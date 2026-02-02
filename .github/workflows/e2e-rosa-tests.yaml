@@ -41,6 +41,11 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
+      - name: Install tools
+        env:
+          ACTION: "install_tools"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Install ROSA CLI
@@ -93,10 +98,9 @@ jobs:
       - name: Validate kubectl is working
         run: |
           rosa login --token="${{ env.ROSATOKEN }}"
-          rosa create kubeconfig --cluster="${CLUSTER_NAME}"
           kubectl get pods
       - name: Delete cluster on validation failure
-        if: always()
+        # if: always()
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
