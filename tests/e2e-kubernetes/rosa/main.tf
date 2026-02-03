@@ -44,7 +44,8 @@ module "hcp" {
 }
 
 resource "aws_secretsmanager_secret" "openshift_credentials" {
-  name = "${var.cluster_name}-openshift-credentials"
+  name                    = "${var.cluster_name}-openshift-credentials"
+  recovery_window_in_days = 0 # Force immediate deletion to avoid conflicts in subsequent CI runs
 }
 
 resource "aws_secretsmanager_secret_version" "secret_version" {
