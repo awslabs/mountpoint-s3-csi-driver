@@ -148,8 +148,19 @@ jobs:
       - name: Validate kubectl is working
         run: |
           kubectl get pods -n kube-system
+      - name: Run E2E Tests
+        env:
+          ACTION: "run_tests"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Post e2e cleanup
+        if: always()
+        env:
+          ACTION: "e2e_cleanup"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        # if: always()
+        if: always()
         env:
           ACTION: "uninstall_driver"
         run: |
@@ -164,5 +175,3 @@ jobs:
         run: |
           cd tests/e2e-kubernetes/rosa/
           terraform destroy --auto-approve
-
-  # TODO: Run e2e tests
