@@ -113,7 +113,7 @@ jobs:
         run: |
           kubectl get pods -n kube-system
       - name: Uninstall the driver
-        if: always()
+        # if: always()
         env:
           ACTION: "uninstall_driver"
         run: |
