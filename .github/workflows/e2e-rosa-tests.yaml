@@ -104,10 +104,20 @@ jobs:
           openshift_server_url: ${{ env.OPENSHIFT_CREDS_CLUSTER_API_URL }}
           openshift_username: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_USERNAME }}
           openshift_password: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_PASSWORD }}
+      - name: Install the driver
+        env:
+          ACTION: "install_driver"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Validate kubectl is working
         run: |
-          oc get pods
-          kubectl get pods
+          kubectl get pods -n kube-system
+      - name: Uninstall the driver
+        if: always()
+        env:
+          ACTION: "uninstall_driver"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Delete ROSA cluster
         if: always()
         env:
