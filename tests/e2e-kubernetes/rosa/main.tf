@@ -69,7 +69,7 @@ module "vpc" {
 }
 
 resource "aws_iam_policy" "s3_express_worker_policy" {
-  name        = "${var.cluster_name}-s3-csi-permissions"
+  name        = "${var.cluster_name}-s3-express"
   description = "S3 Express permissions for ROSA Worker"
 
   policy = jsonencode({

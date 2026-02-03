@@ -18,7 +18,7 @@ variable "aws_region" {
 
 variable "openshift_version" {
   type    = string
-  default = "4.20.12"
+  default = "4.20.11"
 }
 
 variable "compute_machine_type" {
