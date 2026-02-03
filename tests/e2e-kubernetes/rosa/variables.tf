@@ -15,3 +15,18 @@ variable "cluster_name" {
 variable "aws_region" {
   type = string
 }
+
+variable "openshift_version" {
+  type    = string
+  default = "4.20.12"
+}
+
+variable "compute_machine_type" {
+  type    = string
+  default = "m5.xlarge"
+}
+
+variable "replicas" {
+  type    = number
+  default = 3
+}

@@ -13,7 +13,7 @@ terraform {
 
   backend "s3" {}
 
-  required_version = ">= 1.2.0"
+  required_version = ">= 1.14.4"
 }
 
 provider "aws" {
@@ -28,10 +28,10 @@ module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
   version = "1.7.1"
 
-  openshift_version = "4.20.12"
-  cluster_name = "${var.cluster_name}"
-  compute_machine_type = "m5.xlarge"
-  replicas = 3
+  openshift_version = var.openshift_version
+  cluster_name = var.cluster_name
+  compute_machine_type = var.compute_machine_type
+  replicas = var.replicas
   machine_cidr = module.vpc.cidr_block
   aws_availability_zones = module.vpc.availability_zones
   aws_subnet_ids = concat(module.vpc.public_subnets, module.vpc.private_subnets)
