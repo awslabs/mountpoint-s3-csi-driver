@@ -99,3 +99,10 @@ resource "aws_iam_role_policy_attachment" "s3_full_access_worker_attachment" {
 
   depends_on = [module.hcp]
 }
+
+resource "aws_iam_role_policy_attachment" "ecr_readonly_worker_attachment" {
+  role       = local.worker_role_name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+
+  depends_on = [module.hcp]
+}
