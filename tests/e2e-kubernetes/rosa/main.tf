@@ -25,7 +25,7 @@ provider "rhcs" {
 }
 
 locals {
-  worker_role_name = "${var.cluster_name}-HCP-ROSA-Worker-Role"
+  worker_role_name = "${var.cluster_name}-account-HCP-ROSA-Worker-Role"
 }
 
 module "hcp" {
