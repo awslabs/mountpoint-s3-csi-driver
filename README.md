@@ -73,7 +73,7 @@ Unstable versions (i.e., `beta`, `alpha`, or `rc`) are for testing purposes only
 
 ## Support
 
-Support will be provided for the latest version and one prior version. Bugs or vulnerabilities found in the latest version will be backported to the previous release in a new minor version.
+Support will be provided for the latest version, and we may backport bug fixes or vulnerabilities to it as well as the previous major version.
 
 This policy is non-binding and subject to change.
 
