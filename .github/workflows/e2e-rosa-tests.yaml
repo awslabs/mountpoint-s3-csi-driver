@@ -55,6 +55,7 @@ jobs:
         run: |
           make -j `nproc` all-push-skip-if-present
   create_cluster: # TODO: This takes ~30min. Consider creating it once instead of on every PR/commit
+    needs: [build]
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
