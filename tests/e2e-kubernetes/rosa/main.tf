@@ -2,11 +2,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 4.20.0"
+      version = ">= 6.30.0"
     }
 
     rhcs = {
-      version = ">= 1.6.8"
+      version = ">= 1.7.1"
       source  = "terraform-redhat/rhcs"
     }
   }
@@ -26,9 +26,9 @@ provider "rhcs" {
 
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
-  version = "1.6.8"
+  version = "1.7.1"
 
-  openshift_version = "4.18.13"
+  openshift_version = "4.20.12"
   cluster_name = "${var.cluster_name}"
   compute_machine_type = "m5.xlarge"
   replicas = 3
