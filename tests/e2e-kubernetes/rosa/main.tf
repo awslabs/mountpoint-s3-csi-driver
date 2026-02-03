@@ -50,9 +50,9 @@ resource "aws_secretsmanager_secret" "openshift_credentials" {
 resource "aws_secretsmanager_secret_version" "secret_version" {
   secret_id     = aws_secretsmanager_secret.openshift_credentials.id
   secret_string = jsonencode({
-    "openshift_username": module.hcp.cluster_admin_username
-    "openshift_password": module.hcp.cluster_admin_password
-    "openshift_server": module.hcp.cluster_api_url
+    "cluster_admin_username": module.hcp.cluster_admin_username
+    "cluster_admin_password": module.hcp.cluster_admin_password
+    "cluster_api_url": module.hcp.cluster_api_url
   })
 }
 

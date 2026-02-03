@@ -88,16 +88,21 @@ jobs:
         run: |
           cd tests/e2e-kubernetes/rosa/
           terraform apply --auto-approve
-      - name: Install ROSA CLI
-        run: |
-          wget https://mirror.openshift.com/pub/openshift-v4/clients/rosa/latest/rosa-linux.tar.gz
-          tar -xzf rosa-linux.tar.gz
-          chmod +x rosa
-          sudo mv rosa /usr/local/bin/
-          rosa version
+      - name: Get OpenShift credentials
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            OPENSHIFT_CREDS,s3-csi-${{ inputs.environment }}-openshift-credentials
+          parse-json-secrets: true
+      - name: Login to OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ env.OPENSHIFT_CREDS_CLUSTER_API_URL }}
+          openshift_username: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_USERNAME }}
+          openshift_password: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_PASSWORD }}
       - name: Validate kubectl is working
         run: |
-          rosa login --token="${{ env.ROSATOKEN }}"
+          oc get pods
           kubectl get pods
       - name: Delete cluster on validation failure
         if: always()
