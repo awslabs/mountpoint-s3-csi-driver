@@ -100,7 +100,7 @@ jobs:
           rosa login --token="${{ env.ROSATOKEN }}"
           kubectl get pods
       - name: Delete cluster on validation failure
-        # if: always()
+        if: always()
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"

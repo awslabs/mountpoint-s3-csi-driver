@@ -43,6 +43,19 @@ module "hcp" {
   ec2_metadata_http_tokens = "required"
 }
 
+resource "aws_secretsmanager_secret" "openshift_credentials" {
+  name = "${var.cluster_name}-openshift-credentials"
+}
+
+resource "aws_secretsmanager_secret_version" "secret_version" {
+  secret_id     = aws_secretsmanager_secret.openshift_credentials.id
+  secret_string = jsonencode({
+    "openshift_username": module.hcp.cluster_admin_username
+    "openshift_password": module.hcp.cluster_admin_password
+    "openshift_server": module.hcp.cluster_api_url
+  })
+}
+
 module "vpc" {
   source  = "terraform-redhat/rosa-hcp/rhcs//modules/vpc"
 
