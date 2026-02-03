@@ -60,6 +60,10 @@ jobs:
           ACTION: "install_tools"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "latest"
       - name: Get ROSA Token
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
@@ -104,7 +108,7 @@ jobs:
         run: |
           oc get pods
           kubectl get pods
-      - name: Delete cluster on validation failure
+      - name: Delete ROSA cluster
         if: always()
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
@@ -117,4 +121,3 @@ jobs:
 
   # TODO: Add install CSI driver
   # TODO: Run e2e tests
-  # TODO: Delete cluster
