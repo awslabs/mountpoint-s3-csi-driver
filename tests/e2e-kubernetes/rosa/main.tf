@@ -24,6 +24,10 @@ provider "rhcs" {
   token = var.rhcs_token
 }
 
+locals {
+  worker_role_name = "${var.cluster_name}-HCP-ROSA-Worker-Role"
+}
+
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
   version = "1.7.1"
@@ -62,4 +66,36 @@ module "vpc" {
 
   name_prefix              = "${var.cluster_name}-vpc"
   availability_zones_count = 3
+}
+
+resource "aws_iam_policy" "s3_express_worker_policy" {
+  name        = "${var.cluster_name}-s3-csi-permissions"
+  description = "S3 Express permissions for ROSA Worker"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3express:*",
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "s3_express_worker_attachment" {
+  role       = local.worker_role_name
+  policy_arn = aws_iam_policy.s3_express_worker_policy.arn
+
+  depends_on = [module.hcp]
+}
+
+resource "aws_iam_role_policy_attachment" "s3_full_access_worker_attachment" {
+  role       = local.worker_role_name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+
+  depends_on = [module.hcp]
 }

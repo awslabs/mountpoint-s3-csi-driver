@@ -119,7 +119,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete ROSA cluster
-        if: always()
+        # if: always()
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
@@ -129,5 +129,4 @@ jobs:
           cd tests/e2e-kubernetes/rosa/
           terraform destroy --auto-approve
 
-  # TODO: Add install CSI driver
   # TODO: Run e2e tests
