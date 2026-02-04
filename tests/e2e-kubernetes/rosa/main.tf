@@ -96,7 +96,7 @@ resource "aws_iam_role" "csi_driver_irsa" {
 }
 
 resource "aws_iam_policy" "csi_driver_s3_express_policy" {
-  name        = "${var.cluster_name}-s3-express"
+  name        = "${var.cluster_name}-s3-express-policy"
 
   policy = jsonencode({
     Version = "2012-10-17"
