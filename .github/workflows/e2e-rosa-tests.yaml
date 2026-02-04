@@ -85,6 +85,7 @@ jobs:
           sudo mv rosa /usr/local/bin/
           rosa version
       - name: Configure AWS Credentials
+        id: aws-creds
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
@@ -143,6 +144,7 @@ jobs:
         env:
           ACTION: "install_driver"
           TAG: "untested_${{ inputs.ref }}"
+          CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Validate kubectl is working
@@ -151,6 +153,7 @@ jobs:
       - name: Run E2E Tests
         env:
           ACTION: "run_tests"
+          IMDS_AVAILABLE: "false"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup

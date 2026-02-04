@@ -36,12 +36,21 @@ function helm_install_driver() {
   REPOSITORY=${4}
   TAG=${5}
   KUBECONFIG=${6}
+  CSI_DRIVER_IRSA_ROLE_ARN=${7}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG"
+
+  if [[ -n "${CSI_DRIVER_IRSA_ROLE_ARN}" ]]; then
+    echo "Configuring IRSA for CSI driver with role: ${CSI_DRIVER_IRSA_ROLE_ARN}"
+    IRSA_FLAG="--set node.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${CSI_DRIVER_IRSA_ROLE_ARN}"
+  else
+    echo "Using instance profile for CSI driver"
+    IRSA_FLAG=""
+  fi
 
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
@@ -50,6 +59,7 @@ function helm_install_driver() {
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
     --set experimental.reserveHeadroomForMountpointPods=true \
+    ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG

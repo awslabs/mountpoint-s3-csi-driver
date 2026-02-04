@@ -24,9 +24,7 @@ provider "rhcs" {
   token = var.rhcs_token
 }
 
-locals {
-  worker_role_name = "${var.cluster_name}-account-HCP-ROSA-Worker-Role"
-}
+data "aws_caller_identity" "current" {}
 
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
@@ -68,9 +66,37 @@ module "vpc" {
   availability_zones_count = 3
 }
 
-resource "aws_iam_policy" "s3_express_worker_policy" {
+resource "aws_iam_role_policy_attachment" "ecr_readonly_worker_attachment" {
+  role       = "${var.cluster_name}-account-HCP-ROSA-Worker-Role"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+
+  depends_on = [module.hcp]
+}
+
+resource "aws_iam_role" "csi_driver_irsa" {
+  name = "${var.cluster_name}-driver-irsa"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${replace(module.hcp.oidc_endpoint_url, "https://", "")}"
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "${replace(module.hcp.oidc_endpoint_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:s3-csi-driver-sa"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "csi_driver_s3_express_policy" {
   name        = "${var.cluster_name}-s3-express"
-  description = "S3 Express permissions for ROSA Worker"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -86,23 +112,12 @@ resource "aws_iam_policy" "s3_express_worker_policy" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "s3_express_worker_attachment" {
-  role       = local.worker_role_name
-  policy_arn = aws_iam_policy.s3_express_worker_policy.arn
-
-  depends_on = [module.hcp]
-}
-
-resource "aws_iam_role_policy_attachment" "s3_full_access_worker_attachment" {
-  role       = local.worker_role_name
+resource "aws_iam_role_policy_attachment" "csi_driver_s3_full_access" {
+  role       = aws_iam_role.csi_driver_irsa.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-
-  depends_on = [module.hcp]
 }
 
-resource "aws_iam_role_policy_attachment" "ecr_readonly_worker_attachment" {
-  role       = local.worker_role_name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-
-  depends_on = [module.hcp]
+resource "aws_iam_role_policy_attachment" "csi_driver_s3_express_full_access" {
+  role       = aws_iam_role.csi_driver_irsa.name
+  policy_arn = aws_iam_policy.csi_driver_s3_express_policy.arn
 }

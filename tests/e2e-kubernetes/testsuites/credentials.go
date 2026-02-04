@@ -306,6 +306,18 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	//                        |
 	//                      ------
 	Describe("Credentials", Serial, Ordered, func() {
+		// driverBaselineIRSARoleARN is the driver's service account IRSA role ARN annotation
+		// that the driver was installed with.
+		// On ROSA (IMDS not available): This is the IRSA role created by terraform
+		// On EKS (IMDS available): This is empty (driver uses instance profile)
+		var driverBaselineIRSARoleARN string
+
+		BeforeAll(func(ctx context.Context) {
+			sa := csiDriverServiceAccount(ctx, f)
+			driverBaselineIRSARoleARN = sa.Annotations[roleARNAnnotation]
+			framework.Logf("Driver's baseline IRSA role ARN: %s", driverBaselineIRSARoleARN)
+		})
+
 		cleanClusterWideResources := func(ctx context.Context) {
 			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
 			// we need to clean up all credential related resources before each test to ensure we've a
@@ -313,7 +325,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			By("Cleaning up cluster-wide resources")
 
 			sa := csiDriverServiceAccount(ctx, f)
-			overrideServiceAccountRole(ctx, f, sa, "")
+			overrideServiceAccountRole(ctx, f, sa, driverBaselineIRSARoleARN)
 
 			if eksPodIdentityAgentDaemonSetForCluster(ctx, f) != nil {
 				deletePodIdentityAssociations(ctx, sa)
@@ -419,6 +431,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			})
 
 			Context("IAM Instance Profiles", func() {
+				BeforeEach(func(ctx context.Context) {
+					if !IMDSAvailable {
+						Skip("IAM instance profiles not available (no IMDS)")
+					}
+				})
+
 				// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
 				// see the comments in the beginning of this function.
 				It("should use ec2 instance profile's full access role", func(ctx context.Context) {
