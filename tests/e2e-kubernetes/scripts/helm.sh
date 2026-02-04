@@ -39,7 +39,7 @@ function helm_install_driver() {
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
 
   # helm_uninstall_driver \
-  #   "$HELM_BIN" \
+  #   "$HELM_BIN"  \
   #   "$KUBECTL_BIN" \
   #   "$RELEASE_NAME" \
   #   "$KUBECONFIG"
