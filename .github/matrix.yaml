@@ -23,9 +23,6 @@ matrix:
     - family: "AmazonLinux2023"
       selinux-mode: "enforcing"
   exclude:
-    - cluster-type: "eksctl"
-      arch: "arm"
-      family: "Bottlerocket"
     # AL2 is not supported by Kubernetes 1.33.
     - cluster-type: "eksctl"
       family: "AmazonLinux2"
