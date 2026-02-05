@@ -139,11 +139,9 @@ jobs:
           ACTION: "install_driver"
           TAG: "untested_${{ inputs.ref }}"
           CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
+          CSI_DRIVER_NAMESPACE: "openshift-cluster-csi-drivers"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-      - name: Validate kubectl is working
-        run: |
-          kubectl get pods -n kube-system
       - name: Run E2E Tests
         env:
           ACTION: "run_tests"
@@ -160,6 +158,7 @@ jobs:
         if: always()
         env:
           ACTION: "uninstall_driver"
+          CSI_DRIVER_NAMESPACE: "openshift-cluster-csi-drivers"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete ROSA cluster

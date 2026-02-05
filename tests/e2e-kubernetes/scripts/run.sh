@@ -64,6 +64,7 @@ CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
+CSI_DRIVER_NAMESPACE=${CSI_DRIVER_NAMESPACE:-kube-system}
 
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
@@ -86,7 +87,7 @@ function kubectl_install() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n ${CSI_DRIVER_NAMESPACE} --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
@@ -152,7 +153,7 @@ function e2e_cleanup() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n ${CSI_DRIVER_NAMESPACE} --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
@@ -171,7 +172,8 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${REGISTRY}/${IMAGE_NAME}" \
     "${TAG}" \
     "${KUBECONFIG}" \
-    "${CSI_DRIVER_IRSA_ROLE_ARN}"
+    "${CSI_DRIVER_IRSA_ROLE_ARN}" \
+    "${CSI_DRIVER_NAMESPACE}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
@@ -200,7 +202,8 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$HELM_RELEASE_NAME" \
-    "${KUBECONFIG}"
+    "${KUBECONFIG}" \
+    "${CSI_DRIVER_NAMESPACE}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
