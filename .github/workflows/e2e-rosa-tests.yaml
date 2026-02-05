@@ -155,7 +155,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        # if: always()
+        if: always()
         env:
           ACTION: "uninstall_driver"
           CSI_DRIVER_NAMESPACE: "openshift-cluster-csi-drivers"
