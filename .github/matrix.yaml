@@ -1,3 +1,6 @@
+# Changes here may need to be backported to the latest 2.x and 1.x release branches.
+# Backport if AWS is removing support for an EKS version, or if we're actively choosing to support a new k8s version on
+# an old release.
 matrix:
   cluster-type: ["eksctl"]
   arch: ["x86", "arm"]
