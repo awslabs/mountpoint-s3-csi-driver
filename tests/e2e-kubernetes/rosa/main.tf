@@ -87,7 +87,7 @@ resource "aws_iam_role" "csi_driver_irsa" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "${replace(module.hcp.oidc_endpoint_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:s3-csi-driver-sa"
+            "${replace(module.hcp.oidc_endpoint_url, "https://", "")}:sub" = "system:serviceaccount:openshift-cluster-csi-drivers:s3-csi-driver-sa"
           }
         }
       }

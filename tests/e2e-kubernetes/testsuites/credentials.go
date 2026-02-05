@@ -997,6 +997,18 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	awsAccount := identity.Account
 	partition := getARNPartition(*identity.Arn)
 
+	// Build the StringEquals condition
+	stringEqualsCondition := jsonMap{
+		fmt.Sprintf("%s:sub", oidcProvider): fmt.Sprintf("system:serviceaccount:%s:%s", sa.Namespace, sa.Name),
+	}
+
+	// Only add :aud condition for non-OpenShift clusters (EKS)
+	// OpenShift OIDC providers don't need audience claim.
+	// See https://aws.amazon.com/blogs/containers/fine-grained-iam-roles-for-red-hat-openshift-service-on-aws-rosa-workloads-with-sts/
+	if !isOpenShiftOIDCProvider(oidcProvider) {
+		stringEqualsCondition[fmt.Sprintf("%s:aud", oidcProvider)] = "sts.amazonaws.com"
+	}
+
 	buf, err := json.Marshal(&jsonMap{
 		"Version": "2012-10-17",
 		"Statement": []jsonMap{
@@ -1007,10 +1019,7 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 				},
 				"Action": "sts:AssumeRoleWithWebIdentity",
 				"Condition": jsonMap{
-					"StringEquals": jsonMap{
-						fmt.Sprintf("%s:aud", oidcProvider): "sts.amazonaws.com",
-						fmt.Sprintf("%s:sub", oidcProvider): fmt.Sprintf("system:serviceaccount:%s:%s", sa.Namespace, sa.Name),
-					},
+					"StringEquals": stringEqualsCondition,
 				},
 			},
 		},
@@ -1018,6 +1027,12 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	framework.ExpectNoError(err)
 
 	return string(buf)
+}
+
+// isOpenShiftOIDCProvider checks if the OIDC provider is from OpenShift/ROSA
+// OpenShift OIDC providers typically have the format: oidc.op1.openshiftapps.com/...
+func isOpenShiftOIDCProvider(oidcProvider string) bool {
+	return strings.Contains(oidcProvider, "openshiftapps.com")
 }
 
 func eksPodIdentityRoleTrustPolicyDocument() string {

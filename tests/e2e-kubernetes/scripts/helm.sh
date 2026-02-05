@@ -44,7 +44,8 @@ function helm_install_driver() {
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
-    "$KUBECONFIG"
+    "$KUBECONFIG" \
+    "$NAMESPACE"
 
   if [[ -n "${CSI_DRIVER_IRSA_ROLE_ARN}" ]]; then
     echo "Configuring IRSA for CSI driver with role: ${CSI_DRIVER_IRSA_ROLE_ARN}"
