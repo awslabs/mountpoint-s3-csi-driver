@@ -32,6 +32,7 @@ IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 SELINUX_MODE=${SELINUX_MODE:-}
+IS_OPENSHIFT=${IS_OPENSHIFT:-false}
 
 # eksctl: mustn't include patch version (e.g. 1.19)
 # 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
@@ -64,7 +65,6 @@ CLUSTER_FILE=${TEST_DIR}/${CLUSTER_NAME}.${CLUSTER_TYPE}.yaml
 
 SSH_KEY=${SSH_KEY:-""}
 HELM_RELEASE_NAME=mountpoint-s3-csi-driver
-CSI_DRIVER_NAMESPACE=${CSI_DRIVER_NAMESPACE:-kube-system}
 
 EKSCTL_PATCH_FILE=${EKSCTL_PATCH_FILE:-${BASE_DIR}/eksctl-patch.json}
 EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:-${BASE_DIR}/eksctl-patch-selinux-enforcing.json}
@@ -87,7 +87,7 @@ function kubectl_install() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n ${CSI_DRIVER_NAMESPACE} --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
@@ -153,7 +153,7 @@ function e2e_cleanup() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n ${CSI_DRIVER_NAMESPACE} --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
@@ -173,7 +173,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${TAG}" \
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
-    "${CSI_DRIVER_NAMESPACE}"
+    "${IS_OPENSHIFT}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
@@ -203,7 +203,7 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
     "$KUBECTL_BIN" \
     "$HELM_RELEASE_NAME" \
     "${KUBECONFIG}" \
-    "${CSI_DRIVER_NAMESPACE}"
+    "${IS_OPENSHIFT}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then

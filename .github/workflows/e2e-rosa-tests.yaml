@@ -139,7 +139,7 @@ jobs:
           ACTION: "install_driver"
           TAG: "untested_${{ inputs.ref }}"
           CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
-          CSI_DRIVER_NAMESPACE: "openshift-cluster-csi-drivers"
+          IS_OPENSHIFT: "true"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
@@ -155,14 +155,14 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        # if: always()
+        if: always()
         env:
           ACTION: "uninstall_driver"
-          CSI_DRIVER_NAMESPACE: "openshift-cluster-csi-drivers"
+          IS_OPENSHIFT: "true"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Delete ROSA cluster
-        # if: always()
+        if: always()
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
