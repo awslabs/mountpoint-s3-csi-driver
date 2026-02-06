@@ -91,6 +91,7 @@ The following table provides the support status for various distros with regards
 | Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
 | Ubuntu 20.04         |         - |   1.0.0 |          - |       - |
 | Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
+| Ubuntu 24.04         |         - |   2.0.0 |          - |       - |
 | Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
 
 ## Documentation
