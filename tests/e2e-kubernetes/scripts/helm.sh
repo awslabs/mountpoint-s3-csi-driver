@@ -27,6 +27,7 @@ function helm_uninstall_driver() {
       set +e
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
       set -e
+      $KUBECTL_BIN delete secret --namespace kube-system sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
     else
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
     fi
