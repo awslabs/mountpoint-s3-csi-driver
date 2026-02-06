@@ -24,6 +24,7 @@ func init() {
 	flag.StringVar(&CommitId, "commit-id", "local", "commit id will be used to name buckets")
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.StringVar(&ClusterName, "cluster-name", "", "name of the cluster")
+	flag.StringVar(&ClusterType, "cluster-type", "eksctl", "type of cluster (eksctl or openshift)")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&UpgradeTests, "run-upgrade-tests", false, "run upgrade tests")
@@ -65,22 +66,33 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3CSICredentialsTestSuite,
 	custom_testsuites.InitS3CSICacheTestSuite,
 	custom_testsuites.InitS3CSIPodSharingTestSuite,
-	custom_testsuites.InitS3HeadroomTestSuite,
 	custom_testsuites.InitS3TaintRemovalTestSuite,
+}
+
+func getCSITestSuites() []func() framework.TestSuite {
+	suites := CSITestSuites
+	// Headroom feature is not supported on OpenShift
+	if ClusterType != "openshift" {
+		suites = append(suites, custom_testsuites.InitS3HeadroomTestSuite)
+	}
+	return suites
 }
 
 // This executes testSuites for csi volumes.
 var _ = utils.SIGDescribe("CSI Volumes", func() {
+	var testSuites []func() framework.TestSuite
 	if Performance {
-		CSITestSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
+		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
 	} else if UpgradeTests {
-		CSITestSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIUpgradeTestSuite}
+		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIUpgradeTestSuite}
+	} else {
+		testSuites = getCSITestSuites()
 	}
 	curDriver := initS3Driver()
 
 	args := framework.GetDriverNameWithFeatureTags(curDriver)
 	args = append(args, func() {
-		framework.DefineTestSuites(curDriver, CSITestSuites)
+		framework.DefineTestSuites(curDriver, testSuites)
 	})
 	f.Context(args...)
 })
