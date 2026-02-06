@@ -34,6 +34,7 @@ func init() {
 	s3client.DefaultRegion = BucketRegion
 	custom_testsuites.DefaultRegion = BucketRegion
 	custom_testsuites.ClusterName = ClusterName
+	custom_testsuites.ClusterType = ClusterType
 	custom_testsuites.IMDSAvailable = IMDSAvailable
 }
 

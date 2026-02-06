@@ -42,7 +42,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -56,7 +56,7 @@ jobs:
           TAG: "${{ env.TAG_UNTESTED }}"
         run: |
           make -j `nproc` all-push-skip-if-present
-  test: # TODO: This takes ~30min. Consider creating it once instead of on every PR/commit
+  test:
     needs: [build]
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -75,14 +75,11 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: "go.mod"
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Configure AWS Credentials
         id: aws-creds
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -90,8 +87,7 @@ jobs:
       - name: Install tools
         env:
           ACTION: "install_tools"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
+        run: tests/e2e-kubernetes/scripts/run.sh
       - name: Install OpenShift CLI
         uses: redhat-actions/openshift-tools-installer@v1
         with:
@@ -102,28 +98,26 @@ jobs:
           secret-ids: |
             RosaToken
       - name: Initialize Terraform
+        working-directory: tests/e2e-kubernetes/rosa/
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
         run: |
-          cd tests/e2e-kubernetes/rosa/
           terraform init \
             -backend-config="bucket=$TERRAFORM_BUCKET" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=$TF_VAR_aws_region"
       - name: Validate Terraform configuration
-        run: |
-          cd tests/e2e-kubernetes/rosa/
-          terraform validate
-      - name: Create ROSA cluster
+        working-directory: tests/e2e-kubernetes/rosa/
+        run: terraform validate
+      - name: Create/Update ROSA cluster
+        working-directory: tests/e2e-kubernetes/rosa/
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
           TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
-        run: |
-          cd tests/e2e-kubernetes/rosa/
-          terraform apply --auto-approve
+        run: terraform apply --auto-approve
       - name: Get OpenShift credentials
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
@@ -141,33 +135,19 @@ jobs:
           ACTION: "install_driver"
           TAG: "untested_${{ inputs.ref }}"
           CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
+        run: tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
         env:
           ACTION: "run_tests"
           IMDS_AVAILABLE: "false"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
+        run: tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup
         if: always()
         env:
           ACTION: "e2e_cleanup"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
+        run: tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        # if: always()
+        if: always()
         env:
           ACTION: "uninstall_driver"
-        run: |
-          tests/e2e-kubernetes/scripts/run.sh
-      - name: Delete ROSA cluster
-        # if: always()
-        env:
-          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
-          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
-          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
-          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
-        run: |
-          cd tests/e2e-kubernetes/rosa/
-          terraform destroy --auto-approve
+        run: tests/e2e-kubernetes/scripts/run.sh
