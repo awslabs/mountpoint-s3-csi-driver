@@ -32,7 +32,6 @@ IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 SELINUX_MODE=${SELINUX_MODE:-}
-IS_OPENSHIFT=${IS_OPENSHIFT:-false}
 
 # eksctl: mustn't include patch version (e.g. 1.19)
 # 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
@@ -41,11 +40,11 @@ K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 # We need to ensure that we're using all testing matrix variables in the cluster name
 # because they all run in parallel and conflicting name would break other tests.
-CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}"
-
-if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
+    CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-rosa"}
+elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
-    CLUSTER_NAME="${CLUSTER_NAME}-${K8S_VERSION_EKSCTL/./-}"
+    CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}-${K8S_VERSION_EKSCTL/./-}"
 else
     echo "Unsupported cluster type: ${CLUSTER_TYPE}."
     exit 1
@@ -173,7 +172,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${TAG}" \
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
-    "${IS_OPENSHIFT}"
+    "${CLUSTER_TYPE}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
@@ -203,7 +202,7 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
     "$KUBECTL_BIN" \
     "$HELM_RELEASE_NAME" \
     "${KUBECONFIG}" \
-    "${IS_OPENSHIFT}"
+    "${CLUSTER_TYPE}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then

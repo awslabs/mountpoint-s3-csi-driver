@@ -19,10 +19,10 @@ function helm_uninstall_driver() {
   KUBECTL_BIN=${2}
   RELEASE_NAME=${3}
   KUBECONFIG=${4}
-  IS_OPENSHIFT=${5}
+  CLUSTER_TYPE=${5}
 
   if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
-    if [[ "${IS_OPENSHIFT}" == "true" ]]; then
+    if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
       echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings cannot be deleted due to admission webhooks."
       set +e
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
@@ -47,14 +47,14 @@ function helm_install_driver() {
   TAG=${5}
   KUBECONFIG=${6}
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
-  IS_OPENSHIFT=${8}
+  CLUSTER_TYPE=${8}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
     "$KUBECONFIG" \
-    "$IS_OPENSHIFT"
+    "$CLUSTER_TYPE"
 
   if [[ -n "${CSI_DRIVER_IRSA_ROLE_ARN}" ]]; then
     echo "Configuring IRSA for CSI driver with role: ${CSI_DRIVER_IRSA_ROLE_ARN}"
