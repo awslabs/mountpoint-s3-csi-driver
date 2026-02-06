@@ -729,6 +729,10 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
+					if eksPodIdentityAgentDaemonSet == nil {
+						Skip("EKS Pod Identity Agent is not configured, skipping test")
+					}
+
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
