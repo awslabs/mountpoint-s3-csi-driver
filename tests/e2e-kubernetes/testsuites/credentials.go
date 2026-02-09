@@ -1036,8 +1036,6 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	return string(buf)
 }
 
-
-
 func eksPodIdentityRoleTrustPolicyDocument() string {
 	buf, err := json.Marshal(&jsonMap{
 		"Version": "2012-10-17",
