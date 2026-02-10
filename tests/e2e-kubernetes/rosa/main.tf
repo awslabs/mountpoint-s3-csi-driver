@@ -26,6 +26,18 @@ provider "rhcs" {
 
 data "aws_caller_identity" "current" {}
 
+# Capture cluster creation timestamp in state
+# Used in e2e-rosa-tests.yaml to evaluate whether we should re-create cluster if it's too old
+resource "terraform_data" "cluster_creation_time" {
+  input = timestamp()
+
+  lifecycle {
+    ignore_changes = [input]
+  }
+
+  depends_on = [module.hcp]
+}
+
 module "hcp" {
   source  = "terraform-redhat/rosa-hcp/rhcs"
   version = "1.7.1"

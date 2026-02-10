@@ -23,7 +23,7 @@ function helm_uninstall_driver() {
 
   if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
     if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
-      echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings cannot be deleted due to admission webhooks."
+      echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
       set +e
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
       set -e

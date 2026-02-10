@@ -110,6 +110,50 @@ jobs:
       - name: Validate Terraform configuration
         working-directory: tests/e2e-kubernetes/rosa/
         run: terraform validate
+      - name: Check cluster age and destroy if too old
+        id: check_cluster_age
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          MAX_AGE_DAYS: 3
+        run: |
+          # Check if cluster creation timestamp exists in Terraform state
+          CLUSTER_CREATED=$(terraform show -json | jq -r '
+            .values.root_module.resources[] |
+            select(.type == "terraform_data" and .name == "cluster_creation_time") |
+            .values.output // empty
+          ')
+
+          if [ -z "$CLUSTER_CREATED" ] || [ "$CLUSTER_CREATED" = "null" ]; then
+            echo "No existing cluster found (no creation timestamp in state)"
+            echo "destroy_cluster=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Cluster created at: $CLUSTER_CREATED"
+
+          # Calculate cluster age in days
+          CREATED_EPOCH=$(date -d "$CLUSTER_CREATED" +%s)
+          CURRENT_EPOCH=$(date +%s)
+          AGE_DAYS=$(( ($CURRENT_EPOCH - $CREATED_EPOCH) / 86400 ))
+          echo "Cluster age: $AGE_DAYS days"
+
+          if [ $AGE_DAYS -ge $MAX_AGE_DAYS ]; then
+            echo "Cluster is $AGE_DAYS days old (>= $MAX_AGE_DAYS days). Destroying for fresh deployment."
+            echo "destroy_cluster=true" >> $GITHUB_OUTPUT
+          else
+            echo "Cluster is $AGE_DAYS days old (< $MAX_AGE_DAYS days). Will reuse existing cluster."
+            echo "destroy_cluster=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Destroy old cluster
+        if: steps.check_cluster_age.outputs.destroy_cluster == 'true'
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: |
+          echo "Destroying cluster older than 14 days..."
+          terraform destroy --auto-approve
       - name: Create/Update ROSA cluster
         working-directory: tests/e2e-kubernetes/rosa/
         env:
