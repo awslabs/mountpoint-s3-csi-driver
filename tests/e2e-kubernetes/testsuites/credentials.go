@@ -139,7 +139,8 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
 	// in these test cases to ensure it does not fallback to Driver-level 4) credentials.
 	// NOTE: In OpenShift clusters as IMDS is not available we rely on Driver-level IRSA 2)
-	// credentials instead of IAM instance profile.
+	// credentials instead of IAM instance profile. EKS Pod Identity and IAM Instance Profile
+	// are not tested on OpenShift because they are not supported.
 
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"credentials", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged

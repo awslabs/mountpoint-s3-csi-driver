@@ -114,7 +114,7 @@ jobs:
         id: check_cluster_age
         working-directory: tests/e2e-kubernetes/rosa/
         env:
-          MAX_AGE_DAYS: 3
+          MAX_AGE_DAYS: 0
         run: |
           # Check if cluster creation timestamp exists in Terraform state
           CLUSTER_CREATED=$(terraform show -json | jq -r '
@@ -144,7 +144,7 @@ jobs:
             echo "destroy_cluster=false" >> $GITHUB_OUTPUT
           fi
       - name: Destroy old cluster
-        if: steps.check_cluster_age.outputs.destroy_cluster == 'true'
+        if: steps.check_cluster_age.outputs.destroy_cluster != 'false'
         working-directory: tests/e2e-kubernetes/rosa/
         env:
           TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
