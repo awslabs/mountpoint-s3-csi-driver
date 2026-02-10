@@ -151,9 +151,7 @@ jobs:
           TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
           TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
-        run: |
-          echo "Destroying cluster older than 14 days..."
-          terraform destroy --auto-approve
+        run: terraform destroy --auto-approve
       - name: Create/Update ROSA cluster
         working-directory: tests/e2e-kubernetes/rosa/
         env:
