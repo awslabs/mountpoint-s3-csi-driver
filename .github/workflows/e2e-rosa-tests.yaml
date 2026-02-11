@@ -116,11 +116,12 @@ jobs:
         env:
           MAX_AGE_DAYS: 0
         run: |
+          set -euo pipefail
           # Check if cluster creation timestamp exists in Terraform state
           CLUSTER_CREATED=$(terraform show -json | jq -r '
-            .values.root_module.resources[] |
-            select(.type == "terraform_data" and .name == "cluster_creation_time") |
-            .values.output // empty
+            (.values.root_module.resources // []) |
+            map(select(.type == "terraform_data" and .name == "cluster_creation_time")) |
+            .[0].values.output // empty
           ')
 
           if [ -z "$CLUSTER_CREATED" ] || [ "$CLUSTER_CREATED" = "null" ]; then
