@@ -114,7 +114,7 @@ jobs:
         id: check_cluster_age
         working-directory: tests/e2e-kubernetes/rosa/
         env:
-          MAX_AGE_DAYS: 0
+          MAX_AGE_DAYS: 3
         run: |
           set -euo pipefail
           # Check if cluster creation timestamp exists in Terraform state
