@@ -35,7 +35,7 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	_ = ignoreSIGTERM()
+	setupSignalHandler()
 
 	mountpointBinFullPath := filepath.Join(*mountpointBinDir, mountpointBin)
 	mountOptions, err := recvMountOptions()
@@ -78,14 +78,23 @@ func recvMountOptions() (mountoptions.Options, error) {
 	return options, nil
 }
 
-func ignoreSIGTERM() <-chan struct{} {
+// setupSignalHandler captures and ignores SIGTERM signals to prevent default
+// termination.
+//
+// This, combined with TerminationGracePeriodSeconds=10m, prevents Mountpoint
+// from terminating before the workload pod. This achieves the desired
+// termination order in typical cases where the API respects the grace period
+// and the workload terminates within 10 minutes.
+//
+// Note: The desired order may be violated if the grace period is overridden
+// (e.g., via Karpenter NodePool settings) or if the workload takes longer
+// than 10 minutes to terminate.
+func setupSignalHandler() {
 	sigChan := make(chan os.Signal, 1)
-	done := make(chan struct{})
 	signal.Notify(sigChan, syscall.SIGTERM)
 	go func() {
-		<-sigChan
-		klog.Info("Received SIGTERM, ignoring and waiting for exit file mechanism")
-		close(done)
+		for range sigChan {
+			klog.Info("Received SIGTERM, ignoring")
+		}
 	}()
-	return done
 }

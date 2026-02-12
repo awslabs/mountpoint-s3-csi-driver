@@ -52,6 +52,7 @@ const (
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
+const TerminationGracePeriodSeconds = 600          // 10 minutes
 
 // A PriorityClassKind represents type of priority class to use while spawning a Mountpoint Pod.
 type PriorityClassKind uint8
@@ -122,7 +123,7 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
 			RestartPolicy:                 corev1.RestartPolicyOnFailure,
-			TerminationGracePeriodSeconds: ptr.To(int64(600)), // 10 minutes
+			TerminationGracePeriodSeconds: ptr.To(int64(TerminationGracePeriodSeconds)),
 			SecurityContext: &corev1.PodSecurityContext{
 				FSGroup: uid,
 			},
