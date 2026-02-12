@@ -135,3 +135,12 @@ F0919 20:25:04.161506       1 main.go:45] Failed to receive mount options from /
 
 One well-known cause of this issue is when <a href="#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status">volumes are specified without using a unique `volumeHandle` value</a>.
 There may be other issues related to the volume or pod spec that can lead to the workload pod being stuck in `ContainerCreating`, and the Mountpoint pod failing with this error.
+
+## My workload pods are getting "Transport endpoint is not connected" errors during node drain
+
+This error occurs when workload pods are terminated before the Mountpoint pod that provides their S3 volume mount. To prevent this, the CSI driver implements graceful eviction:
+
+- Mountpoint pods ignore SIGTERM signals and have a 10-minute termination grace period, which ensures the S3 mount stays available during typical workload pod shutdown.
+- If any workload pod takes longer than 10 minutes to terminate, it may encounter "Transport endpoint is not connected" errors when the Mountpoint pod is force-killed after its grace period expires.
+
+**Recommendation:** Keep workload pod termination grace periods sufficiently low to ensure graceful shutdown completes within the Mountpoint pod's 10-minute window and the grace period specified in the `drain` operation (e.g. via Karpenter NodePool [settings](https://karpenter.sh/docs/concepts/nodepools/#spectemplatespecterminationgraceperiod)).
