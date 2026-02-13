@@ -1,0 +1,34 @@
+name: Helm publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag referencing commit to create release from"
+        required: true
+
+jobs:
+  # This job is manually dispatched for now, since we do not have image build fully automated yet.
+  helm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Ensure only the latest version of the workflow can run, as this is global for the project
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          config: .github/cr.yaml
+          mark_as_latest: false
