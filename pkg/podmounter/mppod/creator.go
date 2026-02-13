@@ -52,7 +52,14 @@ const (
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
-const TerminationGracePeriodSeconds = 600          // 10 minutes
+// TerminationGracePeriodSeconds sets the grace period for Mountpoint pod termination.
+// 10 minutes provides sufficient time for workload pods to gracefully terminate and
+// for the volume to get unmounted before the Mountpoint pod is force-killed.
+// This duration accounts for:
+// - Default Kubernetes termination grace period (30 seconds)
+// - Application-specific shutdown procedures
+// The value balances graceful shutdown with resource cleanup efficiency.
+const TerminationGracePeriodSeconds = 600 // 10 minutes
 
 // A PriorityClassKind represents type of priority class to use while spawning a Mountpoint Pod.
 type PriorityClassKind uint8
