@@ -5,10 +5,8 @@ on:
     inputs:
       old_version:
         description: "Previous version to upgrade from (e.g., 1.14.1)"
-        required: true
       new_version:
         description: "New version to upgrade to (e.g., 2.0.0-beta)"
-        required: true
 
 permissions:
   id-token: write
