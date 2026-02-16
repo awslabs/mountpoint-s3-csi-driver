@@ -41,6 +41,8 @@ node:
   tolerateAllTaints: true
   defaultTolerations: true
   tolerations: []
+  hostNetwork: false
+  healthzPort: 9808
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

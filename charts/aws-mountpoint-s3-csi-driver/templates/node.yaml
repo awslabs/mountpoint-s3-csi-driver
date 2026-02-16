@@ -23,6 +23,7 @@ spec:
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
+      hostNetwork: {{ .Values.node.hostNetwork }}
       {{- with .Values.node.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -120,7 +121,7 @@ spec:
               mountPropagation: Bidirectional
           ports:
             - name: healthz
-              containerPort: 9808
+              containerPort: {{ .Values.node.healthzPort }}
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -178,6 +179,7 @@ spec:
             allowPrivilegeEscalation: false
           args:
             - --csi-address=/csi/csi.sock
+            - --health-port={{ .Values.node.healthzPort }}
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
