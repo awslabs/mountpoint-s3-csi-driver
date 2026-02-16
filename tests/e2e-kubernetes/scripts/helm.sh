@@ -19,8 +19,19 @@ function helm_uninstall_driver() {
   KUBECTL_BIN=${2}
   RELEASE_NAME=${3}
   KUBECONFIG=${4}
+  CLUSTER_TYPE=${5}
+
   if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
-    $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+    if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
+      echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
+      set +e
+      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+      set -e
+      $KUBECTL_BIN delete secret --namespace kube-system sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
+    else
+      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+    fi
+
     $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   else
     echo "driver does not seem to be installed"
@@ -36,12 +47,23 @@ function helm_install_driver() {
   REPOSITORY=${4}
   TAG=${5}
   KUBECONFIG=${6}
+  CSI_DRIVER_IRSA_ROLE_ARN=${7}
+  CLUSTER_TYPE=${8}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$RELEASE_NAME" \
-    "$KUBECONFIG"
+    "$KUBECONFIG" \
+    "$CLUSTER_TYPE"
+
+  if [[ -n "${CSI_DRIVER_IRSA_ROLE_ARN}" ]]; then
+    echo "Configuring IRSA for CSI driver with role: ${CSI_DRIVER_IRSA_ROLE_ARN}"
+    IRSA_FLAG="--set node.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${CSI_DRIVER_IRSA_ROLE_ARN}"
+  else
+    echo "Using instance profile for CSI driver"
+    IRSA_FLAG=""
+  fi
 
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
@@ -50,6 +72,7 @@ function helm_install_driver() {
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
     --set experimental.reserveHeadroomForMountpointPods=true \
+    ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG

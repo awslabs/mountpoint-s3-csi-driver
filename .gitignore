@@ -8,3 +8,4 @@ go.work.sum
 .github/artifacts/data.json
 cover.out
 cover.html
+.terraform/

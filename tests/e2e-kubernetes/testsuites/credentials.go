@@ -81,6 +81,7 @@ var eksPodsServicePrincipal = determineEksPodsServicePrincipal()
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
 var ClusterName string
+var ClusterType string
 
 // IMDSAvailable indicates whether the Instance Metadata Service is accessible.
 // When true, it enables a test that rely on automatic detection of the STS region.
@@ -132,11 +133,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// 		1) IAM Roles for Service Accounts (IRSA)
 	// 		2) EKS Pod Identity
 	//
-	// In our test environment we add "AmazonS3FullAccess" policy to our EC2 instances
-	// (see "eksctl-patch.json") which allows Driver-level 3) to work.
+	// In our EKS test environment we add "AmazonS3FullAccess" policy to our EC2 instances
+	// (see "eksctl-patch.json") which allows Driver-level 4) to work.
 	// In order to test if other driver-level and pod-level credentials correctly work,
 	// we're trying to set a more restricted role (e.g. with "AmazonS3ReadOnlyAccess" policy),
-	// in these test cases to ensure it does not fallback to Driver-level 3) credentials.
+	// in these test cases to ensure it does not fallback to Driver-level 4) credentials.
+	// NOTE: In OpenShift clusters as IMDS is not available we rely on Driver-level IRSA 2)
+	// credentials instead of IAM instance profile. EKS Pod Identity and IAM Instance Profile
+	// are not tested on OpenShift because they are not supported.
 
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"credentials", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
@@ -306,6 +310,18 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	//                        |
 	//                      ------
 	Describe("Credentials", Serial, Ordered, func() {
+		// driverBaselineIRSARoleARN is the driver's service account IRSA role ARN annotation
+		// that the driver was installed with.
+		// On OpenShift (IMDS not available): This is the IRSA role created by terraform (driver uses IRSA as base credentials)
+		// On EKS (IMDS available): This is empty (driver uses IAM instance profile as base credentials)
+		var driverBaselineIRSARoleARN string
+
+		BeforeAll(func(ctx context.Context) {
+			sa := csiDriverServiceAccount(ctx, f)
+			driverBaselineIRSARoleARN = sa.Annotations[roleARNAnnotation]
+			framework.Logf("Driver's baseline IRSA role ARN: %s", driverBaselineIRSARoleARN)
+		})
+
 		cleanClusterWideResources := func(ctx context.Context) {
 			// Since we're using cluster-wide resources and we're running multiple tests in the same cluster,
 			// we need to clean up all credential related resources before each test to ensure we've a
@@ -313,7 +329,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			By("Cleaning up cluster-wide resources")
 
 			sa := csiDriverServiceAccount(ctx, f)
-			overrideServiceAccountRole(ctx, f, sa, "")
+			overrideServiceAccountRole(ctx, f, sa, driverBaselineIRSARoleARN)
 
 			if eksPodIdentityAgentDaemonSetForCluster(ctx, f) != nil {
 				deletePodIdentityAssociations(ctx, sa)
@@ -419,6 +435,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 			})
 
 			Context("IAM Instance Profiles", func() {
+				BeforeEach(func(ctx context.Context) {
+					if !IMDSAvailable {
+						Skip("IAM instance profiles not available (no IMDS)")
+					}
+				})
+
 				// We always have instance profile with "AmazonS3FullAccess" policy in EC2 instances of our test cluster,
 				// see the comments in the beginning of this function.
 				It("should use ec2 instance profile's full access role", func(ctx context.Context) {
@@ -711,6 +733,10 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
+					if eksPodIdentityAgentDaemonSet == nil {
+						Skip("EKS Pod Identity Agent is not configured, skipping test")
+					}
+
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
@@ -979,6 +1005,18 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 	awsAccount := identity.Account
 	partition := getARNPartition(*identity.Arn)
 
+	// Build the StringEquals condition
+	stringEqualsCondition := jsonMap{
+		fmt.Sprintf("%s:sub", oidcProvider): fmt.Sprintf("system:serviceaccount:%s:%s", sa.Namespace, sa.Name),
+	}
+
+	// Only add :aud condition for non-OpenShift clusters (EKS)
+	// OpenShift OIDC providers don't need audience claim.
+	// See https://aws.amazon.com/blogs/containers/fine-grained-iam-roles-for-red-hat-openshift-service-on-aws-rosa-workloads-with-sts/
+	if ClusterType != "openshift" {
+		stringEqualsCondition[fmt.Sprintf("%s:aud", oidcProvider)] = "sts.amazonaws.com"
+	}
+
 	buf, err := json.Marshal(&jsonMap{
 		"Version": "2012-10-17",
 		"Statement": []jsonMap{
@@ -989,10 +1027,7 @@ func assumeRoleWithWebIdentityPolicyDocument(ctx context.Context, oidcProvider s
 				},
 				"Action": "sts:AssumeRoleWithWebIdentity",
 				"Condition": jsonMap{
-					"StringEquals": jsonMap{
-						fmt.Sprintf("%s:aud", oidcProvider): "sts.amazonaws.com",
-						fmt.Sprintf("%s:sub", oidcProvider): fmt.Sprintf("system:serviceaccount:%s:%s", sa.Namespace, sa.Name),
-					},
+					"StringEquals": stringEqualsCondition,
 				},
 			},
 		},

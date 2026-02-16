@@ -1,0 +1,196 @@
+name: E2E ROSA Tests
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+
+env:
+  IMAGE_NAME: "s3-csi-driver"
+  BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  BENCHMARK_BUCKET: "s3://${{ vars.BENCHMARK_BUCKET }}"
+  TAG_UNTESTED: "untested_${{ inputs.ref }}"
+  TAG_PASSED: "test_passed_${{ inputs.ref }}"
+  CLUSTER_TYPE: "openshift"
+  CLUSTER_NAME: "s3-csi-${{ inputs.environment }}"
+jobs:
+  build:
+    runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build, tag, and push docker image to Amazon ECR Private Repository
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          PLATFORM: "linux/amd64,linux/arm64"
+          TAG: "${{ env.TAG_UNTESTED }}"
+        run: |
+          make -j `nproc` all-push-skip-if-present
+  test:
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: "${{ vars.AWS_REGION }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: "go.mod"
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Configure AWS Credentials
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+      - name: Install tools
+        env:
+          ACTION: "install_tools"
+        run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "latest"
+      - name: Get ROSA Token
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            RosaToken
+      - name: Initialize Terraform
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TERRAFORM_BUCKET: "${{ vars.TERRAFORM_BUCKET }}"
+        run: |
+          terraform init \
+            -backend-config="bucket=$TERRAFORM_BUCKET" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=$TF_VAR_aws_region"
+      - name: Validate Terraform configuration
+        working-directory: tests/e2e-kubernetes/rosa/
+        run: terraform validate
+      - name: Check cluster age and destroy if too old
+        id: check_cluster_age
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          MAX_AGE_DAYS: 3
+        run: |
+          set -euo pipefail
+          # Check if cluster creation timestamp exists in Terraform state
+          CLUSTER_CREATED=$(terraform show -json | jq -r '
+            (.values.root_module.resources // []) |
+            map(select(.type == "terraform_data" and .name == "cluster_creation_time")) |
+            .[0].values.output // empty
+          ')
+
+          if [ -z "$CLUSTER_CREATED" ] || [ "$CLUSTER_CREATED" = "null" ]; then
+            echo "No existing cluster found (no creation timestamp in state)"
+            echo "destroy_cluster=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Cluster created at: $CLUSTER_CREATED"
+
+          # Calculate cluster age in days
+          CREATED_EPOCH=$(date -d "$CLUSTER_CREATED" +%s)
+          CURRENT_EPOCH=$(date +%s)
+          AGE_DAYS=$(( ($CURRENT_EPOCH - $CREATED_EPOCH) / 86400 ))
+          echo "Cluster age: $AGE_DAYS days"
+
+          if [ $AGE_DAYS -ge $MAX_AGE_DAYS ]; then
+            echo "Cluster is $AGE_DAYS days old (>= $MAX_AGE_DAYS days). Destroying for fresh deployment."
+            echo "destroy_cluster=true" >> $GITHUB_OUTPUT
+          else
+            echo "Cluster is $AGE_DAYS days old (< $MAX_AGE_DAYS days). Will reuse existing cluster."
+            echo "destroy_cluster=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Destroy old cluster
+        if: steps.check_cluster_age.outputs.destroy_cluster != 'false'
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: terraform destroy --auto-approve
+      - name: Create/Update ROSA cluster
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          TF_VAR_aws_region: "${{ vars.AWS_REGION }}"
+          TF_VAR_cluster_name: "s3-csi-${{ inputs.environment }}"
+          TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
+          TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
+        run: terraform apply --auto-approve
+      - name: Get OpenShift credentials
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            OPENSHIFT_CREDS,s3-csi-${{ inputs.environment }}-openshift-credentials
+          parse-json-secrets: true
+      - name: Login to OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ env.OPENSHIFT_CREDS_CLUSTER_API_URL }}
+          openshift_username: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_USERNAME }}
+          openshift_password: ${{ env.OPENSHIFT_CREDS_CLUSTER_ADMIN_PASSWORD }}
+      - name: Install the driver
+        env:
+          ACTION: "install_driver"
+          TAG: "untested_${{ inputs.ref }}"
+          CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
+        run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Run E2E Tests
+        env:
+          ACTION: "run_tests"
+          IMDS_AVAILABLE: "false"
+        run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Post e2e cleanup
+        if: always()
+        env:
+          ACTION: "e2e_cleanup"
+        run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Uninstall the driver
+        if: always()
+        env:
+          ACTION: "uninstall_driver"
+        run: tests/e2e-kubernetes/scripts/run.sh

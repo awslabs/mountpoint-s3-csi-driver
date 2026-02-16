@@ -28,6 +28,7 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
+IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 SELINUX_MODE=${SELINUX_MODE:-}
@@ -39,11 +40,11 @@ K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 # We need to ensure that we're using all testing matrix variables in the cluster name
 # because they all run in parallel and conflicting name would break other tests.
-CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}"
-
-if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
+    CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-rosa"}
+elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
-    CLUSTER_NAME="${CLUSTER_NAME}-${K8S_VERSION_EKSCTL/./-}"
+    CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}-${K8S_VERSION_EKSCTL/./-}"
 else
     echo "Unsupported cluster type: ${CLUSTER_TYPE}."
     exit 1
@@ -71,6 +72,7 @@ if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
 fi
 
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
+CSI_DRIVER_IRSA_ROLE_ARN=${CSI_DRIVER_IRSA_ROLE_ARN:-}
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -168,25 +170,27 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "$HELM_RELEASE_NAME" \
     "${REGISTRY}/${IMAGE_NAME}" \
     "${TAG}" \
-    "${KUBECONFIG}"
+    "${KUBECONFIG}" \
+    "${CSI_DRIVER_IRSA_ROLE_ARN}" \
+    "${CLUSTER_TYPE}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=true --cluster-name=${CLUSTER_NAME} --run-upgrade-tests
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=true --cluster-name=${CLUSTER_NAME}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
   EXIT_CODE=$?
   print_cluster_info
   popd
@@ -197,7 +201,8 @@ elif [[ "${ACTION}" == "uninstall_driver" ]]; then
     "$HELM_BIN" \
     "$KUBECTL_BIN" \
     "$HELM_RELEASE_NAME" \
-    "${KUBECONFIG}"
+    "${KUBECONFIG}" \
+    "${CLUSTER_TYPE}"
 elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
