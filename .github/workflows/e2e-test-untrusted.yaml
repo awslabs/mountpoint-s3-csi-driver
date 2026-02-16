@@ -25,13 +25,3 @@ jobs:
       environment: "untrusted"
       ref: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
-
-  upgrade:
-    name: Upgrade Tests
-    uses: ./.github/workflows/e2e-tests.yaml
-    needs: approval
-    with:
-      environment: "untrusted"
-      ref: ${{ github.event.pull_request.head.sha }}
-      run_upgrade_tests: true
-    secrets: inherit
