@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   e2e:
-    name: E2E Tests
+    name: E2E ROSA Tests
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id }}
     uses: ./.github/workflows/e2e-rosa-tests.yaml
     with:

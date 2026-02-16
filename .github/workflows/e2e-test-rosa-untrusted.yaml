@@ -18,7 +18,7 @@ jobs:
         run: |
           echo "Approved!"
   e2e:
-    name: E2E Tests
+    name: E2E ROSA Tests
     uses: ./.github/workflows/e2e-rosa-tests.yaml
     needs: approval
     with:
