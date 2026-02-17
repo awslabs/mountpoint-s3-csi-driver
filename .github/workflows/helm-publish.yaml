@@ -16,19 +16,37 @@ jobs:
     # Ensure only the latest version of the workflow can run, as this is global for the project
     if: ${{ github.ref == 'refs/heads/main' }}
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+      - name: Checkout verification script from main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          sparse-checkout: |
+            scripts/verify-helm-images.sh
+          sparse-checkout-cone-mode: false
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        with:
-          config: .github/cr.yaml
-          mark_as_latest: false
+      - name: Install crane
+        run: |
+          cd /tmp
+          curl -sL "https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz" > crane.tar.gz
+          tar -xzf crane.tar.gz crane
+          sudo mv crane /usr/local/bin/crane
+          sudo chmod +x /usr/local/bin/crane
+          crane version
+      - name: Verify all images exist before publishing
+        run: ./scripts/verify-helm-images.sh
+      # TODO: Uncomment after verifying the workflow works correctly
+      # - name: Run chart-releaser
+      #   uses: helm/chart-releaser-action@v1.7.0
+      #   env:
+      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      #   with:
+      #     config: .github/cr.yaml
+      #     mark_as_latest: false
