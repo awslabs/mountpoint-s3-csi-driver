@@ -67,7 +67,7 @@ jobs:
       AWS_REGION: "${{ vars.AWS_REGION }}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref }}
           persist-credentials: false
