@@ -102,7 +102,7 @@ jobs:
         with:
           go-version-file: "go.mod"
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -168,7 +168,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
