@@ -1,5 +1,9 @@
 # Unreleased
 
+# v2.4.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.4.0/README.md)
+
 ### Notable changes
 * Support Mountpoint [version 1.22.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.22.0)
   * Breaking Change: Address an issue where opening a file for reading/writing immediately after the file had been closed would occasionally fail. Since this release, opening a new file handle after close will succeed and trigger the completion of a deferred upload if required. As a consequence, duplicate references to the closed file handle will become invalid and read or write operations on them will fail. See [this section in the semantics documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md#close-and-re-open) for details. ([#1704](https://github.com/awslabs/mountpoint-s3/pull/1704))
