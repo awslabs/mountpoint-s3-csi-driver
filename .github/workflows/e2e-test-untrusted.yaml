@@ -25,3 +25,11 @@ jobs:
       environment: "untrusted"
       ref: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
+  e2e-rosa:
+    name: E2E ROSA Tests
+    uses: ./.github/workflows/e2e-rosa-tests.yaml
+    needs: approval
+    with:
+      environment: "rosa-untrusted"
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
