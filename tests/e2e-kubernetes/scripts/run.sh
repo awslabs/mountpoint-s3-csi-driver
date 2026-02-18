@@ -146,8 +146,40 @@ function e2e_cleanup() {
   fi
   set +e
 
-  for bucket in $(aws s3 ls --region ${REGION} | awk '{ print $3 }' | grep "^${CLUSTER_NAME}-e2e-kubernetes-.*"); do
-    aws s3 rb "s3://${bucket}" --force --region ${REGION}
+  # Delete test buckets older than 7 days
+  current_date=$(date +%s)
+  seven_days_ago=$((current_date - 7*24*60*60))
+  bucket_name_prefix="^s3-csi-k8s-e2e-"
+
+  # Clean up standard S3 buckets
+  echo "Cleaning up standard S3 buckets..."
+  aws s3 ls --region ${REGION} | while read -r date_part time_part bucket_name; do
+    if [[ "$bucket_name" =~ $bucket_name_prefix ]]; then
+      # Convert bucket date to seconds since epoch
+      bucket_date=$(date -d "$date_part $time_part" +%s 2>/dev/null || echo "0")
+
+      # Delete if bucket is older than 7 days
+      if [[ "$bucket_date" -lt "$seven_days_ago" ]]; then
+        echo "Deleting old standard bucket: $bucket_name (created: $date_part $time_part)"
+        aws s3 rb "s3://${bucket_name}" --force --region ${REGION}
+      fi
+    fi
+  done
+
+  # Clean up S3 Express (Directory) buckets
+  echo "Cleaning up S3 Express buckets..."
+  aws s3api list-directory-buckets --region ${REGION} --query 'Buckets[*].[Name,CreationDate]' --output text 2>/dev/null | while read -r bucket_name creation_date; do
+    if [[ "$bucket_name" =~ $bucket_name_prefix ]]; then
+      # Convert bucket date to seconds since epoch
+      bucket_date=$(date -d "$creation_date" +%s 2>/dev/null || echo "0")
+
+      # Delete if bucket is older than 7 days
+      if [[ "$bucket_date" -lt "$seven_days_ago" ]]; then
+        echo "Deleting old S3 Express bucket: $bucket_name (created: $creation_date)"
+        aws s3 rm s3://${bucket_name}/ --recursive --region ${REGION}
+        aws s3api delete-bucket --bucket "$bucket_name" --region ${REGION}
+      fi
+    fi
   done
 }
 
