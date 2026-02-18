@@ -52,6 +52,14 @@ const (
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
+// TerminationGracePeriodSeconds sets the grace period for Mountpoint pod termination.
+// 10 minutes provides sufficient time for workload pods to gracefully terminate and
+// for the volume to get unmounted before the Mountpoint pod is force-killed.
+// This duration accounts for:
+// - Default Kubernetes termination grace period (30 seconds)
+// - Application-specific shutdown procedures
+// The value balances graceful shutdown with resource cleanup efficiency.
+const TerminationGracePeriodSeconds = 600 // 10 minutes
 
 // A PriorityClassKind represents type of priority class to use while spawning a Mountpoint Pod.
 type PriorityClassKind uint8
@@ -121,7 +129,8 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			// and in turn `/bin/aws-s3-csi-mounter` also exits with Mountpoint process' exit code,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
-			RestartPolicy: corev1.RestartPolicyOnFailure,
+			RestartPolicy:                 corev1.RestartPolicyOnFailure,
+			TerminationGracePeriodSeconds: ptr.To(int64(TerminationGracePeriodSeconds)),
 			SecurityContext: &corev1.PodSecurityContext{
 				FSGroup: uid,
 			},
