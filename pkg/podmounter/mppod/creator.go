@@ -121,7 +121,8 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			// and in turn `/bin/aws-s3-csi-mounter` also exits with Mountpoint process' exit code,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
-			RestartPolicy: corev1.RestartPolicyOnFailure,
+			RestartPolicy:                 corev1.RestartPolicyOnFailure,
+			TerminationGracePeriodSeconds: ptr.To(int64(600)), // 10 minutes
 			SecurityContext: &corev1.PodSecurityContext{
 				FSGroup: uid,
 			},
