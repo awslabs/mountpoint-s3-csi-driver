@@ -11,7 +11,7 @@
   * Remove redundant cache metrics in logs. ([#1716](https://github.com/awslabs/mountpoint-s3/pull/1716), [#1721](https://github.com/awslabs/mountpoint-s3/pull/1721))
   * Update cache metrics for consistency. ([#1721](https://github.com/awslabs/mountpoint-s3/pull/1721), [#1738](https://github.com/awslabs/mountpoint-s3/pull/1738))
   * Add cache metrics for OTLP export. ([#1724](https://github.com/awslabs/mountpoint-s3/pull/1724))
-* Update sidecar versions in the helm chart. ([#695](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/695))
+* Migrate CSI sidecar images in Helm chart values to `public.ecr.aws/csi-components` registry and update sidecar versions. ([#705](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/705))
 
 # v2.3.0
 
