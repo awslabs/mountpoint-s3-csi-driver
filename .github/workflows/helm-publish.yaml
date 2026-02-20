@@ -43,11 +43,10 @@ jobs:
           crane version
       - name: Verify all images exist before publishing
         run: ./main-branch/scripts/verify-helm-images.sh
-      # TODO: Uncomment after verifying the workflow works correctly
-      # - name: Run chart-releaser
-      #   uses: helm/chart-releaser-action@v1.7.0
-      #   env:
-      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-      #   with:
-      #     config: .github/cr.yaml
-      #     mark_as_latest: false
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          config: .github/cr.yaml
+          mark_as_latest: false
