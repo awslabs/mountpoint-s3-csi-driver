@@ -1,0 +1,35 @@
+---
+name: CI Queue
+description: |
+  Action for waiting and releasing positions in a queue.
+  To be used in place of GitHub's native concurrency controls which don't today support queuing.
+inputs:
+  mode:
+    description: "To enqueue or not: 'enqueue'|'dequeue'"
+    type: string
+  table-name:
+    required: true
+    type: string
+    description: "DynamoDB table name for the queue"
+
+runs:
+    using: composite
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Enqueue and wait for turn
+        if: inputs.mode == 'enqueue'
+        id: enqueue
+        shell: bash
+        run: |
+          ${GITHUB_ACTION_PATH}/ci-queue.py enqueue \
+              --table-name="${{ inputs.table-name }}" \
+              --workflow-run-id="${{ github.run_id }}" \
+              --github-repository="${{ github.repository }}"
+      - name: Remove workflow from queue
+        if: inputs.mode == 'dequeue'
+        shell: bash
+        run: |
+          ${GITHUB_ACTION_PATH}/ci-queue.py dequeue \
+              --table-name="${{ inputs.table-name }}" \
+              --workflow-run-id="${{ github.run_id }}"

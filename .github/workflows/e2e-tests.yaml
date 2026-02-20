@@ -22,9 +22,6 @@ on:
         type: string
         description: "Only used if `run_upgrade_tests` is true, specifies the new version to test upgrade to."
 
-concurrency:
-  group: e2e-cluster-${{ inputs.environment }}
-
 env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
@@ -33,6 +30,33 @@ env:
   TAG_UNTESTED: "untested_${{ inputs.ref }}"
   TAG_PASSED: "test_passed_${{ inputs.ref }}"
 jobs:
+  wait_in_queue:
+    name: Acquire and wait for CI Queue Position
+    runs-on: ubuntu-latest
+    needs: ["build"]  # Don't bother locking until build completes.
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write  # For AWS credentials
+      actions: write   # For workflow restart via GH CLI
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Wait for queue position
+        id: wait
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/ci-queue
+        with:
+          mode: enqueue
+          table-name: ${{ vars.CI_QUEUE_TABLE }}
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
@@ -70,7 +94,7 @@ jobs:
         run: |
           make -j `nproc` all-push-skip-if-present
   test:
-    needs: ["build", "build_matrix"]
+    needs: ["wait_in_queue", "build", "build_matrix"]
     strategy:
       # Failing fast causes some resources created during the test to leak,
       # so we disable it to ensure all resources created during test are properly cleaned up.
@@ -163,15 +187,27 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Verify jobs succeeded
-        run: echo '${{ toJSON(needs) }}' | jq -e 'to_entries | all(.value.result == "success")'
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
+      - name: Release queue position
+        id: release
+        timeout-minutes: 5
+        uses: ./.github/actions/ci-queue
+        with:
+          mode: dequeue
+          table-name: ${{ vars.CI_QUEUE_TABLE }}
+      - name: Verify jobs succeeded
+        run: echo '${{ toJSON(needs) }}' | jq -e 'to_entries | all(.value.result == "success")'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2

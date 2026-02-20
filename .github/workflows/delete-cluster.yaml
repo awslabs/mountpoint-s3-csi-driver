@@ -6,14 +6,61 @@ on:
       environment:
         description: "Github Environment"
 
-concurrency:
-  group: e2e-cluster-${{ inputs.environment }}
-
 env:
   IMAGE_NAME: "s3-csi-driver"
   BENCHMARK_ARTIFACTS_FOLDER: ".github/artifacts"
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 jobs:
+  wait_in_queue:
+    name: Acquire and wait for CI Queue Position
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write  # For AWS credentials
+      actions: write   # For workflow restart via GH CLI
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Wait for queue position
+        id: wait
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/ci-queue
+        with:
+          mode: enqueue
+          table-name: ${{ vars.CI_QUEUE_TABLE }}
+  release_queue_position:
+    name: Release CI Queue Position
+    if: always()
+    needs: ["delete_cluster"]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write  # For AWS credentials
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Release queue position
+        id: release
+        timeout-minutes: 5
+        uses: ./.github/actions/ci-queue
+        with:
+          mode: dequeue
+          table-name: ${{ vars.CI_QUEUE_TABLE }}
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
