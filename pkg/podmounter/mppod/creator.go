@@ -130,7 +130,7 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
 			// and not successful exists (i.e. zero exit code).
 			RestartPolicy:                 corev1.RestartPolicyOnFailure,
-			TerminationGracePeriodSeconds: ptr.To(int64(TerminationGracePeriodSeconds)),
+			TerminationGracePeriodSeconds: new(int64(TerminationGracePeriodSeconds)),
 			SecurityContext: &corev1.PodSecurityContext{
 				FSGroup: uid,
 			},
@@ -140,12 +140,12 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 				ImagePullPolicy: c.config.Container.ImagePullPolicy,
 				Command:         []string{c.config.Container.Command},
 				SecurityContext: &corev1.SecurityContext{
-					AllowPrivilegeEscalation: ptr.To(false),
+					AllowPrivilegeEscalation: new(false),
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
 					RunAsUser:    uid,
-					RunAsNonRoot: ptr.To(true),
+					RunAsNonRoot: new(true),
 					SeccompProfile: &corev1.SeccompProfile{
 						Type: corev1.SeccompProfileTypeRuntimeDefault,
 					},

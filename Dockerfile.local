@@ -46,7 +46,7 @@ RUN cd mountpoint-s3 && \
 #
 
 # Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.24 as builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.26.0 as builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver

@@ -45,9 +45,9 @@ const (
 
 // Struct for JSON patch operations
 type JSONPatch struct {
-	OP    string      `json:"op,omitempty"`
-	Path  string      `json:"path,omitempty"`
-	Value interface{} `json:"value"`
+	OP    string `json:"op,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Value any    `json:"value"`
 }
 
 // StartNotReadyTaintWatcher launches a short-lived Node informer that removes the
@@ -107,12 +107,12 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 	}
 
 	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			if n, ok := obj.(*corev1.Node); ok {
 				attemptTaintRemoval(n)
 			}
 		},
-		UpdateFunc: func(_, newObj interface{}) {
+		UpdateFunc: func(_, newObj any) {
 			if n, ok := newObj.(*corev1.Node); ok {
 				attemptTaintRemoval(n)
 			}
