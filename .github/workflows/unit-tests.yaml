@@ -8,19 +8,26 @@ on:
   merge_group:
     types: [ "checks_requested" ]
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go.mod'
 
     - name: Check style
       run: make check_style
+
+    - name: Check module tidy
+      run: make check_mod_tidy
 
     - name: Check licenses
       run: make check_licenses
@@ -32,24 +39,21 @@ jobs:
       run: make bin
 
     - name: Test
-      # Run tests as root as we require it for systemd tests
-      run: sudo make test
+      run: make test
 
     - name: Check test coverage
       run: make cover
 
     - name: Upload report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       id: uploaded-report
       with:
         name: cover
         path: cover.html
 
-    - name: Comment test coverage
+    - name: Post test coverage to step summary
       if: ${{ github.event_name == 'pull_request' }}
       env:
-        TOTAL_COVERAGE: ${{ steps.go-test-coverage.outputs.total-coverage }}
         ARTIFACT_URL: ${{ steps.uploaded-report.outputs.artifact-url }}
       run: |
-        echo "### Total test coverage: ${{ env.TOTAL_COVERAGE }}%" >> $GITHUB_STEP_SUMMARY
-        echo "Download report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
+        echo "Test coverage report: ${{ env.ARTIFACT_URL }}" >> $GITHUB_STEP_SUMMARY
