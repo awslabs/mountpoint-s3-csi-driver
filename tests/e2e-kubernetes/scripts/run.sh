@@ -145,8 +145,10 @@ function e2e_cleanup() {
     done
   fi
   set +e
+}
 
-  # Delete test buckets older than 7 days
+# Delete test buckets older than 7 days
+function delete_old_buckets() {
   current_date=$(date +%s)
   seven_days_ago=$((current_date - 7*24*60*60))
   bucket_name_prefix="^s3-csi-k8s-e2e-"
@@ -176,8 +178,8 @@ function e2e_cleanup() {
       # Delete if bucket is older than 7 days
       if [[ "$bucket_date" -lt "$seven_days_ago" ]]; then
         echo "Deleting old S3 Express bucket: $bucket_name (created: $creation_date)"
-        aws s3 rm s3://${bucket_name}/ --recursive --region ${REGION}
-        aws s3api delete-bucket --bucket "$bucket_name" --region ${REGION}
+        aws s3 rm s3://"${bucket_name}"/ --recursive --region ${REGION}
+        aws s3api delete-bucket --bucket "${bucket_name}" --region ${REGION}
       fi
     fi
   done
@@ -239,7 +241,9 @@ elif [[ "${ACTION}" == "delete_cluster" ]]; then
   delete_cluster
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
   e2e_cleanup || true
+elif [[ "${ACTION}" == "delete_old_buckets" ]]; then
+  delete_old_buckets
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster|delete_old_buckets"
   exit 1
 fi

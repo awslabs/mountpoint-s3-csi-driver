@@ -1,0 +1,44 @@
+name: Cleanup Old Test Buckets
+
+on:
+  schedule:
+    # Run every Wednesday at 6:00 AM UTC (cron: minute hour day-of-month month day-of-week)
+    - cron: '0 6 * * 3'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  cleanup-old-buckets:
+    runs-on: ubuntu-latest
+    # this is to prevent the job to run at forked projects
+    if: ${{ ! github.repository.fork }}
+    strategy:
+      matrix:
+        environment: [trusted, untrusted, rosa-trusted, rosa-untrusted]
+    environment: ${{ matrix.environment }}
+    permissions:
+      id-token: write # Required for OIDC authentication with AWS
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 3600 # 1 hour should be sufficient for cleanup
+
+      - name: Delete Old Test Buckets
+        env:
+          ACTION: "delete_old_buckets"
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+
+      - name: Cleanup Summary
+        run: |
+          echo "Weekly cleanup of old test buckets completed successfully"
+          echo "Cleaned up buckets older than 7 days with prefix: s3-csi-k8s-e2e-"
