@@ -1,5 +1,8 @@
 # Unreleased
 
+### Notable changes
+* Add graceful pod eviction to ensure proper termination order. Mountpoint pods now remain active until all workload pods using the volume have terminated, preventing "Transport endpoint is not connected" errors. ([#693](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/693))
+
 # v2.4.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.4.0/README.md)
