@@ -40,7 +40,7 @@ spec:
       {{- end }}
       containers:
         - name: s3-csi-controller
-          image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          image: {{ include "csiDriverImageName" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - "/bin/aws-s3-csi-controller"
@@ -61,7 +61,7 @@ spec:
           {{- end }}
           env:
             - name: MOUNTPOINT_IMAGE
-              value: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+              value: {{ include "csiDriverImageName" . }}
             - name: MOUNTPOINT_IMAGE_PULL_POLICY
               value: {{ .Values.image.pullPolicy }}
             - name: MOUNTPOINT_NAMESPACE

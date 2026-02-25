@@ -58,7 +58,7 @@ spec:
 
       containers:
         - name: s3-plugin
-          image: {{ printf "%s%s:%s" (default "" .Values.image.containerRegistry) .Values.image.repository (default (printf "v%s" .Chart.AppVersion) (toString .Values.image.tag)) }}
+          image: {{ include "csiDriverImageName" . }}
           securityContext:
             # `privileged: true` grants all Kernel capabilities, runs as root, etc..
             # Required for opening FUSE device and creating mounts.
@@ -135,7 +135,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         - name: node-driver-registrar
-          image: {{ printf "%s:%s" .Values.sidecars.nodeDriverRegistrar.image.repository .Values.sidecars.nodeDriverRegistrar.image.tag }}
+          image: {{ include "nodeDriverRegistrarImageName" . }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.nodeDriverRegistrar.image.pullPolicy }}
           securityContext:
             readOnlyRootFilesystem: true
@@ -171,7 +171,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         - name: liveness-probe
-          image: {{ printf "%s:%s" .Values.sidecars.livenessProbe.image.repository .Values.sidecars.livenessProbe.image.tag }}
+          image: {{ include "livenessProbeImageName" . }}
           imagePullPolicy: {{ default .Values.image.pullPolicy .Values.sidecars.livenessProbe.image.pullPolicy }}
           securityContext:
             readOnlyRootFilesystem: true
