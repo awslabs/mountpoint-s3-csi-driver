@@ -290,6 +290,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
+		assert.Equals(t, ptr.To(int64(mppod.TerminationGracePeriodSeconds)), mpPod.Spec.TerminationGracePeriodSeconds)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
 		assert.Equals(t, &corev1.Volume{
 			Name: mppod.CommunicationDirName,
