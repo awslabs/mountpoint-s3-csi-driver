@@ -56,11 +56,14 @@ func genBinDataFromSeed(len int, seed int64) []byte {
 	return binData
 }
 
-func checkWriteToPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkWriteToPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite))
-	framework.Logf("written data with sha: %x", sha256.Sum256(data))
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite))
+	if err != nil {
+		framework.Logf("written data with sha: %x", sha256.Sum256(data))
+	}
+	return err
 }
 
 func checkWriteToPathFails(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
@@ -69,9 +72,9 @@ func checkWriteToPathFails(ctx context.Context, f *framework.Framework, pod *v1.
 	e2epod.VerifyExecInPodFail(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
 }
 
-func checkReadFromPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkReadFromPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
+	return e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
 }
 
 func checkDeletingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
@@ -346,4 +349,26 @@ func waitForKubernetesObjectToDisappear[T any](ctx context.Context, get framewor
 		}
 		return &v, err
 	})).WithTimeout(timeout).WithPolling(interval).Should(gomega.BeNil())
+}
+
+// findMountpointPods locates all Mountpoint pods for a specific volume on a node
+func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName string) ([]*v1.Pod, error) {
+	pods, err := cs.CoreV1().Pods(mountpointNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods in %s namespace: %w", mountpointNamespace, err)
+	}
+
+	var matchingPods []*v1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.Annotations[volumeNameAnnotation] == volumeName {
+			matchingPods = append(matchingPods, pod)
+		}
+	}
+
+	if len(matchingPods) == 0 {
+		return nil, fmt.Errorf("no Mountpoint pods found for volume %s", volumeName)
+	}
+
+	return matchingPods, nil
 }
