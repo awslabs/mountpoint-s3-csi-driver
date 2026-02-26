@@ -8,7 +8,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 // Labels populated on spawned Headroom Pods.
@@ -76,8 +75,8 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 					Name:  "pause",
 					Image: c.config.Container.HeadroomImage,
 					SecurityContext: &corev1.SecurityContext{
-						AllowPrivilegeEscalation: ptr.To(false),
-						RunAsNonRoot:             ptr.To(true),
+						AllowPrivilegeEscalation: new(false),
+						RunAsNonRoot:             new(true),
 						Capabilities: &corev1.Capabilities{
 							Drop: []corev1.Capability{"ALL"},
 						},

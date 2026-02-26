@@ -1,6 +1,6 @@
 module github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes
 
-go 1.25.6
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.39.2
@@ -215,7 +215,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.19.2 // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
-	sigs.k8s.io/yaml v1.5.0 // indirect
+	sigs.k8s.io/yaml v1.5.0
 )
 
 replace k8s.io/api => k8s.io/api v0.33.3
