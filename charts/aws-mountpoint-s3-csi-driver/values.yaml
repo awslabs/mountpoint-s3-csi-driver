@@ -30,6 +30,7 @@ node:
     # see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials for more details.
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
+  podLabels: {}
   nodeSelector: {}
   resources:
     requests:
@@ -85,6 +86,7 @@ controller:
   # For example:
   # nodeSelector:
   #   kubernetes.io/role: control-plane
+  podLabels: {}
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -102,6 +104,8 @@ mountpointPod:
 
 nameOverride: ""
 fullnameOverride: ""
+
+customLabels: {}
 
 imagePullSecrets: []
 
