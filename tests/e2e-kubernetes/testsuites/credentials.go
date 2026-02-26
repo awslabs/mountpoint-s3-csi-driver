@@ -59,9 +59,12 @@ const (
 )
 
 const (
-	eksauthAssumeRoleRetryCode            = "AccessDeniedException"
 	eksauthAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
+)
+
+var (
+	eksauthAssumeRoleRetryErrorCodes = []string{"AccessDeniedException", "ResourceNotFoundException"}
 )
 
 const (
@@ -1140,9 +1143,10 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 	})
 }
 
-// waitUntilRoleIsAssumable waits until the given role is assumable.
+// Waits until the given role is assumable.
+//
 // This is needed because we're creating new roles in our test cases and then trying to assume those roles,
-// but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
+// but there's a delay between IAM and the token service (STS or EKS Auth) resulting in errors such as "access denied" or "not found".
 func waitUntilRoleIsAssumable[Input any, Output any, O any](
 	ctx context.Context,
 	assumeFunc func(context.Context, *Input, ...func(O)) (*Output, error),
@@ -1177,7 +1181,7 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 	input *Input,
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *eksauth.Options) {
-		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryCode)
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryErrorCodes...)
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, eksauthAssumeRoleRetryMaxBackoffDelay)
 	})
@@ -1205,7 +1209,7 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 }
 
 func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
-	// If you're seeing the following error, then it means you've made a typo in the cluster name when running the tests!
+	// If you see the following error, it may mean you've made a typo in the cluster name or the role is being assumed too quickly.
 	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 404, RequestID:
 	// ResourceNotFoundException: The token included in the request has no service account role association for it.
 
