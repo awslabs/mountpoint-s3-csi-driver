@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
@@ -99,9 +100,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Errorf("failed to get kubernetes version: %v", err)
 	}
 
+	log := klog.NewKlogr()
+	distribution := cluster.DetectDistribution(clientset, config, log)
+	klog.Infof("Detected K8s distribution: %v", distribution)
+
 	version := version.GetVersion()
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v",
-		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion)
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v, distribution: %v",
+		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion, distribution)
 
 	// `credentialprovider.RegionFromIMDSOnce` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
@@ -129,7 +134,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	go unmounter.StartPeriodicCleanup(stopCh)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-		kubernetesVersion, nodeID)
+		kubernetesVersion, nodeID, distribution)
 	if err != nil {
 		klog.Fatalln(err)
 	}
