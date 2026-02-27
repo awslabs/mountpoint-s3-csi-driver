@@ -269,6 +269,8 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 		},
 		CSIDriverVersion: csiDriverVersion,
 		ClusterVariant:   clusterVariant,
+		CustomLabels:     map[string]string{},
+		PodLabels:        map[string]string{},
 	}
 }
 
