@@ -178,7 +178,7 @@ function delete_old_buckets() {
       # Delete if bucket is older than 7 days
       if [[ "$bucket_date" -lt "$seven_days_ago" ]]; then
         echo "Deleting old S3 Express bucket: $bucket_name (created: $creation_date)"
-        aws s3 rm s3://"${bucket_name}"/ --recursive --region ${REGION}
+        aws s3 rm "s3://${bucket_name}/" --recursive --region ${REGION}
         aws s3api delete-bucket --bucket "${bucket_name}" --region ${REGION}
       fi
     fi
