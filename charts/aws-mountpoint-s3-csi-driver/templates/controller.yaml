@@ -16,6 +16,9 @@ spec:
       labels:
         app: s3-csi-controller
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        {{- if .Values.controller.podLabels }}
+        {{- toYaml .Values.controller.podLabels | nindent 8 }}
+        {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
@@ -68,6 +71,10 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             - name: MOUNTPOINT_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.priorityClassName }}
+            - name: MOUNTPOINT_CUSTOM_LABELS
+              value: {{ toJson .Values.customLabels | quote }}
+            - name: MOUNTPOINT_POD_LABELS
+              value: {{ toJson .Values.mountpointPod.podLabels | quote }}
             {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
             - name: MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.preemptingPriorityClassName }}

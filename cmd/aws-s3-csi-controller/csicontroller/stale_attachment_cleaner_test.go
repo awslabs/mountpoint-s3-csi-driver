@@ -229,7 +229,9 @@ func createStaleAttachmentCleaner(t *testing.T, existingPods []client.Object, he
 
 func mppodConfig(headroomPodsEnabled bool) mppod.Config {
 	config := mppod.Config{
-		Namespace: mountpointNamespace,
+		Namespace:    mountpointNamespace,
+		CustomLabels: map[string]string{},
+		PodLabels:    map[string]string{},
 	}
 
 	if headroomPodsEnabled {
