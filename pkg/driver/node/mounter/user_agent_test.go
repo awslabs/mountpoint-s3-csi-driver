@@ -19,6 +19,7 @@ package mounter
 import (
 	"testing"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
@@ -26,6 +27,7 @@ func TestUserAgent(t *testing.T) {
 	tests := map[string]struct {
 		k8sVersion           string
 		authenticationSource string
+		distribution         cluster.Distribution
 		result               string
 	}{
 		"empty versions": {
@@ -49,13 +51,43 @@ func TestUserAgent(t *testing.T) {
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
 		},
+		"with eks addon distribution": {
+			k8sVersion:           "v1.30.2-eks-db838b0",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			distribution:         cluster.DistributionEKSAddon,
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 distribution/eks-addon",
+		},
+		"with eks self-managed distribution": {
+			k8sVersion:           "v1.30.2-eks-db838b0",
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
+			distribution:         cluster.DistributionEKSSelfManaged,
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0 distribution/eks-self-managed",
+		},
+		"with rosa distribution": {
+			k8sVersion:           "v1.29.6",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			distribution:         cluster.DistributionROSA,
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.29.6 distribution/rosa",
+		},
+		"with other distribution": {
+			k8sVersion:           "v1.28.0",
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
+			distribution:         cluster.DistributionOther,
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 distribution/other",
+		},
+		"with openshift distribution": {
+			k8sVersion:           "v4.13.5",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			distribution:         cluster.DistributionOpenShift,
+			result:               "s3-csi-driver/ credential-source#pod k8s/v4.13.5 distribution/other",
+		},
 	}
 
 	for name, test := range tests {
 		test := test
 		t.Run(name, func(t *testing.T) {
-			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion), test.result; got != expected {
-				t.Fatalf("UserAgent(%q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, got, expected)
+			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion, test.distribution), test.result; got != expected {
+				t.Fatalf("UserAgent(%q, %q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, test.distribution, got, expected)
 			}
 		})
 	}

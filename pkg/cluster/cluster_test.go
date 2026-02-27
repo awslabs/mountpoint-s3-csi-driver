@@ -33,3 +33,44 @@ func TestMountpointPodUserID(t *testing.T) {
 		})
 	}
 }
+
+func TestDistributionUserAgent(t *testing.T) {
+	testCases := []struct {
+		name         string
+		distribution cluster.Distribution
+		expected     cluster.Distribution
+	}{
+		{
+			name:         "EKS addon remains eks-addon",
+			distribution: cluster.DistributionEKSAddon,
+			expected:     cluster.Distribution("eks-addon"),
+		},
+		{
+			name:         "EKS self-managed maps to eks-self-managed",
+			distribution: cluster.DistributionEKSSelfManaged,
+			expected:     cluster.Distribution("eks-self-managed"),
+		},
+		{
+			name:         "ROSA remains rosa",
+			distribution: cluster.DistributionROSA,
+			expected:     cluster.Distribution("rosa"),
+		},
+		{
+			name:         "OpenShift maps to other",
+			distribution: cluster.DistributionOpenShift,
+			expected:     cluster.Distribution("other"),
+		},
+		{
+			name:         "Other remains other",
+			distribution: cluster.DistributionOther,
+			expected:     cluster.Distribution("other"),
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			gotValue := testCase.distribution.UserAgent()
+			assert.Equals(t, testCase.expected, gotValue)
+		})
+	}
+}
