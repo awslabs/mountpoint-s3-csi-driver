@@ -36,6 +36,8 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    permissions:
+      contents: read
   build:
     runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}

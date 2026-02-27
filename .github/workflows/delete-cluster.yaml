@@ -17,6 +17,8 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    permissions:
+      contents: read
   delete_cluster:
     needs: ["build_matrix"]
     strategy:
