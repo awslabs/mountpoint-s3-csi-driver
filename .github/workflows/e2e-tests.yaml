@@ -116,6 +116,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Create cluster
+        id: create_cluster
         env:
           ACTION: "create_cluster"
         run: |
@@ -142,7 +143,8 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        if: always()
+        # Skip uninstall if cluster creation did not succeed - no cluster to communicate with
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' }}
         env:
           ACTION: "uninstall_driver"
         run: |
