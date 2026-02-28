@@ -97,6 +97,7 @@ mountpointPod:
   # This allows us to restrict the pods that the driver's node daemon has privileges to create.
   createNamespace: true
   priorityClassName: mount-s3-critical
+  envConfigMap: ""
   preemptingPriorityClassName: mount-s3-preempting-critical
   headroomPriorityClassName: mount-s3-headroom
 

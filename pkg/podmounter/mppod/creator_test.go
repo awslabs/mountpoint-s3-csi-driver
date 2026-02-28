@@ -23,6 +23,7 @@ const (
 	image                       = "mp-image:latest"
 	headRoomImage               = "pause:latest"
 	imagePullPolicy             = corev1.PullAlways
+	envConfigMap                = "test-configmap"
 	command                     = "/bin/aws-s3-csi-mounter"
 	priorityClassName           = "mount-s3-critical"
 	preemptingPriorityClassName = "mount-s3-preempting-critical"
@@ -266,6 +267,7 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 			HeadroomImage:   headRoomImage,
 			ImagePullPolicy: imagePullPolicy,
 			Command:         command,
+			EnvConfigMap:    envConfigMap,
 		},
 		CSIDriverVersion: csiDriverVersion,
 		ClusterVariant:   clusterVariant,
@@ -323,6 +325,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, 1, len(mpPod.Spec.Containers))
 		assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 		assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
+		assert.Equals(t, envConfigMap, mpPod.Spec.Containers[0].EnvFrom[0].ConfigMapRef.Name)
 		assert.Equals(t, []string{command}, mpPod.Spec.Containers[0].Command)
 		assert.Equals(t, new(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
 		assert.Equals(t, &corev1.Capabilities{

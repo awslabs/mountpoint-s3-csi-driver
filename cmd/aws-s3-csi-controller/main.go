@@ -36,6 +36,7 @@ var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAG
 var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
+var mountpointEnvConfigMap = flag.String("mountpoint-env-config-map", os.Getenv("MOUNTPOINT_ENV_CONFIG_MAP"), "ConfigMap name containing environment variables of Mountpoint Pods.")
 
 var (
 	scheme = runtime.NewScheme()
@@ -78,6 +79,7 @@ func main() {
 			Image:           *mountpointImage,
 			HeadroomImage:   *headroomImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
+			EnvConfigMap:    *mountpointEnvConfigMap,
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
 		ClusterVariant:   cluster.DetectVariant(conf, log),

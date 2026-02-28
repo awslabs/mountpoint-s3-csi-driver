@@ -77,6 +77,7 @@ type ContainerConfig struct {
 	Image           string
 	HeadroomImage   string
 	ImagePullPolicy corev1.PullPolicy
+	EnvConfigMap    string
 }
 
 // A Config represents configuration for spawned Mountpoint/Headroom Pods.
@@ -154,6 +155,16 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 					{
 						Name:      CommunicationDirName,
 						MountPath: filepath.Join("/", CommunicationDirName),
+					},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{
+						ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: c.config.Container.EnvConfigMap,
+							},
+							Optional: ptr.To(true),
+						},
 					},
 				},
 			}},
