@@ -1331,7 +1331,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(hrPod.Pod)
 		})
 
-		It("should not ungate pod when one PVC is unbound", func() {
+		It("should not ungate pod when any PVC is unbound", func() {
 			vol1 := createVolume()
 			vol1.bind()
 			vol2 := createVolume() // Created but NOT bound
@@ -1342,14 +1342,34 @@ var _ = Describe("Mountpoint Controller", func() {
 			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
 			verifyHeadroomPodFor(pod, vol1, hrPod1)
 
-			// Pod should NOT be ungated yet because vol2 is not bound
+			// Pod should NOT be ungated because vol2 is not bound yet
+			// Verify both that the gate remains and only one headroom pod exists
 			Consistently(func(g Gomega) {
 				var p corev1.Pod
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
 				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
 					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
 				))
+
+				// Verify only one headroom pod exists (for vol1), not two
+				var hrPods corev1.PodList
+				g.Expect(k8sClient.List(ctx, &hrPods, client.MatchingLabels{
+					mppod.LabelHeadroomForPod: string(pod.UID),
+				})).To(Succeed())
+				g.Expect(hrPods.Items).To(HaveLen(1))
 			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should ungate pod after all PVCs become bound", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume() // Created but NOT bound initially
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			// First headroom pod should be created for the bound volume
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
 
 			// Now bind the second volume
 			vol2.bind()
