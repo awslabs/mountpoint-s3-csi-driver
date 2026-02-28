@@ -36,7 +36,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
-var kubeletPath = util.KubeletPath()
+var kubeletPath = util.ContainerKubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{
@@ -93,13 +93,20 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	if !strings.HasPrefix(target, kubeletPath) {
-		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
+	// Translate target path from host format to container format if needed
+	targetContainer := util.KubeletHostPathToContainerPath(targetHost)
+
+	if !strings.HasPrefix(targetContainer, kubeletPath) {
+		hostKubeletPath := os.Getenv("HOST_KUBELET_PATH")
+		if hostKubeletPath == "" {
+			hostKubeletPath = kubeletPath
+		}
+		return nil, status.Errorf(codes.InvalidArgument, "Target path %q does not match expected kubelet path. Host kubelet path is configured as %q, but received target path %q. Please verify your kubelet configuration.", targetContainer, hostKubeletPath, targetHost)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -145,15 +152,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, targetContainer, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
-		os.Remove(target)
-		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup); err != nil {
+		os.Remove(targetContainer)
+		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
-	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
+	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
