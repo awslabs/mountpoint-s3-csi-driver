@@ -4,7 +4,13 @@ on:
   schedule:
     # Run every Wednesday at 6:00 AM UTC (cron: minute hour day-of-month month day-of-week)
     - cron: '0 6 * * 3'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      days_old:
+        description: Number of days old for buckets to be deleted
+        required: false
+        default: 7
+        type: number
 
 jobs:
   cleanup-old-buckets:
@@ -35,10 +41,11 @@ jobs:
         env:
           ACTION: "delete_old_buckets"
           AWS_REGION: ${{ vars.AWS_REGION }}
+          DAYS_OLD: ${{ github.event.inputs.days_old || '7' }}
         run: |
           tests/e2e-kubernetes/scripts/run.sh
 
       - name: Cleanup Summary
         run: |
-          echo "Weekly cleanup of old test buckets completed successfully"
-          echo "Cleaned up buckets older than 7 days with prefix: s3-csi-k8s-e2e-"
+          echo "## Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Cleaned up buckets older than ${{ github.event.inputs.days_old || '7' }} days with prefix: \`s3-csi-k8s-e2e-\`" >> $GITHUB_STEP_SUMMARY
