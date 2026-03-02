@@ -45,7 +45,7 @@ jobs:
       run: make cover
 
     - name: Upload report
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       id: uploaded-report
       with:
         name: cover
