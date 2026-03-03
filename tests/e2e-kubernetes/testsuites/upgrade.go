@@ -20,24 +20,26 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/repo"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
 
 // This value defines how long the upgrade test should take.
 //
-// This needs to be at least more than 2 hours because
-//  1. We ask for service account tokens that valid for 1 hour (see `CSIDriver` object)
-//  2. Session duration of the IAM roles we assume is 1 hour
+// This needs to be at least more than 20 minutes because
+//  1. We ask for service account tokens that valid for 10 minutes (see patchCSIDriverTokenExpiration)
+//  2. Session duration of the IAM roles we assume is 10 minutes (see createRole MaxSessionDuration)
 //
-// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 2 hours+.
+// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 20 minutes+.
 // Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
-const UPGRADE_TEST_DURATION_IN_MINUTES = 150
+const UPGRADE_TEST_DURATION_IN_MINUTES = 30
 
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
@@ -216,6 +218,23 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 	}
 
+	// patchCSIDriverTokenExpiration patches the CSIDriver object to use shorter token expiration for tests
+	patchCSIDriverTokenExpiration := func(ctx context.Context, expirationSeconds int64) {
+		client := f.ClientSet.StorageV1().CSIDrivers()
+
+		csiDriver, err := client.Get(ctx, "s3.csi.aws.com", metav1.GetOptions{})
+		framework.ExpectNoError(err)
+
+		// Patch token expiration for tests
+		csiDriver.Spec.TokenRequests[0].ExpirationSeconds = ptr.To(expirationSeconds)
+		csiDriver.Spec.TokenRequests[1].ExpirationSeconds = ptr.To(expirationSeconds)
+
+		_, err = client.Update(ctx, csiDriver, metav1.UpdateOptions{})
+		framework.ExpectNoError(err)
+
+		framework.Logf("Patched CSIDriver token expiration to %d seconds for testing", expirationSeconds)
+	}
+
 	// runUpgradeTest performs the complete upgrade test workflow
 	runUpgradeTest := func(ctx context.Context, fromVersion, toVersion string, useSourceBuild bool) {
 		settings, cfg := setupTestEnvironment(ctx)
@@ -224,6 +243,9 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Install the previous version
 		chartPath := pullCSIDriver(settings, cfg, fromVersion)
 		installCSIDriver(cfg, fromVersion, chartPath)
+
+		// Patch CSIDriver to use 10-minute token expiration for tests
+		patchCSIDriverTokenExpiration(ctx, 600)
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
 		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
