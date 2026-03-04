@@ -34,13 +34,14 @@ import (
 // This value defines how long the upgrade test should take.
 //
 // This needs to be at least more than 20 minutes because
-//  1. We ask for service account tokens that valid for 10 minutes (see patchCSIDriverTokenExpiration)
-//  2. Session duration of the IAM roles we assume is 10 minutes (see createRole MaxSessionDuration)
+//  1. We ask for service account tokens that are valid for 10 minutes (see patchCSIDriverTokenExpiration)
+//  2. When tokens expire, Kubernetes calls NodePublishVolume (due to requiresRepublish: true in CSIDriver). NodePublishVolume refreshes IAM credentials by calling AWS STS with the new service account token
 //
 // So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 20 minutes+.
 // Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
 const UPGRADE_TEST_DURATION_IN_MINUTES = 30
 
+const csiDriverName = "s3.csi.aws.com"
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
@@ -222,7 +223,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	patchCSIDriverTokenExpiration := func(ctx context.Context, expirationSeconds int64) {
 		client := f.ClientSet.StorageV1().CSIDrivers()
 
-		csiDriver, err := client.Get(ctx, "s3.csi.aws.com", metav1.GetOptions{})
+		csiDriver, err := client.Get(ctx, csiDriverName, metav1.GetOptions{})
 		framework.ExpectNoError(err)
 
 		// Patch token expiration for tests
