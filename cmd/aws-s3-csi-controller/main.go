@@ -9,11 +9,14 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -38,8 +41,8 @@ var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAG
 var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
-var mountpointCustomLabels = flag.String("mountpoint-custom-labels", os.Getenv("MOUNTPOINT_CUSTOM_LABELS"), "Custom labels to apply to Mountpoint Pods (JSON format).")
 var mountpointPodLabels = flag.String("mountpoint-pod-labels", os.Getenv("MOUNTPOINT_POD_LABELS"), "Pod labels to apply to Mountpoint Pods (JSON format).")
+var mountpointHeadroomPodLabels = flag.String("mountpoint-headroom-pod-labels", os.Getenv("MOUNTPOINT_HEADROOM_POD_LABELS"), "Pod labels to apply to Headroom Pods (JSON format).")
 
 var (
 	scheme = runtime.NewScheme()
@@ -71,8 +74,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	customLabels := parseLabels(*mountpointCustomLabels, log)
 	podLabels := parseLabels(*mountpointPodLabels, log)
+	headroomPodLabels := parseLabels(*mountpointHeadroomPodLabels, log)
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:                   *mountpointNamespace,
@@ -86,10 +89,10 @@ func main() {
 			HeadroomImage:   *headroomImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
-		CSIDriverVersion: version.GetVersion().DriverVersion,
-		ClusterVariant:   cluster.DetectVariant(conf, log),
-		CustomLabels:     customLabels,
-		PodLabels:        podLabels,
+		CSIDriverVersion:  version.GetVersion().DriverVersion,
+		ClusterVariant:    cluster.DetectVariant(conf, log),
+		PodLabels:         podLabels,
+		HeadroomPodLabels: headroomPodLabels,
 	}, log)
 
 	if err := reconciler.SetupWithManager(mgr); err != nil {
@@ -108,9 +111,11 @@ func main() {
 	}
 }
 
-// parseLabels parses a JSON string into a map of labels.
-// Returns an empty map if the input is empty or invalid JSON.
+// parseLabels parses a JSON string into a map of labels and validates them.
+// Returns an empty map if the input is empty, invalid JSON, or contains invalid labels.
 func parseLabels(labelsJSON string, log logr.Logger) map[string]string {
+	const reservedLabelPrefix = "s3.csi.aws.com/"
+
 	if labelsJSON == "" || labelsJSON == "{}" || labelsJSON == "null" {
 		return map[string]string{}
 	}
@@ -121,5 +126,26 @@ func parseLabels(labelsJSON string, log logr.Logger) map[string]string {
 		return map[string]string{}
 	}
 
-	return labels
+	// Validate and filter out invalid labels
+	validLabels := make(map[string]string)
+	for key, value := range labels {
+		if strings.HasPrefix(key, reservedLabelPrefix) {
+			log.Error(fmt.Errorf("reserved prefix"), "Invalid label key, skipping", "key", key, "prefix", reservedLabelPrefix)
+			continue
+		}
+
+		// Validate key and value
+		if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+			log.Error(fmt.Errorf("invalid key"), "Invalid label key, skipping", "key", key, "errors", strings.Join(errs, "; "))
+			continue
+		}
+		if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+			log.Error(fmt.Errorf("invalid value"), "Invalid label value, skipping", "key", key, "value", value, "errors", strings.Join(errs, "; "))
+			continue
+		}
+
+		validLabels[key] = value
+	}
+
+	return validLabels
 }

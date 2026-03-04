@@ -103,6 +103,9 @@ mountpointPod:
   headroomPriorityClassName: mount-s3-headroom
   podLabels: {}
 
+headroomPod:
+  podLabels: {}
+
 nameOverride: ""
 fullnameOverride: ""
 

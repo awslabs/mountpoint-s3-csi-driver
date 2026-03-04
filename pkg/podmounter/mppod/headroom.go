@@ -39,8 +39,7 @@ const headroomPodNamePrefix = "hr-"
 // HeadroomPod returns a new Headroom Pod spec for the given `workloadPod` and `pv`.
 // This Headroom Pod serves as a capacity headroom to allow scheduling of the Mountpoint Pod alongside `workloadPod` to provide volume for `pv`.
 func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
-	labels := maps.Clone(c.config.CustomLabels)
-	maps.Copy(labels, c.config.PodLabels)
+	labels := maps.Clone(c.config.HeadroomPodLabels)
 	labels[LabelHeadroomForPod] = string(workloadPod.UID)
 	labels[LabelHeadroomForVolume] = pv.Name
 

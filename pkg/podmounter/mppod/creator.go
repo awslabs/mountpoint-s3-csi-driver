@@ -90,8 +90,8 @@ type Config struct {
 	HeadroomPriorityClassName   string
 	Container                   ContainerConfig
 	CSIDriverVersion            string
-	CustomLabels                map[string]string
 	PodLabels                   map[string]string
+	HeadroomPodLabels           map[string]string
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -114,8 +114,7 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 		priorityClassName = c.config.PreemptingPriorityClassName
 	}
 
-	labels := maps.Clone(c.config.CustomLabels)
-	maps.Copy(labels, c.config.PodLabels)
+	labels := maps.Clone(c.config.PodLabels)
 	labels[LabelMountpointVersion] = c.config.MountpointVersion
 	labels[LabelCSIDriverVersion] = c.config.CSIDriverVersion
 
