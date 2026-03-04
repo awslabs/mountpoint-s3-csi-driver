@@ -33,12 +33,14 @@ import (
 
 // This value defines how long the upgrade test should take.
 //
-// This needs to be at least more than 20 minutes because
-//  1. We ask for service account tokens that are valid for 10 minutes (see patchCSIDriverTokenExpiration)
-//  2. When tokens expire, Kubernetes calls NodePublishVolume (due to requiresRepublish: true in CSIDriver). NodePublishVolume refreshes IAM credentials by calling AWS STS with the new service account token
+// This needs to be at least more than 20 minutes because:
+//  1. Pod-level identity: Service account tokens expire every 10 minutes (see patchCSIDriverTokenExpiration)
+//  2. Driver-level identity: Service account tokens expire every 10 minutes (see patchServiceAccountTokenExpiration)
+//  3. When tokens expire, Kubernetes calls NodePublishVolume (due to requiresRepublish: true in CSIDriver)
+//  4. NodePublishVolume refreshes IAM credentials by calling AWS STS with the new service account token
 //
-// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 20 minutes+.
-// Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
+// So, to make sure we hit both credential refresh cycles in the worst case, we run the test for 30 minutes.
+// This ensures credentials are successfully refreshed after the upgrade for both authentication sources.
 const UPGRADE_TEST_DURATION_IN_MINUTES = 30
 
 const csiDriverName = "s3.csi.aws.com"
@@ -236,6 +238,51 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		framework.Logf("Patched CSIDriver token expiration to %d seconds for testing", expirationSeconds)
 	}
 
+	// patchServiceAccountTokenExpiration patches a ServiceAccount to use shorter token expiration for tests
+	patchServiceAccountTokenExpiration := func(ctx context.Context, namespace, saName string, expirationSeconds int64) {
+		client := f.ClientSet.CoreV1().ServiceAccounts(namespace)
+
+		sa, err := client.Get(ctx, saName, metav1.GetOptions{})
+		framework.ExpectNoError(err)
+
+		if sa.Annotations == nil {
+			sa.Annotations = make(map[string]string)
+		}
+		sa.Annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", expirationSeconds)
+
+		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
+		framework.ExpectNoError(err)
+
+		framework.Logf("Patched ServiceAccount %s/%s token expiration to %d seconds for testing", namespace, saName, expirationSeconds)
+	}
+
+	// restartCSIDriverPods restarts CSI driver pods to pick up new ServiceAccount token expiration
+	restartCSIDriverPods := func(ctx context.Context) {
+		framework.Logf("Restarting CSI driver pods to apply new token expiration")
+
+		ds := csiDriverDaemonSet(ctx, f)
+		if ds.Spec.Template.Annotations == nil {
+			ds.Spec.Template.Annotations = make(map[string]string)
+		}
+		ds.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+
+		client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+		_, err := client.Update(ctx, ds, metav1.UpdateOptions{})
+		framework.ExpectNoError(err)
+
+		// Wait for pods to be ready
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			ds := csiDriverDaemonSet(ctx, f)
+			if ds.Status.NumberReady == ds.Status.DesiredNumberScheduled {
+				framework.Logf("CSI driver pods restarted successfully")
+				return
+			}
+			time.Sleep(5 * time.Second)
+		}
+		framework.Failf("Timeout waiting for CSI driver pods to be ready after restart")
+	}
+
 	// runUpgradeTest performs the complete upgrade test workflow
 	runUpgradeTest := func(ctx context.Context, fromVersion, toVersion string, useSourceBuild bool) {
 		settings, cfg := setupTestEnvironment(ctx)
@@ -245,8 +292,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		chartPath := pullCSIDriver(settings, cfg, fromVersion)
 		installCSIDriver(cfg, fromVersion, chartPath)
 
-		// Patch CSIDriver to use 10-minute token expiration for tests
+		// Patch CSIDriver to use 10-minute token expiration for tests (pod-level identity)
 		patchCSIDriverTokenExpiration(ctx, 600)
+
+		// Patch driver's ServiceAccount to use 10-minute token expiration for tests (driver-level identity)
+		patchServiceAccountTokenExpiration(ctx, "kube-system", "s3-csi-driver-sa", 600)
+		restartCSIDriverPods(ctx)
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
 		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
