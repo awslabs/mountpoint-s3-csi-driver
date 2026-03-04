@@ -249,6 +249,123 @@ func TestNodePublishVolume(t *testing.T) {
 				nodeTestEnv.mockCtl.Finish()
 			},
 		},
+		{
+			name: "success: reads SA tokens from secrets field",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				tokensJSON := `{"sts.amazonaws.com":{"token":"sts-token","expirationTimestamp":"2026-01-01T00:00:00Z"}}`
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId:         volumeId,
+					VolumeCapability: stdVolCap,
+					TargetPath:       targetPath,
+					VolumeContext: map[string]string{
+						"bucketName":           bucketName,
+						"authenticationSource": "pod",
+					},
+					Secrets: map[string]string{
+						"csi.storage.k8s.io/serviceAccount.tokens": tokensJSON,
+					},
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(ctx),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID:             volumeId,
+						AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+						ServiceAccountTokens: tokensJSON,
+					}),
+					gomock.Any(),
+					gomock.Eq(""),
+				)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: falls back to volume context for SA tokens when secrets field is empty",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				tokensJSON := `{"sts.amazonaws.com":{"token":"sts-token","expirationTimestamp":"2026-01-01T00:00:00Z"}}`
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId:         volumeId,
+					VolumeCapability: stdVolCap,
+					TargetPath:       targetPath,
+					VolumeContext: map[string]string{
+						"bucketName":                               bucketName,
+						"authenticationSource":                     "pod",
+						"csi.storage.k8s.io/serviceAccount.tokens": tokensJSON,
+					},
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(ctx),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID:             volumeId,
+						AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+						ServiceAccountTokens: tokensJSON,
+					}),
+					gomock.Any(),
+					gomock.Eq(""),
+				)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
+		{
+			name: "success: secrets field takes precedence over volume context for SA tokens",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+				ctx := context.Background()
+				secretsTokens := `{"sts.amazonaws.com":{"token":"secrets-token","expirationTimestamp":"2026-01-01T00:00:00Z"}}`
+				volumeCtxTokens := `{"sts.amazonaws.com":{"token":"volume-ctx-token","expirationTimestamp":"2026-01-01T00:00:00Z"}}`
+				req := &csi.NodePublishVolumeRequest{
+					VolumeId:         volumeId,
+					VolumeCapability: stdVolCap,
+					TargetPath:       targetPath,
+					VolumeContext: map[string]string{
+						"bucketName":                               bucketName,
+						"authenticationSource":                     "pod",
+						"csi.storage.k8s.io/serviceAccount.tokens": volumeCtxTokens,
+					},
+					Secrets: map[string]string{
+						"csi.storage.k8s.io/serviceAccount.tokens": secretsTokens,
+					},
+				}
+
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(ctx),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID:             volumeId,
+						AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+						ServiceAccountTokens: secretsTokens,
+					}),
+					gomock.Any(),
+					gomock.Eq(""),
+				)
+				_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+				if err != nil {
+					t.Fatalf("NodePublishVolume failed: %v", err)
+				}
+
+				nodeTestEnv.mockCtl.Finish()
+			},
+		},
 	}
 
 	for _, tc := range testCases {

@@ -268,11 +268,22 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		VolumeID:             req.GetVolumeId(),
 		AuthenticationSource: authSource,
 		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],
-		ServiceAccountTokens: volumeCtx[volumecontext.CSIServiceAccountTokens],
+		ServiceAccountTokens: serviceAccountTokensFromRequest(req),
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
 		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
 	}
+}
+
+// serviceAccountTokensFromRequest checks secrets first, then volume context.
+// In Kubernetes v1.35+, tokens can be delivered via the secrets field (KEP-5538).
+// We don't set serviceAccountTokenInSecrets in our CSIDriver spec yet, but this
+// fallback ensures we're ready when we do.
+func serviceAccountTokensFromRequest(req *csi.NodePublishVolumeRequest) string {
+	if tokens, ok := req.GetSecrets()[volumecontext.CSIServiceAccountTokens]; ok {
+		return tokens
+	}
+	return req.GetVolumeContext()[volumecontext.CSIServiceAccountTokens]
 }
 
 func credentialCleanupContextFromUnpublishRequest(req *csi.NodeUnpublishVolumeRequest) credentialprovider.CleanupContext {
