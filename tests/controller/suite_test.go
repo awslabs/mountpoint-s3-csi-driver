@@ -107,6 +107,8 @@ var _ = BeforeSuite(func() {
 			ImagePullPolicy: mountpointImagePullPolicy,
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
+		CustomLabels:     map[string]string{},
+		PodLabels:        map[string]string{},
 	}, logf.Log).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

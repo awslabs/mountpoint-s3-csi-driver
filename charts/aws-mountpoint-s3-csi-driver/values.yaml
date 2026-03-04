@@ -101,6 +101,7 @@ mountpointPod:
   priorityClassName: mount-s3-critical
   preemptingPriorityClassName: mount-s3-preempting-critical
   headroomPriorityClassName: mount-s3-headroom
+  podLabels: {}
 
 nameOverride: ""
 fullnameOverride: ""

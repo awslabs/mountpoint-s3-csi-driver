@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/go-logr/logr"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -36,6 +38,8 @@ var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAG
 var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
+var mountpointCustomLabels = flag.String("mountpoint-custom-labels", os.Getenv("MOUNTPOINT_CUSTOM_LABELS"), "Custom labels to apply to Mountpoint Pods (JSON format).")
+var mountpointPodLabels = flag.String("mountpoint-pod-labels", os.Getenv("MOUNTPOINT_POD_LABELS"), "Pod labels to apply to Mountpoint Pods (JSON format).")
 
 var (
 	scheme = runtime.NewScheme()
@@ -67,6 +71,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	customLabels := parseLabels(*mountpointCustomLabels, log)
+	podLabels := parseLabels(*mountpointPodLabels, log)
+
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:                   *mountpointNamespace,
 		MountpointVersion:           *mountpointVersion,
@@ -81,6 +88,8 @@ func main() {
 		},
 		CSIDriverVersion: version.GetVersion().DriverVersion,
 		ClusterVariant:   cluster.DetectVariant(conf, log),
+		CustomLabels:     customLabels,
+		PodLabels:        podLabels,
 	}, log)
 
 	if err := reconciler.SetupWithManager(mgr); err != nil {
@@ -97,4 +106,20 @@ func main() {
 		log.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+}
+
+// parseLabels parses a JSON string into a map of labels.
+// Returns an empty map if the input is empty or invalid JSON.
+func parseLabels(labelsJSON string, log logr.Logger) map[string]string {
+	if labelsJSON == "" || labelsJSON == "{}" || labelsJSON == "null" {
+		return map[string]string{}
+	}
+
+	var labels map[string]string
+	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
+		log.Error(err, "Failed to parse labels JSON, ignoring", "json", labelsJSON)
+		return map[string]string{}
+	}
+
+	return labels
 }

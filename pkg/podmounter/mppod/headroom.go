@@ -3,6 +3,7 @@ package mppod
 import (
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -38,14 +39,16 @@ const headroomPodNamePrefix = "hr-"
 // HeadroomPod returns a new Headroom Pod spec for the given `workloadPod` and `pv`.
 // This Headroom Pod serves as a capacity headroom to allow scheduling of the Mountpoint Pod alongside `workloadPod` to provide volume for `pv`.
 func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
+	labels := maps.Clone(c.config.CustomLabels)
+	maps.Copy(labels, c.config.PodLabels)
+	labels[LabelHeadroomForPod] = string(workloadPod.UID)
+	labels[LabelHeadroomForVolume] = pv.Name
+
 	hrPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      HeadroomPodNameFor(workloadPod, pv),
 			Namespace: c.config.Namespace,
-			Labels: map[string]string{
-				LabelHeadroomForPod:    string(workloadPod.UID),
-				LabelHeadroomForVolume: pv.Name,
-			},
+			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
 			PriorityClassName: c.config.HeadroomPriorityClassName,

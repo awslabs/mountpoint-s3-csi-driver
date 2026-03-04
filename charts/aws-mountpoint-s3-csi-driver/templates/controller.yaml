@@ -71,6 +71,10 @@ spec:
               value: {{ .Values.mountpointPod.namespace }}
             - name: MOUNTPOINT_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.priorityClassName }}
+            - name: MOUNTPOINT_CUSTOM_LABELS
+              value: {{ toJson .Values.customLabels | quote }}
+            - name: MOUNTPOINT_POD_LABELS
+              value: {{ toJson .Values.mountpointPod.podLabels | quote }}
             {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
             - name: MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME
               value: {{ .Values.mountpointPod.preemptingPriorityClassName }}
