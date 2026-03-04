@@ -103,9 +103,6 @@ mountpointPod:
   headroomPriorityClassName: mount-s3-headroom
   podLabels: {}
 
-headroomPod:
-  podLabels: {}
-
 nameOverride: ""
 fullnameOverride: ""
 
@@ -137,3 +134,4 @@ experimental:
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
   reserveHeadroomForMountpointPods: false
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10
+  headroomPodLabels: {}

@@ -1356,6 +1356,9 @@ var _ = Describe("Mountpoint Controller", func() {
 			// Verify user-configured labels from Config are applied
 			Expect(mpPod.Labels).To(HaveKeyWithValue("test-label", "test-value"))
 			Expect(mpPod.Labels).To(HaveKeyWithValue("env", "test"))
+
+			mpPod.succeed()
+			waitForObjectToDisappear(mpPod.Pod)
 		})
 
 		It("should apply configured labels to Headroom Pods", func() {
@@ -1374,6 +1377,10 @@ var _ = Describe("Mountpoint Controller", func() {
 			// Verify user-configured labels from Config are applied
 			Expect(hrPod.Labels).To(HaveKeyWithValue("headroom-label", "headroom-value"))
 			Expect(hrPod.Labels).To(HaveKeyWithValue("tier", "headroom"))
+
+			// Cleanup: terminate workload pod to trigger headroom pod deletion
+			pod.terminate()
+			waitForObjectToDisappear(hrPod.Pod)
 		})
 	})
 })

@@ -7,16 +7,12 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
-	"fmt"
 	"os"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -29,7 +25,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/go-logr/logr"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -74,8 +70,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	podLabels := parseLabels(*mountpointPodLabels, log)
-	headroomPodLabels := parseLabels(*mountpointHeadroomPodLabels, log)
+	podLabels := util.ParseLabels(*mountpointPodLabels, log)
+	headroomPodLabels := util.ParseLabels(*mountpointHeadroomPodLabels, log)
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:                   *mountpointNamespace,
@@ -109,43 +105,4 @@ func main() {
 		log.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
-}
-
-// parseLabels parses a JSON string into a map of labels and validates them.
-// Returns an empty map if the input is empty, invalid JSON, or contains invalid labels.
-func parseLabels(labelsJSON string, log logr.Logger) map[string]string {
-	const reservedLabelPrefix = "s3.csi.aws.com/"
-
-	if labelsJSON == "" || labelsJSON == "{}" || labelsJSON == "null" {
-		return map[string]string{}
-	}
-
-	var labels map[string]string
-	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
-		log.Error(err, "Failed to parse labels JSON, ignoring", "json", labelsJSON)
-		return map[string]string{}
-	}
-
-	// Validate and filter out invalid labels
-	validLabels := make(map[string]string)
-	for key, value := range labels {
-		if strings.HasPrefix(key, reservedLabelPrefix) {
-			log.Error(fmt.Errorf("reserved prefix"), "Invalid label key, skipping", "key", key, "prefix", reservedLabelPrefix)
-			continue
-		}
-
-		// Validate key and value
-		if errs := validation.IsQualifiedName(key); len(errs) > 0 {
-			log.Error(fmt.Errorf("invalid key"), "Invalid label key, skipping", "key", key, "errors", strings.Join(errs, "; "))
-			continue
-		}
-		if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
-			log.Error(fmt.Errorf("invalid value"), "Invalid label value, skipping", "key", key, "value", value, "errors", strings.Join(errs, "; "))
-			continue
-		}
-
-		validLabels[key] = value
-	}
-
-	return validLabels
 }
