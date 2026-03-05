@@ -1070,7 +1070,6 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
 		RoleName:                 new(roleName),
 		AssumeRolePolicyDocument: new(assumeRolePolicyDocument),
-		MaxSessionDuration:       new(int32(900)),
 	})
 	framework.ExpectNoError(err)
 
