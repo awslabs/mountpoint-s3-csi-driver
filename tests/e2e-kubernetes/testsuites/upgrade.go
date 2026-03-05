@@ -33,9 +33,9 @@ import (
 
 // This value defines how long the upgrade test should take.
 //
-// Service account tokens and IAM credentials both expire every 15 minutes.
-// Running for 40 minutes ensures we verify both credential types refresh correctly after the upgrade.
-const UPGRADE_TEST_DURATION_IN_MINUTES = 40
+// Service account tokens expire every 20 minutes, IAM credentials expire after 1 hour.
+// Running for 70 minutes ensures at least 1 IAM refresh and multiple SA token refreshes.
+const UPGRADE_TEST_DURATION_IN_MINUTES = 70
 
 const csiDriverName = "s3.csi.aws.com"
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
@@ -259,11 +259,11 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		chartPath := pullCSIDriver(settings, cfg, fromVersion)
 		installCSIDriver(cfg, fromVersion, chartPath)
 
-		// Patch CSIDriver to use 15-minute token expiration for tests (pod-level identity)
-		patchCSIDriverTokenExpiration(ctx, 900)
+		// Patch CSIDriver to use 20-minute token expiration for tests (pod-level identity)
+		patchCSIDriverTokenExpiration(ctx, 1200)
 
-		// Patch driver's ServiceAccount to use 15-minute token expiration for tests (driver-level identity)
-		patchServiceAccountTokenExpiration(ctx, "kube-system", "s3-csi-driver-sa", 900)
+		// Patch driver's ServiceAccount to use 20-minute token expiration for tests (driver-level identity)
+		patchServiceAccountTokenExpiration(ctx, "kube-system", "s3-csi-driver-sa", 1200)
 		killCSIDriverPods(ctx, f)
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
