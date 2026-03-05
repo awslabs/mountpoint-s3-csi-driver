@@ -299,8 +299,8 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeCapability: stdVolCap,
 					TargetPath:       targetPath,
 					VolumeContext: map[string]string{
-						"bucketName":                               bucketName,
-						"authenticationSource":                     "pod",
+						"bucketName":           bucketName,
+						"authenticationSource": "pod",
 						"csi.storage.k8s.io/serviceAccount.tokens": tokensJSON,
 					},
 				}
@@ -337,8 +337,8 @@ func TestNodePublishVolume(t *testing.T) {
 					VolumeCapability: stdVolCap,
 					TargetPath:       targetPath,
 					VolumeContext: map[string]string{
-						"bucketName":                               bucketName,
-						"authenticationSource":                     "pod",
+						"bucketName":           bucketName,
+						"authenticationSource": "pod",
 						"csi.storage.k8s.io/serviceAccount.tokens": volumeCtxTokens,
 					},
 					Secrets: map[string]string{
