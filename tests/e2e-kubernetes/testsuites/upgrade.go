@@ -33,8 +33,12 @@ import (
 
 // This value defines how long the upgrade test should take.
 //
-// Service account tokens expire every 10 minutes, IAM credentials expire after 1 hour.
-// Running for 90 minutes ensures at least 1 IAM refresh and multiple SA token refreshes.
+// This needs to be at least more than 70 minutes because
+//  1. We ask for service account tokens that valid for 10 min
+//  2. Session duration of the IAM roles we assume is 1 hour
+//
+// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 70min+.
+// Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
 const UPGRADE_TEST_DURATION_IN_MINUTES = 90
 
 const csiDriverName = "s3.csi.aws.com"
