@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"bytes"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
@@ -54,6 +56,67 @@ var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
 var helmChartContainerRepository = os.Getenv("REPOSITORY")
 var helmChartContainerTag = os.Getenv("TAG")
+
+// tokenExpirationPostRenderer patches CSIDriver and ServiceAccount to use shorter token expiration for tests
+type tokenExpirationPostRenderer struct {
+	expirationSeconds int64
+}
+
+func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*bytes.Buffer, error) {
+	decoder := yamlutil.NewYAMLOrJSONDecoder(renderedManifests, 4096)
+	var result bytes.Buffer
+
+	// We parse each YAML object from Helm manifests, handling EOF and skipping empty objects
+	for {
+		var obj map[string]interface{}
+		if err := decoder.Decode(&obj); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		if obj == nil {
+			continue
+		}
+
+		kind, _ := obj["kind"].(string)
+
+		// Patch CSIDriver token expiration
+		if kind == "CSIDriver" {
+			spec := obj["spec"].(map[string]interface{})
+			tokenRequests := spec["tokenRequests"].([]interface{})
+			// Loop handles variable array length
+			for i := range tokenRequests {
+				tr := tokenRequests[i].(map[string]interface{})
+				tr["expirationSeconds"] = r.expirationSeconds
+			}
+		}
+
+		// Patch ServiceAccount token expiration annotation
+		if kind == "ServiceAccount" {
+			metadata := obj["metadata"].(map[string]interface{})
+			if name, _ := metadata["name"].(string); name == "s3-csi-driver-sa" {
+				annotations, ok := metadata["annotations"].(map[string]interface{})
+				if !ok {
+					annotations = make(map[string]interface{})
+					metadata["annotations"] = annotations
+				}
+				annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", r.expirationSeconds)
+			}
+		}
+
+		// Re-encode the object
+		data, err := yaml.Marshal(obj)
+		if err != nil {
+			return nil, err
+		}
+		result.WriteString("---\n")
+		result.Write(data)
+	}
+
+	return &result, nil
+}
 
 type s3CSIUpgradeTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -221,58 +284,14 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 	}
 
-	// patchCSIDriverTokenExpiration patches the CSIDriver object to use shorter token expiration for tests
-	patchCSIDriverTokenExpiration := func(ctx context.Context, expirationSeconds int64) {
-		client := f.ClientSet.StorageV1().CSIDrivers()
-
-		csiDriver, err := client.Get(ctx, csiDriverName, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		// Patch token expiration for tests
-		for i := range csiDriver.Spec.TokenRequests {
-			csiDriver.Spec.TokenRequests[i].ExpirationSeconds = &expirationSeconds
-		}
-
-		_, err = client.Update(ctx, csiDriver, metav1.UpdateOptions{})
-		framework.ExpectNoError(err)
-
-		framework.Logf("Patched CSIDriver token expiration to %d seconds for testing", expirationSeconds)
-	}
-
-	// patchServiceAccountTokenExpiration patches a ServiceAccount to use shorter token expiration for tests
-	patchServiceAccountTokenExpiration := func(ctx context.Context, namespace, saName string, expirationSeconds int64) {
-		client := f.ClientSet.CoreV1().ServiceAccounts(namespace)
-
-		sa, err := client.Get(ctx, saName, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		if sa.Annotations == nil {
-			sa.Annotations = make(map[string]string)
-		}
-		sa.Annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", expirationSeconds)
-
-		_, err = client.Update(ctx, sa, metav1.UpdateOptions{})
-		framework.ExpectNoError(err)
-
-		framework.Logf("Patched ServiceAccount %s/%s token expiration to %d seconds for testing", namespace, saName, expirationSeconds)
-	}
-
 	// runUpgradeTest performs the complete upgrade test workflow
 	runUpgradeTest := func(ctx context.Context, fromVersion, toVersion string, useSourceBuild bool) {
 		settings, cfg := setupTestEnvironment(ctx)
 		framework.Logf("Testing upgrade from %q to %q...", fromVersion, toVersion)
 
-		// Install the previous version
+		// Install the previous version with token expiration patching
 		chartPath := pullCSIDriver(settings, cfg, fromVersion)
 		installCSIDriver(cfg, fromVersion, chartPath)
-
-		// Patch CSIDriver to use 10-minute token expiration for tests (pod-level identity)
-		patchCSIDriverTokenExpiration(ctx, TEST_TOKEN_EXPIRATION_SECONDS)
-
-		// Patch driver's ServiceAccount to use 10-minute token expiration for tests (driver-level identity)
-		patchServiceAccountTokenExpiration(ctx, helmReleaseNamespace, "s3-csi-driver-sa", TEST_TOKEN_EXPIRATION_SECONDS)
-		killCSIDriverPods(ctx, f)
-		framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(ctx, f))
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
 		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
@@ -288,7 +307,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Ensure read-only pods can do listing but fails to write
 		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
 
-		// Upgrade to the new version
+		// Upgrade to the new version with token expiration patching
 		if useSourceBuild {
 			chartPath = packageHelmChartFromSource(toVersion)
 		} else {
@@ -493,6 +512,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	installClient.Version = version
 	installClient.Wait = true
 	installClient.Timeout = 30 * time.Second
+	installClient.PostRenderer = &tokenExpirationPostRenderer{expirationSeconds: TEST_TOKEN_EXPIRATION_SECONDS}
 
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
@@ -510,6 +530,7 @@ func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version
 	upgradeClient.Version = version
 	upgradeClient.Wait = true
 	upgradeClient.Timeout = 30 * time.Second
+	upgradeClient.PostRenderer = &tokenExpirationPostRenderer{expirationSeconds: TEST_TOKEN_EXPIRATION_SECONDS}
 
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
