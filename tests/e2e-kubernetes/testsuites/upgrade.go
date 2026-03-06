@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"bytes"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,7 +21,9 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/repo"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
@@ -31,14 +34,18 @@ import (
 
 // This value defines how long the upgrade test should take.
 //
-// This needs to be at least more than 2 hours because
-//  1. We ask for service account tokens that valid for 1 hour (see `CSIDriver` object)
+// This needs to be at least more than 70 minutes because
+//  1. We ask for service account tokens that valid for 10 min
 //  2. Session duration of the IAM roles we assume is 1 hour
 //
-// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 2 hours+.
+// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 70min+.
 // Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
-const UPGRADE_TEST_DURATION_IN_MINUTES = 150
+const UPGRADE_TEST_DURATION_IN_MINUTES = 90
 
+// Token expiration for service account tokens during tests (10 minutes)
+const TEST_TOKEN_EXPIRATION_SECONDS = 600
+
+const csiDriverName = "s3.csi.aws.com"
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
@@ -49,6 +56,67 @@ var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
 var helmChartContainerRepository = os.Getenv("REPOSITORY")
 var helmChartContainerTag = os.Getenv("TAG")
+
+// tokenExpirationPostRenderer patches CSIDriver and ServiceAccount to use shorter token expiration for tests
+type tokenExpirationPostRenderer struct {
+	expirationSeconds int64
+}
+
+func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*bytes.Buffer, error) {
+	decoder := yamlutil.NewYAMLOrJSONDecoder(renderedManifests, 4096)
+	var result bytes.Buffer
+
+	// We parse each YAML object from Helm manifests, handling EOF and skipping empty objects
+	for {
+		var obj map[string]interface{}
+		if err := decoder.Decode(&obj); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		if obj == nil {
+			continue
+		}
+
+		kind, _ := obj["kind"].(string)
+
+		// Patch CSIDriver token expiration
+		if kind == "CSIDriver" {
+			spec := obj["spec"].(map[string]interface{})
+			tokenRequests := spec["tokenRequests"].([]interface{})
+			// Loop handles variable array length
+			for i := range tokenRequests {
+				tr := tokenRequests[i].(map[string]interface{})
+				tr["expirationSeconds"] = r.expirationSeconds
+			}
+		}
+
+		// Patch ServiceAccount token expiration annotation
+		if kind == "ServiceAccount" {
+			metadata := obj["metadata"].(map[string]interface{})
+			if name, _ := metadata["name"].(string); name == "s3-csi-driver-sa" {
+				annotations, ok := metadata["annotations"].(map[string]interface{})
+				if !ok {
+					annotations = make(map[string]interface{})
+					metadata["annotations"] = annotations
+				}
+				annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", r.expirationSeconds)
+			}
+		}
+
+		// Re-encode the object
+		data, err := yaml.Marshal(obj)
+		if err != nil {
+			return nil, err
+		}
+		result.WriteString("---\n")
+		result.Write(data)
+	}
+
+	return &result, nil
+}
 
 type s3CSIUpgradeTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -221,7 +289,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		settings, cfg := setupTestEnvironment(ctx)
 		framework.Logf("Testing upgrade from %q to %q...", fromVersion, toVersion)
 
-		// Install the previous version
+		// Install the previous version with token expiration patching
 		chartPath := pullCSIDriver(settings, cfg, fromVersion)
 		installCSIDriver(cfg, fromVersion, chartPath)
 
@@ -239,7 +307,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Ensure read-only pods can do listing but fails to write
 		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
 
-		// Upgrade to the new version
+		// Upgrade to the new version with token expiration patching
 		if useSourceBuild {
 			chartPath = packageHelmChartFromSource(toVersion)
 		} else {
@@ -444,6 +512,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	installClient.Version = version
 	installClient.Wait = true
 	installClient.Timeout = 30 * time.Second
+	installClient.PostRenderer = &tokenExpirationPostRenderer{expirationSeconds: TEST_TOKEN_EXPIRATION_SECONDS}
 
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
@@ -461,6 +530,7 @@ func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version
 	upgradeClient.Version = version
 	upgradeClient.Wait = true
 	upgradeClient.Timeout = 30 * time.Second
+	upgradeClient.PostRenderer = &tokenExpirationPostRenderer{expirationSeconds: TEST_TOKEN_EXPIRATION_SECONDS}
 
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
