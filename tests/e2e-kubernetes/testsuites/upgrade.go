@@ -27,7 +27,6 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
 
@@ -40,6 +39,9 @@ import (
 // So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 70min+.
 // Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
 const UPGRADE_TEST_DURATION_IN_MINUTES = 90
+
+// Token expiration for service account tokens during tests (10 minutes)
+const TEST_TOKEN_EXPIRATION_SECONDS = 600
 
 const csiDriverName = "s3.csi.aws.com"
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
@@ -227,8 +229,9 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		framework.ExpectNoError(err)
 
 		// Patch token expiration for tests
-		csiDriver.Spec.TokenRequests[0].ExpirationSeconds = ptr.To(expirationSeconds)
-		csiDriver.Spec.TokenRequests[1].ExpirationSeconds = ptr.To(expirationSeconds)
+		for i := range csiDriver.Spec.TokenRequests {
+			csiDriver.Spec.TokenRequests[i].ExpirationSeconds = &expirationSeconds
+		}
 
 		_, err = client.Update(ctx, csiDriver, metav1.UpdateOptions{})
 		framework.ExpectNoError(err)
@@ -264,11 +267,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		installCSIDriver(cfg, fromVersion, chartPath)
 
 		// Patch CSIDriver to use 10-minute token expiration for tests (pod-level identity)
-		patchCSIDriverTokenExpiration(ctx, 600)
+		patchCSIDriverTokenExpiration(ctx, TEST_TOKEN_EXPIRATION_SECONDS)
 
 		// Patch driver's ServiceAccount to use 10-minute token expiration for tests (driver-level identity)
-		patchServiceAccountTokenExpiration(ctx, "kube-system", "s3-csi-driver-sa", 600)
+		patchServiceAccountTokenExpiration(ctx, helmReleaseNamespace, "s3-csi-driver-sa", TEST_TOKEN_EXPIRATION_SECONDS)
 		killCSIDriverPods(ctx, f)
+		framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(ctx, f))
 
 		// Configure driver-level IRSA with "S3ReadOnlyAccess" policy
 		updateCSIDriversServiceAccountRole(ctx, oidcProvider, iamPolicyS3ReadOnlyAccess)
