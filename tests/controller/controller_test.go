@@ -1331,6 +1331,58 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(hrPod.Pod)
 		})
 	})
+
+	Context("Pod Labels", func() {
+		It("should apply configured labels to Mountpoint Pods", func() {
+			// This test verifies that both driver-managed labels and user-configured
+			// labels from Config.PodLabels are applied to Mountpoint Pods
+
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule(testNode)
+
+			_, mpPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+			// Verify driver-managed labels are always present
+			Expect(mpPod.Labels).To(HaveKey(mppod.LabelMountpointVersion))
+			Expect(mpPod.Labels).To(HaveKey(mppod.LabelCSIDriverVersion))
+
+			// Verify driver labels have correct values
+			Expect(mpPod.Labels[mppod.LabelMountpointVersion]).To(Equal(mountpointVersion))
+			Expect(mpPod.Labels[mppod.LabelCSIDriverVersion]).To(Equal(version.GetVersion().DriverVersion))
+
+			// Verify user-configured labels from Config are applied
+			Expect(mpPod.Labels).To(HaveKeyWithValue("test-label", "test-value"))
+			Expect(mpPod.Labels).To(HaveKeyWithValue("env", "test"))
+
+			mpPod.succeed()
+			waitForObjectToDisappear(mpPod.Pod)
+		})
+
+		It("should apply configured labels to Headroom Pods", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+
+			// Verify driver-managed labels are always present
+			Expect(hrPod.Labels).To(HaveKey(mppod.LabelHeadroomForPod))
+			Expect(hrPod.Labels).To(HaveKey(mppod.LabelHeadroomForVolume))
+
+			// Verify user-configured labels from Config are applied
+			Expect(hrPod.Labels).To(HaveKeyWithValue("headroom-label", "headroom-value"))
+			Expect(hrPod.Labels).To(HaveKeyWithValue("tier", "headroom"))
+
+			// Cleanup: terminate workload pod to trigger headroom pod deletion
+			pod.terminate()
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+	})
 })
 
 //-- Utilities for tests.
