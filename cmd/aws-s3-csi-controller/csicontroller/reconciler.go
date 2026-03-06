@@ -162,7 +162,8 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		priorityClassKind = mppod.PreemptingPriorityClass
 	}
 
-	volumes, requeue, err := r.getWorkloadVolumes(ctx, pod)
+	volumes, hasUnboundPVCs, err := r.getWorkloadVolumes(ctx, pod)
+	requeue := hasUnboundPVCs
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -219,8 +220,9 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 	}
 
 	if needsHeadroomForMountpointPod &&
-		len(volumes) == numHeadroomPods {
-		// Spawned all Headroom Pods needed, now ungate the Workload Pod,
+		len(volumes) == numHeadroomPods &&
+		!hasUnboundPVCs {
+		// No S3 backed PVCs are unbound (requeue=false), spawned all Headroom Pods needed, now ungate the Workload Pod,
 		// so it can get scheduled (alongside Headroom Pods)
 		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
 		if err != nil {
