@@ -21,7 +21,6 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/repo"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/kubernetes/test/e2e/framework"
