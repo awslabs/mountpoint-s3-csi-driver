@@ -69,7 +69,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v6
