@@ -44,7 +44,6 @@ const UPGRADE_TEST_DURATION_IN_MINUTES = 90
 // Token expiration for service account tokens during tests (10 minutes)
 const TEST_TOKEN_EXPIRATION_SECONDS = 600
 
-const csiDriverName = "s3.csi.aws.com"
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
