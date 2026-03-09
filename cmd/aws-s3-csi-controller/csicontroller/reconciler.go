@@ -346,7 +346,7 @@ func (r *Reconciler) setupLogger(
 		logger = logger.WithValues("s3pa", s3pa.Name)
 	}
 
-	var keyValues []interface{}
+	var keyValues []any
 	for k, v := range fieldFilters {
 		keyValues = append(keyValues, k, v)
 	}

@@ -199,8 +199,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 			mountOptions := append(baseMountOptions, "allow-delete")
 			podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-				pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-				pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+				pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+				pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 			})
 
 			pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
@@ -256,8 +256,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 				})
 
 				pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
@@ -288,8 +288,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 				})
 
 				pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
