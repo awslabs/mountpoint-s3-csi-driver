@@ -2,6 +2,7 @@
 
 ### Notable changes
 * Add graceful pod eviction to ensure proper termination order. Mountpoint pods now remain active until all workload pods using the volume have terminated, preventing "Transport endpoint is not connected" errors. ([#693](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/693))
+* Add `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to Mountpoint Pods to prevent Cluster Autoscaler scale-down blocking. This resolves an issue where Cluster Autoscaler treated MP pods as non-replicated singleton pods, preventing node scale-down. ([#675](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/675))
 
 # v2.4.0
 

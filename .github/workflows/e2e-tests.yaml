@@ -36,6 +36,8 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    permissions:
+      contents: read
   build:
     runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}
@@ -116,6 +118,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Create cluster
+        id: create_cluster
         env:
           ACTION: "create_cluster"
         run: |
@@ -142,7 +145,8 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        if: always()
+        # Skip uninstall if cluster creation did not succeed - no cluster to communicate with
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' }}
         env:
           ACTION: "uninstall_driver"
         run: |
