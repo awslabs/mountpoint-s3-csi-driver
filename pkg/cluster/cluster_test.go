@@ -5,7 +5,6 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
-	"k8s.io/utils/ptr"
 )
 
 func TestMountpointPodUserID(t *testing.T) {
@@ -17,7 +16,7 @@ func TestMountpointPodUserID(t *testing.T) {
 		{
 			name:     "Default Kubernetes should return 1000",
 			variant:  cluster.DefaultKubernetes,
-			expected: ptr.To(int64(1000)),
+			expected: new(int64(1000)),
 		},
 		{
 			name:     "OpenShift should return nil",
