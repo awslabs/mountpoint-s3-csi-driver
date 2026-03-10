@@ -40,6 +40,7 @@ jobs:
           make e2e-controller
 
   post_test:
+    name: "Controller Tests Complete"
     if: always()
     needs:
       - controller_test
