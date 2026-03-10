@@ -1040,7 +1040,7 @@ var _ = Describe("Mountpoint Controller", func() {
 
 				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
-						SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+						SizeLimit: new(resource.MustParse(sizeLimit)),
 						Medium:    corev1.StorageMediumMemory,
 					},
 				})
@@ -1603,7 +1603,7 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 			Namespace:    defaultNamespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			AccessModes:      accessModes,
 			Resources:        corev1.VolumeResourceRequirements{Requests: resources},
 		},
