@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1301,6 +1302,73 @@ func TestProvideContext_GetCredentialPodID(t *testing.T) {
 			assert.Equals(t, tt.want, p.GetCredentialPodID())
 		})
 	}
+}
+
+func TestProvidingEnv(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+
+	clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
+	provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+
+	writePath := t.TempDir()
+	baseProvideCtx := credentialprovider.ProvideContext{
+		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		WorkloadPodID:        testPodID,
+		MountpointPodID:      testMountpointPodID,
+		VolumeID:             testVolumeID,
+		PodNamespace:         testPodNamespace,
+		ServiceAccountName:   testPodServiceAccount,
+		ServiceAccountTokens: serviceAccountTokens(t, tokens{
+			serviceAccountTokenAudienceSTS: {
+				Token: testWebIdentityToken,
+			},
+			serviceAccountTokenAudienceEKS: {
+				Token: testContainerAuthorizationToken,
+			},
+		}),
+		ServiceAccountEKSRoleARN: testRoleARN,
+		MountKind:                credentialprovider.MountKindPod,
+	}
+
+	t.Run("Valid", func(t *testing.T) {
+		provideCtx := baseProvideCtx
+		provideCtx.Env = `- name: HTTPS_PROXY
+  value: proxy:3128
+- name: NO_PROXY
+  value: noproxy.com`
+
+		env, source, err := provider.Provide(context.Background(), provideCtx)
+		assert.NoError(t, err)
+		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
+		assert.Equals(t, envprovider.Environment{
+			"AWS_ROLE_ARN":                testRoleARN,
+			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testPodMounterPodLevelServiceAccountToken),
+			"AWS_EC2_METADATA_DISABLED":   "true",
+			"AWS_REGION":                  testIMDSRegion,
+			"AWS_DEFAULT_REGION":          testIMDSRegion,
+			"HTTPS_PROXY":                 "proxy:3128",
+			"NO_PROXY":                    "noproxy.com",
+		}, env)
+		assertWebIdentityTokenFile(t, filepath.Join(writePath, testPodMounterPodLevelServiceAccountToken))
+	})
+
+	t.Run("Not in allowlist", func(t *testing.T) {
+		provideCtx := baseProvideCtx
+		provideCtx.Env = `- name: FOO
+  value: BAR`
+
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+		if err == nil {
+			t.Fatal("Expected error when inject invalid env, but got nil")
+		}
+
+		expectedErrMsg := "Environment variable not allowed: FOO"
+		if !strings.Contains(err.Error(), expectedErrMsg) {
+			t.Errorf("Expected error message %q, but got %q", expectedErrMsg, err.Error())
+		}
+	})
 }
 
 //-- Utilities for tests

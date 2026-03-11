@@ -98,6 +98,8 @@ type ProvideContext struct {
 	StsRegion string
 	// BucketRegion is the `--region` parameter passed via mount options.
 	BucketRegion string
+
+	Env string
 }
 
 // SetWriteAndEnvPath sets `WritePath` and `EnvPath` for `ctx`.

@@ -272,6 +272,7 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
 		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
+		Env:                  volumeCtx[volumecontext.MountpointContainerEnv],
 	}
 }
 
