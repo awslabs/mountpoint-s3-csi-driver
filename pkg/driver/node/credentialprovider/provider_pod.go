@@ -11,6 +11,8 @@ import (
 	"github.com/google/renameio"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
@@ -71,6 +73,12 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 	env := envprovider.Environment{
 		envprovider.EnvEC2MetadataDisabled: "true",
 	}
+
+	customEnv, err := c.createCustomEnvironment(provideCtx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create custom environment: %v", err)
+	}
+	env.Merge(customEnv)
 
 	if provideCtx.IsSystemDMountpoint() {
 		cacheKey := podNamespace + "/" + podServiceAccount
@@ -235,4 +243,28 @@ func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx Provide
 		envprovider.EnvContainerCredentialsFullURI:     eksPodIdentityAgentCredentialsURI,
 		envprovider.EnvContainerAuthorizationTokenFile: tokenFile,
 	}, nil
+}
+
+// createCustomEnvironment verify and creates an environment with user injected environment variables
+func (c *Provider) createCustomEnvironment(provideCtx ProvideContext) (envprovider.Environment, error) {
+	env := envprovider.Environment{}
+
+	if provideCtx.Env != "" {
+		var ctxEnvs []corev1.EnvVar
+		if err := yaml.Unmarshal([]byte(provideCtx.Env), &ctxEnvs); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Cannot parse injected environment: %v", err)
+		}
+		for _, ctxEnv := range ctxEnvs {
+			switch ctxEnv.Name {
+			case envprovider.EnvHttpsProxy:
+				env[envprovider.EnvHttpsProxy] = ctxEnv.Value
+			case envprovider.EnvNoProxy:
+				env[envprovider.EnvNoProxy] = ctxEnv.Value
+			default:
+				return nil, status.Errorf(codes.InvalidArgument, "Environment variable not allowed: %s", ctxEnv.Name)
+			}
+		}
+	}
+
+	return env, nil
 }

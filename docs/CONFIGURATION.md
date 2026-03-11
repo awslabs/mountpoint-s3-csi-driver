@@ -61,6 +61,8 @@ spec:
       mountpointContainerResourcesRequestsMemory: 1Gi
       mountpointContainerResourcesLimitsCpu: 500m
       mountpointContainerResourcesLimitsMemory: 1Gi
+      # Optional: Configure Mountpoint container environment variables
+      mountpointContainerEnv: ""
 
 ---
 apiVersion: v1
