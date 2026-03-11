@@ -33,10 +33,6 @@ jobs:
           sparse-checkout: |
             scripts/verify-helm-images.sh
           sparse-checkout-cone-mode: false
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Install crane
         run: |
           cd /tmp
@@ -63,6 +59,8 @@ jobs:
                 }
               ]
             }
+      - name: Verify all images exist before publishing
+        run: ./main-branch/scripts/verify-helm-images.sh
   publish-helm-chart:
     runs-on: ubuntu-latest
     permissions:
@@ -71,6 +69,15 @@ jobs:
     # Ensure only the latest version of this job on main can run for publishing, as this is global for the project
     if: ${{ github.ref == 'refs/heads/main' && !inputs.dry-run }}
     steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         env:
