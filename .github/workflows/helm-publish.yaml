@@ -1,20 +1,24 @@
 name: Helm publish
 
 on:
+  # This job is manually dispatched for now, since we do not have image build fully automated yet.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag referencing commit to create release from"
+        description: "Release tag (e.g. v2.0.0)"
         required: true
+      dry-run:
+        description: "Skip publishing Helm chart"
+        type: boolean
+        required: true
+        default: true
 
 jobs:
-  # This job is manually dispatched for now, since we do not have image build fully automated yet.
-  helm:
+  verify-helm-chart:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    # Ensure only the latest version of the workflow can run, as this is global for the project
-    if: ${{ github.ref == 'refs/heads/main' }}
+      id-token: write
+    environment: "trusted"
     steps:
       - name: Checkout tag
         uses: actions/checkout@v6
@@ -41,8 +45,32 @@ jobs:
           sudo mv crane /usr/local/bin/crane
           sudo chmod +x /usr/local/bin/crane
           crane version
-      - name: Verify all images exist before publishing
-        run: ./main-branch/scripts/verify-helm-images.sh
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          # We only need valid credentials for authentication with ECR, so only ecr:GetAuthorizationToken.
+          inline-session-policy: >-
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid":"AllowECRAuth",
+                  "Effect":"Allow",
+                  "Action":"ecr:GetAuthorizationToken",
+                  "Resource":"*"
+                }
+              ]
+            }
+  publish-helm-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [verify-helm-chart]
+    # Ensure only the latest version of this job on main can run for publishing, as this is global for the project
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.dry-run }}
+    steps:
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         env:
