@@ -31,6 +31,26 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// Upgrade/Rollback Test Coverage Summary
+//
+// What's Covered:
+// The tests verify IRSA authentication (both driver-level and pod-level) with credential refresh by running for 90 minutes
+// to exceed the 1-hour IAM role session duration and 10-minute service account token expiration cycles, ensuring credentials
+// work across version transitions. They also ensure workload continuity by creating pods before/after upgrade/rollback and
+// monitoring that file operations (read/write/delete) continue working throughout both processes, with clean pod termination
+// verified at each stage.
+//
+// What's NOT Covered:
+// Caching configurations (emptyDir, ephemeral, shared cache) are completely untested, and Mountpoint Pod Sharing scenarios
+// during upgrades are not verified. Cross-account bucket access, resource limits on Mountpoint containers, and advanced
+// mount options (like --prefix, --read-only, --metadata-ttl) are also not tested.
+//
+// However, these gaps are acceptable for upgrade/rollback testing because these features (cache, resource limits,
+// mount options) are static configurations set at pod creation time and are not modified or maintained by the driver
+// during pod lifecycle or version transitions. The upgrade/rollback process only affects the driver's control plane
+// (credential refresh, pod scheduling, mount/unmount operations), which is thoroughly covered by testing authentication
+// and workload continuity.
+
 // This value defines how long the upgrade and rollback tests should take.
 //
 // This needs to be at least more than 70 minutes because
