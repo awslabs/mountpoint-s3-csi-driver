@@ -27,11 +27,11 @@ const (
 	userAgentCsiDriverPrefix        = "s3-csi-driver/"
 	userAgentK8sPrefix              = "k8s/"
 	userAgentCredentialSourcePrefix = "credential-source#"
-	userAgentDistributionPrefix     = "distribution/"
+	userAgentDistributionPrefix     = "dist/"
 )
 
 // UserAgent returns user-agent for the CSI driver.
-// The format is: s3-csi-driver/VERSION credential-source#SOURCE k8s/VERSION distribution/DISTRO
+// The format is: s3-csi-driver/VERSION credential-source#SOURCE k8s/VERSION dist/DISTRO
 func UserAgent(authenticationSource string, kubernetesVersion string, distribution cluster.Distribution) string {
 	var b strings.Builder
 
@@ -54,7 +54,7 @@ func UserAgent(authenticationSource string, kubernetesVersion string, distributi
 	if distribution != "" {
 		b.WriteRune(' ')
 		b.WriteString(userAgentDistributionPrefix)
-		b.WriteString(string(distribution.UserAgent()))
+		b.WriteString(string(distribution))
 	}
 
 	return b.String()

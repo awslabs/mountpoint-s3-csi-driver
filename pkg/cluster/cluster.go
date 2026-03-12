@@ -24,27 +24,20 @@ type Distribution string
 
 const (
 	// DistributionEKSAddon is an EKS cluster where the CSI driver is installed as an EKS add-on.
-	DistributionEKSAddon Distribution = "eks-addon"
+	DistributionEKSAddon Distribution = "addon"
 	// DistributionEKSSelfManaged is an EKS cluster where the CSI driver is installed outside the add-on flow (for example via Helm).
-	DistributionEKSSelfManaged Distribution = "eks"
-	// DistributionROSA is an OpenShift cluster with a Red Hat managed control plane (ROSA).
+	DistributionEKSSelfManaged Distribution = "helm"
+	// DistributionROSA is a Red Hat OpenShift Service on AWS (ROSA) cluster.
 	DistributionROSA Distribution = "rosa"
 	// DistributionOther is a cluster that does not match known distributions.
 	DistributionOther Distribution = "other"
-	// DistributionOpenShift is a non-ROSA OpenShift cluster with a self-hosted control plane.
+	// DistributionOpenShift is a non-ROSA OpenShift cluster.
 	DistributionOpenShift Distribution = "openshift"
 )
 
 const (
-	userAgentDistributionEKSAddon       Distribution = "eks-addon"
-	userAgentDistributionEKSSelfManaged Distribution = "eks-self-managed"
-	userAgentDistributionROSA           Distribution = "rosa"
-	userAgentDistributionOther          Distribution = "other"
-)
-
-const (
 	kubeSystemNamespace         = "kube-system"
-	csiDriverServiceAccountName = "aws-mountpoint-s3-csi-driver"
+	csiDriverServiceAccountName = "s3-csi-driver-sa"
 	eksAddonLabel               = "app.kubernetes.io/managed-by"
 	eksAddonAnnotation          = "eks.amazonaws.com/addon"
 	rosaLabel                   = "rosa.openshift.io/managed"
@@ -168,23 +161,4 @@ func (c Variant) MountpointPodUserID() *int64 {
 	}
 
 	return defaultMountpointUID
-}
-
-// UserAgent returns normalized distribution value for user-agent reporting.
-// Values are grouped into one of:
-// - eks-addon
-// - eks-self-managed
-// - rosa
-// - other
-func (d Distribution) UserAgent() Distribution {
-	switch d {
-	case DistributionEKSAddon:
-		return userAgentDistributionEKSAddon
-	case DistributionEKSSelfManaged:
-		return userAgentDistributionEKSSelfManaged
-	case DistributionROSA:
-		return userAgentDistributionROSA
-	default:
-		return userAgentDistributionOther
-	}
 }

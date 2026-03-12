@@ -55,31 +55,31 @@ func TestUserAgent(t *testing.T) {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			distribution:         cluster.DistributionEKSAddon,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 distribution/eks-addon",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 dist/addon",
 		},
 		"with eks self-managed distribution": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: credentialprovider.AuthenticationSourceDriver,
 			distribution:         cluster.DistributionEKSSelfManaged,
-			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0 distribution/eks-self-managed",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0 dist/helm",
 		},
 		"with rosa distribution": {
 			k8sVersion:           "v1.29.6",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			distribution:         cluster.DistributionROSA,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.29.6 distribution/rosa",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.29.6 dist/rosa",
 		},
 		"with other distribution": {
 			k8sVersion:           "v1.28.0",
 			authenticationSource: credentialprovider.AuthenticationSourceDriver,
 			distribution:         cluster.DistributionOther,
-			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 distribution/other",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 dist/other",
 		},
 		"with openshift distribution": {
-			k8sVersion:           "v4.13.5",
+			k8sVersion:           "v1.25.0+abc123",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			distribution:         cluster.DistributionOpenShift,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v4.13.5 distribution/other",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.25.0+abc123 dist/openshift",
 		},
 	}
 
