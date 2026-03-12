@@ -286,8 +286,9 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
 		}, mpPod.Labels)
 		assert.Equals(t, map[string]string{
-			mppod.AnnotationVolumeName: testVolName,
-			mppod.AnnotationVolumeId:   testVolID,
+			mppod.AnnotationVolumeName:                    testVolName,
+			mppod.AnnotationVolumeId:                      testVolID,
+			mppod.AnnotationClusterAutoscalerDaemonsetPod: "true",
 		}, mpPod.Annotations)
 
 		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
