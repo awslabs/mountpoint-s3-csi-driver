@@ -20,11 +20,14 @@ import (
 	"context"
 	"maps"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -143,6 +146,23 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	if !args.Has(mountpoint.ArgAllowOther) {
 		// If customer container is running as root we need to add --allow-root as Mountpoint Pod is not run as root
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
+	}
+
+	// When using an emptyDir cache without Memory medium, statvfs on the cache directory reports
+	// the node's root filesystem stats rather than the emptyDir's sizeLimit.
+	// Forward 95% of cacheEmptyDirSizeLimit to Mountpoint as --max-cache-size, so it performs cache evictions
+	// before Kubernetes evicts the pod for exceeding the emptyDir limit.
+	if sizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; sizeLimit != "" {
+		if volumeCtx[volumecontext.CacheEmptyDirMedium] != string(corev1.StorageMediumMemory) {
+			quantity, err := resource.ParseQuantity(sizeLimit)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, sizeLimit, err)
+			}
+			const safetyFactor = 0.95 // Mountpoint can overshoot its target by around 1-2%
+			sizeInBytesWithSafetyFactor := float64(quantity.Value()) * safetyFactor
+			maxCacheSizeMiB := int64(sizeInBytesWithSafetyFactor / (1024 * 1024))
+			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(maxCacheSizeMiB, 10))
+		}
 	}
 
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
