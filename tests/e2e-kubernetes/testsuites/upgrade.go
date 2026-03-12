@@ -41,6 +41,7 @@ import (
 // verified at each stage.
 //
 // What's NOT Covered:
+// EKS Pod Identity authentication is NOT tested (only IRSA is tested). TODO: Add EKS Pod Identity test coverage.
 // Caching configurations (emptyDir, ephemeral, shared cache) are completely untested, and Mountpoint Pod Sharing scenarios
 // during upgrades are not verified. Cross-account bucket access, resource limits on Mountpoint containers, and advanced
 // mount options (like --prefix, --read-only, --metadata-ttl) are also not tested.
@@ -48,8 +49,8 @@ import (
 // However, these gaps are acceptable for upgrade/rollback testing because these features (cache, resource limits,
 // mount options) are static configurations set at pod creation time and are not modified or maintained by the driver
 // during pod lifecycle or version transitions. The upgrade/rollback process only affects the driver's control plane
-// (credential refresh, pod scheduling, mount/unmount operations), which is thoroughly covered by testing authentication
-// and workload continuity.
+// (credential refresh, pod scheduling, mount/unmount operations), which is covered by testing IRSA authentication
+// and workload continuity. EKS Pod Identity should be added in future test iterations.
 
 // This value defines how long the upgrade and rollback tests should take.
 //
