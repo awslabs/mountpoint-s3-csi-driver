@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -24,15 +25,11 @@ type Distribution string
 
 const (
 	// DistributionEKSAddon is an EKS cluster where the CSI driver is installed as an EKS add-on.
-	DistributionEKSAddon Distribution = "addon"
-	// DistributionEKSSelfManaged is an EKS cluster where the CSI driver is installed outside the add-on flow (for example via Helm).
-	DistributionEKSSelfManaged Distribution = "helm"
-	// DistributionROSA is a Red Hat OpenShift Service on AWS (ROSA) cluster.
-	DistributionROSA Distribution = "rosa"
-	// DistributionOther is a cluster that does not match known distributions.
-	DistributionOther Distribution = "other"
-	// DistributionOpenShift is a non-ROSA OpenShift cluster.
+	DistributionEKSAddon Distribution = "eks-addon"
+	// DistributionOpenShift is an OpenShift cluster (includes ROSA).
 	DistributionOpenShift Distribution = "openshift"
+	// DistributionOther is a cluster that does not match known distributions (includes EKS self-managed).
+	DistributionOther Distribution = "other"
 )
 
 const (
@@ -40,7 +37,6 @@ const (
 	csiDriverServiceAccountName = "s3-csi-driver-sa"
 	eksAddonLabel               = "app.kubernetes.io/managed-by"
 	eksAddonAnnotation          = "eks.amazonaws.com/addon"
-	rosaLabel                   = "rosa.openshift.io/managed"
 )
 
 var defaultMountpointUID = new(int64(1000))
@@ -77,23 +73,31 @@ func DetectDistribution(clientset kubernetes.Interface, config *rest.Config, log
 
 	variant := DetectVariant(config, log)
 	if variant == OpenShift {
-		if isROSA(ctx, clientset, log) {
-			return DistributionROSA
-		}
 		log.Info("Detected OpenShift distribution")
 		return DistributionOpenShift
 	}
 
+	// Check ENV variable first (more reliable for EKS addon detection)
+	if isEKSAddonFromEnv(log) {
+		return DistributionEKSAddon
+	}
+
+	// Fall back to service account check for backward compatibility
 	if isEKSAddon(ctx, clientset, log) {
 		return DistributionEKSAddon
 	}
 
-	if isEKSCluster(config, log) {
-		return DistributionEKSSelfManaged
-	}
-
 	log.V(2).Info("Could not detect known distribution, defaulting to other")
 	return DistributionOther
+}
+
+func isEKSAddonFromEnv(log logr.Logger) bool {
+	installationType := os.Getenv("INSTALLATION_TYPE")
+	if installationType == "eks-addon" {
+		log.Info("Detected EKS Addon distribution from INSTALLATION_TYPE env var")
+		return true
+	}
+	return false
 }
 
 func isEKSAddon(ctx context.Context, clientset kubernetes.Interface, log logr.Logger) bool {
@@ -110,42 +114,6 @@ func isEKSAddon(ctx context.Context, clientset kubernetes.Interface, log logr.Lo
 
 	if _, ok := sa.Annotations[eksAddonAnnotation]; ok {
 		log.Info("Detected EKS Addon distribution")
-		return true
-	}
-
-	return false
-}
-
-func isEKSCluster(config *rest.Config, log logr.Logger) bool {
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		log.V(2).Info("Failed to create discovery client for EKS detection", "error", err)
-		return false
-	}
-
-	version, err := discoveryClient.ServerVersion()
-	if err != nil {
-		log.V(2).Info("Failed to get server version for EKS detection", "error", err)
-		return false
-	}
-
-	if strings.Contains(version.GitVersion, "-eks-") {
-		log.Info("Detected EKS cluster distribution")
-		return true
-	}
-
-	return false
-}
-
-func isROSA(ctx context.Context, clientset kubernetes.Interface, log logr.Logger) bool {
-	ns, err := clientset.CoreV1().Namespaces().Get(ctx, kubeSystemNamespace, metav1.GetOptions{})
-	if err != nil {
-		log.V(2).Info("Could not get kube-system namespace", "error", err)
-		return false
-	}
-
-	if ns.Labels[rosaLabel] == "true" {
-		log.Info("Detected ROSA distribution")
 		return true
 	}
 
