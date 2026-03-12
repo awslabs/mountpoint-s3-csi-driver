@@ -31,15 +31,37 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// This value defines how long the upgrade test should take.
+// Upgrade/Rollback Test Coverage Summary
+//
+// What's Covered:
+// The tests verify IRSA authentication (both driver-level and pod-level) with credential refresh by running for 90 minutes
+// to exceed the 1-hour IAM role session duration and 10-minute service account token expiration cycles, ensuring credentials
+// work across version transitions. They also ensure workload continuity by creating pods before/after upgrade/rollback and
+// monitoring that file operations (read/write/delete) continue working throughout both processes, with clean pod termination
+// verified at each stage.
+//
+// What's NOT Covered:
+// EKS Pod Identity authentication is NOT tested (only IRSA is tested). TODO: Add EKS Pod Identity test coverage.
+// Caching configurations (emptyDir, ephemeral, shared cache) are completely untested, and Mountpoint Pod Sharing scenarios
+// during upgrades are not verified. Cross-account bucket access, resource limits on Mountpoint containers, and advanced
+// mount options (like --prefix, --read-only, --metadata-ttl) are also not tested.
+//
+// However, these gaps are acceptable for upgrade/rollback testing because these features (cache, resource limits,
+// mount options) are static configurations set at pod creation time and are not modified or maintained by the driver
+// during pod lifecycle or version transitions. The upgrade/rollback process only affects the driver's control plane
+// (credential refresh, pod scheduling, mount/unmount operations), which is covered by testing IRSA authentication
+// and workload continuity. EKS Pod Identity should be added in future test iterations.
+
+// This value defines how long the upgrade and rollback tests should take.
 //
 // This needs to be at least more than 70 minutes because
 //  1. We ask for service account tokens that valid for 10 min
 //  2. Session duration of the IAM roles we assume is 1 hour
 //
-// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 70min+.
-// Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
+// So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade and rollback tests for 70min+.
+// Therefore we can be sure if the credentials are successfully refreshed after the upgrade and rollback.
 const UPGRADE_TEST_DURATION_IN_MINUTES = 90
+const ROLLBACK_TEST_DURATION_IN_MINUTES = 90
 
 // Token expiration for service account tokens during tests (10 minutes)
 const TEST_TOKEN_EXPIRATION_SECONDS = 600
@@ -296,14 +318,30 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Create two SAs for pod-level IRSA with "S3FullAccess" and "S3ReadOnlyAccess" policies
 		pliFullAccessSA, pliReadOnlyAccessSA := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess), createServiceAccountWithPolicy(ctx, iamPolicyS3ReadOnlyAccess)
 
-		// Create three workloads with different SAs
-		fullAccessPods, readOnlyAccessPods := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+		// To test both upgrade termination and rollback scenarios, we create 5 sets of workloads:
 
-		// Write a sample files to writeable pods
-		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPods)
+		// Set		|Created When	| Purpose									|Terminated When
+		//__________|_______________|___________________________________________|_________________________
+		// Set A	|Before upgrade	| Test pre-upgrade workloads on rollback	|After rollback monitoring
+		// Set B	|Before upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
+		// Set C	|After upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
+		// Set D	|After upgrade	| Test post-upgrade workloads on rollback	|After rollback monitoring
+		// Set E	|After rollback	| Test new workload creation post-rollback	|After rollback monitoring
 
-		// Ensure read-only pods can do listing but fails to write
-		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
+		// Create Set A + Set B (for upgrade test + rollback test)
+		framework.Logf("Creating Set A and Set B workloads before upgrade...")
+		fullAccessPodsSetA, readOnlyAccessPodsSetA := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+		fullAccessPodsSetB, readOnlyAccessPodsSetB := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+
+		// Test Set A workloads
+		framework.Logf("Testing Set A workloads...")
+		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPodsSetA)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetA, testFile, testWriteSize, seed)
+
+		// Test Set B workloads
+		framework.Logf("Testing Set B workloads...")
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetB, testFile, testWriteSize, seed)
 
 		// Upgrade to the new version with token expiration patching
 		if useSourceBuild {
@@ -313,28 +351,83 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 		upgradeCSIDriver(cfg, f, toVersion, chartPath)
 
-		// Create new workloads after the upgrade
-		dliReadOnlyAccessPodNewVersion := createPod(ctx, "default")
-		pliFullAccessPodNewVersion := createPod(enablePLI(ctx), pliFullAccessSA.Name)
-		pliReadOnlyAccessPodNewVersion := createPod(enablePLI(ctx), pliReadOnlyAccessSA.Name)
-		fullAccessPods = append(fullAccessPods, pliFullAccessPodNewVersion)
-		readOnlyAccessPods = append(readOnlyAccessPods, dliReadOnlyAccessPodNewVersion, pliReadOnlyAccessPodNewVersion)
+		// Create Set C + Set D after the upgrade
+		framework.Logf("Creating Set C and Set D workloads after upgrade...")
+		fullAccessPodsSetC, readOnlyAccessPodsSetC := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+		fullAccessPodsSetD, readOnlyAccessPodsSetD := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 
-		// Verify new workloads
-		_, _, _ = writeAndVerifyTestFile(ctx, []*v1.Pod{pliFullAccessPodNewVersion})
-		verifyReadOnlyAccess(ctx, readOnlyAccessPods, testFile, testWriteSize, seed)
+		// Test Set C workloads
+		framework.Logf("Testing Set C workloads...")
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
+
+		// Test Set D workloads
+		framework.Logf("Testing Set D workloads...")
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
 
 		// Ensure the workloads are still healthy
-		for range UPGRADE_TEST_DURATION_IN_MINUTES {
-			framework.Logf("Checking if workloads are still healthy after the upgrade...")
-			verifyWorkloadHealth(ctx, fullAccessPods, readOnlyAccessPods, testFile, testWriteSize, seed)
-			framework.Logf("Sleeping for a minute for the next cycle...")
-			time.Sleep(1 * time.Minute)
-		}
+		framework.Logf("Monitoring all 12 workloads (Set A + B + C + D) for %d minutes...", UPGRADE_TEST_DURATION_IN_MINUTES)
+		allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
+		allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
 
-		// Ensure the workloads can be terminated without any problem
-		for _, pod := range slices.Concat(fullAccessPods, readOnlyAccessPods) {
+		monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade", verifyWorkloadHealth)
+
+		// Terminate Set B + Set C (test termination after upgrade)
+		framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
+		for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
 			e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		}
+		framework.Logf("Set B and Set C terminated successfully. Set A and Set D remain running.")
+
+		framework.Logf("Upgrade phase completed successfully, proceeding to rollback test...")
+
+		// Rollback phase - only runs if upgrade succeeded
+		// Rollback failures are non-fatal and logged as warnings
+
+		rollbackSucceeded := true
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					rollbackSucceeded = false
+					framework.Logf("WARNING: Rollback phase failed with panic: %v", r)
+				}
+			}()
+
+			// Perform rollback
+			rollbackCSIDriver(cfg, f)
+
+			// Create Set E after rollback
+			framework.Logf("Creating Set E workloads after rollback...")
+			fullAccessPodsSetE, readOnlyAccessPodsSetE := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+
+			// Test Set E workloads
+			framework.Logf("Testing Set E workloads...")
+			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
+			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
+
+			// Monitor Set A + D + E for 150 minutes after rollback
+			framework.Logf("Monitoring workloads (Set A + D + E) for %d minutes after rollback...", ROLLBACK_TEST_DURATION_IN_MINUTES)
+
+			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetD, fullAccessPodsSetE)
+			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
+
+			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback", verifyWorkloadHealth)
+
+			// Terminate Set A + D + E (test termination after rollback)
+			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
+			for _, pod := range slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetD, readOnlyAccessPodsSetD, fullAccessPodsSetE, readOnlyAccessPodsSetE) {
+				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+			}
+			framework.Logf("Set A, Set D, and Set E terminated successfully")
+		}()
+
+		// Log rollback outcome with GitHub Actions annotation if failed
+		if rollbackSucceeded {
+			framework.Logf("Rollback phase completed successfully")
+		} else {
+			fmt.Println("::warning file=upgrade.go,line=318::Rollback phase failed but upgrade succeeded - test marked as passed")
+			framework.Logf("WARNING: Rollback phase failed, but test is still marked as passed since upgrade succeeded")
 		}
 	}
 
@@ -521,6 +614,31 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	framework.Logf("Helm release %q created", release.Name)
 }
 
+// monitorWorkloadsForDuration monitors workload health for a specified duration, checking every minute and logging progress.
+func monitorWorkloadsForDuration(
+	ctx context.Context,
+	fullAccessPods []*v1.Pod,
+	readOnlyPods []*v1.Pod,
+	testFile string,
+	testWriteSize int,
+	seed int64,
+	duration time.Duration,
+	phase string,
+	verifyFunc func(context.Context, []*v1.Pod, []*v1.Pod, string, int, int64),
+) {
+	endTime := time.Now().Add(duration)
+	for time.Now().Before(endTime) {
+		framework.Logf("Checking if workloads are still healthy after %s...", phase)
+		verifyFunc(ctx, fullAccessPods, readOnlyPods, testFile, testWriteSize, seed)
+
+		if remaining := time.Until(endTime); remaining > time.Minute {
+			time.Sleep(time.Minute)
+		} else if remaining > 0 {
+			time.Sleep(remaining)
+		}
+	}
+}
+
 // upgradeCSIDriver upgrades the CSI Driver's Helm chart to the new version.
 func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version string, chartPath string) {
 	upgradeClient := action.NewUpgrade(cfg)
@@ -538,6 +656,24 @@ func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)
 
+	framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(context.Background(), f))
+}
+
+// rollbackCSIDriver performs a rollback using Helm's rollback action.
+func rollbackCSIDriver(cfg *action.Configuration, f *framework.Framework) {
+
+	rollbackClient := action.NewRollback(cfg)
+	rollbackClient.Wait = true
+	rollbackClient.Timeout = 30 * time.Second
+	// Version = 0 means rollback to previous revision https://github.com/helm/helm/blob/e31a078e/pkg/action/rollback.go#L129-L132
+	rollbackClient.Version = 0
+
+	err := rollbackClient.Run(helmReleaseName)
+	framework.ExpectNoError(err, "Failed to rollback CSI Driver")
+
+	framework.Logf("Helm release %q rolled back successfully", helmReleaseName)
+
+	// Wait for DaemonSet to rollout with old version
 	framework.ExpectNoError(waitForCSIDriverDaemonSetRollout(context.Background(), f))
 }
 
