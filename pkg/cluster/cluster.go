@@ -25,7 +25,7 @@ type Distribution string
 const (
 	// DistributionEKSAddon is an EKS cluster where the CSI driver is installed as an EKS add-on.
 	DistributionEKSAddon Distribution = "eks-addon"
-	// DistributionEKSSelfManaged is an EKS cluster where the CSI driver is installed outside the add-on flow (for example, via Helm).
+	// DistributionEKSSelfManaged is an EKS cluster where the CSI driver is installed outside the add-on flow (for example via Helm).
 	DistributionEKSSelfManaged Distribution = "eks"
 	// DistributionROSA is an OpenShift cluster with a Red Hat managed control plane (ROSA).
 	DistributionROSA Distribution = "rosa"
@@ -50,7 +50,7 @@ const (
 	rosaLabel                   = "rosa.openshift.io/managed"
 )
 
-var defaultMountpointUID = ptr.To(int64(1000))
+var defaultMountpointUID = new(int64(1000))
 
 // DetectVariant determines Kubernetes variant by checking API groups.
 func DetectVariant(client *rest.Config, log logr.Logger) Variant {
