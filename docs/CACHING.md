@@ -53,7 +53,9 @@ spec:
       cacheEmptyDirMedium: Memory # optional
 ```
 
-Both `cacheEmptyDirSizeLimit` and `cacheEmptyDirMedium` are optional, but we highly recommend you specify a size limit on your cache, as it might otherwise use all your node's storage depending on the cluster's configuration. If `cacheEmptyDirMedium` is not specified, the default storage medium will be used.
+Both `cacheEmptyDirSizeLimit` and `cacheEmptyDirMedium` are optional, but we highly recommend you specify a size limit on your cache, as it might otherwise use all your node's storage depending on the cluster's configuration. If `cacheEmptyDirMedium` is not specified, the emptyDir volume is stored on whatever medium that backs the node such as disk, SSD, or network storage, depending on your environment.
+
+If `cacheEmptyDirSizeLimit` is specified and `cacheEmptyDirMedium` is not, the CSI Driver will automatically enforce that limit in Mountpoint to prevent the Mountpoint Pod from being evicted by Kubernetes for exceeding the `emptyDir` limit. You can override this by setting `--max-cache-size` in `mountOptions`, but it must not exceed `cacheEmptyDirSizeLimit`.
 
 The `emptyDir` will be unique to each Mountpoint Pod and won't be shared between other Mountpoint instances.
 
