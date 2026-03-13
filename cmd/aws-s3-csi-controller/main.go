@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -36,6 +37,8 @@ var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAG
 var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
+var mountpointPodLabels = flag.String("mountpoint-pod-labels", os.Getenv("MOUNTPOINT_POD_LABELS"), "Pod labels to apply to Mountpoint Pods (JSON format).")
+var mountpointHeadroomPodLabels = flag.String("mountpoint-headroom-pod-labels", os.Getenv("MOUNTPOINT_HEADROOM_POD_LABELS"), "Pod labels to apply to Headroom Pods (JSON format).")
 
 var (
 	scheme = runtime.NewScheme()
@@ -67,6 +70,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	podLabels := util.ParseLabels(*mountpointPodLabels, log)
+	headroomPodLabels := util.ParseLabels(*mountpointHeadroomPodLabels, log)
+
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:                   *mountpointNamespace,
 		MountpointVersion:           *mountpointVersion,
@@ -79,8 +85,10 @@ func main() {
 			HeadroomImage:   *headroomImage,
 			ImagePullPolicy: corev1.PullPolicy(*mountpointImagePullPolicy),
 		},
-		CSIDriverVersion: version.GetVersion().DriverVersion,
-		ClusterVariant:   cluster.DetectVariant(conf, log),
+		CSIDriverVersion:  version.GetVersion().DriverVersion,
+		ClusterVariant:    cluster.DetectVariant(conf, log),
+		PodLabels:         podLabels,
+		HeadroomPodLabels: headroomPodLabels,
 	}, log)
 
 	if err := reconciler.SetupWithManager(mgr); err != nil {
