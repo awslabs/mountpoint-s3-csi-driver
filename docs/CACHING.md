@@ -53,7 +53,7 @@ spec:
       cacheEmptyDirMedium: Memory # optional
 ```
 
-Both `cacheEmptyDirSizeLimit` and `cacheEmptyDirMedium` are optional, but we highly recommend you specify a size limit on your cache, as it might otherwise use all your node's storage depending on the cluster's configuration. If `cacheEmptyDirMedium` is not specified, the default storage medium will be used.
+Both `cacheEmptyDirSizeLimit` and `cacheEmptyDirMedium` are optional, but we highly recommend you specify a size limit on your cache, as it might otherwise use all your node's storage depending on the cluster's configuration. If `cacheEmptyDirMedium` is not specified, the default storage medium will be used and 95% of `cacheEmptyDirSizeLimit` (if specified) will automatically be forwarded to Mountpoint as `--max-cache-size` unless this is already specified in `mountOptions`.
 
 The `emptyDir` will be unique to each Mountpoint Pod and won't be shared between other Mountpoint instances.
 
