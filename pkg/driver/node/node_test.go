@@ -8,6 +8,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"golang.org/x/net/context"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -476,6 +477,130 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
+	}
+}
+
+func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
+	var (
+		volumeId   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/target/path"
+	)
+
+	testCases := []struct {
+		name         string
+		volumeCtx    map[string]string
+		mountFlags   []string
+		expectedArgs []string
+		expectError  bool
+	}{
+		{
+			name: "injects max-cache-size from cacheEmptyDirSizeLimit",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+			},
+			expectedArgs: []string{"--allow-root", "--max-cache-size=47"},
+		},
+		{
+			name: "converts GiB to MiB correctly",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "2Gi",
+			},
+			expectedArgs: []string{"--allow-root", "--max-cache-size=1945"},
+		},
+		{
+			name: "does not inject when medium is Memory (tmpfs has isolated filesystem)",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+				"cacheEmptyDirMedium":    string(corev1.StorageMediumMemory),
+			},
+			expectedArgs: []string{"--allow-root"},
+		},
+		{
+			name: "does not inject when medium is HugePages (has isolated filesystem)",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+				"cacheEmptyDirMedium":    string(corev1.StorageMediumHugePages),
+			},
+			expectedArgs: []string{"--allow-root"},
+		},
+		{
+			name: "does not override explicit max-cache-size from mountOptions",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+			},
+			mountFlags:   []string{"--max-cache-size=100"},
+			expectedArgs: []string{"--allow-root", "--max-cache-size=100"},
+		},
+		{
+			name: "no injection when cacheEmptyDirSizeLimit is not set",
+			volumeCtx: map[string]string{
+				"bucketName": bucketName,
+			},
+			expectedArgs: []string{"--allow-root"},
+		},
+		{
+			name: "returns error for invalid cacheEmptyDirSizeLimit",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "not-a-quantity",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			ctx := context.Background()
+
+			volCap := &csi.VolumeCapability{
+				AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{
+						MountFlags: tc.mountFlags,
+					},
+				},
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+				},
+			}
+
+			req := &csi.NodePublishVolumeRequest{
+				VolumeId:         volumeId,
+				VolumeCapability: volCap,
+				TargetPath:       targetPath,
+				VolumeContext:    tc.volumeCtx,
+			}
+
+			if !tc.expectError {
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(ctx),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Any(),
+					gomock.Eq(mountpoint.ParseArgs(tc.expectedArgs)),
+					gomock.Eq(""),
+				).Return(nil)
+			}
+
+			_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+			if tc.expectError {
+				if err == nil {
+					t.Fatal("expected error but got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+
+			nodeTestEnv.mockCtl.Finish()
+		})
 	}
 }
 
