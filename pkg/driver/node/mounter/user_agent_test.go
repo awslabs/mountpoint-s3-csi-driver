@@ -19,6 +19,7 @@ package mounter
 import (
 	"testing"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
@@ -26,6 +27,7 @@ func TestUserAgent(t *testing.T) {
 	tests := map[string]struct {
 		k8sVersion           string
 		authenticationSource string
+		distribution         cluster.Distribution
 		result               string
 	}{
 		"empty versions": {
@@ -49,12 +51,30 @@ func TestUserAgent(t *testing.T) {
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
 			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
 		},
+		"with eks addon distribution": {
+			k8sVersion:           "v1.30.2-eks-db838b0",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			distribution:         cluster.DistributionEKSAddon,
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 dist/eks-addon",
+		},
+		"with other distribution": {
+			k8sVersion:           "v1.28.0",
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
+			distribution:         cluster.DistributionOther,
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 dist/other",
+		},
+		"with openshift distribution": {
+			k8sVersion:           "v1.25.0+abc123",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			distribution:         cluster.DistributionOpenShift,
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.25.0+abc123 dist/openshift",
+		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion), test.result; got != expected {
-				t.Fatalf("UserAgent(%q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, got, expected)
+			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion, test.distribution), test.result; got != expected {
+				t.Fatalf("UserAgent(%q, %q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, test.distribution, got, expected)
 			}
 		})
 	}
