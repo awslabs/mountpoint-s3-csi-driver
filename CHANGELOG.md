@@ -4,6 +4,16 @@
 * Add graceful pod eviction to ensure proper termination order. Mountpoint pods now remain active until all workload pods using the volume have terminated, preventing "Transport endpoint is not connected" errors. ([#693](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/693))
 * Add `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to Mountpoint Pods to prevent Cluster Autoscaler scale-down blocking. This resolves an issue where Cluster Autoscaler treated MP pods as non-replicated singleton pods, preventing node scale-down. ([#675](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/675))
 
+# v2.4.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.4.1/README.md) 
+
+* Support Mountpoint [version 1.22.1](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.22.1) ([#733](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/733))
+  * Fix a race condition where concurrent operations after closing a truncated file could result in I/O errors on subsequent reads. The issue was introduced in v1.22.0. ([#1781](https://github.com/awslabs/mountpoint-s3/pull/1781))
+  * Fix incorrect validation of default data cache limit which would cause Mountpoint to preserve less than 5% of available space ([#1779](https://github.com/awslabs/mountpoint-s3/pull/1779))
+* Update go to 1.26.0 and run go fix ([#731](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/731))
+* Update csi-node-driver-registrar and livenessprobe sidecar versions for release 2.4 branch ([#739](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/739))
+
 # v2.4.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.4.0/README.md)
