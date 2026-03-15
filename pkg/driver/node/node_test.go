@@ -46,7 +46,7 @@ func TestNodePublishVolume(t *testing.T) {
 				Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 			},
 		}
-		targetPath = "/target/path"
+		targetPath = "/var/lib/kubelet/target/path"
 	)
 	testCases := []struct {
 		name     string
@@ -377,7 +377,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
-		targetPath = "/target/path"
+		targetPath = "/var/lib/kubelet/target/path"
 	)
 	testCases := []struct {
 		name     string
@@ -599,7 +599,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 func TestNodeUnpublishVolume(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
-		targetPath = "/target/path"
+		targetPath = "/var/lib/kubelet/target/path"
 	)
 	testCases := []struct {
 		name     string
