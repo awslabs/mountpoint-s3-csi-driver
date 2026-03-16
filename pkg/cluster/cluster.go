@@ -1,13 +1,11 @@
 package cluster
 
 import (
-	"context"
 	"os"
+	"strings"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
@@ -19,24 +17,14 @@ const (
 	OpenShift                        // OpenShift K8s
 )
 
-// Distribution represents the K8s distribution for user agent reporting.
-type Distribution string
-
-const (
-	// DistributionEKSAddon is an EKS cluster where the CSI driver is installed as an EKS add-on.
-	DistributionEKSAddon Distribution = "eks-addon"
-	// DistributionOpenShift is an OpenShift cluster (includes ROSA).
-	DistributionOpenShift Distribution = "openshift"
-	// DistributionOther is a cluster that does not match known distributions (includes EKS self-managed).
-	DistributionOther Distribution = "other"
-)
-
-const (
-	kubeSystemNamespace         = "kube-system"
-	csiDriverServiceAccountName = "s3-csi-driver-sa"
-	eksAddonLabel               = "app.kubernetes.io/managed-by"
-	eksAddonAnnotation          = "eks.amazonaws.com/addon"
-)
+func (v Variant) String() string {
+	switch v {
+	case OpenShift:
+		return "openshift"
+	default:
+		return "kubernetes"
+	}
+}
 
 var defaultMountpointUID = new(int64(1000))
 
@@ -66,57 +54,18 @@ func DetectVariant(client *rest.Config, log logr.Logger) Variant {
 	return DefaultKubernetes
 }
 
-// DetectDistribution determines the K8s distribution for user agent reporting.
-func DetectDistribution(clientset kubernetes.Interface, config *rest.Config, log logr.Logger) Distribution {
-	ctx := context.Background()
-
-	variant := DetectVariant(config, log)
-	if variant == OpenShift {
-		log.Info("Detected OpenShift distribution")
-		return DistributionOpenShift
+// InstallationMethod returns the installation method for the CSI driver.
+// It reads the INSTALLATION_TYPE environment variable and returns its value,
+// falling back to "unknown" if the variable is not set.
+// Known values: eks-addon, helm, kustomize.
+func InstallationMethod() string {
+	method := strings.ToLower(strings.TrimSpace(os.Getenv("INSTALLATION_TYPE")))
+	switch method {
+	case "eks-addon", "helm", "kustomize":
+		return method
 	}
 
-	// Check ENV variable first (more reliable for EKS addon detection)
-	if isEKSAddonFromEnv(log) {
-		return DistributionEKSAddon
-	}
-
-	// Fall back to service account check for backward compatibility
-	if isEKSAddon(ctx, clientset, log) {
-		return DistributionEKSAddon
-	}
-
-	log.V(2).Info("Could not detect known distribution, defaulting to other")
-	return DistributionOther
-}
-
-func isEKSAddonFromEnv(log logr.Logger) bool {
-	installationType := os.Getenv("INSTALLATION_TYPE")
-	if installationType == "eks-addon" {
-		log.Info("Detected EKS Addon distribution from INSTALLATION_TYPE env var")
-		return true
-	}
-	return false
-}
-
-func isEKSAddon(ctx context.Context, clientset kubernetes.Interface, log logr.Logger) bool {
-	sa, err := clientset.CoreV1().ServiceAccounts(kubeSystemNamespace).Get(ctx, csiDriverServiceAccountName, metav1.GetOptions{})
-	if err != nil {
-		log.V(2).Info("Could not find CSI driver service account", "error", err)
-		return false
-	}
-
-	if sa.Labels[eksAddonLabel] == "eks" {
-		log.Info("Detected EKS Addon distribution")
-		return true
-	}
-
-	if _, ok := sa.Annotations[eksAddonAnnotation]; ok {
-		log.Info("Detected EKS Addon distribution")
-		return true
-	}
-
-	return false
+	return "unknown"
 }
 
 // MountpointPodUserID returns the appropriate RunAsUser for Mountpoint Pod based on the cluster variant.

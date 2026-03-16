@@ -57,7 +57,7 @@ type PodMounter struct {
 	mountSyscall      mountSyscall
 	bindMountSyscall  bindMountSyscall
 	kubernetesVersion string
-	distribution      cluster.Distribution
+	variant           cluster.Variant
 	credProvider      credentialprovider.ProviderInterface
 	nodeID            string
 }
@@ -72,7 +72,7 @@ func NewPodMounter(
 	bindMountSyscall bindMountSyscall,
 	kubernetesVersion string,
 	nodeID string,
-	distribution cluster.Distribution,
+	variant cluster.Variant,
 ) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
@@ -83,7 +83,7 @@ func NewPodMounter(
 		mountSyscall:      mountSyscall,
 		bindMountSyscall:  bindMountSyscall,
 		kubernetesVersion: kubernetesVersion,
-		distribution:      distribution,
+		variant:           variant,
 		nodeID:            nodeID,
 	}, nil
 }
@@ -218,7 +218,7 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
 	}
 
-	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion, pm.distribution))
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion, pm.variant))
 
 	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
 	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)

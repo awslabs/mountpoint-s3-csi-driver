@@ -27,13 +27,15 @@ const (
 	userAgentCsiDriverPrefix        = "s3-csi-driver/"
 	userAgentK8sPrefix              = "k8s/"
 	userAgentCredentialSourcePrefix = "credential-source#"
-	userAgentDistributionPrefix     = "dist/"
+	userAgentOpenShiftPrefix        = "md/openshift"
+	userAgentInstallPrefix          = "md/install#"
 )
 
 // UserAgent returns user-agent for the CSI driver.
-// The format is: s3-csi-driver/VERSION credential-source#SOURCE k8s/VERSION dist/DISTRO
-func UserAgent(authenticationSource string, kubernetesVersion string, distribution cluster.Distribution) string {
+// The format is: s3-csi-driver/VERSION credential-source#SOURCE k8s/VERSION [md/openshift] md/install#METHOD
+func UserAgent(authenticationSource string, kubernetesVersion string, variant cluster.Variant) string {
 	var b strings.Builder
+	installMethod := cluster.InstallationMethod()
 
 	// s3-csi-driver/v0.0.0
 	b.WriteString(userAgentCsiDriverPrefix)
@@ -51,11 +53,16 @@ func UserAgent(authenticationSource string, kubernetesVersion string, distributi
 		b.WriteString(kubernetesVersion)
 	}
 
-	if distribution != "" {
+	if variant == cluster.OpenShift {
+		// md/openshift (version will be added in a follow-up)
 		b.WriteRune(' ')
-		b.WriteString(userAgentDistributionPrefix)
-		b.WriteString(string(distribution))
+		b.WriteString(userAgentOpenShiftPrefix)
 	}
+
+	// md/install#helm
+	b.WriteRune(' ')
+	b.WriteString(userAgentInstallPrefix)
+	b.WriteString(installMethod)
 
 	return b.String()
 }

@@ -101,13 +101,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}
 
 	log := klog.NewKlogr()
-	distribution := cluster.DetectDistribution(clientset, config, log)
-	klog.Infof("Detected K8s distribution: %v", distribution)
+	variant := cluster.DetectVariant(config, log)
+	installMethod := cluster.InstallationMethod()
 
 	version := version.GetVersion()
-	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v, distribution: %v",
-		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion, distribution)
-
+	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v, variant: %s, install: %v",
+		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion, variant.String(), installMethod)
 	// `credentialprovider.RegionFromIMDSOnce` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
 	go func() {
@@ -134,7 +133,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	go unmounter.StartPeriodicCleanup(stopCh)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-		kubernetesVersion, nodeID, distribution)
+		kubernetesVersion, nodeID, variant)
 	if err != nil {
 		klog.Fatalln(err)
 	}

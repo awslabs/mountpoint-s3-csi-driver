@@ -27,54 +27,80 @@ func TestUserAgent(t *testing.T) {
 	tests := map[string]struct {
 		k8sVersion           string
 		authenticationSource string
-		distribution         cluster.Distribution
+		variant              cluster.Variant
+		installationType     string
 		result               string
 	}{
 		"empty versions": {
-			result: "s3-csi-driver/ credential-source#",
+			installationType: "unknown",
+			result:           "s3-csi-driver/ credential-source# md/install#unknown",
+		},
+		"empty installation type fallback": {
+			installationType: "",
+			result:           "s3-csi-driver/ credential-source# md/install#unknown",
 		},
 		"stock k8s version": {
-			k8sVersion: "v1.29.6",
-			result:     "s3-csi-driver/ credential-source# k8s/v1.29.6",
+			k8sVersion:       "v1.29.6",
+			installationType: "unknown",
+			result:           "s3-csi-driver/ credential-source# k8s/v1.29.6 md/install#unknown",
 		},
 		"eks k8s version": {
-			k8sVersion: "v1.30.2-eks-db838b0",
-			result:     "s3-csi-driver/ credential-source# k8s/v1.30.2-eks-db838b0",
+			k8sVersion:       "v1.30.2-eks-db838b0",
+			installationType: "unknown",
+			result:           "s3-csi-driver/ credential-source# k8s/v1.30.2-eks-db838b0 md/install#unknown",
 		},
 		"driver authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: credentialprovider.AuthenticationSourceDriver,
-			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0",
+			installationType:     "unknown",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.2-eks-db838b0 md/install#unknown",
 		},
 		"pod authentication source": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0",
+			installationType:     "unknown",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 md/install#unknown",
 		},
-		"with eks addon distribution": {
+		"eks addon installation method": {
 			k8sVersion:           "v1.30.2-eks-db838b0",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
-			distribution:         cluster.DistributionEKSAddon,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 dist/eks-addon",
+			installationType:     "eks-addon",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.30.2-eks-db838b0 md/install#eks-addon",
 		},
-		"with other distribution": {
+		"helm installation method": {
 			k8sVersion:           "v1.28.0",
 			authenticationSource: credentialprovider.AuthenticationSourceDriver,
-			distribution:         cluster.DistributionOther,
-			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 dist/other",
+			installationType:     "helm",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 md/install#helm",
 		},
-		"with openshift distribution": {
-			k8sVersion:           "v1.25.0+abc123",
+		"openshift with helm": {
+			k8sVersion:           "v1.33.6",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
-			distribution:         cluster.DistributionOpenShift,
-			result:               "s3-csi-driver/ credential-source#pod k8s/v1.25.0+abc123 dist/openshift",
+			variant:              cluster.OpenShift,
+			installationType:     "helm",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.33.6 md/openshift md/install#helm",
+		},
+		"openshift with kustomize": {
+			k8sVersion:           "v1.33.6",
+			authenticationSource: credentialprovider.AuthenticationSourcePod,
+			variant:              cluster.OpenShift,
+			installationType:     "kustomize",
+			result:               "s3-csi-driver/ credential-source#pod k8s/v1.33.6 md/openshift md/install#kustomize",
+		},
+		"invalid installation method": {
+			k8sVersion:           "v1.30.0",
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
+			installationType:     "operator",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.30.0 md/install#unknown",
 		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion, test.distribution), test.result; got != expected {
-				t.Fatalf("UserAgent(%q, %q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, test.distribution, got, expected)
+			t.Setenv("INSTALLATION_TYPE", test.installationType)
+
+			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion, test.variant), test.result; got != expected {
+				t.Fatalf("UserAgent(%q, %q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, test.variant.String(), got, expected)
 			}
 		})
 	}

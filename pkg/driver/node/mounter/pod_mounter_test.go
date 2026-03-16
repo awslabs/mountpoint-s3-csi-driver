@@ -167,7 +167,7 @@ func setup(t *testing.T) *testCtx {
 	assert.NoError(t, err)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, mockCredProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
-		mountBindSyscall, testK8sVersion, nodeName, cluster.DistributionOther)
+		mountBindSyscall, testK8sVersion, nodeName, cluster.DefaultKubernetes)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
@@ -229,7 +229,7 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
-					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DistributionOther),
+					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes),
 				},
 				Env: envprovider.Default().List(),
 			}, got)
