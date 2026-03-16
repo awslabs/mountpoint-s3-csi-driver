@@ -529,13 +529,41 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 			expectedArgs: []string{"--allow-root"},
 		},
 		{
-			name: "does not override explicit max-cache-size from mountOptions",
+			name: "explicit max-cache-size below size limit takes precedence over auto-injected value",
 			volumeCtx: map[string]string{
 				"bucketName":             bucketName,
 				"cacheEmptyDirSizeLimit": "50Mi",
 			},
-			mountFlags:   []string{"--max-cache-size=100"},
-			expectedArgs: []string{"--allow-root", "--max-cache-size=100"},
+			mountFlags:   []string{"--max-cache-size=40"},
+			expectedArgs: []string{"--allow-root", "--max-cache-size=40"},
+		},
+		{
+			name: "explicit max-cache-size equal to size limit is accepted",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+			},
+			mountFlags:   []string{"--max-cache-size=50"}, // 50Mi = 50 MiB
+			expectedArgs: []string{"--allow-root", "--max-cache-size=50"},
+		},
+		{
+			name: "explicit max-cache-size exceeding size limit returns error",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+			},
+			mountFlags:  []string{"--max-cache-size=100"},
+			expectError: true,
+		},
+		{
+			name: "explicit max-cache-size exceeding size limit returns error for Memory medium",
+			volumeCtx: map[string]string{
+				"bucketName":             bucketName,
+				"cacheEmptyDirSizeLimit": "50Mi",
+				"cacheEmptyDirMedium":    string(corev1.StorageMediumMemory),
+			},
+			mountFlags:  []string{"--max-cache-size=100"},
+			expectError: true,
 		},
 		{
 			name: "no injection when cacheEmptyDirSizeLimit is not set",
