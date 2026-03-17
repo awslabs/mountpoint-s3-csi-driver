@@ -144,3 +144,16 @@ This error occurs when workload pods are terminated before the Mountpoint pod th
 - If any workload pod takes longer than 10 minutes to terminate, it may encounter "Transport endpoint is not connected" errors when the Mountpoint pod is force-killed after its grace period expires.
 
 **Recommendation:** Keep workload pod termination grace periods sufficiently low to ensure graceful shutdown completes within the Mountpoint pod's 10-minute window and the grace period specified in the `drain` operation (e.g. via Karpenter NodePool [settings](https://karpenter.sh/docs/concepts/nodepools/#spectemplatespecterminationgraceperiod)).
+
+## Cluster Autoscaler blocked by Mountpoint pods (prior to v2.5.0)
+
+Prior to version v2.5.0, Cluster Autoscaler may stop scaling nodes down due to `mount-s3/mp-*` pods blocking node removal.
+
+**Behavior:** Nodes with MP pods cannot be scaled down, showing logs like:
+```
+I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal cannot be removed: mount-s3/mp-4c5r7 is not replicated
+```
+
+**Recommendation:** Upgrade to Mountpoint S3 CSI driver v2.5.0 or later. The fix adds `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to MP pods, allowing the autoscaler to treat them as DaemonSet-managed pods instead of standalone pods that block scale-down.
+
+**Limitation:** Note that this may cause over-provisioning based on the templateNodeInfo mechanism. Overestimation of required pod slots is capped by the distinct S3 PV count (or the number of S3 pods on any running node), see: [podsExpectedOnFreshNode](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/simulator/node_info_utils.go#L177) and [how-does-scale-up-work](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/FAQ.md#how-does-scale-up-work).

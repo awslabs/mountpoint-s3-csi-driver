@@ -16,7 +16,7 @@ set -euo pipefail
 #   - yq: YAML processor (https://github.com/mikefarah/yq)
 #   - crane: Container registry tool (https://github.com/google/go-containerregistry/tree/main/cmd/crane)
 #
-# Note: AWS credentials are required, though not specific ones.
+# Note: AWS credentials are required with any ecr:GetAuthorizationToken permission to access EKS add-on repositories.
 
 CHART_DIR="charts/aws-mountpoint-s3-csi-driver"
 VALUES_FILE="${CHART_DIR}/values.yaml"
@@ -64,9 +64,9 @@ FAILED=0
 # Function to verify public ECR image exists using crane (no AWS credentials needed)
 verify_public_ecr_image() {
   local full_image=$1
-  
+
   echo "  Image: ${full_image}"
-  
+
   # Use crane to get the image digest
   # crane handles authentication automatically for public ECR repositories
   if digest=$(crane digest "${full_image}" 2>&1); then

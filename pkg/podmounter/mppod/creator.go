@@ -40,6 +40,10 @@ const (
 	AnnotationNoNewWorkload = "s3.csi.aws.com/no-new-workload"
 	AnnotationVolumeName    = "s3.csi.aws.com/volume-name"
 	AnnotationVolumeId      = "s3.csi.aws.com/volume-id"
+	// AnnotationClusterAutoscalerDaemonsetPod tells the cluster autoscaler to treat this pod as if it's managed by a DaemonSet,
+	// preventing blocked scale-down when the autoscaler cannot reschedule the pod to another node.
+	// See: https://github.com/kubernetes/autoscaler/issues/2453
+	AnnotationClusterAutoscalerDaemonsetPod = "cluster-autoscaler.kubernetes.io/daemonset-pod"
 )
 
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
@@ -111,8 +115,9 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 			},
 			Annotations: map[string]string{
-				AnnotationVolumeName: pv.Name,
-				AnnotationVolumeId:   pv.Spec.CSI.VolumeHandle,
+				AnnotationVolumeName:                    pv.Name,
+				AnnotationVolumeId:                      pv.Spec.CSI.VolumeHandle,
+				AnnotationClusterAutoscalerDaemonsetPod: "true",
 			},
 		},
 		Spec: corev1.PodSpec{
