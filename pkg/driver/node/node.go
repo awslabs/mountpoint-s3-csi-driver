@@ -156,6 +156,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		}
 		emptyDirSizeLimitMiB := quantity.Value() / (1024 * 1024)
 
+		// Safety factor to account for Mountpoint overshooting its cache target by around 1-2%.
+		const safetyFactor = 0.95
+		safeMaxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
+
 		if maxCacheSize, ok := args.Value(mountpoint.ArgMaxCacheSize); ok {
 			maxCacheSizeMiB, err := strconv.ParseInt(maxCacheSize, 10, 64)
 			if err != nil {
@@ -168,6 +172,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 					volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, emptyDirSizeLimitMiB,
 					mountpoint.ArgMaxCacheSize, volumecontext.CacheEmptyDirSizeLimit)
 			}
+			// For disk-backed (default) medium, remove user's explicit --max-cache-size if it exceeds
+			// the safe threshold, allowing the safe default to be injected below via SetIfAbsent.
+			if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) && maxCacheSizeMiB > safeMaxCacheSizeMiB {
+				args.Remove(mountpoint.ArgMaxCacheSize)
+			}
 		}
 
 		// For disk-backed (default) medium, statvfs on the cache directory reports the node's root filesystem
@@ -177,9 +186,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
 		// can self-limit without this injection.
 		if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
-			const safetyFactor = 0.95
-			maxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
-			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(maxCacheSizeMiB, 10))
+			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(safeMaxCacheSizeMiB, 10))
 		}
 	}
 

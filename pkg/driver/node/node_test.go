@@ -544,13 +544,34 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 			expectedArgs: []string{"--allow-root", "--max-cache-size=40"},
 		},
 		{
-			name: "explicit max-cache-size equal to size limit is accepted",
+			name: "explicit max-cache-size equal to size limit is clamped to safe value for default medium",
 			volumeCtx: map[string]string{
 				volumecontext.BucketName:             bucketName,
 				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
 				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
 			},
-			mountFlags:   []string{"--max-cache-size=50"}, // 50Mi = 50 MiB
+			mountFlags:   []string{"--max-cache-size=50"}, // 50 MiB > safe threshold (47 MiB), gets clamped
+			expectedArgs: []string{"--allow-root", "--max-cache-size=47"},
+		},
+		{
+			name: "explicit max-cache-size in danger zone is clamped to safe value for default medium",
+			volumeCtx: map[string]string{
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+			},
+			mountFlags:   []string{"--max-cache-size=48"}, // 48 MiB > safe threshold (47 MiB) but <= limit (50 MiB)
+			expectedArgs: []string{"--allow-root", "--max-cache-size=47"},
+		},
+		{
+			name: "explicit max-cache-size near limit is preserved for Memory medium",
+			volumeCtx: map[string]string{
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+				volumecontext.CacheEmptyDirMedium:    string(corev1.StorageMediumMemory),
+			},
+			mountFlags:   []string{"--max-cache-size=50"}, // Memory has accurate statvfs, no clamping needed
 			expectedArgs: []string{"--allow-root", "--max-cache-size=50"},
 		},
 		{
