@@ -42,15 +42,6 @@ const (
 	AnnotationVolumeId      = "s3.csi.aws.com/volume-id"
 )
 
-const (
-	// cacheTypeEmptyDir creates a cache unique to the Mountpoint Pod by using `emptyDir` volume type.
-	// See https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.
-	cacheTypeEmptyDir = "emptyDir"
-	// cacheTypeEphemeral creates a generic ephemeral volume unique to the Mountpoint Pod by using `ephemeral` volume type.
-	// See https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes.
-	cacheTypeEphemeral = "ephemeral"
-)
-
 const CommunicationDirSizeLimit = 10 * 1024 * 1024 // 10MB
 // TerminationGracePeriodSeconds sets the grace period for Mountpoint pod termination.
 // 10 minutes provides sufficient time for workload pods to gracefully terminate and
@@ -231,19 +222,19 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 			return errors.New("Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
 		}
 
-		cacheType = cacheTypeEmptyDir
+		cacheType = volumecontext.CacheTypeEmptyDir
 		c.log.Info("Configuring cache via `mountOptions` is deprecated, will fallback using `emptyDir`. We recommend setting `sizeLimit` on cache folders, please see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md for more details.")
 	}
 
 	var volumeSource corev1.VolumeSource
 	var err error
 	switch cacheType {
-	case cacheTypeEmptyDir:
+	case volumecontext.CacheTypeEmptyDir:
 		volumeSource, err = c.createCacheVolumeSourceForEmptyDir(volumeAttributes)
-	case cacheTypeEphemeral:
+	case volumecontext.CacheTypeEphemeral:
 		volumeSource, err = c.createCacheVolumeSourceForEphemeral(volumeAttributes)
 	default:
-		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, cacheTypeEmptyDir, cacheTypeEphemeral)
+		return fmt.Errorf("unsupported local-cache type: %q, only %q and %q are supported", cacheType, volumecontext.CacheTypeEmptyDir, volumecontext.CacheTypeEphemeral)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to configure %q local-cache: %w", cacheType, err)
@@ -265,7 +256,16 @@ func (c *Creator) configureLocalCache(mpPod *corev1.Pod, mpContainer *corev1.Con
 func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
 	emptyDir := &corev1.EmptyDirVolumeSource{}
 
-	if sizeLimit := volumeAttributes[volumecontext.CacheEmptyDirSizeLimit]; sizeLimit != "" {
+	sizeLimit := volumeAttributes[volumecontext.CacheEmptyDirSizeLimit]
+	medium := volumeAttributes[volumecontext.CacheEmptyDirMedium]
+
+	if sizeLimit == "" && medium == string(corev1.StorageMediumDefault) {
+		c.log.Info("`cacheEmptyDirSizeLimit` is not set for disk-backed emptyDir cache. " +
+			"Mountpoint may consume excessive node storage and cause pod eviction. " +
+			"Consider setting `cacheEmptyDirSizeLimit` in volumeAttributes.")
+	}
+
+	if sizeLimit != "" {
 		quantity, err := resource.ParseQuantity(sizeLimit)
 		if err != nil {
 			return corev1.VolumeSource{}, failedToParseQuantityError(err, volumecontext.CacheEmptyDirSizeLimit, sizeLimit)
@@ -273,7 +273,7 @@ func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string
 		emptyDir.SizeLimit = &quantity
 	}
 
-	if medium := volumeAttributes[volumecontext.CacheEmptyDirMedium]; medium != "" {
+	if medium != "" {
 		switch medium {
 		case string(corev1.StorageMediumMemory):
 			emptyDir.Medium = corev1.StorageMediumMemory
@@ -289,12 +289,12 @@ func (c *Creator) createCacheVolumeSourceForEmptyDir(volumeAttributes map[string
 func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[string]string) (corev1.VolumeSource, error) {
 	storageClassName := volumeAttributes[volumecontext.CacheEphemeralStorageClassName]
 	if storageClassName == "" {
-		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageClassName, cacheTypeEphemeral)
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageClassName, volumecontext.CacheTypeEphemeral)
 	}
 
 	storageResourceRequestStr := volumeAttributes[volumecontext.CacheEphemeralStorageResourceRequest]
 	if storageResourceRequestStr == "" {
-		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageResourceRequest, cacheTypeEphemeral)
+		return corev1.VolumeSource{}, fmt.Errorf("%q must be provided with %q cache type", volumecontext.CacheEphemeralStorageResourceRequest, volumecontext.CacheTypeEphemeral)
 	}
 
 	storageRequestSize, err := resource.ParseQuantity(storageResourceRequestStr)

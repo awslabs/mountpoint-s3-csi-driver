@@ -148,8 +148,8 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	// If cacheEmptyDirSizeLimit is set, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
-	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" {
+	// If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
+	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir {
 		quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
@@ -174,7 +174,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		// stats rather than the emptyDir's sizeLimit, so Mountpoint cannot self-limit correctly.
 		// Inject --max-cache-size at 95% of the limit to ensure Mountpoint evicts before Kubernetes does.
 		// The 5% margin accounts for Mountpoint overshooting its target by around 1-2%.
-		// Memory and HugePages mediums have isolated filesystems with accurate size reporting, so Mountpoint
+		// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
 		// can self-limit without this injection.
 		if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
 			const safetyFactor = 0.95

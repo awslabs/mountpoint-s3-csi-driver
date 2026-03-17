@@ -14,6 +14,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	mock_driver "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mocks"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -497,42 +498,47 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 		{
 			name: "injects max-cache-size from cacheEmptyDirSizeLimit",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
 			},
 			expectedArgs: []string{"--allow-root", "--max-cache-size=47"},
 		},
 		{
 			name: "converts GiB to MiB correctly",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "2Gi",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
 			},
 			expectedArgs: []string{"--allow-root", "--max-cache-size=1945"},
 		},
 		{
 			name: "does not inject when medium is Memory (tmpfs has isolated filesystem)",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
-				"cacheEmptyDirMedium":    string(corev1.StorageMediumMemory),
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+				volumecontext.CacheEmptyDirMedium:    string(corev1.StorageMediumMemory),
 			},
 			expectedArgs: []string{"--allow-root"},
 		},
 		{
 			name: "does not inject when medium is HugePages (has isolated filesystem)",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
-				"cacheEmptyDirMedium":    string(corev1.StorageMediumHugePages),
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+				volumecontext.CacheEmptyDirMedium:    string(corev1.StorageMediumHugePages),
 			},
 			expectedArgs: []string{"--allow-root"},
 		},
 		{
 			name: "explicit max-cache-size below size limit takes precedence over auto-injected value",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
 			},
 			mountFlags:   []string{"--max-cache-size=40"},
 			expectedArgs: []string{"--allow-root", "--max-cache-size=40"},
@@ -540,8 +546,9 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 		{
 			name: "explicit max-cache-size equal to size limit is accepted",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
 			},
 			mountFlags:   []string{"--max-cache-size=50"}, // 50Mi = 50 MiB
 			expectedArgs: []string{"--allow-root", "--max-cache-size=50"},
@@ -549,8 +556,9 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 		{
 			name: "explicit max-cache-size exceeding size limit returns error",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
 			},
 			mountFlags:  []string{"--max-cache-size=100"},
 			expectError: true,
@@ -558,25 +566,36 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 		{
 			name: "explicit max-cache-size exceeding size limit returns error for Memory medium",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "50Mi",
-				"cacheEmptyDirMedium":    string(corev1.StorageMediumMemory),
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+				volumecontext.CacheEmptyDirMedium:    string(corev1.StorageMediumMemory),
 			},
 			mountFlags:  []string{"--max-cache-size=100"},
 			expectError: true,
 		},
 		{
+			name: "does not inject when cache is not emptyDir",
+			volumeCtx: map[string]string{
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEphemeral,
+				volumecontext.CacheEmptyDirSizeLimit: "50Mi",
+			},
+			expectedArgs: []string{"--allow-root"},
+		},
+		{
 			name: "no injection when cacheEmptyDirSizeLimit is not set",
 			volumeCtx: map[string]string{
-				"bucketName": bucketName,
+				volumecontext.BucketName: bucketName,
 			},
 			expectedArgs: []string{"--allow-root"},
 		},
 		{
 			name: "returns error for invalid cacheEmptyDirSizeLimit",
 			volumeCtx: map[string]string{
-				"bucketName":             bucketName,
-				"cacheEmptyDirSizeLimit": "not-a-quantity",
+				volumecontext.BucketName:             bucketName,
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "not-a-quantity",
 			},
 			expectError: true,
 		},
