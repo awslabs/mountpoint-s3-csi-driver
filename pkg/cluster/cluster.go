@@ -1,6 +1,9 @@
 package cluster
 
 import (
+	"os"
+	"strings"
+
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
@@ -13,6 +16,15 @@ const (
 	DefaultKubernetes Variant = iota // Vanilla K8s
 	OpenShift                        // OpenShift K8s
 )
+
+func (v Variant) String() string {
+	switch v {
+	case OpenShift:
+		return "openshift"
+	default:
+		return "kubernetes"
+	}
+}
 
 var defaultMountpointUID = new(int64(1000))
 
@@ -40,6 +52,20 @@ func DetectVariant(client *rest.Config, log logr.Logger) Variant {
 	}
 
 	return DefaultKubernetes
+}
+
+// InstallationMethod returns the installation method for the CSI driver.
+// It reads the INSTALLATION_TYPE environment variable and returns its value,
+// falling back to "unknown" if the variable is not set.
+// Known values: eks-addon, helm, kustomize.
+func InstallationMethod() string {
+	method := strings.ToLower(strings.TrimSpace(os.Getenv("INSTALLATION_TYPE")))
+	switch method {
+	case "eks-addon", "helm", "kustomize":
+		return method
+	}
+
+	return "unknown"
 }
 
 // MountpointPodUserID returns the appropriate RunAsUser for Mountpoint Pod based on the cluster variant.
