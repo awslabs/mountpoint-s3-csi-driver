@@ -25,10 +25,13 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
@@ -148,8 +151,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
+	customEnv, err := customEnvFromRequest(req)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Could not parse custom environment: %v", err)
+	}
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
+	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup, customEnv); err != nil {
 		os.Remove(target)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
 	}
@@ -318,4 +325,29 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		Readonly:          req.Readonly,
 		VolumeContext:     safeVolumeContext,
 	}
+}
+
+// customEnvFromRequest validate and return environment variables provided by user
+func customEnvFromRequest(req *csi.NodePublishVolumeRequest) (envprovider.Environment, error) {
+	env := envprovider.Environment{}
+	mppContainerEnv := req.GetVolumeContext()[volumecontext.MountpointContainerEnv]
+
+	if mppContainerEnv != "" {
+		var ctxEnvs []corev1.EnvVar
+		if err := yaml.Unmarshal([]byte(mppContainerEnv), &ctxEnvs); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid format: %v", err)
+		}
+		for _, ctxEnv := range ctxEnvs {
+			switch ctxEnv.Name {
+			case envprovider.EnvHttpsProxy:
+				env[envprovider.EnvHttpsProxy] = ctxEnv.Value
+			case envprovider.EnvNoProxy:
+				env[envprovider.EnvNoProxy] = ctxEnv.Value
+			default:
+				return nil, status.Errorf(codes.InvalidArgument, "Environment variable not allowed: %s", ctxEnv.Name)
+			}
+		}
+	}
+
+	return env, nil
 }
