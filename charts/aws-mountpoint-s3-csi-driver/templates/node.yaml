@@ -15,6 +15,9 @@ spec:
       labels:
         app: s3-csi-node
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        {{- if .Values.node.podLabels }}
+        {{- toYaml .Values.node.podLabels | nindent 8 }}
+        {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux

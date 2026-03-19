@@ -3,6 +3,7 @@ package mppod
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 
 	"github.com/go-logr/logr"
@@ -93,6 +94,8 @@ type Config struct {
 	HeadroomPriorityClassName   string
 	Container                   ContainerConfig
 	CSIDriverVersion            string
+	PodLabels                   map[string]string
+	HeadroomPodLabels           map[string]string
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -115,14 +118,15 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 		priorityClassName = c.config.PreemptingPriorityClassName
 	}
 
+	labels := maps.Clone(c.config.PodLabels)
+	labels[LabelMountpointVersion] = c.config.MountpointVersion
+	labels[LabelCSIDriverVersion] = c.config.CSIDriverVersion
+
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
 			Namespace:    c.config.Namespace,
-			Labels: map[string]string{
-				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
-			},
+			Labels:       labels,
 			Annotations: map[string]string{
 				AnnotationVolumeName:                    pv.Name,
 				AnnotationVolumeId:                      pv.Spec.CSI.VolumeHandle,
