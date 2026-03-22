@@ -602,7 +602,7 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
-		targetPath = "/target/path"
+		targetPath = "/var/lib/kubelet/target/path"
 	)
 
 	testCases := []struct {
