@@ -76,6 +76,8 @@ spec:
               value: mount-s3
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: http://169.254.170.23/v1/credentials
+            - name: INSTALLATION_TYPE
+              value: kustomize
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:

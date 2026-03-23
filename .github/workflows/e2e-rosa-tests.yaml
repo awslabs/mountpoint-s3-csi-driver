@@ -69,7 +69,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -168,6 +168,7 @@ jobs:
             OPENSHIFT_CREDS,s3-csi-${{ inputs.environment }}-openshift-credentials
           parse-json-secrets: true
       - name: Login to OpenShift
+        id: openshift_login
         uses: redhat-actions/oc-login@v1
         with:
           openshift_server_url: ${{ env.OPENSHIFT_CREDS_CLUSTER_API_URL }}
@@ -190,7 +191,8 @@ jobs:
           ACTION: "e2e_cleanup"
         run: tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver
-        if: always()
+        # Skip uninstall if OpenShift login did not succeed - no cluster access
+        if: ${{ always() && steps.openshift_login.conclusion == 'success' }}
         env:
           ACTION: "uninstall_driver"
         run: tests/e2e-kubernetes/scripts/run.sh
