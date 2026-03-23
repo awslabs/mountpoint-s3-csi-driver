@@ -15,15 +15,12 @@
 ARG MOUNTPOINT_VERSION=1.22.1
 
 # Download the mountpoint tarball and produce an installable directory
-# Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
-# is being packaged up in the container and a newer version linking to a too new glibc
-# can cause portability issues
-FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as mp_builder
+FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
 # We need the full version of GnuPG
-RUN yum install -y gzip wget gnupg2 tar fuse-libs binutils patchelf
+RUN dnf install -y gzip wget gnupg2 tar fuse-libs binutils patchelf
 
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz" && \
