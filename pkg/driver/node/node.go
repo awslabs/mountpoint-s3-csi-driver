@@ -21,7 +21,6 @@ import (
 	"maps"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -38,8 +37,6 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
-
-var kubeletPath = util.KubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{
@@ -96,13 +93,17 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	if !strings.HasPrefix(target, kubeletPath) {
-		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
+	// Translate target path from host format to container format if needed.
+	// Example error: Failed to translate target path "/opt/kubernetes/kubelet/pods/abcd-1234/volumes/kubernetes.io~csi/s3-pv/mount":
+	//   path "/opt/kubernetes/kubelet/pods/abcd-1234/volumes/kubernetes.io~csi/s3-pv/mount" does not start with host kubelet path "/var/lib/kubelet"
+	targetContainer, err := util.KubeletHostPathToContainerPath(targetHost)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to translate target path %q: %v", targetHost, err)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -190,15 +191,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		}
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, targetContainer, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
-		os.Remove(target)
-		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup); err != nil {
+		os.Remove(targetContainer)
+		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
-	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
+	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -211,32 +212,37 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	mounted, err := ns.Mounter.IsMountPoint(target)
+	targetContainer, err := util.KubeletHostPathToContainerPath(targetHost)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to translate target path %q: %v", targetHost, err)
+	}
+
+	mounted, err := ns.Mounter.IsMountPoint(targetContainer)
 	if err != nil && os.IsNotExist(err) {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", targetContainer)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	} else if err != nil && mount.IsCorruptedMnt(err) {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", targetContainer, err)
 		mounted = true
 	} else if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 	if !mounted {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", targetContainer)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
 	credentialCtx := credentialCleanupContextFromUnpublishRequest(req)
 
-	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = ns.Mounter.Unmount(ctx, target, credentialCtx)
+	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", targetContainer)
+	err = ns.Mounter.Unmount(ctx, targetContainer, credentialCtx)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
