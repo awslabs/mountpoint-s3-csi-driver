@@ -15,6 +15,7 @@ const (
 	ArgAllowRoot       = "--allow-root"
 	ArgRegion          = "--region"
 	ArgCache           = "--cache"
+	ArgMaxCacheSize    = "--max-cache-size"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
 	ArgGid             = "--gid"

@@ -21,6 +21,7 @@ import (
 	"k8s.io/mount-utils"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -77,7 +78,7 @@ func setup(t *testing.T) *testCtx {
 	parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
 	assert.NoError(t, err)
 	kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
-	t.Setenv("KUBELET_PATH", kubeletPath)
+	t.Setenv("CONTAINER_KUBELET_PATH", kubeletPath)
 
 	// Chdir to `kubeletPath` so `mountoptions.{Recv, Send}` can use relative paths to Unix sockets
 	// to overcome `bind: invalid argument`.
@@ -166,7 +167,7 @@ func setup(t *testing.T) *testCtx {
 	assert.NoError(t, err)
 
 	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, mockCredProvider, mpmounter.NewWithMount(fakeMounter), mountSyscall,
-		mountBindSyscall, testK8sVersion, nodeName)
+		mountBindSyscall, testK8sVersion, nodeName, cluster.DefaultKubernetes)
 	assert.NoError(t, err)
 
 	testCtx.podMounter = podMounter
@@ -228,7 +229,7 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
-					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion),
+					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes),
 				},
 				Env: envprovider.Default().List(),
 			}, got)
