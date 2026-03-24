@@ -24,13 +24,14 @@ Mountpoint for Amazon S3 does not implement all the features of a POSIX file sys
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v2.4.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.4.1                       |
+| v2.5.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v2.4.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.4.1                       |
 | v2.4.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.4.0                       |
 | v2.3.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.3.0                       |
 | v2.2.2         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.2.2                       |
@@ -81,7 +82,7 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.25+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.30+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
 
 ## Distros Support Matrix
 
@@ -91,7 +92,7 @@ The following table provides the support status for various distros with regards
 |-----------------------------------------|-------------:|-------:|-----------:|--------:|
 | Amazon Linux 2       |         - |   1.0.0 |          - |       - |
 | Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
-| Ubuntu 20.04         |         - |   1.0.0 |          - |       - |
+| Ubuntu 20.04         |         - |   1.0.0 |          - |   2.5.0 |
 | Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
 | Ubuntu 24.04         |         - |   2.0.0 |          - |       - |
 | Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
