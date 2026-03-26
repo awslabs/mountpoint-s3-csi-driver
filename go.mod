@@ -16,7 +16,7 @@ require (
 	k8s.io/api v0.31.3
 	k8s.io/apiextensions-apiserver v0.31.0
 	k8s.io/client-go v0.31.3
-	k8s.io/klog/v2 v2.130.1
+	k8s.io/klog/v2 v2.140.0
 	k8s.io/kubectl v0.31.3
 	k8s.io/mount-utils v0.29.4
 	pgregory.net/rapid v1.2.0

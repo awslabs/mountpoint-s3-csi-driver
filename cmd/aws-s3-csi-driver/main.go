@@ -43,6 +43,9 @@ func main() {
 		nodeID       = flag.String("node-id", os.Getenv(NodeIDEnvVar), "node-id to report in NodeGetInfo RPC")
 	)
 	klog.InitFlags(nil)
+	// Opt into fixed stderrthreshold behavior (kubernetes/klog#212).
+	_ = flag.Set("legacy_stderr_threshold_behavior", "false")
+	_ = flag.Set("stderrthreshold", "INFO")
 	// Set logging to stderr false otherwise klog won't call our logger set via
 	// `klog.SetOutput` - which also logs to stderr after escaping newlines.
 	flag.Set("logtostderr", "false")
