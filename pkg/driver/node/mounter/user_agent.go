@@ -19,6 +19,7 @@ package mounter
 import (
 	"strings"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 )
 
@@ -26,11 +27,15 @@ const (
 	userAgentCsiDriverPrefix        = "s3-csi-driver/"
 	userAgentK8sPrefix              = "k8s/"
 	userAgentCredentialSourcePrefix = "credential-source#"
+	userAgentOpenShiftPrefix        = "md/openshift"
+	userAgentInstallPrefix          = "md/install#"
 )
 
 // UserAgent returns user-agent for the CSI driver.
-func UserAgent(authenticationSource string, kubernetesVersion string) string {
+// The format is: s3-csi-driver/VERSION credential-source#SOURCE k8s/VERSION [md/openshift] md/install#METHOD
+func UserAgent(authenticationSource string, kubernetesVersion string, variant cluster.Variant) string {
 	var b strings.Builder
+	installMethod := cluster.InstallationMethod()
 
 	// s3-csi-driver/v0.0.0
 	b.WriteString(userAgentCsiDriverPrefix)
@@ -47,6 +52,17 @@ func UserAgent(authenticationSource string, kubernetesVersion string) string {
 		b.WriteString(userAgentK8sPrefix)
 		b.WriteString(kubernetesVersion)
 	}
+
+	if variant == cluster.OpenShift {
+		// md/openshift (version will be added in a follow-up)
+		b.WriteRune(' ')
+		b.WriteString(userAgentOpenShiftPrefix)
+	}
+
+	// md/install#helm
+	b.WriteRune(' ')
+	b.WriteString(userAgentInstallPrefix)
+	b.WriteString(installMethod)
 
 	return b.String()
 }

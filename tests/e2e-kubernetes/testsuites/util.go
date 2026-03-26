@@ -28,13 +28,12 @@ import (
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 const defaultNonRootUser = int64(1001)
 const defaultNonRootGroup = int64(2000)
 
-type jsonMap = map[string]interface{}
+type jsonMap = map[string]any
 
 const NamespacePrefix = "aws-s3-csi-e2e-"
 
@@ -138,7 +137,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 			Namespace: f.Namespace.Name,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""), // for static provisioning
+			StorageClassName: new(""), // for static provisioning
 			VolumeName:       pvName,
 			AccessModes:      []v1.PersistentVolumeAccessMode{accessMode},
 			Resources: v1.VolumeResourceRequirements{
@@ -217,17 +216,17 @@ func podModifierNonRoot(pod *v1.Pod) {
 	if pod.Spec.SecurityContext == nil {
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	pod.Spec.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-	pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
-	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
+	pod.Spec.SecurityContext.RunAsUser = new(defaultNonRootUser)
+	pod.Spec.SecurityContext.RunAsGroup = new(defaultNonRootGroup)
+	pod.Spec.SecurityContext.RunAsNonRoot = new(true)
 
 	for _, container := range pod.Spec.Containers {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &v1.SecurityContext{}
 		}
-		container.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-		container.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
-		container.SecurityContext.RunAsNonRoot = ptr.To(true)
+		container.SecurityContext.RunAsUser = new(defaultNonRootUser)
+		container.SecurityContext.RunAsGroup = new(defaultNonRootGroup)
+		container.SecurityContext.RunAsNonRoot = new(true)
 	}
 }
 

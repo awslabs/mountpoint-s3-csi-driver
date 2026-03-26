@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
@@ -56,6 +57,7 @@ type PodMounter struct {
 	mountSyscall      mountSyscall
 	bindMountSyscall  bindMountSyscall
 	kubernetesVersion string
+	variant           cluster.Variant
 	credProvider      credentialprovider.ProviderInterface
 	nodeID            string
 }
@@ -68,18 +70,20 @@ func NewPodMounter(
 	mount *mpmounter.Mounter,
 	mountSyscall mountSyscall,
 	bindMountSyscall bindMountSyscall,
-	kubernetesVersion,
+	kubernetesVersion string,
 	nodeID string,
+	variant cluster.Variant,
 ) (*PodMounter, error) {
 	return &PodMounter{
 		podWatcher:        podWatcher,
 		s3paCache:         s3paCache,
 		credProvider:      credProvider,
 		mount:             mount,
-		kubeletPath:       util.KubeletPath(),
+		kubeletPath:       util.ContainerKubeletPath(),
 		mountSyscall:      mountSyscall,
 		bindMountSyscall:  bindMountSyscall,
 		kubernetesVersion: kubernetesVersion,
+		variant:           variant,
 		nodeID:            nodeID,
 	}, nil
 }
@@ -214,7 +218,7 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
 	}
 
-	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion))
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authenticationSource, pm.kubernetesVersion, pm.variant))
 
 	podMountSockPath := mppod.PathOnHost(podPath, mppod.KnownPathMountSock)
 	podMountErrorPath := mppod.PathOnHost(podPath, mppod.KnownPathMountError)

@@ -4,7 +4,6 @@ on:
   push:
     branches: ["main", "feature/*"]
   pull_request:
-    branches: ["main", "feature/*"]
   merge_group:
     types: ["checks_requested"]
 
@@ -41,6 +40,7 @@ jobs:
           make e2e-controller
 
   post_test:
+    name: "Controller Post Test"
     if: always()
     needs:
       - controller_test
