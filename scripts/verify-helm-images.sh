@@ -16,7 +16,7 @@ set -euo pipefail
 #   - yq: YAML processor (https://github.com/mikefarah/yq)
 #   - crane: Container registry tool (https://github.com/google/go-containerregistry/tree/main/cmd/crane)
 #
-# Note: AWS credentials are required with any ecr:GetAuthorizationToken permission to access EKS add-on repositories.
+# Note: AWS credentials are required with ecr:GetAuthorizationToken and ecr:BatchGetImage permissions to access EKS add-on repositories.
 
 CHART_DIR="charts/aws-mountpoint-s3-csi-driver"
 VALUES_FILE="${CHART_DIR}/values.yaml"
