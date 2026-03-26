@@ -21,7 +21,6 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 var s3paGVR = schema.GroupVersionResource{Group: "s3.csi.aws.com", Version: "v2", Resource: "mountpoints3podattachments"}
@@ -106,7 +105,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 				if pod.Spec.SecurityContext == nil {
 					pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 				}
-				pod.Spec.SecurityContext.FSGroup = ptr.To(int64(1000))
+				pod.Spec.SecurityContext.FSGroup = new(int64(1000))
 			})
 
 			expectedFields := defaultExpectedFields(targetNode, resource.Pv)
@@ -126,7 +125,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 				if pod.Spec.SecurityContext == nil {
 					pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 				}
-				pod.Spec.SecurityContext.FSGroup = ptr.To(int64(1000 + index))
+				pod.Spec.SecurityContext.FSGroup = new(int64(1000 + index))
 			})
 
 			s3paNames, mountpointPodNames := verifyPodsHaveDifferentMountpointPods(ctx, f, pods, func(pod *v1.Pod) map[string]string {
@@ -325,7 +324,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 
 			targetNode, pods := createPodsInTheSameNode(ctx, f, 2, resource, func(index int, pod *v1.Pod) {
 				if index > 1 {
-					pod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(10))
+					pod.Spec.TerminationGracePeriodSeconds = new(int64(10))
 					pod.Spec.Containers[0].Command = []string{"/bin/sh"}
 					pod.Spec.Containers[0].Args = []string{"-c", `
 						handle_sigterm() {

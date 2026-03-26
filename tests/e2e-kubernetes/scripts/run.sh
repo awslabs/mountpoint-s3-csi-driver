@@ -145,10 +145,6 @@ function e2e_cleanup() {
     done
   fi
   set +e
-
-  for bucket in $(aws s3 ls --region ${REGION} | awk '{ print $3 }' | grep "^${CLUSTER_NAME}-e2e-kubernetes-.*"); do
-    aws s3 rb "s3://${bucket}" --force --region ${REGION}
-  done
 }
 
 function print_cluster_info() {

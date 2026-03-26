@@ -10,7 +10,9 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -49,6 +51,10 @@ func main() {
 			mountSockPath, err)
 	}
 
+	// Set up signal handler after successfully receiving mount options
+	// This ensures we only ignore SIGTERM once we're ready to serve the volume
+	setupSignalHandler()
+
 	exitCode, err := csimounter.Run(csimounter.Options{
 		MountpointPath: mountpointBinFullPath,
 		MountExitPath:  mountExitPath,
@@ -72,4 +78,31 @@ func recvMountOptions() (mountoptions.Options, error) {
 	}
 	klog.Infof("Mount options has been received from %s", mountSockPath)
 	return options, nil
+}
+
+// setupSignalHandler captures and ignores SIGTERM signals to prevent default
+// termination behavior, ensuring graceful pod eviction order.
+//
+// This, combined with TerminationGracePeriodSeconds=10m, prevents the Mountpoint
+// pod from terminating before workload pods that depend on it. During node draining,
+// Kubernetes sends SIGTERM to all pods simultaneously. By ignoring SIGTERM,
+// the Mountpoint pod continues serving the volume while workload pods receive their
+// SIGTERM and begin graceful shutdown.
+//
+// The Mountpoint container terminates properly when:
+// 1. All workload pods finish and the volume is unmounted by s3-csi-node component (normal case)
+// 2. The 10-minute grace period expires and Kubernetes sends SIGKILL (force termination)
+//
+// This achieves the desired termination order in typical cases where the workload
+// terminates within 10 minutes. The desired order may be violated if the grace
+// period is overridden (e.g., via Karpenter NodePool settings) or if the workload
+// takes longer than 10 minutes to terminate.
+func setupSignalHandler() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+	go func() {
+		for range sigChan {
+			klog.Info("Received SIGTERM signal, ignoring to maintain pod eviction order - Mountpoint will continue serving volume until workload pods terminate or grace period expires")
+		}
+	}()
 }

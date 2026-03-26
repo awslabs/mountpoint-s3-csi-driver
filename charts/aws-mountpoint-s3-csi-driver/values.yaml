@@ -12,7 +12,7 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v2.4.0"
+  tag: "v2.5.0"
 
 node:
   kubeletPath: /var/lib/kubelet
@@ -30,6 +30,7 @@ node:
     # see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials for more details.
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
+  podLabels: {}
   nodeSelector: {}
   resources:
     requests:
@@ -55,8 +56,8 @@ node:
 sidecars:
   nodeDriverRegistrar:
     image:
-      repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
-      tag: v2.13.0-eks-1-32-19
+      repository: public.ecr.aws/csi-components/csi-node-driver-registrar
+      tag: v2.16.0-eksbuild.3
       pullPolicy: IfNotPresent
     env:
       - name: KUBE_NODE_NAME
@@ -71,8 +72,8 @@ sidecars:
     resources: {}
   livenessProbe:
     image:
-      repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
-      tag: v2.15.0-eks-1-32-19
+      repository: public.ecr.aws/csi-components/livenessprobe
+      tag: v2.18.0-eksbuild.3
       pullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: /csi
@@ -85,6 +86,7 @@ controller:
   # For example:
   # nodeSelector:
   #   kubernetes.io/role: control-plane
+  podLabels: {}
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -99,9 +101,12 @@ mountpointPod:
   priorityClassName: mount-s3-critical
   preemptingPriorityClassName: mount-s3-preempting-critical
   headroomPriorityClassName: mount-s3-headroom
+  podLabels: {}
 
 nameOverride: ""
 fullnameOverride: ""
+
+customLabels: {}
 
 imagePullSecrets: []
 
@@ -129,3 +134,4 @@ experimental:
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
   reserveHeadroomForMountpointPods: false
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10
+  headroomPodLabels: {}

@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-ARG MOUNTPOINT_VERSION=1.22.0
+ARG MOUNTPOINT_VERSION=1.22.2
 
 # Download the mountpoint tarball and produce an installable directory
 # Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
@@ -30,9 +30,10 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz.asc" && \
     wget -q https://s3.amazonaws.com/mountpoint-s3-release/public_keys/KEYS
 
-# Import the key and validate it has the fingerprint we expect
+# Import the key and validate it has the fingerprints we expect
 RUN gpg --import KEYS && \
-    (gpg --fingerprint mountpoint-s3@amazon.com | grep "673F E406 1506 BB46 9A0E  F857 BE39 7A52 B086 DA5A")
+    (gpg --fingerprint mountpoint-s3@amazon.com | grep "8AEF E705 EBE3 29C0 948C  75A6 6F1C 3B3A EF4B 030B") && \
+    (gpg --fingerprint mountpoint-s3@amazon.com | grep "673F E406 1506 BB46 9A0E  F857 BE39 7A52 B086 DA5A") # older key
 
 # Verify the downloaded tarball, extract it, and fixup the binary
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
@@ -43,7 +44,7 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
 # Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.25.6 as builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.26.1 as builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver

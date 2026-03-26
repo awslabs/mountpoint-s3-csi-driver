@@ -35,7 +35,7 @@ const (
 )
 
 func TestCreatingMountpointPods(t *testing.T) {
-	createAndVerifyPod(t, cluster.DefaultKubernetes, ptr.To(int64(1000)))
+	createAndVerifyPod(t, cluster.DefaultKubernetes, new(int64(1000)))
 }
 
 func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
@@ -100,11 +100,11 @@ func TestCreatingHeadroomPod(t *testing.T) {
 		assert.Equals(t, "pause", hrPod.Spec.Containers[0].Name)
 		assert.Equals(t, headRoomImage, hrPod.Spec.Containers[0].Image)
 
-		assert.Equals(t, ptr.To(false), hrPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+		assert.Equals(t, new(false), hrPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
 		assert.Equals(t, &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		}, hrPod.Spec.Containers[0].SecurityContext.Capabilities)
-		assert.Equals(t, ptr.To(true), hrPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+		assert.Equals(t, new(true), hrPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
 		assert.Equals(t, &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		}, hrPod.Spec.Containers[0].SecurityContext.SeccompProfile)
@@ -267,8 +267,10 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 			ImagePullPolicy: imagePullPolicy,
 			Command:         command,
 		},
-		CSIDriverVersion: csiDriverVersion,
-		ClusterVariant:   clusterVariant,
+		CSIDriverVersion:  csiDriverVersion,
+		ClusterVariant:    clusterVariant,
+		PodLabels:         map[string]string{},
+		HeadroomPodLabels: map[string]string{},
 	}
 }
 
@@ -284,12 +286,14 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
 		}, mpPod.Labels)
 		assert.Equals(t, map[string]string{
-			mppod.AnnotationVolumeName: testVolName,
-			mppod.AnnotationVolumeId:   testVolID,
+			mppod.AnnotationVolumeName:                    testVolName,
+			mppod.AnnotationVolumeId:                      testVolID,
+			mppod.AnnotationClusterAutoscalerDaemonsetPod: "true",
 		}, mpPod.Annotations)
 
 		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
+		assert.Equals(t, ptr.To(int64(mppod.TerminationGracePeriodSeconds)), mpPod.Spec.TerminationGracePeriodSeconds)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
 		assert.Equals(t, &corev1.Volume{
 			Name: mppod.CommunicationDirName,
@@ -323,12 +327,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 		assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
 		assert.Equals(t, []string{command}, mpPod.Spec.Containers[0].Command)
-		assert.Equals(t, ptr.To(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+		assert.Equals(t, new(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
 		assert.Equals(t, &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		}, mpPod.Spec.Containers[0].SecurityContext.Capabilities)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.Containers[0].SecurityContext.RunAsUser)
-		assert.Equals(t, ptr.To(true), mpPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+		assert.Equals(t, new(true), mpPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
 		assert.Equals(t, &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		}, mpPod.Spec.Containers[0].SecurityContext.SeccompProfile)
@@ -430,7 +434,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+					SizeLimit: new(resource.MustParse(sizeLimit)),
 				},
 			})
 		})
@@ -486,7 +490,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			verifyDefaultValues(mpPod, priorityClassName)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+					SizeLimit: new(resource.MustParse(sizeLimit)),
 					Medium:    corev1.StorageMediumMemory,
 				},
 			})
@@ -900,4 +904,106 @@ func verifyLocalCacheVolume(t *testing.T, mpPod *corev1.Pod, expected corev1.Vol
 		Name:      mppod.LocalCacheDirName,
 		MountPath: filepath.Join("/", mppod.LocalCacheDirName),
 	}, cacheMount)
+}
+
+func TestPodLabels(t *testing.T) {
+	t.Run("Mountpoint Pod", func(t *testing.T) {
+		config := createTestConfig(cluster.DefaultKubernetes)
+		config.PodLabels = map[string]string{
+			"mountpoint-pod-label":       "mountpoint-pod-label-value",
+			mppod.LabelMountpointVersion: "should-be-overridden",
+		}
+		creator := mppod.NewCreator(config, testr.New(t))
+
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
+				},
+			},
+		}
+
+		mpPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+
+		// Verify user labels are applied
+		assert.Equals(t, "mountpoint-pod-label-value", mpPod.Labels["mountpoint-pod-label"])
+
+		// Verify driver labels take priority (cannot be overridden)
+		assert.Equals(t, mountpointVersion, mpPod.Labels[mppod.LabelMountpointVersion])
+		assert.Equals(t, csiDriverVersion, mpPod.Labels[mppod.LabelCSIDriverVersion])
+	})
+
+	t.Run("Headroom Pod", func(t *testing.T) {
+		config := createTestConfig(cluster.DefaultKubernetes)
+		config.HeadroomPodLabels = map[string]string{
+			"headroom-pod-label":      "headroom-pod-label-value",
+			mppod.LabelHeadroomForPod: "should-be-overridden",
+		}
+		creator := mppod.NewCreator(config, testr.New(t))
+
+		workloadPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workload-pod",
+				Namespace: "default",
+				UID:       "test-uid",
+			},
+		}
+
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+		}
+
+		hrPod, err := creator.HeadroomPod(workloadPod, pv)
+		assert.NoError(t, err)
+
+		// Verify user labels are applied
+		assert.Equals(t, "headroom-pod-label-value", hrPod.Labels["headroom-pod-label"])
+
+		// Verify driver labels take priority (cannot be overridden)
+		assert.Equals(t, string(workloadPod.UID), hrPod.Labels[mppod.LabelHeadroomForPod])
+		assert.Equals(t, testVolName, hrPod.Labels[mppod.LabelHeadroomForVolume])
+	})
+
+	t.Run("Empty Labels", func(t *testing.T) {
+		config := createTestConfig(cluster.DefaultKubernetes)
+		// PodLabels and HeadroomPodLabels are already empty from createTestConfig
+		creator := mppod.NewCreator(config, testr.New(t))
+
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
+				},
+			},
+		}
+
+		// Test Mountpoint Pod
+		mpPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+
+		// Verify only driver labels are present
+		assert.Equals(t, mountpointVersion, mpPod.Labels[mppod.LabelMountpointVersion])
+		assert.Equals(t, csiDriverVersion, mpPod.Labels[mppod.LabelCSIDriverVersion])
+		assert.Equals(t, 2, len(mpPod.Labels))
+
+		// Test Headroom Pod
+		workloadPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workload-pod",
+				Namespace: "default",
+				UID:       "test-uid",
+			},
+		}
+
+		hrPod, err := creator.HeadroomPod(workloadPod, pv)
+		assert.NoError(t, err)
+
+		// Verify only driver labels are present
+		assert.Equals(t, string(workloadPod.UID), hrPod.Labels[mppod.LabelHeadroomForPod])
+		assert.Equals(t, testVolName, hrPod.Labels[mppod.LabelHeadroomForVolume])
+		assert.Equals(t, 2, len(hrPod.Labels))
+	})
 }

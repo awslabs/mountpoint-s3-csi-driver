@@ -37,7 +37,6 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -59,9 +58,12 @@ const (
 )
 
 const (
-	eksauthAssumeRoleRetryCode            = "AccessDeniedException"
 	eksauthAssumeRoleRetryMaxAttempts     = 0 // This will cause SDK to retry indefinitely, but we do have a timeout on the operation
 	eksauthAssumeRoleRetryMaxBackoffDelay = 10 * time.Second
+)
+
+var (
+	eksauthAssumeRoleRetryErrorCodes = []string{"AccessDeniedException", "ResourceNotFoundException"}
 )
 
 const (
@@ -1069,15 +1071,15 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
 	framework.Logf("Creating IAM role '%s' with assumeRolePolicyDocument \"%s\"", roleName, assumeRolePolicyDocument)
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
-		RoleName:                 ptr.To(roleName),
-		AssumeRolePolicyDocument: ptr.To(assumeRolePolicyDocument),
+		RoleName:                 new(roleName),
+		AssumeRolePolicyDocument: new(assumeRolePolicyDocument),
 	})
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
 		framework.Logf("Deleting IAM role '%s'", roleName)
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		return err
 	}
@@ -1085,8 +1087,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	for _, policyName := range policyNames {
 		policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 		_, err := client.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
-			RoleName:  ptr.To(roleName),
-			PolicyArn: ptr.To(policyArn),
+			RoleName:  new(roleName),
+			PolicyArn: new(policyArn),
 		})
 		framework.ExpectNoError(err)
 	}
@@ -1094,7 +1096,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.Logf("Waiting until all policies are attached to IAM role")
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		policies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		if err != nil {
 			return false, err
@@ -1119,8 +1121,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		for _, policyName := range policyNames {
 			policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 			_, err := client.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
-				RoleName:  ptr.To(roleName),
-				PolicyArn: ptr.To(policyArn),
+				RoleName:  new(roleName),
+				PolicyArn: new(policyArn),
 			})
 			errs = append(errs, err)
 		}
@@ -1134,15 +1136,16 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	return waitUntilRoleIsAssumableSTS(ctx, client.AssumeRole, &sts.AssumeRoleInput{
-		RoleArn:         ptr.To(roleArn),
-		RoleSessionName: ptr.To(f.BaseName),
-		DurationSeconds: ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:         new(roleArn),
+		RoleSessionName: new(f.BaseName),
+		DurationSeconds: new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
-// waitUntilRoleIsAssumable waits until the given role is assumable.
+// Waits until the given role is assumable.
+//
 // This is needed because we're creating new roles in our test cases and then trying to assume those roles,
-// but there is a delay between IAM and STS services and newly created roles/policies does not appear on STS immediately.
+// but there's a delay between IAM and the token service (STS or EKS Auth) resulting in errors such as "access denied" or "not found".
 func waitUntilRoleIsAssumable[Input any, Output any, O any](
 	ctx context.Context,
 	assumeFunc func(context.Context, *Input, ...func(O)) (*Output, error),
@@ -1177,7 +1180,7 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 	input *Input,
 ) *Output {
 	return waitUntilRoleIsAssumable(ctx, assumeFunc, input, func(o *eksauth.Options) {
-		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryCode)
+		o.Retryer = retry.AddWithErrorCodes(o.Retryer, eksauthAssumeRoleRetryErrorCodes...)
 		o.Retryer = retry.AddWithMaxAttempts(o.Retryer, eksauthAssumeRoleRetryMaxAttempts)
 		o.Retryer = retry.AddWithMaxBackoffDelay(o.Retryer, eksauthAssumeRoleRetryMaxBackoffDelay)
 	})
@@ -1197,15 +1200,15 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableSTS(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
-		RoleArn:          ptr.To(roleARN),
-		RoleSessionName:  ptr.To(f.BaseName),
-		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),
-		DurationSeconds:  ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:          new(roleARN),
+		RoleSessionName:  new(f.BaseName),
+		WebIdentityToken: new(serviceAccountToken.Status.Token),
+		DurationSeconds:  new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
 func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, pod *v1.Pod) {
-	// If you're seeing the following error, then it means you've made a typo in the cluster name when running the tests!
+	// If you see the following error, it may mean you've made a typo in the cluster name or the role is being assumed too quickly.
 	// [FAILED] operation error EKS Auth: AssumeRoleForPodIdentity, https response error StatusCode: 404, RequestID:
 	// ResourceNotFoundException: The token included in the request has no service account role association for it.
 
@@ -1230,8 +1233,8 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	client := eksauth.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableEKS(ctx, client.AssumeRoleForPodIdentity, &eksauth.AssumeRoleForPodIdentityInput{
-		ClusterName: ptr.To(ClusterName),
-		Token:       ptr.To(serviceAccountToken.Status.Token),
+		ClusterName: new(ClusterName),
+		Token:       new(serviceAccountToken.Status.Token),
 	})
 }
 
@@ -1381,7 +1384,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 		return ""
 	}
 
-	var configuration map[string]interface{}
+	var configuration map[string]any
 	err = json.Unmarshal(response, &configuration)
 	if err != nil {
 		framework.Logf("failed to parse OIDC configuration: %v", err)

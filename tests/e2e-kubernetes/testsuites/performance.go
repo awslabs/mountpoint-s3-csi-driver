@@ -113,7 +113,7 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		const podsNum = 3
 		var pods []*v1.Pod
 		nodeName := ""
-		for i := 0; i < podsNum; i++ {
+		for i := range podsNum {
 			index := i + 1
 			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, nodeName))
 			nodeSelector := make(map[string]string)
@@ -136,7 +136,7 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		ginkgo.By("Installing fio in pods")
 		var wg sync.WaitGroup
 		wg.Add(podsNum)
-		for i := 0; i < podsNum; i++ {
+		for i := range podsNum {
 			go func(podId int) {
 				defer ginkgo.GinkgoRecover()
 				defer wg.Done()
@@ -148,13 +148,13 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		var output []benchmarkEntry
 		for _, cfgName := range getFioCfgNames() {
 			ginkgo.By(fmt.Sprintf("Running benchmark with config: %s", cfgName))
-			for i := 0; i < podsNum; i++ {
+			for i := range podsNum {
 				copySmallFileToPod(ctx, f, pods[i], FioCfgHostDir+cfgName+".fio", FioCfgPodFile)
 			}
 			throughputs := make([]float32, podsNum)
 			var wg sync.WaitGroup
 			wg.Add(podsNum)
-			for i := 0; i < podsNum; i++ {
+			for i := range podsNum {
 				go func(podId int) {
 					defer ginkgo.GinkgoRecover()
 					defer wg.Done()

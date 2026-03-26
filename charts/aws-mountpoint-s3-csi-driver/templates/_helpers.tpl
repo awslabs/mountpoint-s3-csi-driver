@@ -6,6 +6,22 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "csiDriverImageName" -}}
+{{ include "renderImageName" (dict "image" .Values.image "eksImage" "/eks/aws-s3-csi-driver" "isEKSAddon" .Values.isEKSAddon ) }}
+{{- end -}}
+
+{{- define "nodeDriverRegistrarImageName" -}}
+{{ include "renderImageName" (dict "image" .Values.sidecars.nodeDriverRegistrar.image "eksImage" "/eks/csi-node-driver-registrar" "isEKSAddon" .Values.isEKSAddon ) }}
+{{- end -}}
+
+{{- define "livenessProbeImageName" -}}
+{{ include "renderImageName" (dict "image" .Values.sidecars.livenessProbe.image "eksImage" "/eks/livenessprobe" "isEKSAddon" .Values.isEKSAddon ) }}
+{{- end -}}
+
+{{- define "renderImageName" -}}
+{{ printf "%s%s:%s" (default "" .image.containerRegistry) (ternary .image.repository .eksImage (empty .isEKSAddon)) .image.tag }}
+{{- end -}}
+
 {{/*
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
@@ -37,12 +53,14 @@ Common labels
 {{- define "aws-mountpoint-s3-csi-driver.labels" -}}
 {{ include "aws-mountpoint-s3-csi-driver.selectorLabels" . }}
 {{- if ne .Release.Name "kustomize" }}
+{{- if empty .Values.isEKSAddon }}
 helm.sh/chart: {{ include "aws-mountpoint-s3-csi-driver.chart" . }}
+{{- end }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/component: csi-driver
-app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/managed-by: {{ ternary .Release.Service "EKS" (empty .Values.isEKSAddon) }}
 {{- end }}
 {{- if .Values.customLabels }}
 {{ toYaml .Values.customLabels }}

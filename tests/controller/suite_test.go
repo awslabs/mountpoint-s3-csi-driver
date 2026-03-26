@@ -106,7 +106,9 @@ var _ = BeforeSuite(func() {
 			HeadroomImage:   headroomImage,
 			ImagePullPolicy: mountpointImagePullPolicy,
 		},
-		CSIDriverVersion: version.GetVersion().DriverVersion,
+		CSIDriverVersion:  version.GetVersion().DriverVersion,
+		PodLabels:         map[string]string{"test-label": "test-value", "env": "test"},
+		HeadroomPodLabels: map[string]string{"headroom-label": "headroom-value", "tier": "headroom"},
 	}, logf.Log).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

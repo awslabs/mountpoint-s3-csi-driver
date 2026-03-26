@@ -20,11 +20,13 @@ import (
 	"context"
 	"maps"
 	"os"
-	"strings"
+	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -35,8 +37,6 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
-
-var kubeletPath = util.KubeletPath()
 
 var (
 	nodeCaps = []csi.NodeServiceCapability_RPC_Type{
@@ -93,13 +93,17 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	if !strings.HasPrefix(target, kubeletPath) {
-		klog.Errorf("NodePublishVolume: target path %q is not in kubelet path %q. This might cause mounting issues, please ensure you have correct kubelet path configured.", target, kubeletPath)
+	// Translate target path from host format to container format if needed.
+	// Example error: Failed to translate target path "/opt/kubernetes/kubelet/pods/abcd-1234/volumes/kubernetes.io~csi/s3-pv/mount":
+	//   path "/opt/kubernetes/kubelet/pods/abcd-1234/volumes/kubernetes.io~csi/s3-pv/mount" does not start with host kubelet path "/var/lib/kubelet"
+	targetContainer, err := util.KubeletHostPathToContainerPath(targetHost)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to translate target path %q: %v", targetHost, err)
 	}
 
 	volCap := req.GetVolumeCapability()
@@ -145,15 +149,57 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, target, args.SortedList())
+	// If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
+	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir {
+		quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
+		}
+		emptyDirSizeLimitMiB := quantity.Value() / (1024 * 1024)
+
+		// Safety factor to account for Mountpoint overshooting its cache target by around 1-2%.
+		const safetyFactor = 0.95
+		safeMaxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
+
+		if maxCacheSize, ok := args.Value(mountpoint.ArgMaxCacheSize); ok {
+			maxCacheSizeMiB, err := strconv.ParseInt(maxCacheSize, 10, 64)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", mountpoint.ArgMaxCacheSize, maxCacheSize, err)
+			}
+			if maxCacheSizeMiB > emptyDirSizeLimitMiB {
+				return nil, status.Errorf(codes.InvalidArgument,
+					"%s (%d MiB) exceeds %s (%s = %d MiB). Reduce %s or increase %s.",
+					mountpoint.ArgMaxCacheSize, maxCacheSizeMiB,
+					volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, emptyDirSizeLimitMiB,
+					mountpoint.ArgMaxCacheSize, volumecontext.CacheEmptyDirSizeLimit)
+			}
+			// For disk-backed (default) medium, remove user's explicit --max-cache-size if it exceeds
+			// the safe threshold, allowing the safe default to be injected below via SetIfAbsent.
+			if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) && maxCacheSizeMiB > safeMaxCacheSizeMiB {
+				args.Remove(mountpoint.ArgMaxCacheSize)
+			}
+		}
+
+		// For disk-backed (default) medium, statvfs on the cache directory reports the node's root filesystem
+		// stats rather than the emptyDir's sizeLimit, so Mountpoint cannot self-limit correctly.
+		// Inject --max-cache-size at 95% of the limit to ensure Mountpoint evicts before Kubernetes does.
+		// The 5% margin accounts for Mountpoint overshooting its target by around 1-2%.
+		// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
+		// can self-limit without this injection.
+		if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
+			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(safeMaxCacheSizeMiB, 10))
+		}
+	}
+
+	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, targetContainer, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, target, credentialCtx, args, fsGroup); err != nil {
-		os.Remove(target)
-		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, target, err)
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup); err != nil {
+		os.Remove(targetContainer)
+		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
-	klog.V(4).Infof("NodePublishVolume: %s was mounted", target)
+	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -166,32 +212,37 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
-	target := req.GetTargetPath()
-	if len(target) == 0 {
+	targetHost := req.GetTargetPath()
+	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
 	}
 
-	mounted, err := ns.Mounter.IsMountPoint(target)
+	targetContainer, err := util.KubeletHostPathToContainerPath(targetHost)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to translate target path %q: %v", targetHost, err)
+	}
+
+	mounted, err := ns.Mounter.IsMountPoint(targetContainer)
 	if err != nil && os.IsNotExist(err) {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s does not exist, skipping unmount", targetContainer)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	} else if err != nil && mount.IsCorruptedMnt(err) {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", target, err)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s is corrupted: %v, will try to unmount", targetContainer, err)
 		mounted = true
 	} else if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 	if !mounted {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", target)
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", targetContainer)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
 	credentialCtx := credentialCleanupContextFromUnpublishRequest(req)
 
-	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = ns.Mounter.Unmount(ctx, target, credentialCtx)
+	klog.V(4).Infof("NodeUnpublishVolume: unmounting %s", targetContainer)
+	err = ns.Mounter.Unmount(ctx, targetContainer, credentialCtx)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -268,11 +319,22 @@ func credentialProvideContextFromPublishRequest(req *csi.NodePublishVolumeReques
 		VolumeID:             req.GetVolumeId(),
 		AuthenticationSource: authSource,
 		PodNamespace:         volumeCtx[volumecontext.CSIPodNamespace],
-		ServiceAccountTokens: volumeCtx[volumecontext.CSIServiceAccountTokens],
+		ServiceAccountTokens: serviceAccountTokensFromRequest(req),
 		ServiceAccountName:   volumeCtx[volumecontext.CSIServiceAccountName],
 		StsRegion:            volumeCtx[volumecontext.STSRegion],
 		BucketRegion:         bucketRegion,
 	}
+}
+
+// serviceAccountTokensFromRequest checks secrets first, then volume context.
+// In Kubernetes v1.35+, tokens can be delivered via the secrets field (KEP-5538).
+// We don't set serviceAccountTokenInSecrets in our CSIDriver spec yet, but this
+// fallback ensures we're ready when we do.
+func serviceAccountTokensFromRequest(req *csi.NodePublishVolumeRequest) string {
+	if tokens, ok := req.GetSecrets()[volumecontext.CSIServiceAccountTokens]; ok {
+		return tokens
+	}
+	return req.GetVolumeContext()[volumecontext.CSIServiceAccountTokens]
 }
 
 func credentialCleanupContextFromUnpublishRequest(req *csi.NodeUnpublishVolumeRequest) credentialprovider.CleanupContext {
