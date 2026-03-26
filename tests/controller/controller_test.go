@@ -1330,6 +1330,116 @@ var _ = Describe("Mountpoint Controller", func() {
 			expectNoS3PodAttachmentWithFields(defaultExpectedFields(testNode, vol2.pv))
 			waitForObjectToDisappear(hrPod.Pod)
 		})
+
+		It("should not ungate pod when any PVC is unbound", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume() // Created but NOT bound
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			// Should create headroom pod for the bound volume
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			// Pod should NOT be ungated because vol2 is not bound yet
+			// Verify both that the gate remains and only one headroom pod exists
+			Consistently(func(g Gomega) {
+				var p corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
+				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
+					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
+				))
+
+				// Verify only one headroom pod exists (for vol1), not two
+				var hrPods corev1.PodList
+				g.Expect(k8sClient.List(ctx, &hrPods, client.MatchingLabels{
+					mppod.LabelHeadroomForPod: string(pod.UID),
+				})).To(Succeed())
+				g.Expect(hrPods.Items).To(HaveLen(1))
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should ungate pod after all PVCs become bound", func() {
+			vol1 := createVolume()
+			vol1.bind()
+			vol2 := createVolume() // Created but NOT bound initially
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(vol2.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			// First headroom pod should be created for the bound volume
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			// Now bind the second volume
+			vol2.bind()
+
+			// Pod should now be ungated
+			pod.waitUntilSchedulingUngated()
+
+			// Second headroom pod should be created
+			hrPod2 := waitForHeadroomPodForWorkload(pod, vol2)
+			verifyHeadroomPodFor(pod, vol2, hrPod2)
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol1, pod)
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol2, pod)
+			waitForObjectToDisappear(hrPod1.Pod)
+			waitForObjectToDisappear(hrPod2.Pod)
+		})
+	})
+
+	Context("Pod Labels", func() {
+		It("should apply configured labels to Mountpoint Pods", func() {
+			// This test verifies that both driver-managed labels and user-configured
+			// labels from Config.PodLabels are applied to Mountpoint Pods
+
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule(testNode)
+
+			_, mpPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+
+			// Verify driver-managed labels are always present
+			Expect(mpPod.Labels).To(HaveKey(mppod.LabelMountpointVersion))
+			Expect(mpPod.Labels).To(HaveKey(mppod.LabelCSIDriverVersion))
+
+			// Verify driver labels have correct values
+			Expect(mpPod.Labels[mppod.LabelMountpointVersion]).To(Equal(mountpointVersion))
+			Expect(mpPod.Labels[mppod.LabelCSIDriverVersion]).To(Equal(version.GetVersion().DriverVersion))
+
+			// Verify user-configured labels from Config are applied
+			Expect(mpPod.Labels).To(HaveKeyWithValue("test-label", "test-value"))
+			Expect(mpPod.Labels).To(HaveKeyWithValue("env", "test"))
+
+			mpPod.succeed()
+			waitForObjectToDisappear(mpPod.Pod)
+		})
+
+		It("should apply configured labels to Headroom Pods", func() {
+			vol := createVolume()
+			vol.bind()
+
+			pod := createPod(withPVC(vol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod.waitUntilSchedulingUngated()
+
+			hrPod := waitForHeadroomPodForWorkload(pod, vol)
+
+			// Verify driver-managed labels are always present
+			Expect(hrPod.Labels).To(HaveKey(mppod.LabelHeadroomForPod))
+			Expect(hrPod.Labels).To(HaveKey(mppod.LabelHeadroomForVolume))
+
+			// Verify user-configured labels from Config are applied
+			Expect(hrPod.Labels).To(HaveKeyWithValue("headroom-label", "headroom-value"))
+			Expect(hrPod.Labels).To(HaveKeyWithValue("tier", "headroom"))
+
+			// Cleanup: terminate workload pod to trigger headroom pod deletion
+			pod.terminate()
+			waitForObjectToDisappear(hrPod.Pod)
+		})
 	})
 })
 

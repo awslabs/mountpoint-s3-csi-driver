@@ -193,7 +193,7 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
 			assert.NoError(t, err)
 			kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
-			t.Setenv("KUBELET_PATH", kubeletPath)
+			t.Setenv("CONTAINER_KUBELET_PATH", kubeletPath)
 			t.Chdir(kubeletPath)
 
 			sourceMountDir := mounter.SourceMountDir(kubeletPath)
@@ -337,7 +337,7 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
 			assert.NoError(t, err)
 			kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
-			t.Setenv("KUBELET_PATH", kubeletPath)
+			t.Setenv("CONTAINER_KUBELET_PATH", kubeletPath)
 			t.Chdir(kubeletPath)
 
 			sourceMountDir := mounter.SourceMountDir(kubeletPath)
