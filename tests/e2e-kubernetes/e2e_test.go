@@ -1,14 +1,17 @@
 package e2e
 
 import (
+	"context"
 	"flag"
 	"testing"
+	"time"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 	custom_testsuites "github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/testsuites"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	f "k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/storage/framework"
 	"k8s.io/kubernetes/test/e2e/storage/testsuites"
@@ -79,6 +82,33 @@ func getCSITestSuites() []func() framework.TestSuite {
 	}
 	return suites
 }
+
+// Wait for all Mountpoint pods in mount-s3 namespace to be cleaned up after tests complete.
+// This ensures the mount-s3 namespace is not stuck with stale pods when the driver is uninstalled,
+// which would cause the namespace to get stuck in Terminating state and block the next CI run's install.
+var _ = ginkgo.SynchronizedAfterSuite(func() {}, func() {
+	cs, err := f.LoadClientset()
+	f.ExpectNoError(err, "creating kubernetes client")
+
+	ctx := context.Background()
+	f.Logf("Waiting for Mountpoint pods in mount-s3 namespace to be cleaned up...")
+	gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
+		pods, err := cs.CoreV1().Pods("mount-s3").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return 0, err
+		}
+		if len(pods.Items) > 0 {
+			names := make([]string, len(pods.Items))
+			for i, pod := range pods.Items {
+				names[i] = pod.Name
+			}
+			f.Logf("Still waiting for %d Mountpoint pod(s) to be cleaned up: %v", len(pods.Items), names)
+		}
+		return len(pods.Items), nil
+	}).WithTimeout(5 * time.Minute).WithPolling(10 * time.Second).Should(gomega.Equal(0),
+		"Mountpoint pods in mount-s3 namespace were not cleaned up in time")
+	f.Logf("All Mountpoint pods cleaned up successfully")
+})
 
 // This executes testSuites for csi volumes.
 var _ = utils.SIGDescribe("CSI Volumes", func() {
