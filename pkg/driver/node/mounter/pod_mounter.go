@@ -102,7 +102,7 @@ func NewPodMounter(
 //
 // If Mountpoint is already mounted at `target`, it will return early at step 3 to ensure credentials are up-to-date.
 // If Mountpoint is already mounted at `source`, it will skip steps 4-7 and only perform bind mount to `target`.
-func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string) error {
+func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 	volumeName, err := pm.volumeNameFromTargetPath(target)
 	if err != nil {
 		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
@@ -163,7 +163,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	}
 
 	if !isSourceMountPoint {
-		err = pm.mountS3AtSource(ctx, source, pod, podPath, bucketName, credEnv, authenticationSource, args)
+		err = pm.mountS3AtSource(ctx, source, pod, podPath, bucketName, credEnv, userEnv, authenticationSource, args)
 		if err != nil {
 			return fmt.Errorf("Failed to mount at source %q: %w. %s", source, err, pm.helpMessageForGettingMountpointLogs(pod))
 		}
@@ -194,6 +194,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 //   - podPath: Base path for Pod-specific files
 //   - bucketName: Name of the S3 bucket to mount
 //   - credEnv: Environment variables related to AWS credentials
+//   - userEnv: Environment variables provided by user
 //   - authenticationSource: Authentication source from PV volume attribute
 //   - args: Mountpoint arguments
 //
@@ -208,9 +209,11 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 //
 // If any step fails, it ensures cleanup by unmounting the source path.
 func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod *corev1.Pod, podPath string,
-	bucketName string, credEnv envprovider.Environment, authenticationSource credentialprovider.AuthenticationSource,
+	bucketName string, credEnv envprovider.Environment, userEnv envprovider.Environment, authenticationSource credentialprovider.AuthenticationSource,
 	args mountpoint.Args) error {
-	env := envprovider.Default()
+	env := envprovider.Environment{}
+	env.Merge(userEnv)
+	env.Merge(envprovider.Default())
 	env.Merge(credEnv)
 
 	// Move `--aws-max-attempts` to env if provided
