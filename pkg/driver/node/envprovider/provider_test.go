@@ -1,6 +1,7 @@
 package envprovider_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -266,6 +267,67 @@ func TestMergingEnvironments(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			testCase.env.Merge(testCase.other)
 			assert.Equals(t, testCase.want, testCase.env)
+		})
+	}
+}
+
+func TestParseUserEnvFromVolumeContext(t *testing.T) {
+	testCases := []struct {
+		name      string
+		volumeCtx map[string]string
+		want      envprovider.Environment
+		errMsg    string
+	}{
+		{
+			name: "correct",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "proxy:3128",
+				"mountpointEnv.NO_PROXY":    "169.254.169.254",
+			},
+			want: envprovider.Environment{
+				"HTTPS_PROXY": "proxy:3128",
+				"NO_PROXY":    "169.254.169.254",
+			},
+			errMsg: "",
+		},
+		{
+			name: "correct, skipping invalid prefix",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY":    "proxy:3128",
+				"mountpointEnvvvv.HTTPS_PROXY": "invalidPrefix",
+			},
+			want: envprovider.Environment{
+				"HTTPS_PROXY": "proxy:3128",
+			},
+			errMsg: "",
+		},
+		{
+			name: "failed, invalid format",
+			volumeCtx: map[string]string{
+				"mountpointEnv.FOO.BAR": "FOO",
+			},
+			errMsg: "Invalid Mountpoint environment format: mountpointEnv.FOO.BAR",
+		},
+		{
+			name: "failed, environment not allowed",
+			volumeCtx: map[string]string{
+				"mountpointEnv.FOO": "BAR",
+			},
+			errMsg: "Environment variable not allowed: mountpointEnv.FOO",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			userEnv, err := envprovider.ParseUserEnvFromVolumeContext(testCase.volumeCtx)
+			if testCase.errMsg != "" {
+				if !strings.Contains(err.Error(), testCase.errMsg) {
+					t.Errorf("Expected error message %q, but got %q", testCase.errMsg, err.Error())
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equals(t, testCase.want, userEnv)
+			}
 		})
 	}
 }
