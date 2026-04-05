@@ -31,6 +31,7 @@ import (
 	"k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
@@ -195,7 +196,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
 
-	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup); err != nil {
+	userEnv, err := envprovider.ParseUserEnvFromVolumeContext(req.GetVolumeContext())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Could not parse user environment: %v", err)
+	}
+
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup, userEnv); err != nil {
 		os.Remove(targetContainer)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
