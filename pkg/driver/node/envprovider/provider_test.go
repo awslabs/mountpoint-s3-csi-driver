@@ -288,7 +288,6 @@ func TestParseUserEnvFromVolumeContext(t *testing.T) {
 				"HTTPS_PROXY": "proxy:3128",
 				"NO_PROXY":    "169.254.169.254",
 			},
-			errMsg: "",
 		},
 		{
 			name: "correct, skipping invalid prefix",
@@ -299,21 +298,13 @@ func TestParseUserEnvFromVolumeContext(t *testing.T) {
 			want: envprovider.Environment{
 				"HTTPS_PROXY": "proxy:3128",
 			},
-			errMsg: "",
-		},
-		{
-			name: "failed, invalid format",
-			volumeCtx: map[string]string{
-				"mountpointEnv.FOO.BAR": "FOO",
-			},
-			errMsg: "Invalid Mountpoint environment format: mountpointEnv.FOO.BAR",
 		},
 		{
 			name: "failed, environment not allowed",
 			volumeCtx: map[string]string{
 				"mountpointEnv.FOO": "BAR",
 			},
-			errMsg: "Environment variable not allowed: mountpointEnv.FOO",
+			errMsg: "environment variable not allowed: mountpointEnv.FOO",
 		},
 	}
 

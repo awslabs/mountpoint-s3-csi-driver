@@ -20,8 +20,8 @@ spec:
     volumeAttributes:
       bucketName: s3-csi-driver
       # Supported variables: HTTPS_PROXY, NO_PROXY
-      mountpointEnv.HTTPS_PROXY: "https://proxy.example.com"
-      mountpointEnv.NO_PROXY: "169.254.169.254"
+      mountpointEnv.HTTPS_PROXY: "http://proxy.example.com:3128"
+      mountpointEnv.NO_PROXY: "sts.amazonaws.com"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

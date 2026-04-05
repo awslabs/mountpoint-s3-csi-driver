@@ -30,6 +30,8 @@ const (
 	EnvNoProxy                         = "NO_PROXY"
 )
 
+const mountpointEnvPrefix = "mountpointEnv."
+
 // Key represents an environment variable name.
 type Key = string
 
@@ -78,17 +80,14 @@ func Default() Environment {
 func ParseUserEnvFromVolumeContext(volumeCtx map[string]string) (Environment, error) {
 	env := Environment{}
 	for key, value := range volumeCtx {
-		if !strings.Contains(key, "mountpointEnv.") {
+		envName, ok := strings.CutPrefix(key, mountpointEnvPrefix)
+		if !ok {
 			continue
 		}
-		keyParts := strings.Split(key, ".")
-		if len(keyParts) != 2 {
-			return nil, fmt.Errorf("Invalid Mountpoint environment format: %s", key)
+		if !slices.Contains(userEnvAllowlist, envName) {
+			return nil, fmt.Errorf("environment variable not allowed: %s (allowed: %v)", key, userEnvAllowlist)
 		}
-		if !slices.Contains(userEnvAllowlist, keyParts[1]) {
-			return nil, fmt.Errorf("Environment variable not allowed: %s", key)
-		}
-		env.Set(keyParts[1], value)
+		env.Set(envName, value)
 	}
 	return env, nil
 }

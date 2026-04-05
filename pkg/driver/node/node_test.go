@@ -435,7 +435,7 @@ func TestNodePublishVolume(t *testing.T) {
 					t.Fatal("NodePublishVolume is success")
 				}
 
-				expectedErrMsg := "Environment variable not allowed: mountpointEnv.FOO"
+				expectedErrMsg := "environment variable not allowed: mountpointEnv.FOO"
 				if !strings.Contains(err.Error(), expectedErrMsg) {
 					t.Errorf("Expected error message %q, but got %q", expectedErrMsg, err.Error())
 				}

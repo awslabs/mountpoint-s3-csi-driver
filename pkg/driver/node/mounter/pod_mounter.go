@@ -211,6 +211,8 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod *corev1.Pod, podPath string,
 	bucketName string, credEnv envprovider.Environment, userEnv envprovider.Environment, authenticationSource credentialprovider.AuthenticationSource,
 	args mountpoint.Args) error {
+
+	// Build environment with precedence (highest wins): credEnv > Default() > userEnv
 	env := envprovider.Environment{}
 	env.Merge(userEnv)
 	env.Merge(envprovider.Default())
