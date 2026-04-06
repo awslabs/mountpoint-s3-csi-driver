@@ -20,8 +20,8 @@ spec:
     volumeAttributes:
       bucketName: s3-csi-driver
       # Supported variables: HTTPS_PROXY, NO_PROXY
-      mountpointEnv.HTTPS_PROXY: "http://proxy.example.com:3128"
-      mountpointEnv.NO_PROXY: "sts.amazonaws.com"
+      mountpointEnv.HTTPS_PROXY: "http://proxy.default.svc.cluster.local:3128"
+      mountpointEnv.NO_PROXY: "169.254.169.254"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -35,6 +35,29 @@ spec:
     requests:
       storage: 1Gi
   volumeName: s3-pv # Name of your PV
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: proxy
+  labels:
+    app: proxy
+spec:
+  containers:
+    - name: proxy
+      image: ubuntu/squid:latest
+      ports:
+        - containerPort: 3128
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy
+spec:
+  selector:
+    app: proxy
+  ports:
+    - port: 3128
 ---
 apiVersion: v1
 kind: Pod

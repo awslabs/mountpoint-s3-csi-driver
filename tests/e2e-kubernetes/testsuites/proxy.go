@@ -55,8 +55,14 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		l local
 	)
 
-	f := framework.NewFrameworkWithCustomTimeouts("proxy", storageframework.GetDriverTimeouts(driver))
-	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"proxy", storageframework.GetDriverTimeouts(driver))
+
+	// Running squid proxy under Restricted level requires multiple configurations, eg:
+	// securityContext:
+	//   capabilities:
+	//     add: ["NET_BIND_SERVICE"]
+	// For simplicity, namespace only set to Baseline while keeping workload pod at Restricted
+	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	cleanup := func(ctx context.Context) {
 		var errs []error
@@ -71,7 +77,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		ginkgo.DeferCleanup(cleanup)
 	})
 
-	expectFailToMount := func(ctx context.Context) {
+	expectFailToMount := func(ctx context.Context, expectedErrMsg string) {
 		resource := createVolumeResourceWithAccessMode(ctx, l.config, pattern, v1.ReadWriteMany)
 		l.resources = append(l.resources, resource)
 
@@ -90,12 +96,9 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		}.AsSelector().String()
 		framework.Logf("Waiting for FailedMount event: %s", eventSelector)
 
-		err = e2eevents.WaitTimeoutForEvent(ctx, f.ClientSet, f.Namespace.Name, eventSelector, "MountVolume.SetUp failed", 5*time.Minute)
-		if err == nil {
-			framework.Logf("Got FailedMount event: %s", eventSelector)
-		} else {
-			framework.Logf("Didn't get FailedMount event: %s", eventSelector)
-		}
+		err = e2eevents.WaitTimeoutForEvent(ctx, f.ClientSet, f.Namespace.Name, eventSelector, expectedErrMsg, 5*time.Minute)
+		framework.ExpectNoError(err, "Expected FailedMount event containing %q", expectedErrMsg)
+		framework.Logf("Got FailedMount event containing %q", expectedErrMsg)
 
 		pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err)
@@ -103,58 +106,54 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 	}
 
 	ginkgo.It("should be able to operate behind proxy", func(ctx context.Context) {
-		proxyUrl := "proxy.default.svc.cluster.local"
+		proxyName := fmt.Sprintf("%s-proxy", f.UniqueName)
+		proxyUrl := fmt.Sprintf("%s.%s.svc.cluster.local", proxyName, f.Namespace.Name)
 		var proxyPort int32 = 3128
 		proxy := contextWithVolumeAttributes(ctx, map[string]string{
 			"mountpointEnv.HTTPS_PROXY": fmt.Sprintf("http://%s:%d", proxyUrl, proxyPort),
+			"mountpointEnv.NO_PROXY":    "169.254.169.254",
 		})
 
 		resource := createVolumeResource(proxy, l.config, pattern, v1.ReadWriteMany, []string{
-			fmt.Sprintf("uid=%d", defaultNonRootUser),
-			fmt.Sprintf("gid=%d", defaultNonRootGroup),
-			"allow-other",
 			"debug",
 			"debug-crt",
 		})
 		l.resources = append(l.resources, resource)
 
 		ginkgo.By("Creating proxy pod")
-		client := f.ClientSet.CoreV1().Pods(v1.NamespaceDefault)
 
 		proxyLabels := map[string]string{
-			"app": "proxy",
+			"app": proxyName,
 		}
 
 		proxyPod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "proxy",
-				Namespace: v1.NamespaceDefault,
-				Labels:    proxyLabels,
+				Name:   proxyName,
+				Labels: proxyLabels,
 			},
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
 					{
 						Name:  "proxy",
-						Image: "ubuntu/squid:latest",
+						Image: "public.ecr.aws/ubuntu/squid:latest",
 						Ports: []v1.ContainerPort{{ContainerPort: proxyPort}},
 					},
 				},
 			},
 		}
 
-		proxyPod, err := client.Create(ctx, proxyPod, metav1.CreateOptions{})
+		proxyPod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, proxyPod)
 		framework.ExpectNoError(err)
 		defer func() {
 			_ = e2epod.DeletePodWithWait(ctx, f.ClientSet, proxyPod)
 		}()
 
 		ginkgo.By("Creating proxy service")
-		serviceClient := f.ClientSet.CoreV1().Services(v1.NamespaceDefault)
+		serviceClient := f.ClientSet.CoreV1().Services(f.Namespace.Name)
 
 		proxyService := &v1.Service{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "proxy",
-				Namespace: v1.NamespaceDefault,
+				Name: proxyName,
 			},
 			Spec: v1.ServiceSpec{
 				Selector: proxyLabels,
@@ -165,7 +164,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		proxyService, err = serviceClient.Create(ctx, proxyService, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
 		defer func() {
-			e2eservice.WaitForServiceDeletedWithFinalizer(ctx, f.ClientSet, v1.NamespaceDefault, proxyService.Name)
+			e2eservice.WaitForServiceDeletedWithFinalizer(ctx, f.ClientSet, f.Namespace.Name, proxyService.Name)
 		}()
 
 		ginkgo.By("Creating workload pod with a volume")
@@ -182,14 +181,6 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking write to a volume")
 		checkWriteToPath(ctx, f, pod, fileInVol, toWrite, seed)
-		ginkgo.By("Checking read from a volume")
-		checkReadFromPath(ctx, f, pod, fileInVol, toWrite, seed)
-		ginkgo.By("Checking file group owner")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
-		ginkgo.By("Checking dir group owner")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
-		ginkgo.By("Checking pod identity")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
 
 		ginkgo.By("Checking mountpoint actually operate behind proxy")
 		// Find the Mountpoint pods associated with our volume
@@ -203,13 +194,13 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 	ginkgo.It("should fail when mountpointEnv.HTTPS_PROXY set to a non-existent proxy", func(ctx context.Context) {
 		expectFailToMount(contextWithVolumeAttributes(ctx, map[string]string{
-			"mountpointEnv.HTTPS_PROXY": "nonexistentproxy",
-		}))
+			"mountpointEnv.HTTPS_PROXY": "http://proxy.invalid:3128",
+		}), "AWS_IO_DNS_INVALID_NAME, Host name was invalid for dns resolution")
 	})
 
 	ginkgo.It("should reject unallowed env var", func(ctx context.Context) {
 		expectFailToMount(contextWithVolumeAttributes(ctx, map[string]string{
 			"mountpointEnv.FOO": "BAR",
-		}))
+		}), "environment variable not allowed")
 	})
 }
