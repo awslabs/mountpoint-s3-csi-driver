@@ -21,7 +21,7 @@ spec:
       bucketName: s3-csi-driver
       # Supported variables: HTTPS_PROXY, NO_PROXY
       mountpointEnv.HTTPS_PROXY: "http://proxy.default.svc.cluster.local:3128"
-      mountpointEnv.NO_PROXY: "169.254.169.254"
+      mountpointEnv.NO_PROXY: "sts.us-east-1.amazonaws.com"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

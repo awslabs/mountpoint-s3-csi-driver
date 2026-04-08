@@ -111,7 +111,6 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		var proxyPort int32 = 3128
 		proxy := contextWithVolumeAttributes(ctx, map[string]string{
 			"mountpointEnv.HTTPS_PROXY": fmt.Sprintf("http://%s:%d", proxyUrl, proxyPort),
-			"mountpointEnv.NO_PROXY":    "169.254.169.254",
 		})
 
 		resource := createVolumeResource(proxy, l.config, pattern, v1.ReadWriteMany, []string{
