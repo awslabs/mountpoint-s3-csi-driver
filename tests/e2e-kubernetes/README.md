@@ -19,7 +19,7 @@ ACTION=install_driver  tests/e2e-kubernetes/scripts/run.sh
 # option 1: kubeconfig inferred from CLUSTER_TYPE and ARCH
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 # option 2: kubeconfig set explicitly
-export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.eksctl.1.28.0.k8s.local.kubeconfig
+export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.eksctl.1.30.0.k8s.local.kubeconfig
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 
 ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh

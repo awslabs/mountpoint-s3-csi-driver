@@ -1,8 +1,20 @@
 # Unreleased
 
+# v2.5.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.5.0/README.md) 
+
 ### Notable changes
 * Add graceful pod eviction to ensure proper termination order. Mountpoint pods now remain active until all workload pods using the volume have terminated, preventing "Transport endpoint is not connected" errors. ([#693](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/693))
+* Forward `CacheEmptyDirSizeLimit` to Mountpoint as `--max-cache-size` when using `emptyDir` cache with the default storage medium. This fixes issues where Mountpoint cache usage would go over `CacheEmptyDirSizeLimit` and cause eviction of the Mountpoint pod. ([#743](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/743))
 * Add `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to Mountpoint Pods to prevent Cluster Autoscaler scale-down blocking. This resolves an issue where Cluster Autoscaler treated MP pods as non-replicated singleton pods, preventing node scale-down. ([#675](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/675))
+* Drop support for Kubernetes 1.29. ([#721](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/721))
+* Add `podLabels` configuration to Helm chart values. ([#714](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/714))
+* Add fallback logic for SA tokens via CSI secrets field. ([#728](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/728))
+* Headroom: Prevent premature workload pod ungating when PVC is unbound. ([#708](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/708))
+* Use hard-coded kubelet path for s3-plugin container. ([#656](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/656))
+* Support Mountpoint [version 1.22.2](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.22.2) ([#755](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/755))
+  * Update the internal S3 client to use the latest release of the AWS Common Runtime (CRT) libraries. ([#1778](https://github.com/awslabs/mountpoint-s3/pull/1778))
 
 # v2.4.1
 

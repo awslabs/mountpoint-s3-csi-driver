@@ -7,6 +7,8 @@ const (
 	STSRegion            = "stsRegion"
 
 	Cache                                = "cache"
+	CacheTypeEmptyDir                    = "emptyDir"
+	CacheTypeEphemeral                   = "ephemeral"
 	CacheEmptyDirSizeLimit               = "cacheEmptyDirSizeLimit"
 	CacheEmptyDirMedium                  = "cacheEmptyDirMedium"
 	CacheEphemeralStorageClassName       = "cacheEphemeralStorageClassName"

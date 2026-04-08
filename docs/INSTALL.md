@@ -5,7 +5,7 @@
 
 ## Prerequisites
 
-* Kubernetes Version >= 1.25
+* Kubernetes Version >= 1.30
 * A [supported Operating System (OS)](/README.md#distros-support-matrix) with **x86-64** or **arm64** architectures.
 
 ## Installation
