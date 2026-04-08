@@ -30,15 +30,11 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
   e2e-rosa:
-    name: "E2E ROSA Tests (${{ matrix.region }})"
+    name: E2E ROSA Tests
     uses: ./.github/workflows/e2e-rosa-tests.yaml
-    strategy:
-      matrix:
-        region:
-          - 'us-east-1'
     needs: approval
     with:
-      environment: "${{ matrix.region }}-rosa-untrusted"
+      environment: "rosa-untrusted"
       ref: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
   outcome:
