@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 )
 
 const (
@@ -25,7 +26,11 @@ const (
 	EnvSecretAccessKey                 = "AWS_SECRET_ACCESS_KEY"
 	EnvSessionToken                    = "AWS_SESSION_TOKEN"
 	EnvMountpointCacheKey              = "UNSTABLE_MOUNTPOINT_CACHE_KEY"
+	EnvHTTPSProxy                      = "HTTPS_PROXY"
+	EnvNoProxy                         = "NO_PROXY"
 )
+
+const mountpointEnvPrefix = "mountpointEnv."
 
 // Key represents an environment variable name.
 type Key = string
@@ -42,6 +47,12 @@ var envAllowlist = []Key{
 	EnvRegion,
 	EnvDefaultRegion,
 	EnvSTSRegionalEndpoints,
+}
+
+// userEnvAllowlist is the list of environment variables allowed to be configured by user.
+var userEnvAllowlist = []Key{
+	EnvHTTPSProxy,
+	EnvNoProxy,
 }
 
 // Region returns detected region from environment variables `AWS_REGION` or `AWS_DEFAULT_REGION`.
@@ -64,6 +75,21 @@ func Default() Environment {
 		}
 	}
 	return environment
+}
+
+func ParseUserEnvFromVolumeContext(volumeCtx map[string]string) (Environment, error) {
+	env := Environment{}
+	for key, value := range volumeCtx {
+		envName, ok := strings.CutPrefix(key, mountpointEnvPrefix)
+		if !ok {
+			continue
+		}
+		if !slices.Contains(userEnvAllowlist, envName) {
+			return nil, fmt.Errorf("environment variable not allowed: %s (allowed: %v)", key, userEnvAllowlist)
+		}
+		env.Set(envName, value)
+	}
+	return env, nil
 }
 
 // List returns a sorted slice of environment variables in "KEY=VALUE" format.
