@@ -106,7 +106,7 @@ var _ = ginkgo.SynchronizedAfterSuite(func() {}, func() {
 			f.Logf("Still waiting for %d Mountpoint pod(s) to be cleaned up: %v", len(pods.Items), names)
 		}
 		return len(pods.Items), nil
-	}).WithTimeout(5 * time.Minute).WithPolling(10 * time.Second).Should(gomega.Equal(0),
+	}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(gomega.Equal(0),
 		"Mountpoint pods in mount-s3 namespace were not cleaned up in time")
 	f.Logf("All Mountpoint pods cleaned up successfully")
 })
