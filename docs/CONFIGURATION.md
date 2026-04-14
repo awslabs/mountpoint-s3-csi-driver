@@ -62,6 +62,12 @@ spec:
       mountpointContainerResourcesLimitsCpu: 500m
       mountpointContainerResourcesLimitsMemory: 1Gi
 
+      # ----- ENVIRONMENT VARIABLE CONFIGURATION -----
+      # Optional: Pass extra environment variables to the mount-s3 process. Default: none.
+      # Supported variables: HTTPS_PROXY, NO_PROXY
+      mountpointEnv.HTTPS_PROXY: "http://proxy.example.com:3128"
+      mountpointEnv.NO_PROXY: "sts.us-east-1.amazonaws.com"
+
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

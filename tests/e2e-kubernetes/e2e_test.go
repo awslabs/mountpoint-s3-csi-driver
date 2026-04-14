@@ -72,6 +72,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3CSIPodSharingTestSuite,
 	custom_testsuites.InitS3TaintRemovalTestSuite,
 	custom_testsuites.InitS3CSIEvictionOrderTestSuite,
+	custom_testsuites.InitS3ProxyTestSuite,
 }
 
 func getCSITestSuites() []func() framework.TestSuite {
