@@ -20,6 +20,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
@@ -32,7 +33,7 @@ var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 const mountpointBin = "mount-s3"
 
 func main() {
-	klog.InitFlags(nil)
+	utillog.InitKlog()
 	flag.Parse()
 
 	mountpointBinFullPath := filepath.Join(*mountpointBinDir, mountpointBin)
