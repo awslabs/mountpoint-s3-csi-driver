@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 	"k8s.io/klog/v2"
 )
 
@@ -42,14 +42,8 @@ func main() {
 		mpVersion    = flag.String("mp-version", os.Getenv("MOUNTPOINT_VERSION"), "mp version to report in service name")
 		nodeID       = flag.String("node-id", os.Getenv(NodeIDEnvVar), "node-id to report in NodeGetInfo RPC")
 	)
-	klog.InitFlags(nil)
-	// Set logging to stderr false otherwise klog won't call our logger set via
-	// `klog.SetOutput` - which also logs to stderr after escaping newlines.
-	flag.Set("logtostderr", "false")
-	flag.Set("alsologtostderr", "false")
+	utillog.InitKlog()
 	flag.Parse()
-
-	klog.SetOutput(&newlineEscapingStderrWriter{})
 
 	if *printVersion {
 		info, err := version.GetVersionJSON()
@@ -84,21 +78,4 @@ func main() {
 	if err := drv.Run(); err != nil {
 		klog.Fatalln(err)
 	}
-}
-
-var (
-	newline       = []byte("\n")
-	newlineEscape = []byte("")
-)
-
-type newlineEscapingStderrWriter struct{}
-
-// Write writes given log entry to `os.Stderr` after escaping newlines.
-func (*newlineEscapingStderrWriter) Write(b []byte) (int, error) {
-	// Since we escape newlines here, `len` of written bytes might be different from `len(b)`,
-	// `os.Stderr.Write` returns an error when `writtenBytes != len(b)`, so, we should be fine to
-	// just return `n = len(b)`.
-	n := len(b)
-	_, err := os.Stderr.Write(append(bytes.ReplaceAll(b, newline, newlineEscape), newline...))
-	return n, err
 }
