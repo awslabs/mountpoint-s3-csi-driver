@@ -17,6 +17,8 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    permissions:
+      contents: read
   delete_cluster:
     needs: ["build_matrix"]
     strategy:
@@ -50,7 +52,7 @@ jobs:
         with:
           go-version-file: "go.mod"
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}

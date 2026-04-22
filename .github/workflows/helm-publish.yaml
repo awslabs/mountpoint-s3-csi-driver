@@ -1,22 +1,80 @@
 name: Helm publish
 
 on:
+  # This job is manually dispatched for now, since we do not have image build fully automated yet.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag referencing commit to create release from"
+        description: "Release tag (e.g. v2.0.0)"
         required: true
+      dry-run:
+        description: "Skip publishing Helm chart"
+        type: boolean
+        required: true
+        default: true
 
 jobs:
-  # This job is manually dispatched for now, since we do not have image build fully automated yet.
-  helm:
+  verify-helm-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment: "trusted"
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Checkout verification script from main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: main-branch
+          sparse-checkout: |
+            scripts/verify-helm-images.sh
+          sparse-checkout-cone-mode: false
+      - name: Install crane
+        run: |
+          cd /tmp
+          curl -sL "https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz" > crane.tar.gz
+          tar -xzf crane.tar.gz crane
+          sudo mv crane /usr/local/bin/crane
+          sudo chmod +x /usr/local/bin/crane
+          crane version
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          inline-session-policy: >-
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid":"AllowECRAuth",
+                  "Effect":"Allow",
+                  "Action":"ecr:GetAuthorizationToken",
+                  "Resource":"*"
+                },
+                {
+                  "Sid":"AllowECRRead",
+                  "Effect": "Allow",
+                  "Action": "ecr:BatchGetImage",
+                  "Resource": "arn:aws:ecr:us-east-1:602401143452:repository/eks/*"
+                }
+              ]
+            }
+      - name: Verify all images exist before publishing
+        run: ./main-branch/scripts/verify-helm-images.sh
+  publish-helm-chart:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Ensure only the latest version of the workflow can run, as this is global for the project
-    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [verify-helm-chart]
+    # Ensure only the latest version of this job on main can run for publishing, as this is global for the project
+    if: ${{ github.ref == 'refs/heads/main' && !inputs.dry-run }}
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}

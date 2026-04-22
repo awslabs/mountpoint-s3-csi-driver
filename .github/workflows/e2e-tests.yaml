@@ -24,6 +24,8 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    permissions:
+      contents: read
   build:
     runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}
@@ -88,7 +90,7 @@ jobs:
         with:
           go-version-file: "go.mod"
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -99,6 +101,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Create cluster
+        id: create_cluster
         env:
           ACTION: "create_cluster"
         run: |
@@ -156,13 +159,12 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver (PodMounter)
-        if: always()
+        # Skip uninstall if cluster creation did not succeed - no cluster to communicate with
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' }}
         env:
           ACTION: "uninstall_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
-
-      # Everything is tested, delete the cluster
       - name: Delete cluster
         if: always()
         env:
@@ -184,7 +186,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
