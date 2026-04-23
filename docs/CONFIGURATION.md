@@ -57,6 +57,8 @@ spec:
 
       # ----- RESOURCE CONFIGURATION -----
       # Optional: Configure Mountpoint container resource requests/limits
+      # Note: Specifying `ResourcesRequests` is currently not recommended since it may lead to failures like those described in
+      # [Scheduler problems with v2 #543](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543)
       mountpointContainerResourcesRequestsCpu: 500m
       mountpointContainerResourcesRequestsMemory: 1Gi
       mountpointContainerResourcesLimitsCpu: 500m
