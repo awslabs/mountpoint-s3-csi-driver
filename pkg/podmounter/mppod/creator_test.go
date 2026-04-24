@@ -95,12 +95,12 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, image, mpPod.Spec.Containers[0].Image)
 		assert.Equals(t, imagePullPolicy, mpPod.Spec.Containers[0].ImagePullPolicy)
 		assert.Equals(t, []string{command}, mpPod.Spec.Containers[0].Command)
-		assert.Equals(t, ptr.To(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+		assert.Equals(t, new(false), mpPod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
 		assert.Equals(t, &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		}, mpPod.Spec.Containers[0].SecurityContext.Capabilities)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.Containers[0].SecurityContext.RunAsUser)
-		assert.Equals(t, ptr.To(true), mpPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
+		assert.Equals(t, new(true), mpPod.Spec.Containers[0].SecurityContext.RunAsNonRoot)
 		assert.Equals(t, &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		}, mpPod.Spec.Containers[0].SecurityContext.SeccompProfile)
@@ -202,7 +202,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			verifyDefaultValues(mpPod)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+					SizeLimit: new(resource.MustParse(sizeLimit)),
 				},
 			})
 		})
@@ -258,7 +258,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			verifyDefaultValues(mpPod)
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: ptr.To(resource.MustParse(sizeLimit)),
+					SizeLimit: new(resource.MustParse(sizeLimit)),
 					Medium:    corev1.StorageMediumMemory,
 				},
 			})
@@ -617,7 +617,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 }
 
 func TestCreatingMountpointPods(t *testing.T) {
-	createAndVerifyPod(t, cluster.DefaultKubernetes, ptr.To(int64(1000)))
+	createAndVerifyPod(t, cluster.DefaultKubernetes, new(int64(1000)))
 }
 
 func TestCreatingMountpointPodsInOpenShift(t *testing.T) {
