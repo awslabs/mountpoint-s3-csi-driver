@@ -5,3 +5,23 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      all-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-root-deps:
+        patterns:
+          - "*"
+  - package-ecosystem: "gomod"
+    directory: "/tests/e2e-kubernetes"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-e2e-deps:
+        patterns:
+          - "*"
