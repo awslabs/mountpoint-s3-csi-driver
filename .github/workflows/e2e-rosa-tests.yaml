@@ -77,6 +77,8 @@ jobs:
           go-version-file: "go.mod"
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.9" # FIXME - Remove pin once Terraform >= 1.15.1 is released
       - name: Configure AWS Credentials
         id: aws-creds
         uses: aws-actions/configure-aws-credentials@v6
