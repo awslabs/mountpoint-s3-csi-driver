@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 )
@@ -145,15 +144,15 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking write to a volume")
-		checkWriteToPath(f, pod, fileInVol, toWrite, seed)
+		checkWriteToPath(ctx, f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking read from a volume")
-		checkReadFromPath(f, pod, fileInVol, toWrite, seed)
+		checkReadFromPath(ctx, f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking file group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
+		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking dir group owner")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
+		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking pod identity")
-		e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
+		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
 	}
 	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
 		validateWriteToVolume(ctx)
@@ -177,7 +176,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		}()
 		volPath := "/mnt/volume1"
 		ginkgo.By("Checking file group owner")
-		_, stderr, err := e2evolume.PodExec(f, pod, fmt.Sprintf("ls %s", volPath))
+		_, stderr, err := e2epod.ExecShellInPodWithFullOutput(ctx, f, pod.Name, fmt.Sprintf("ls %s", volPath))
 		gomega.Expect(err).To(gomega.HaveOccurred())
 		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"))
 	}
