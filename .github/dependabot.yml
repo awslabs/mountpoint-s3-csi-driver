@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      all-actions:
+      gh-actions:
         patterns:
           - "*"
   - package-ecosystem: "gomod"
@@ -14,14 +14,16 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      all-root-deps:
-        patterns:
-          - "*"
+      gomod-root-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "gomod"
     directory: "/tests/e2e-kubernetes"
     schedule:
       interval: "weekly"
     groups:
-      all-e2e-deps:
-        patterns:
-          - "*"
+      gomod-e2e-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
