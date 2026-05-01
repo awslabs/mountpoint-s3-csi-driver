@@ -24,6 +24,7 @@ on:
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
+  queue: max
 
 env:
   IMAGE_NAME: "s3-csi-driver"
