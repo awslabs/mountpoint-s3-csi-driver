@@ -10,6 +10,7 @@ on:
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
+  queue: max
 
 jobs:
   delete_rosa_cluster:
