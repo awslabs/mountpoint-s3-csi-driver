@@ -57,7 +57,7 @@ E2E_COMMIT_ID?=local
 E2E_KUBECONFIG?=""
 
 # Kubernetes version to use in envtest for controller tests.
-ENVTEST_K8S_VERSION ?= 1.30.x
+ENVTEST_K8S_VERSION ?= 1.33.x
 
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
@@ -177,6 +177,10 @@ e2e: e2e-controller
 .PHONY: check_style
 check_style:
 	test -z "$$(gofmt -d . | tee /dev/stderr)"
+
+.PHONY: check_tidy
+check_mod_tidy:
+	test -z "$$(go mod tidy --diff | tee /dev/stderr)"
 
 .PHONY: check_licenses
 check_licenses: download_go_deps

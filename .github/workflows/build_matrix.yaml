@@ -4,13 +4,17 @@ on:
       matrix:
         description: "Matrix"
         value: ${{ jobs.build_matrix.outputs.matrix }}
+
+permissions:
+  contents: read
+
 jobs:
   build_matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.parse_yaml.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Parse matrix.yaml file
         id: parse_yaml
         run: |
