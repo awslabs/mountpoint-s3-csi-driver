@@ -82,7 +82,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		var pods []*v1.Pod
 		node := l.config.ClientNodeSelection
 		// Create each pod with pvc
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			index := i + 1
 			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, node))
 			pod, err := e2epod.CreatePod(ctx, f.ClientSet, f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{pvc}, admissionapi.LevelBaseline, "")
@@ -124,7 +124,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
 		}()
-		for i := 0; i < len(pvcs); i++ {
+		for i := range pvcs {
 			fileInVol := fmt.Sprintf("/mnt/volume%d/file.txt", i+1)
 			volSeed := seed + int64(i)
 			if doWrite {
@@ -169,7 +169,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		var pvcs []*v1.PersistentVolumeClaim
 		numVols := 2
 
-		for i := 0; i < numVols; i++ {
+		for range numVols {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 			pvcs = append(pvcs, resource.Pvc)

@@ -208,8 +208,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 			mountOptions := append(baseMountOptions, "allow-delete")
 			podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-				pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-				pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+				pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+				pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 			})
 
 			pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
@@ -265,8 +265,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 				})
 
 				pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
@@ -297,8 +297,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				mountOptions := append(baseMountOptions, "allow-delete")
 				podModifiers := append(basePodModifiers, func(pod *v1.Pod) {
-					pod.Spec.Containers[0].SecurityContext.RunAsUser = ptr.To(root)
-					pod.Spec.Containers[0].SecurityContext.RunAsGroup = ptr.To(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsUser = new(root)
+					pod.Spec.Containers[0].SecurityContext.RunAsGroup = new(root)
 				})
 
 				pod, bucketName := createPod(ctx, mountOptions, podModifiers...)
@@ -468,7 +468,7 @@ func ensureCacheDirExistsInNode(pod *v1.Pod, cacheDir string) {
 	}
 	// We need to set this false at Pod-level as `chmod-cache-dir` needs to run as `root` and this
 	// would prevent container creation if its true.
-	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(false)
+	pod.Spec.SecurityContext.RunAsNonRoot = new(false)
 
 	// The directory created with `DirectoryOrCreate` will have 0755 permissions and will be owned by kubelet.
 	// Unless we change permissions here, non-root containers won't be able to access to the cache dir.
@@ -477,8 +477,8 @@ func ensureCacheDirExistsInNode(pod *v1.Pod, cacheDir string) {
 		Image:   e2epod.GetDefaultTestImage(),
 		Command: e2epod.GenerateScriptCmd("chmod -R 777 /cache"),
 		SecurityContext: &v1.SecurityContext{
-			RunAsUser:  ptr.To(root),
-			RunAsGroup: ptr.To(root),
+			RunAsUser:  new(root),
+			RunAsGroup: new(root),
 		},
 		VolumeMounts: []v1.VolumeMount{cacheVolumeMount},
 	})

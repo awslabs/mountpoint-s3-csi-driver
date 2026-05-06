@@ -36,7 +36,6 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -1029,15 +1028,15 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
-		RoleName:                 ptr.To(roleName),
-		AssumeRolePolicyDocument: ptr.To(assumeRolePolicyDocument),
+		RoleName:                 new(roleName),
+		AssumeRolePolicyDocument: new(assumeRolePolicyDocument),
 	})
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
 		framework.Logf("Deleting IAM role")
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		return err
 	}
@@ -1045,8 +1044,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	for _, policyName := range policyNames {
 		policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 		_, err := client.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
-			RoleName:  ptr.To(roleName),
-			PolicyArn: ptr.To(policyArn),
+			RoleName:  new(roleName),
+			PolicyArn: new(policyArn),
 		})
 		framework.ExpectNoError(err)
 	}
@@ -1054,7 +1053,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.Logf("Waiting until all policies are attached to IAM role")
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		policies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		if err != nil {
 			return false, err
@@ -1079,8 +1078,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		for _, policyName := range policyNames {
 			policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 			_, err := client.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
-				RoleName:  ptr.To(roleName),
-				PolicyArn: ptr.To(policyArn),
+				RoleName:  new(roleName),
+				PolicyArn: new(policyArn),
 			})
 			errs = append(errs, err)
 		}
@@ -1094,9 +1093,9 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	return waitUntilRoleIsAssumableSTS(ctx, client.AssumeRole, &sts.AssumeRoleInput{
-		RoleArn:         ptr.To(roleArn),
-		RoleSessionName: ptr.To(f.BaseName),
-		DurationSeconds: ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:         new(roleArn),
+		RoleSessionName: new(f.BaseName),
+		DurationSeconds: new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
@@ -1157,10 +1156,10 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableSTS(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
-		RoleArn:          ptr.To(roleARN),
-		RoleSessionName:  ptr.To(f.BaseName),
-		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),
-		DurationSeconds:  ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:          new(roleARN),
+		RoleSessionName:  new(f.BaseName),
+		WebIdentityToken: new(serviceAccountToken.Status.Token),
+		DurationSeconds:  new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
@@ -1186,8 +1185,8 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	client := eksauth.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableEKS(ctx, client.AssumeRoleForPodIdentity, &eksauth.AssumeRoleForPodIdentityInput{
-		ClusterName: ptr.To(ClusterName),
-		Token:       ptr.To(serviceAccountToken.Status.Token),
+		ClusterName: new(ClusterName),
+		Token:       new(serviceAccountToken.Status.Token),
 	})
 }
 
@@ -1337,7 +1336,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 		return ""
 	}
 
-	var configuration map[string]interface{}
+	var configuration map[string]any
 	err = json.Unmarshal(response, &configuration)
 	if err != nil {
 		framework.Logf("failed to parse OIDC configuration: %v", err)
