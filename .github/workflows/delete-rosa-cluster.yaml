@@ -29,8 +29,6 @@ jobs:
           persist-credentials: false
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: "1.14.9" # FIXME - Remove pin once Terraform >= 1.15.1 is released
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
