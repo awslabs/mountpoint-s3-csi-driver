@@ -5,3 +5,25 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod-root-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "gomod"
+    directory: "/tests/e2e-kubernetes"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod-e2e-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
