@@ -27,6 +27,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"net"
 	"os"
@@ -42,6 +43,7 @@ var (
 	commDir          = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
 	mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
 	recvTimeout      = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
+	stderrCapacity   = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
 )
 
 const (
@@ -67,7 +69,7 @@ func main() {
 
 	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
 
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{})
+	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity})
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	sigCh := make(chan os.Signal, 1)
@@ -86,7 +88,7 @@ func main() {
 		conn, err := listener.Accept()
 		if err != nil {
 			// Check if listener was closed (shutdown)
-			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+			if errors.Is(err, net.ErrClosed) {
 				klog.Info("Listener closed, exiting accept loop")
 				break
 			}

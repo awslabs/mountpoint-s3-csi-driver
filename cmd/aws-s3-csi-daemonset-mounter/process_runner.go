@@ -5,10 +5,12 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"os/exec"
+	"sync"
+
+	"k8s.io/klog/v2"
 )
 
 // ProcessHandle represents a started process that can be waited on.
@@ -24,34 +26,39 @@ type ProcessRunner interface {
 }
 
 // defaultProcessRunner is the real implementation that starts OS processes.
-type defaultProcessRunner struct{}
+type defaultProcessRunner struct {
+	stderrCapacity uint
+}
 
 func (r *defaultProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
-	var stderrBuf bytes.Buffer
+	stderrBuf := newTailBuf(r.stderrCapacity)
 	if cmd.Stderr != nil {
-		cmd.Stderr = io.MultiWriter(cmd.Stderr, &stderrBuf)
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, stderrBuf)
 	} else {
-		cmd.Stderr = &stderrBuf
+		cmd.Stderr = stderrBuf
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &realProcessHandle{cmd: cmd, stderrBuf: &stderrBuf}, nil
+	return &defaultProcessHandle{cmd: cmd, stderrBuf: stderrBuf}, nil
 }
 
-type realProcessHandle struct {
+type defaultProcessHandle struct {
 	cmd       *exec.Cmd
-	stderrBuf *bytes.Buffer
+	stderrBuf *tailBuf
 }
 
-func (h *realProcessHandle) Pid() int { return h.cmd.Process.Pid }
+func (h *defaultProcessHandle) Pid() int { return h.cmd.Process.Pid }
 
-func (h *realProcessHandle) Wait() (int, []byte) {
+func (h *defaultProcessHandle) Wait() (int, []byte) {
 	err := h.cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
+		} else {
+			klog.Errorf("Unexpected error waiting for process %d: %v", h.cmd.Process.Pid, err)
+			exitCode = 1
 		}
 	} else {
 		exitCode = h.cmd.ProcessState.ExitCode()
@@ -59,6 +66,56 @@ func (h *realProcessHandle) Wait() (int, []byte) {
 	return exitCode, h.stderrBuf.Bytes()
 }
 
-func (h *realProcessHandle) Signal(sig os.Signal) error {
+func (h *defaultProcessHandle) Signal(sig os.Signal) error {
 	return h.cmd.Process.Signal(sig)
+}
+
+// tailBuf is a fixed-capacity ring buffer that retains the last N bytes written.
+type tailBuf struct {
+	mu   sync.Mutex
+	buf  []byte
+	pos  int
+	full bool
+}
+
+func newTailBuf(capacity uint) *tailBuf {
+	return &tailBuf{buf: make([]byte, capacity)}
+}
+
+func (tb *tailBuf) Write(p []byte) (int, error) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	n := len(p)
+	cap := len(tb.buf)
+	if cap == 0 {
+		return n, nil
+	}
+	if len(p) >= cap {
+		copy(tb.buf, p[len(p)-cap:])
+		tb.pos = 0
+		tb.full = true
+		return n, nil
+	}
+	for len(p) > 0 {
+		space := cap - tb.pos
+		copied := copy(tb.buf[tb.pos:], p[:min(len(p), space)])
+		tb.pos = (tb.pos + copied) % cap
+		if tb.pos == 0 || copied == space {
+			tb.full = true
+		}
+		p = p[copied:]
+	}
+	return n, nil
+}
+
+func (tb *tailBuf) Bytes() []byte {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if !tb.full {
+		return append([]byte(nil), tb.buf[:tb.pos]...)
+	}
+	out := make([]byte, len(tb.buf))
+	n := copy(out, tb.buf[tb.pos:])
+	copy(out[n:], tb.buf[:tb.pos])
+	return out
 }
