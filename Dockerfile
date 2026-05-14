@@ -19,7 +19,6 @@ FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as m
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
-# gnupg2-minimal is pre-installed in AL2023 and provides gpg for signature verification
 RUN dnf install -y gzip wget tar fuse-libs binutils patchelf
 
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
