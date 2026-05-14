@@ -19,7 +19,10 @@ FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as m
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
-RUN dnf install -y gzip wget tar fuse-libs binutils patchelf
+RUN dnf install -y gzip wget tar fuse-libs binutils patchelf && \
+    # gnupg2-minimal doesn't include gpg-agent needed for signature verification.
+    # https://docs.aws.amazon.com/linux/al2023/ug/gnupg-minimal.html
+    dnf swap -y gnupg2-minimal gnupg2-full
 
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz" && \
