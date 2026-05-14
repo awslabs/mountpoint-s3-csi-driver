@@ -15,15 +15,12 @@
 ARG MOUNTPOINT_VERSION=1.22.2
 
 # Download the mountpoint tarball and produce an installable directory
-# Building on Amazon Linux 2 because it has an old libc version. libfuse from the os
-# is being packaged up in the container and a newer version linking to a too new glibc
-# can cause portability issues
-FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as mp_builder
+FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
 ARG MOUNTPOINT_VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
-# We need the full version of GnuPG
-RUN yum install -y gzip wget gnupg2 tar fuse-libs binutils patchelf
+# gnupg2-minimal is pre-installed in AL2023 and provides gpg for signature verification
+RUN dnf install -y gzip wget tar fuse-libs binutils patchelf
 
 RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNTPOINT_VERSION}/$MP_ARCH/mount-s3-${MOUNTPOINT_VERSION}-$MP_ARCH.tar.gz" && \
@@ -44,7 +41,7 @@ RUN MP_ARCH=`echo ${TARGETARCH} | sed s/amd64/x86_64/` && \
     patchelf --set-rpath '$ORIGIN' /mountpoint-s3/bin/mount-s3
 
 # Build driver. Use BUILDPLATFORM not TARGETPLATFORM for cross compilation
-FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.26.2 as builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/eks-distro-build-tooling/golang:1.26.2-al23 as builder
 ARG TARGETARCH
 
 WORKDIR /go/src/github.com/awslabs/mountpoint-s3-csi-driver
@@ -54,7 +51,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 
 # `eks-distro-minimal-base-csi` includes `libfuse` and mount utils such as `umount`.
 # We need to make sure to use same Amazon Linux version here and while producing Mountpoint to not have glibc compatibility issues.
-FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest AS linux-amazon
+FROM --platform=$TARGETPLATFORM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi:latest-al23 AS linux-amazon
 ARG MOUNTPOINT_VERSION
 ENV MOUNTPOINT_VERSION=${MOUNTPOINT_VERSION}
 ENV MOUNTPOINT_BIN_DIR=/mountpoint-s3/bin
