@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/wait"
 	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -1186,17 +1187,30 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 	})
 }
 
+// Retries CreateToken for up to ~15s to handle transient API server errors
+// (e.g. gRPC connection closing during token signing).
+func createServiceAccountToken(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, tokenRequest *authenticationv1.TokenRequest) *authenticationv1.TokenRequest {
+	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
+	var serviceAccountToken *authenticationv1.TokenRequest
+	backoff := wait.Backoff{Steps: 5, Duration: 500 * time.Millisecond, Factor: 2.0, Jitter: 0.1}
+	err := k8sretry.OnError(backoff, apierrors.IsInternalError, func() error {
+		var err error
+		serviceAccountToken, err = saClient.CreateToken(ctx, sa.Name, tokenRequest, metav1.CreateOptions{})
+		return err
+	})
+	framework.ExpectNoError(err)
+	return serviceAccountToken
+}
+
 func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
 	roleARN := sa.Annotations[roleARNAnnotation]
 	framework.Logf("Waiting until IAM role %s for ServiceAccount %s is assumable with web identity", roleARN, sa.Name)
 
-	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
-	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
+	serviceAccountToken := createServiceAccountToken(ctx, f, sa, &authenticationv1.TokenRequest{
 		Spec: authenticationv1.TokenRequestSpec{
 			Audiences: []string{serviceAccountTokenAudienceSTS},
 		},
-	}, metav1.CreateOptions{})
-	framework.ExpectNoError(err)
+	})
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableSTS(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
@@ -1214,8 +1228,7 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	framework.Logf("Waiting until IAM role for ServiceAccount %s is assumable for EKS Pod Identity (%s, %s, %s)", sa.Name, pod.Name, pod.UID, pod.Namespace)
 
-	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
-	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
+	serviceAccountToken := createServiceAccountToken(ctx, f, sa, &authenticationv1.TokenRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: pod.Namespace,
 		},
@@ -1228,8 +1241,7 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 				UID:        pod.UID,
 			},
 		},
-	}, metav1.CreateOptions{})
-	framework.ExpectNoError(err)
+	})
 
 	client := eksauth.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableEKS(ctx, client.AssumeRoleForPodIdentity, &eksauth.AssumeRoleForPodIdentityInput{
