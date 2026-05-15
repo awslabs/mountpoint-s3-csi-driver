@@ -1,6 +1,7 @@
 package node_test
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"strings"
@@ -8,7 +9,6 @@ import (
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
-	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"

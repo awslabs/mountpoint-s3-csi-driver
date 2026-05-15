@@ -1,6 +1,6 @@
 module github.com/awslabs/mountpoint-s3-csi-driver
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.39.2
@@ -98,7 +98,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/moby/sys/mountinfo v0.7.1 // indirect
-	golang.org/x/net v0.48.0
+	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.39.0
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/protobuf v1.36.10
