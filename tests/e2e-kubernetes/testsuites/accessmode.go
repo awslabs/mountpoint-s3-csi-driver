@@ -77,7 +77,7 @@ func (t *s3CSIAccessModeTestSuite) DefineTests(driver storageframework.TestDrive
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking that write to a volume fails")
-		checkWriteToPathFails(f, pod, fileInVol, toWrite, seed)
+		checkWriteToPathFails(ctx, f, pod, fileInVol, toWrite, seed)
 	}
 	ginkgo.It("should fail to write to ReadOnlyMany volume", func(ctx context.Context) {
 		validateWriteToVolumeFails(ctx)

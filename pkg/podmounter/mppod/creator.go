@@ -109,12 +109,12 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 				ImagePullPolicy: c.config.Container.ImagePullPolicy,
 				Command:         []string{c.config.Container.Command},
 				SecurityContext: &corev1.SecurityContext{
-					AllowPrivilegeEscalation: ptr.To(false),
+					AllowPrivilegeEscalation: new(false),
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
 					RunAsUser:    uid,
-					RunAsNonRoot: ptr.To(true),
+					RunAsNonRoot: new(true),
 					SeccompProfile: &corev1.SeccompProfile{
 						Type: corev1.SeccompProfileTypeRuntimeDefault,
 					},

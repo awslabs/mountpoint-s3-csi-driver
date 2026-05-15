@@ -52,7 +52,6 @@ func TestUserAgent(t *testing.T) {
 	}
 
 	for name, test := range tests {
-		test := test
 		t.Run(name, func(t *testing.T) {
 			if got, expected := UserAgent(test.authenticationSource, test.k8sVersion), test.result; got != expected {
 				t.Fatalf("UserAgent(%q, %q) returned %q; expected %q", test.authenticationSource, test.k8sVersion, got, expected)
