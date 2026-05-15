@@ -25,14 +25,6 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
-      - name: Checkout verification script from main
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          path: main-branch
-          sparse-checkout: |
-            scripts/verify-helm-images.sh
-          sparse-checkout-cone-mode: false
       - name: Install crane
         run: |
           cd /tmp
@@ -65,7 +57,7 @@ jobs:
               ]
             }
       - name: Verify all images exist before publishing
-        run: ./main-branch/scripts/verify-helm-images.sh
+        run: ./scripts/verify-helm-images.sh
   publish-helm-chart:
     runs-on: ubuntu-latest
     permissions:
