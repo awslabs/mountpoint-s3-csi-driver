@@ -100,7 +100,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/moby/sys/mountinfo v0.7.1 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
-	golang.org/x/net v0.48.0
+	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.39.0
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/protobuf v1.36.10
