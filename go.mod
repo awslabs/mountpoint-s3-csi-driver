@@ -3,6 +3,7 @@ module github.com/awslabs/mountpoint-s3-csi-driver
 go 1.26.2
 
 require (
+	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/aws/aws-sdk-go-v2 v1.39.2
 	github.com/aws/aws-sdk-go-v2/config v1.31.12
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.9

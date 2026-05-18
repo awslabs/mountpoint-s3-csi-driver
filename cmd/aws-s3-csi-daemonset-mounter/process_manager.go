@@ -27,7 +27,7 @@ const errorFileExt = ".error"
 // ProcessManager tracks and manages Mountpoint child processes.
 type ProcessManager struct {
 	commDir   string
-	runner    ProcessRunner
+	runner    ProcessRunner // interface for spawning processes; substituted in tests
 	mu        sync.Mutex
 	processes map[string]ProcessHandle // mountId -> process handle
 	wg        sync.WaitGroup           // tracks waiter goroutines
@@ -143,9 +143,15 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 		if len(line) == 0 && i == len(lines)-1 {
 			break
 		}
-		pw.w.Write([]byte(pw.prefix))
-		pw.w.Write(line)
-		pw.w.Write([]byte("\n"))
+		if _, err := pw.w.Write([]byte(pw.prefix)); err != nil {
+			return 0, err
+		}
+		if _, err := pw.w.Write(line); err != nil {
+			return 0, err
+		}
+		if _, err := pw.w.Write([]byte("\n")); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }

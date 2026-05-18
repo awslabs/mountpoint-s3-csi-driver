@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync"
 
+	"github.com/armon/circbuf"
 	"k8s.io/klog/v2"
 )
 
@@ -31,7 +31,10 @@ type defaultProcessRunner struct {
 }
 
 func (r *defaultProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
-	stderrBuf := newTailBuf(r.stderrCapacity)
+	stderrBuf, err := circbuf.NewBuffer(int64(r.stderrCapacity))
+	if err != nil {
+		return nil, err
+	}
 	if cmd.Stderr != nil {
 		cmd.Stderr = io.MultiWriter(cmd.Stderr, stderrBuf)
 	} else {
@@ -45,7 +48,7 @@ func (r *defaultProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 
 type defaultProcessHandle struct {
 	cmd       *exec.Cmd
-	stderrBuf *tailBuf
+	stderrBuf *circbuf.Buffer
 }
 
 func (h *defaultProcessHandle) Pid() int { return h.cmd.Process.Pid }
@@ -68,54 +71,4 @@ func (h *defaultProcessHandle) Wait() (int, []byte) {
 
 func (h *defaultProcessHandle) Signal(sig os.Signal) error {
 	return h.cmd.Process.Signal(sig)
-}
-
-// tailBuf is a fixed-capacity ring buffer that retains the last N bytes written.
-type tailBuf struct {
-	mu   sync.Mutex
-	buf  []byte
-	pos  int
-	full bool
-}
-
-func newTailBuf(capacity uint) *tailBuf {
-	return &tailBuf{buf: make([]byte, capacity)}
-}
-
-func (tb *tailBuf) Write(p []byte) (int, error) {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	n := len(p)
-	cap := len(tb.buf)
-	if cap == 0 {
-		return n, nil
-	}
-	if len(p) >= cap {
-		copy(tb.buf, p[len(p)-cap:])
-		tb.pos = 0
-		tb.full = true
-		return n, nil
-	}
-	for len(p) > 0 {
-		space := cap - tb.pos
-		copied := copy(tb.buf[tb.pos:], p[:min(len(p), space)])
-		tb.pos = (tb.pos + copied) % cap
-		if tb.pos == 0 || copied == space {
-			tb.full = true
-		}
-		p = p[copied:]
-	}
-	return n, nil
-}
-
-func (tb *tailBuf) Bytes() []byte {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	if !tb.full {
-		return append([]byte(nil), tb.buf[:tb.pos]...)
-	}
-	out := make([]byte, len(tb.buf))
-	n := copy(out, tb.buf[tb.pos:])
-	copy(out[n:], tb.buf[:tb.pos])
-	return out
 }
