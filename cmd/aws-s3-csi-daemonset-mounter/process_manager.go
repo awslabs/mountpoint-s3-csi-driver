@@ -9,12 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/process"
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
@@ -176,43 +175,26 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 	}
 }
 
-// countOpenFDs counts open file descriptors of this process by reading /proc/self/fd.
 func countOpenFDs() int {
-	entries, err := os.ReadDir("/proc/self/fd")
+	p, err := process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		return -1
 	}
-	return len(entries)
+	n, err := p.NumFDs()
+	if err != nil {
+		return -1
+	}
+	return int(n)
 }
 
-// countChildProcesses counts child processes of this process by reading /proc.
 func countChildProcesses() int {
-	myPid := os.Getpid()
-	entries, err := os.ReadDir("/proc")
+	p, err := process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		return -1
 	}
-
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil {
-			continue
-		}
-		stat, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-		if err != nil {
-			continue
-		}
-		fields := strings.SplitN(string(stat[strings.LastIndex(string(stat), ")")+2:]), " ", 3)
-		if len(fields) >= 2 {
-			ppid, _ := strconv.Atoi(fields[1])
-			if ppid == myPid && pid != myPid {
-				count++
-			}
-		}
+	children, err := p.Children()
+	if err != nil {
+		return -1
 	}
-	return count
+	return len(children)
 }
