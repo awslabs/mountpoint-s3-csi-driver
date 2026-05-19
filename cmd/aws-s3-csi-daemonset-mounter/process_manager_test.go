@@ -343,6 +343,76 @@ func countOpenFds(t *testing.T) int {
 	return len(entries)
 }
 
+func TestHandleConnection_MountIdValidation(t *testing.T) {
+	validIds := []string{
+		"abcdef12-3456-7890-abcd-ef1234567890-vol456",
+		"pvc-abcdef12-3456-7890-abcd-ef1234567890",
+		"s3-pv",
+	}
+	invalidIds := []string{
+		"../../etc/passwd",
+		"../parent",
+		"slash/inside",
+		"/absolute",
+		"-starts-with-dash",
+		".starts-with-dot",
+		"has spaces",
+		"has\nnewline",
+	}
+
+	commDir := t.TempDir()
+	fr := &fakeProcessRunner{}
+	pm := NewProcessManager(commDir, fr)
+
+	sockPath := filepath.Join(commDir, "test.sock")
+	listener, err := net.Listen("unix", sockPath)
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	dev := mountertest.OpenDevNull(t)
+	defer dev.Close()
+
+	sendMount := func(id string) {
+		sendDone := make(chan struct{})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			mountoptions.Send(ctx, sockPath, mountoptions.Options{
+				Fd:         int(dev.Fd()),
+				BucketName: "bucket",
+				VolumeId:   id,
+			})
+			close(sendDone)
+		}()
+
+		conn, err := listener.Accept()
+		assert.NoError(t, err)
+		handleConnection(conn.(*net.UnixConn), "/opt/mount-s3", pm, 5*time.Second)
+		<-sendDone
+	}
+
+	for _, id := range invalidIds {
+		sendMount(id)
+	}
+
+	fr.mu.Lock()
+	assert.Equals(t, 0, len(fr.handles))
+	fr.mu.Unlock()
+
+	for _, id := range validIds {
+		sendMount(id)
+	}
+
+	fr.mu.Lock()
+	assert.Equals(t, len(validIds), len(fr.handles))
+	fr.mu.Unlock()
+
+	for _, h := range fr.handles {
+		h.Exit(0, "")
+	}
+	pm.Shutdown()
+}
+
 func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}

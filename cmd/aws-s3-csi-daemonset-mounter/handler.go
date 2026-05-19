@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
+
+var validMountId = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // handleConnection receives mount options from a single connection and spawns a Mountpoint child process.
 func handleConnection(conn *net.UnixConn, mountpointPath string, pm *ProcessManager, recvTimeout time.Duration) {
@@ -26,9 +29,9 @@ func handleConnection(conn *net.UnixConn, mountpointPath string, pm *ProcessMana
 	}
 
 	mountId := options.VolumeId
-	if mountId == "" {
+	if mountId == "" || !validMountId.MatchString(mountId) {
 		syscall.Close(options.Fd)
-		klog.Error("Received mount options without mount identifier, cannot track child process")
+		klog.Errorf("Received mount request with invalid mountId: %q", mountId)
 		return
 	}
 

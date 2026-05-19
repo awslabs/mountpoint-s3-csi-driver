@@ -157,6 +157,7 @@ func RecvOnConn(conn *net.UnixConn, deadline time.Time) (Options, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
+			closeFds(unixRightsBuf)
 			return Options{}, fmt.Errorf("failed to read message from connection: %w", err)
 		}
 
