@@ -25,6 +25,10 @@ type Options struct {
 	BucketName string   `json:"bucketName"`
 	Args       []string `json:"args"`
 	Env        []string `json:"env"`
+	// VolumeId is a unique mount identifier used by the daemonset mounter for child process
+	// tracking and error file naming. In daemonset mode this is "<podUID>-<volumeId>".
+	// With pod sharing it'll be "volumeID" (PersistentVolume: metadata.name).
+	VolumeId string `json:"volumeId,omitempty"`
 }
 
 // Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.
@@ -127,7 +131,18 @@ func Recv(ctx context.Context, sockPath string) (Options, error) {
 		return Options{}, fmt.Errorf("failed to accept connection from unix socket %s: %w", sockPath, err)
 	}
 
-	unixConn := conn.(*net.UnixConn)
+	deadline, _ := ctx.Deadline()
+	return RecvOnConn(conn.(*net.UnixConn), deadline)
+}
+
+// RecvOnConn receives mount options from an already-accepted connection.
+// If deadline is non-zero, a read deadline is set on the connection.
+func RecvOnConn(conn *net.UnixConn, deadline time.Time) (Options, error) {
+	if !deadline.IsZero() {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			return Options{}, fmt.Errorf("failed to set read deadline on connection: %w", err)
+		}
+	}
 
 	messageBuf := make([]byte, 0)
 	unixRightsBuf := make([]byte, 0)
@@ -137,13 +152,13 @@ func Recv(ctx context.Context, sockPath string) (Options, error) {
 		message := make([]byte, messageRecvSize)
 		unixRights := make([]byte, unixRightsRecvSize)
 
-		messageN, unixRightsN, _, _, err := unixConn.ReadMsgUnix(message, unixRights)
+		messageN, unixRightsN, _, _, err := conn.ReadMsgUnix(message, unixRights)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-
-			return Options{}, fmt.Errorf("failed to read message from unix socket %s: %w", sockPath, err)
+			closeFds(unixRightsBuf)
+			return Options{}, fmt.Errorf("failed to read message from connection: %w", err)
 		}
 
 		messageBuf = append(messageBuf, message[:messageN]...)
@@ -151,22 +166,37 @@ func Recv(ctx context.Context, sockPath string) (Options, error) {
 	}
 
 	var options Options
-	err = json.Unmarshal(messageBuf, &options)
+	err := json.Unmarshal(messageBuf, &options)
 	if err != nil {
-		return Options{}, fmt.Errorf("failed to decode mount options from unix socket %s: %w", sockPath, err)
+		closeFds(unixRightsBuf)
+		return Options{}, fmt.Errorf("failed to decode mount options from connection: %w", err)
 	}
 
 	fds, err := parseUnixRights(unixRightsBuf)
 	if err != nil {
-		return Options{}, fmt.Errorf("failed to decode unix rights from unix socket %s: %w", sockPath, err)
+		return Options{}, fmt.Errorf("failed to decode unix rights from connection: %w", err)
 	}
 
 	if len(fds) != 1 {
-		return Options{}, fmt.Errorf("expected to got one file descriptor from unix socket %s, but got %d", sockPath, len(fds))
+		for _, fd := range fds {
+			syscall.Close(fd)
+		}
+		return Options{}, fmt.Errorf("expected one file descriptor from connection, but got %d", len(fds))
 	}
 
 	options.Fd = fds[0]
 	return options, nil
+}
+
+// closeFds attempts to parse and close any file descriptors in the raw unix rights buffer.
+func closeFds(unixRightsBuf []byte) {
+	fds, err := parseUnixRights(unixRightsBuf)
+	if err != nil {
+		return
+	}
+	for _, fd := range fds {
+		syscall.Close(fd)
+	}
 }
 
 // parseUnixRights parses given socket control message to extract passed file descriptors.

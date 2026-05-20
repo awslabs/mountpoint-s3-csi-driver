@@ -69,5 +69,6 @@ COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/LICENSES
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-driver /bin/aws-s3-csi-driver
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-controller /bin/aws-s3-csi-controller
 COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-mounter /bin/aws-s3-csi-mounter
+COPY --from=builder /go/src/github.com/awslabs/mountpoint-s3-csi-driver/bin/aws-s3-csi-daemonset-mounter /bin/aws-s3-csi-daemonset-mounter
 
 ENTRYPOINT ["/bin/aws-s3-csi-driver"]
