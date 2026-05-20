@@ -2,11 +2,12 @@ package mounter
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -154,7 +155,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	})
 	if err != nil {
 		// If send failed due to stale path, invalidate cache and retry once
-		if isStalePath(err) {
+		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) {
 			klog.V(4).Infof("DaemonsetMounter: comm dir may be stale, re-discovering")
 			dm.invalidateCommDir()
 			commDir, err = dm.getCommDir(ctx)
@@ -255,7 +256,7 @@ func (dm *DaemonsetMounter) invalidateCommDir() {
 
 // discoverCommDir finds the secondary mounter pod on this node and returns the path
 // to its emptyDir comm volume as seen from the primary daemonset (via kubelet pod dir).
-// It retries until secondary daemonset mounter appearsin case primary starts before secondary.
+// It retries until secondary daemonset mounter appears in case primary starts before secondary.
 func (dm *DaemonsetMounter) discoverCommDir(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, daemonsetMountReadyTimeout)
 	defer cancel()
@@ -303,7 +304,7 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, moun
 	ctx, cancel := context.WithTimeout(parentCtx, daemonsetMountReadyTimeout)
 	defer cancel()
 
-	mountResultCh := make(chan error, 1)
+	mountResultCh := make(chan error, 2)
 
 	// Poll for error file
 	go func() {
@@ -332,24 +333,4 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, moun
 	}()
 
 	return <-mountResultCh
-}
-
-// isStalePath checks if an error indicates the comm dir path is no longer valid.
-func isStalePath(err error) bool {
-	return os.IsNotExist(err) || os.IsPermission(err) ||
-		isENOENT(err)
-}
-
-func isENOENT(err error) bool {
-	for err != nil {
-		if pe, ok := err.(*os.PathError); ok {
-			if pe.Err == syscall.ENOENT {
-				return true
-			}
-			err = pe.Err
-		} else {
-			break
-		}
-	}
-	return false
 }
