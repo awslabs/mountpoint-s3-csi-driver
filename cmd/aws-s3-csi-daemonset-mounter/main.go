@@ -1,6 +1,6 @@
 // `aws-s3-csi-daemonset-mounter` is the entrypoint binary running on the secondary (mounter) DaemonSet.
 // It listens on a Unix domain socket for mount requests from the CSI Driver Node Pod,
-// and spawns a Mountpoint instance for each request.
+// and spawns a Mountpoint process for each request.
 //
 // Unlike the pod-per-mount architecture (V2), this binary manages multiple Mountpoint processes
 // within a single pod. Each mount request produces exactly one Mountpoint child process.
