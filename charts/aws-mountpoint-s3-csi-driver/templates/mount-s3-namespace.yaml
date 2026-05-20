@@ -1,3 +1,4 @@
+{{- if ne .Values.experimental.mounterMode "daemonset" }}
 {{- if .Values.mountpointPod.createNamespace }}
 ---
 apiVersion: v1
@@ -7,4 +8,5 @@ metadata:
   labels:
     name: {{ .Values.mountpointPod.namespace }}
     pod-security.kubernetes.io/enforce: restricted
+{{- end }}
 {{- end }}

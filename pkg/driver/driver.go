@@ -62,6 +62,7 @@ const (
 
 var (
 	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+	mounterMode            = os.Getenv("MOUNTER_MODE")
 	podWatcherResyncPeriod = time.Minute
 	scheme                 = runtime.NewScheme()
 )
@@ -117,28 +118,38 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	stopCh := make(chan struct{})
 
-	mpMounter := mpmounter.New()
-	podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
-	err = podWatcher.Start(stopCh)
-	if err != nil {
-		klog.Fatalf("Failed to start Pod watcher: %v\n", err)
+	var nodeMounter mounter.Mounter
+
+	if mounterMode == "daemonset" {
+		klog.Info("Using daemonset mounter mode")
+		dm := mounter.NewDaemonsetMounter(clientset, nodeID)
+		go dm.WarmCommDir(context.Background())
+		nodeMounter = dm
+	} else {
+		mpMounter := mpmounter.New()
+		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
+		err = podWatcher.Start(stopCh)
+		if err != nil {
+			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
+		}
+
+		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
+
+		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
+
+		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
+
+		go unmounter.StartPeriodicCleanup(stopCh)
+
+		podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
+			kubernetesVersion, nodeID, variant)
+		if err != nil {
+			klog.Fatalln(err)
+		}
+		nodeMounter = podMounter
 	}
 
-	s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
-
-	unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
-
-	podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
-
-	go unmounter.StartPeriodicCleanup(stopCh)
-
-	podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-		kubernetesVersion, nodeID, variant)
-	if err != nil {
-		klog.Fatalln(err)
-	}
-
-	nodeServer := node.NewS3NodeServer(nodeID, podMounter)
+	nodeServer := node.NewS3NodeServer(nodeID, nodeMounter)
 
 	return &Driver{
 		Endpoint:   endpoint,
