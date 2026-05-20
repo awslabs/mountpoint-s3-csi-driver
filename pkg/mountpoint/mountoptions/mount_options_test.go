@@ -2,6 +2,9 @@ package mountoptions_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +91,112 @@ func testRoundtrip(t *testing.T, mountSock string) {
 	assert.Equals(t, wantStat.Dev, gotStat.Dev)
 	assert.Equals(t, wantStat.Ino, gotStat.Ino)
 	assert.Equals(t, want, got)
+}
+
+// TestRecvCloseFdsOnError verifies that RecvOnConn closes received file descriptors on error.
+// NOTE: Do not use t.Parallel() here — fd counting via /proc/self/fd is process-global
+// and would be unreliable if other tests open/close fds concurrently.
+func TestRecvCloseFdsOnError(t *testing.T) {
+	t.Run("Bad JSON", func(t *testing.T) {
+		testRecvClosesFdsOnError(t, []byte("not json"), 1)
+	})
+	t.Run("More Than One Fd", func(t *testing.T) {
+		testRecvClosesFdsOnError(t, mustMarshal(t, mountoptions.Options{BucketName: "b"}), 2)
+	})
+}
+
+func testRecvClosesFdsOnError(t *testing.T, message []byte, fdCount int) {
+	// Create files to send as fds.
+	files := make([]*os.File, fdCount)
+	for i := range files {
+		file, err := os.Open(os.DevNull)
+		assert.NoError(t, err)
+		defer file.Close()
+		files[i] = file
+	}
+
+	// Set up a unix socket pair.
+	server, client, err := unixSocketPair(t)
+	assert.NoError(t, err)
+	defer server.Close()
+
+	// Send message with fds from client side.
+	fds := make([]int, len(files))
+	for i, f := range files {
+		fds[i] = int(f.Fd())
+	}
+	unixRights := syscall.UnixRights(fds...)
+	_, _, err = client.WriteMsgUnix(message, unixRights, nil)
+	assert.NoError(t, err)
+	client.Close()
+
+	// Count open fds before Recv.
+	fdsBefore := countOpenFds(t)
+
+	// RecvOnConn should return an error and not leak fds.
+	_, recvErr := mountoptions.RecvOnConn(server, time.Time{})
+	if recvErr == nil {
+		t.Fatal("expected RecvOnConn to return an error")
+	}
+
+	// Count open fds after Recv - should not have increased.
+	fdsAfter := countOpenFds(t)
+	if fdsAfter > fdsBefore {
+		t.Errorf("file descriptor leak: had %d open fds before RecvOnConn, have %d after", fdsBefore, fdsAfter)
+	}
+}
+
+func TestRecvOnConnRespectsDeadline(t *testing.T) {
+	server, client, err := unixSocketPair(t)
+	assert.NoError(t, err)
+	defer server.Close()
+	defer client.Close()
+
+	_, err = mountoptions.RecvOnConn(server, time.Now().Add(50*time.Millisecond))
+	if err == nil {
+		t.Fatal("expected RecvOnConn to return a timeout error")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("expected timeout error, got: %v", err)
+	}
+}
+
+func unixSocketPair(t *testing.T) (*net.UnixConn, *net.UnixConn, error) {
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	serverFile := os.NewFile(uintptr(fds[0]), "server")
+	clientFile := os.NewFile(uintptr(fds[1]), "client")
+
+	serverConn, err := net.FileConn(serverFile)
+	serverFile.Close() // FileConn dups the fd, close the original.
+	if err != nil {
+		clientFile.Close()
+		return nil, nil, err
+	}
+	clientConn, err := net.FileConn(clientFile)
+	clientFile.Close() // FileConn dups the fd, close the original.
+	if err != nil {
+		serverConn.Close()
+		return nil, nil, err
+	}
+	return serverConn.(*net.UnixConn), clientConn.(*net.UnixConn), nil
+}
+
+func countOpenFds(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	assert.NoError(t, err)
+	return len(entries)
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	assert.NoError(t, err)
+	return data
 }
 
 const defaultTimeout = 10 * time.Second
