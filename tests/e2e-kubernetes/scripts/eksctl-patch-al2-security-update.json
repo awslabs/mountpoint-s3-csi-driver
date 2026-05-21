@@ -1,0 +1,10 @@
+[
+  {
+    "op": "add",
+    "path": "/managedNodeGroups/0/preBootstrapCommands",
+    "value": [
+      "yum update --security -y",
+      "reboot"
+    ]
+  }
+]

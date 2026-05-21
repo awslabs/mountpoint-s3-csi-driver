@@ -36,8 +36,9 @@ function eksctl_compute_cluster_spec_hash() {
   NODE_TYPE=${1}
   ZONES=${2}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${3}
+  EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE=${4}
 
-  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}-${EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE}" | sha256sum | cut -d' ' -f1
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
@@ -65,8 +66,9 @@ function eksctl_create_cluster() {
   AMI_FAMILY=${11}
   K8S_VERSION=${12}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
+  EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE=${14:-}
 
-  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" "${EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE}")
 
   # Check if cluster exists and matches our specs
   if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
@@ -100,6 +102,11 @@ function eksctl_create_cluster() {
 
   if [ -n "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" ]; then
     ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_SELINUX_ENFORCING_FILE)" -o yaml > $CLUSTER_FILE_TMP
+    mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+  fi
+
+  if [ -n "$EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE" ]; then
+    ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_AL2_SECURITY_UPDATE_FILE)" -o yaml > $CLUSTER_FILE_TMP
     mv $CLUSTER_FILE_TMP $CLUSTER_FILE
   fi
 
