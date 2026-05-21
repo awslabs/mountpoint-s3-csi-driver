@@ -1,4 +1,5 @@
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
+{{- $mounter := index .Values.daemonsetMounters 0 }}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -18,27 +19,27 @@ spec:
       labels:
         app: aws-s3-csi-daemonset-mounter
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
-        {{- with .Values.mounterDaemonset.podLabels }}
+        {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-        {{- with .Values.mounterDaemonset.nodeSelector }}
+        {{- with $mounter.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       priorityClassName: system-node-critical
-      {{- with .Values.mounterDaemonset.affinity }}
+      {{- with $mounter.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
-        {{- if .Values.mounterDaemonset.tolerateAllTaints }}
+        {{- if $mounter.tolerateAllTaints }}
         - operator: Exists
         {{- end }}
-        {{- with .Values.mounterDaemonset.tolerations }}
+        {{- with $mounter.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.mounterDaemonset.imagePullSecrets }}
+      {{- with $mounter.imagePullSecrets }}
       imagePullSecrets:
       {{- range . }}
         - name: {{ . }}
@@ -66,7 +67,7 @@ spec:
         volumeMounts:
           - name: comm
             mountPath: /comm
-        {{- with .Values.mounterDaemonset.resources }}
+        {{- with $mounter.resources }}
         resources:
           {{- toYaml . | nindent 12 }}
         {{- end }}

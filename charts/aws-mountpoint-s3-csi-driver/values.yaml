@@ -141,16 +141,16 @@ experimental:
   # one mountpoint pod per workload in v2. The controller, CRD, and mount-s3 namespace are not deployed.
   mounterMode: "pod"
 
-# Configuration for the secondary mounter daemonset.
+# Configuration for the secondary mounter daemonset(s).
 # Only used when experimental.mounterMode is "daemonset".
-mounterDaemonset:
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-  podLabels: {}
-  nodeSelector: {}
-  tolerateAllTaints: true
-  tolerations: []
-  affinity: {}
-  imagePullSecrets: []
+daemonsetMounters:
+  - resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    podLabels: {}
+    nodeSelector: {}
+    tolerateAllTaints: true
+    tolerations: []
+    affinity: {}
+    imagePullSecrets: []
