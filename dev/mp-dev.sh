@@ -144,7 +144,7 @@ deploy_helm_chart() {
         ./charts/aws-mountpoint-s3-csi-driver
 
     # Restart the mounter DS pod (OnDelete strategy means helm upgrade alone won't recreate it)
-    kubectl -n kube-system delete po -lapp=s3-csi-mounter --ignore-not-found
+    kubectl -n kube-system delete po -lapp=s3-csi-daemonset-mounter --ignore-not-found
 }
 
 deploy_containers() {
@@ -187,7 +187,7 @@ deploy_containers() {
     # Note pod mode has controller and no mounter daemonset, vice versa in daemonset mode
     kubectl -n kube-system delete po -lapp=s3-csi-controller --ignore-not-found
     kubectl -n kube-system delete po -lapp=s3-csi-node
-    kubectl -n kube-system delete po -lapp=s3-csi-mounter --ignore-not-found
+    kubectl -n kube-system delete po -lapp=s3-csi-daemonset-mounter --ignore-not-found
 }
 
 deploy() {

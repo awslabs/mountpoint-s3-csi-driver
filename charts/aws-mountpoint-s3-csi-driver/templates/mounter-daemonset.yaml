@@ -3,7 +3,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: aws-s3-csi-daemonset-mounter
+  name: s3-csi-daemonset-mounter
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
@@ -12,12 +12,12 @@ spec:
     type: OnDelete
   selector:
     matchLabels:
-      app: aws-s3-csi-daemonset-mounter
+      app: s3-csi-daemonset-mounter
       {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: aws-s3-csi-daemonset-mounter
+        app: s3-csi-daemonset-mounter
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
         {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}

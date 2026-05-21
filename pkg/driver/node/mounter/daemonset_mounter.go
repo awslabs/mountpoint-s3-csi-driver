@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	mounterPodLabel  = "app=aws-s3-csi-daemonset-mounter"
+	mounterPodLabel  = "app=s3-csi-daemonset-mounter"
 	commVolumeName   = "comm"
 	mountSockName    = "mount.sock"
 	mountErrorSuffix = ".error"
