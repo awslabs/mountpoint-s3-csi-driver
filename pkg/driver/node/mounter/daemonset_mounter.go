@@ -34,6 +34,8 @@ const (
 	daemonsetMountPollInterval = 500 * time.Millisecond
 )
 
+var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
+
 // DaemonsetMounter is a [Mounter] that delegates Mountpoint process management
 // to a secondary daemonset running on the same node. It communicates via the
 // secondary pod's emptyDir volume, accessed through the kubelet pod directory.
@@ -259,7 +261,7 @@ func (dm *DaemonsetMounter) discoverCommDir(ctx context.Context) (string, error)
 	defer cancel()
 
 	for {
-		pods, err := dm.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		pods, err := dm.clientset.CoreV1().Pods(mounterNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: mounterPodLabel,
 			FieldSelector: "spec.nodeName=" + dm.nodeID,
 		})
