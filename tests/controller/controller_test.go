@@ -959,6 +959,63 @@ var _ = Describe("Mountpoint Controller", func() {
 		})
 	})
 
+	Context("Duplicate S3PodAttachments recovery", func() {
+		It("should delete duplicate empty S3PodAttachments and create a fresh one with the workload UID", func() {
+			vol := createVolume()
+			vol.bind()
+
+			// Pre-create two empty S3PAs sharing the same field-tuple as the workload pod
+			// will produce.
+			emptyA := newEmptyS3PodAttachment(testNode, vol.pv)
+			emptyB := newEmptyS3PodAttachment(testNode, vol.pv)
+			Expect(k8sClient.Create(ctx, emptyA)).To(Succeed())
+			Expect(k8sClient.Create(ctx, emptyB)).To(Succeed())
+			waitForObject(emptyA)
+			waitForObject(emptyB)
+
+			pod := createPod(withPVC(vol.pvc))
+			pod.schedule(testNode)
+
+			// Both empties get deleted by recovery.
+			waitForObjectToDisappear(emptyA)
+			waitForObjectToDisappear(emptyB)
+
+			// Recovery returns nil, caller creates a fresh S3PA, workload UID lands in it.
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+		})
+
+		It("should keep the duplicate that references Mountpoint Pods, delete the empty one, and assign the new workload to the survivor's existing Mountpoint Pod", func() {
+			vol := createVolume()
+			vol.bind()
+
+			// Schedule a first workload so the reconciler naturally creates the live S3PA and a
+			// real Mountpoint Pod that the second workload can be assigned to.
+			pod1 := createPod(withPVC(vol.pvc))
+			pod1.schedule(testNode)
+			live, mpPod := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod1)
+
+			// Inject an empty duplicate sharing the same field-tuple as `live`.
+			empty := newEmptyS3PodAttachment(testNode, vol.pv)
+			Expect(k8sClient.Create(ctx, empty)).To(Succeed())
+			waitForObject(empty)
+
+			// Schedule a second workload onto the same node/volume.
+			pod2 := createPod(withPVC(vol.pvc))
+			pod2.schedule(testNode)
+
+			// Empty duplicate deleted; the live S3PA survives and the second workload UID is
+			// added to the existing Mountpoint Pod entry alongside pod1's UID.
+			waitForObjectToDisappear(empty)
+			waitForObject(live, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
+				g.Expect(s3pa.Spec.MountpointS3PodAttachments).To(HaveLen(1))
+				g.Expect(s3pa.Spec.MountpointS3PodAttachments[mpPod.Name]).To(ConsistOf(
+					MatchFields(IgnoreExtras, Fields{"WorkloadPodUID": Equal(string(pod1.UID))}),
+					MatchFields(IgnoreExtras, Fields{"WorkloadPodUID": Equal(string(pod2.UID))}),
+				))
+			})
+		})
+	})
+
 	Context("Mountpoint Pod Customization", func() {
 		It("should use configured service account name in PV", func() {
 			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
@@ -2097,3 +2154,22 @@ func findVolumeMountFromContainer(container corev1.Container, name string) *core
 func generateRandomNodeName() string {
 	return fmt.Sprintf("test-node-%s", uuid.New().String()[:8])
 }
+
+// newEmptyS3PodAttachment builds an S3PA whose field-tuple matches what the reconciler will
+// look up for a workload scheduled to `node` with PV `pv` (auth=driver, no fsGroup), but with
+// an empty `MountpointS3PodAttachments` map.
+func newEmptyS3PodAttachment(node string, pv *corev1.PersistentVolume) *crdv2.MountpointS3PodAttachment {
+	return &crdv2.MountpointS3PodAttachment{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "s3pa-empty-"},
+		Spec: crdv2.MountpointS3PodAttachmentSpec{
+			NodeName:                   node,
+			PersistentVolumeName:       pv.Name,
+			VolumeID:                   pv.Spec.CSI.VolumeHandle,
+			MountOptions:               strings.Join(pv.Spec.MountOptions, ","),
+			AuthenticationSource:       "driver",
+			WorkloadFSGroup:            "",
+			MountpointS3PodAttachments: map[string][]crdv2.WorkloadAttachment{},
+		},
+	}
+}
+
