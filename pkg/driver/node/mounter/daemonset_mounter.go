@@ -25,14 +25,12 @@ import (
 )
 
 const (
-	// Name of the emptyDir volume on the secondary daemonset used for communication.
-	commVolumeName = "comm"
+	mounterPodLabel  = "app=aws-s3-csi-daemonset-mounter"
+	commVolumeName   = "comm"
+	mountSockName    = "mount.sock"
+	mountErrorSuffix = ".error"
 
-	// Label used to identify the secondary (mounter) daemonset pods.
-	mounterPodLabel = "app=s3-csi-mounter"
-
-	// Timeout for waiting for Mountpoint to start serving after sending options.
-	daemonsetMountReadyTimeout = 30 * time.Second
+	daemonsetMountReadyTimeout = 15 * time.Second
 	daemonsetMountPollInterval = 500 * time.Millisecond
 )
 
@@ -78,7 +76,11 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 
 	// Idempotency: if target is already a healthy Mountpoint mount, return early.
 	// Kubelet may call NodePublishVolume repeatedly (requiresRepublish, retries).
-	if isMounted, err := dm.IsMountPoint(target); err == nil && isMounted {
+	isMounted, err := dm.IsMountPoint(target)
+	if err != nil {
+		return fmt.Errorf("failed to check if target %q is a mount point: %w", target, err)
+	}
+	if isMounted {
 		klog.V(4).Infof("DaemonsetMounter: target %s is already mounted, nothing to do", target)
 		return nil
 	}
@@ -135,8 +137,8 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	}
 
 	// Step 2: Send mount options to secondary daemonset
-	sockPath := filepath.Join(commDir, "mount.sock")
-	errFilePath := filepath.Join(commDir, mountId+".error")
+	sockPath := filepath.Join(commDir, mountSockName)
+	errFilePath := filepath.Join(commDir, mountId+mountErrorSuffix)
 
 	// Remove old error file if exists
 	os.Remove(errFilePath)
@@ -154,27 +156,13 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		VolumeId:   mountId,
 	})
 	if err != nil {
-		// If send failed due to stale path, invalidate cache and retry once
+		// If send failed due to stale path, invalidate cache, and let Kubelet
+		// retry NodePublishVolume.
 		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) {
-			klog.V(4).Infof("DaemonsetMounter: comm dir may be stale, re-discovering")
+			klog.V(4).Infof("DaemonsetMounter: comm dir may be stale, invalidating cache")
 			dm.invalidateCommDir()
-			commDir, err = dm.getCommDir(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to re-discover mounter pod comm dir: %w", err)
-			}
-			sockPath = filepath.Join(commDir, "mount.sock")
-			errFilePath = filepath.Join(commDir, mountId+".error")
-			err = mountoptions.Send(sendCtx, sockPath, mountoptions.Options{
-				Fd:         fd,
-				BucketName: bucketName,
-				Args:       args.SortedList(),
-				Env:        env.List(),
-				VolumeId:   mountId,
-			})
 		}
-		if err != nil {
-			return fmt.Errorf("failed to send mount options for volume %s (mount %s): %w", volumeId, mountId, err)
-		}
+		return fmt.Errorf("failed to send mount options for volume %s (mount %s): %w", volumeId, mountId, err)
 	}
 
 	// Close the FD in this process — the secondary daemonset now holds it
@@ -198,6 +186,15 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 	err := dm.mount.Unmount(target)
 	if err != nil {
 		return fmt.Errorf("failed to unmount %q: %w", target, err)
+	}
+
+	// Attempt to clean up stale error files (if Mountpoint crashed after a successful mount)
+	dm.mu.Lock()
+	commDir := dm.commDir
+	dm.mu.Unlock()
+	if commDir != "" {
+		mountId := credentialCtx.PodID + "-" + credentialCtx.VolumeID
+		os.Remove(filepath.Join(commDir, mountId+mountErrorSuffix))
 	}
 
 	klog.V(4).Infof("DaemonsetMounter: volume %s unmounted from %s", credentialCtx.VolumeID, target)
@@ -231,7 +228,7 @@ func (dm *DaemonsetMounter) getCommDir(ctx context.Context) (string, error) {
 	defer dm.mu.Unlock()
 
 	if dm.commDir != "" {
-		sockPath := filepath.Join(dm.commDir, "mount.sock")
+		sockPath := filepath.Join(dm.commDir, mountSockName)
 		if _, err := os.Stat(sockPath); err == nil {
 			return dm.commDir, nil
 		}

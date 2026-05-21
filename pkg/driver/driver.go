@@ -63,6 +63,7 @@ const (
 var (
 	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
 	mounterMode            = os.Getenv("MOUNTER_MODE")
+	mounterModeDaemonset   = "daemonset"
 	podWatcherResyncPeriod = time.Minute
 	scheme                 = runtime.NewScheme()
 )
@@ -120,7 +121,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	var nodeMounter mounter.Mounter
 
-	if mounterMode == "daemonset" {
+	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID)
 		go dm.WarmCommDir(context.Background())
