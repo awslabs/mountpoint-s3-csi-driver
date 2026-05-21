@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -1192,14 +1193,28 @@ func waitUntilRoleIsAssumableEKS[Input any, Output any](
 func createServiceAccountToken(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount, tokenRequest *authenticationv1.TokenRequest) *authenticationv1.TokenRequest {
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	var serviceAccountToken *authenticationv1.TokenRequest
-	backoff := wait.Backoff{Steps: 5, Duration: 500 * time.Millisecond, Factor: 2.0, Jitter: 0.1}
-	err := k8sretry.OnError(backoff, apierrors.IsInternalError, func() error {
+	backoff := wait.Backoff{Steps: 5, Duration: time.Second, Factor: 2.0, Jitter: 0.1}
+	err := k8sretry.OnError(backoff, isRetriableTokenError, func() error {
 		var err error
 		serviceAccountToken, err = saClient.CreateToken(ctx, sa.Name, tokenRequest, metav1.CreateOptions{})
+		if err != nil {
+			framework.Logf("Failed to get token for ServiceAccount %s: %v", sa.Name, err)
+		}
 		return err
 	})
 	framework.ExpectNoError(err)
 	return serviceAccountToken
+}
+
+func isRetriableTokenError(err error) bool {
+	var statusErr *apierrors.StatusError
+	if goerrors.As(err, &statusErr) {
+		code := statusErr.Status().Code
+		if code >= 400 && code < 500 && code != http.StatusTooManyRequests {
+			return false
+		}
+	}
+	return true
 }
 
 func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.Framework, sa *v1.ServiceAccount) {
