@@ -353,7 +353,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			s3paNames, mountpointPodNames = verifyPodsShareMountpointPod(ctx, f, pods, defaultExpectedFields(targetNode, resource.Pv))
 			defer deleteWorkloadPodsAndEnsureMountpointResourcesCleaned(ctx, f, pods, s3paNames, mountpointPodNames)
 
-			e2epod.VerifyExecInPodSucceed(ctx, f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
+			checkExecInPodSucceed(ctx, f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
 		})
 
 		// Regression test for race condition fixed in https://github.com/awslabs/mountpoint-s3-csi-driver/pull/652
