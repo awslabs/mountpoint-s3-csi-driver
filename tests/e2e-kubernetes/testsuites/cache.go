@@ -110,8 +110,8 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		// Ensure the data still read from the cache - without cache this would fail as its removed from underlying bucket
 		checkReadFromPath(ctx, f, pod, first, testWriteSize, seed)
 
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
+		checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("mkdir %s && cd %s && echo 'second!' > %s; sync", dir, dir, second))
+		checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'second!'", second))
 		checkListingPathWithEntries(ctx, f, pod, dir, []string{"second"})
 		checkListingPathWithEntries(ctx, f, pod, basePath, []string{"test-dir"})
 		checkDeletingPath(ctx, f, pod, first)
@@ -244,7 +244,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			})
 
 			pod, _ := createPod(ctx, mountOptions, podModifiers...)
-			e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'hello world!'", testFile))
+			checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("cat %s | grep -q 'hello world!'", testFile))
 		})
 
 		// If we're testing multi-level cache, add two more test cases:
@@ -275,7 +275,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 
 				// Now remove the file from S3 and wipe out local cache
 				deleteObjectFromS3(ctx, bucketName, "first")
-				e2epod.VerifyExecInPodSucceed(ctx, f, pod, "rm -rf /cache/*")
+				checkExecInPodSucceed(ctx, f, pod, "rm -rf /cache/*")
 
 				// Reading should still work
 				for range 3 {
