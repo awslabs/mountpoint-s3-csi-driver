@@ -2172,4 +2172,3 @@ func newEmptyS3PodAttachment(node string, pv *corev1.PersistentVolume) *crdv2.Mo
 		},
 	}
 }
-
