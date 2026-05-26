@@ -1,4 +1,7 @@
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
+{{- if gt (len .Values.daemonsetMounters) 1 }}
+{{- fail "Only one entry in daemonsetMounters is supported currently" }}
+{{- end }}
 {{- $mounter := index .Values.daemonsetMounters 0 }}
 kind: DaemonSet
 apiVersion: apps/v1
