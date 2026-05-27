@@ -311,11 +311,14 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 		return Requeue, err
 	}
 	fieldFilters := r.buildFieldFilters(workloadPod, pv, roleArn)
-	s3pa, err := r.getExistingS3PodAttachment(ctx, fieldFilters)
+	log := r.setupLogger(ctx, workloadPod, pvc, workloadUID, fieldFilters)
+	s3pa, err := r.getExistingS3PodAttachment(ctx, fieldFilters, log)
 	if err != nil {
 		return Requeue, err
 	}
-	log := r.setupLogger(ctx, workloadPod, pvc, workloadUID, fieldFilters, s3pa)
+	if s3pa != nil {
+		log = log.WithValues("s3pa", s3pa.Name)
+	}
 
 	if !isPodActive(workloadPod) {
 		return r.handleInactivePod(ctx, s3pa, workloadUID, fieldFilters, log)
@@ -328,25 +331,20 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 }
 
-// setupLogger creates and configures logger that includes pod namespace/name, PVC name, and workload UID fields.
-// If an S3PodAttachment is provided, its name is added. All fieldFilters are appended as additional key-value pairs.
+// setupLogger creates and configures logger that includes pod namespace/name, PVC name, and workload UID fields,
+// plus any provided fieldFilters.
 func (r *Reconciler) setupLogger(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
 	pvc *corev1.PersistentVolumeClaim,
 	workloadUID string,
 	fieldFilters client.MatchingFields,
-	s3pa *crdv2.MountpointS3PodAttachment,
 ) logr.Logger {
 	logger := logf.FromContext(ctx).WithValues(
 		"workloadPod", types.NamespacedName{Namespace: workloadPod.Namespace, Name: workloadPod.Name},
 		"pvc", pvc.Name,
 		"workloadUID", workloadUID,
 	)
-
-	if s3pa != nil {
-		logger = logger.WithValues("s3pa", s3pa.Name)
-	}
 
 	var keyValues []any
 	for k, v := range fieldFilters {
@@ -407,8 +405,11 @@ func (r *Reconciler) getFSGroup(workloadPod *corev1.Pod) string {
 // It returns:
 // - The matching MountpointS3PodAttachment if exactly one is found
 // - nil if no matching resource is found
-// - An error if multiple matching resources are found or if the list operation fails
-func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields) (*crdv2.MountpointS3PodAttachment, error) {
+// - An error if multiple matching resources are found and cannot be auto-resolved, or if the list operation fails
+//
+// When the API server holds multiple S3PAs for the same field-tuple, we attempt to recover in-place by dropping
+// empty-map duplicates.
+func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilters client.MatchingFields, log logr.Logger) (*crdv2.MountpointS3PodAttachment, error) {
 	s3paList := &crdv2.MountpointS3PodAttachmentList{}
 	if err := r.List(ctx, s3paList, fieldFilters); err != nil {
 		return nil, fmt.Errorf("failed to list MountpointS3PodAttachments: %w", err)
@@ -420,8 +421,52 @@ func (r *Reconciler) getExistingS3PodAttachment(ctx context.Context, fieldFilter
 	case 1:
 		return &s3paList.Items[0], nil
 	default:
-		return nil, fmt.Errorf("found %d MountpointS3PodAttachments when expecting 0 or 1", len(s3paList.Items))
+		return r.recoverFromDuplicateS3PodAttachments(ctx, s3paList.Items, fieldFilters, log)
 	}
+}
+
+// recoverFromDuplicateS3PodAttachments is a defense-in-depth handler for duplicate S3PAs sharing
+// the same field-tuple. Deletes duplicates that reference no Mountpoint Pods. Returns:
+//   - the surviving S3PA, if exactly one duplicate references Mountpoint Pods
+//   - nil, if all duplicates referenced no Mountpoint Pods and have been deleted
+//     (caller should re-create through handleNewS3PodAttachment)
+//   - an error, if more than one duplicate references Mountpoint Pods
+func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, duplicates []crdv2.MountpointS3PodAttachment, fieldFilters client.MatchingFields, log logr.Logger) (*crdv2.MountpointS3PodAttachment, error) {
+	log.Info(fmt.Sprintf("Found %d MountpointS3PodAttachments for the same field-tuple, attempting recovery", len(duplicates)))
+
+	var withMountpointPods []*crdv2.MountpointS3PodAttachment
+	var noMountpointPods []*crdv2.MountpointS3PodAttachment
+	for i := range duplicates {
+		if len(duplicates[i].Spec.MountpointS3PodAttachments) == 0 {
+			noMountpointPods = append(noMountpointPods, &duplicates[i])
+		} else {
+			withMountpointPods = append(withMountpointPods, &duplicates[i])
+		}
+	}
+
+	if len(withMountpointPods) > 1 {
+		return nil, fmt.Errorf("found %d MountpointS3PodAttachments referencing Mountpoint Pods when expecting 0 or 1", len(withMountpointPods))
+	}
+
+	for _, s3pa := range noMountpointPods {
+		log.Info("Deleting duplicate MountpointS3PodAttachment that references no Mountpoint Pods", "s3pa", s3pa.Name)
+		if err := r.deleteS3PodAttachment(ctx, s3pa); err != nil {
+			return nil, fmt.Errorf("failed to delete duplicate %q referencing no Mountpoint Pods: %w", s3pa.Name, err)
+		}
+	}
+
+	if len(withMountpointPods) == 1 {
+		return withMountpointPods[0], nil
+	}
+
+	// All duplicates referenced no Mountpoint Pods AND every delete succeeded. Clear any stale pending
+	// creation expectation so the caller's handleNewS3PodAttachment can create a fresh S3PA instead of
+	// requeuing forever.
+	if len(noMountpointPods) > 0 && r.s3paExpectations.isPending(fieldFilters) {
+		log.Info("Clearing stale creation expectation after deleting all duplicates that referenced no Mountpoint Pods")
+		r.s3paExpectations.clear(fieldFilters)
+	}
+	return nil, nil
 }
 
 // handleInactivePod handles inactive workload pod.
@@ -628,7 +673,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
 		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
-		err := r.Delete(ctx, s3pa)
+		err := r.deleteS3PodAttachment(ctx, s3pa)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
@@ -732,6 +777,15 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 
 	log.Info("MountpointS3PodAttachment is created", "s3pa", s3pa.Name)
 	return nil
+}
+
+// deleteS3PodAttachment deletes the given S3PA with a resourceVersion precondition.
+// The precondition makes the apiserver reject the Delete with 409 Conflict if the
+// S3PA was modified since the caller read it; the caller can then retry/requeue.
+// Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
+// not accidentally skipped.
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
+	return r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
 }
 
 // spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.
