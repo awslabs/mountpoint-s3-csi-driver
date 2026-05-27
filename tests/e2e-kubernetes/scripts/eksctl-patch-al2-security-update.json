@@ -3,7 +3,7 @@
     "op": "add",
     "path": "/managedNodeGroups/0/preBootstrapCommands",
     "value": [
-      "if [ ! -f /var/lib/eks-csi-al2-patched ]; then yum update --security -y && touch /var/lib/eks-csi-al2-patched && rm -f /var/lib/cloud/instance/sem/config_scripts_user && reboot; fi"
+      "if [ ! -f /var/lib/eks-csi-al2-patched ]; then yum versionlock delete 'kernel-*' 'kernel-headers-*' 'kernel-devel-*' || true; yum update -y && touch /var/lib/eks-csi-al2-patched && rm -f /var/lib/cloud/instance/sem/config_scripts_user && reboot; fi"
     ]
   }
 ]
