@@ -132,7 +132,7 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 	// Update the S3PodAttachment if modified
 	if modified {
 		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			return cm.reconciler.Delete(ctx, s3pa)
+			return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
 		}
 		return cm.reconciler.Update(ctx, s3pa)
 	}
