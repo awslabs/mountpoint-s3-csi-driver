@@ -124,7 +124,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
 
-		dm := mounter.NewDaemonsetMounter(clientset, nodeID)
+		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), nil)
 		if err := dm.DiscoverCommDir(context.Background()); err != nil {
 			klog.Fatalf("Failed to discover mounter pod: %v", err)
 		}

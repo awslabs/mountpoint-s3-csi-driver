@@ -44,9 +44,9 @@ import (
 
 const (
 	mounterPodLabel  = "app=s3-csi-daemonset-mounter"
-	commVolumeName   = "comm"
-	mountSockName    = "mount.sock"
-	mountErrorSuffix = ".error"
+	CommVolumeName   = "comm"
+	MountSockName    = "mount.sock"
+	MountErrorSuffix = ".error"
 
 	daemonsetMountReadyTimeout = 15 * time.Second
 	daemonsetMountPollInterval = 500 * time.Millisecond
@@ -56,6 +56,12 @@ const (
 )
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
+
+// mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
+type mountSyscallFunc func(target string, opts mpmounter.MountOptions) (int, error)
+
+// sendOptionsFunc sends mount options to the mounter via Unix socket. Injectable for testing.
+type sendOptionsFunc func(ctx context.Context, sockPath string, options mountoptions.Options) error
 
 // DaemonsetMounter is a [Mounter] that delegates Mountpoint process management
 // to a secondary daemonset running on the same node. It communicates via the
@@ -70,16 +76,23 @@ type DaemonsetMounter struct {
 	// rediscoverCh wakes the background watcher to re-discover immediately.
 	commDir      atomic.Pointer[string]
 	rediscoverCh chan struct{}
+
+	// Injectable for testing. nil = use default.
+	mountSyscall mountSyscallFunc
+	sendOptions  sendOptionsFunc
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
-func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string) *DaemonsetMounter {
+// mountSyscall may be nil, in which case the default FUSE mount implementation is used.
+func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *mpmounter.Mounter,
+	mountSyscall mountSyscallFunc) *DaemonsetMounter {
 	return &DaemonsetMounter{
 		clientset:    clientset,
 		nodeID:       nodeID,
 		kubeletPath:  util.ContainerKubeletPath(),
-		mount:        mpmounter.New(),
+		mount:        mount,
 		rediscoverCh: make(chan struct{}, 1),
+		mountSyscall: mountSyscall,
 	}
 }
 
@@ -130,7 +143,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		ReadOnly:   args.Has(mountpoint.ArgReadOnly),
 		AllowOther: args.Has(mountpoint.ArgAllowOther) || args.Has(mountpoint.ArgAllowRoot),
 	}
-	fd, err := dm.mount.Mount(target, mountOpts)
+	fd, err := dm.mountSyscallWithDefault(target, mountOpts)
 	if err != nil {
 		return fmt.Errorf("failed to mount FUSE at %q: %w", target, err)
 	}
@@ -167,8 +180,8 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	}
 
 	// Step 2: Send mount options to secondary daemonset
-	sockPath := filepath.Join(commDir, mountSockName)
-	errFilePath := filepath.Join(commDir, mountId+mountErrorSuffix)
+	sockPath := filepath.Join(commDir, MountSockName)
+	errFilePath := filepath.Join(commDir, mountId+MountErrorSuffix)
 
 	// Remove old error file if exists
 	os.Remove(errFilePath)
@@ -178,7 +191,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	sendCtx, sendCancel := context.WithTimeout(ctx, daemonsetMountReadyTimeout)
 	defer sendCancel()
 
-	err = mountoptions.Send(sendCtx, sockPath, mountoptions.Options{
+	err = dm.sendOptionsWithDefault(sendCtx, sockPath, mountoptions.Options{
 		Fd:         fd,
 		BucketName: bucketName,
 		Args:       args.SortedList(),
@@ -226,7 +239,7 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 	// Attempt to clean up stale error files (if Mountpoint crashed after a successful mount)
 	if dir := dm.commDir.Load(); dir != nil {
 		mountId := credentialCtx.PodID + "-" + credentialCtx.VolumeID
-		os.Remove(filepath.Join(*dir, mountId+mountErrorSuffix))
+		os.Remove(filepath.Join(*dir, mountId+MountErrorSuffix))
 	}
 
 	klog.V(4).Infof("DaemonsetMounter: volume %s unmounted from %s", credentialCtx.VolumeID, target)
@@ -243,6 +256,22 @@ func (dm *DaemonsetMounter) closeFUSEDevFD(fd int) {
 	if err := mpmounter.CloseFD(fd); err != nil {
 		klog.V(4).Infof("DaemonsetMounter: failed to close /dev/fuse fd %d: %v", fd, err)
 	}
+}
+
+// mountSyscallWithDefault delegates to mountSyscall if set, or falls back to dm.mount.Mount.
+func (dm *DaemonsetMounter) mountSyscallWithDefault(target string, opts mpmounter.MountOptions) (int, error) {
+	if dm.mountSyscall != nil {
+		return dm.mountSyscall(target, opts)
+	}
+	return dm.mount.Mount(target, opts)
+}
+
+// sendOptionsWithDefault delegates to sendOptions if set, or falls back to mountoptions.Send.
+func (dm *DaemonsetMounter) sendOptionsWithDefault(ctx context.Context, sockPath string, opts mountoptions.Options) error {
+	if dm.sendOptions != nil {
+		return dm.sendOptions(ctx, sockPath, opts)
+	}
+	return mountoptions.Send(ctx, sockPath, opts)
 }
 
 // DiscoverCommDir discovers the comm dir path synchronously with retries.
@@ -298,7 +327,7 @@ func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 func (dm *DaemonsetMounter) checkCommDir() {
 	dir := dm.commDir.Load()
 	if dir != nil {
-		sockPath := filepath.Join(*dir, mountSockName)
+		sockPath := filepath.Join(*dir, MountSockName)
 		if _, err := os.Stat(sockPath); err == nil {
 			return // healthy, nothing to do
 		}
@@ -354,7 +383,7 @@ func (dm *DaemonsetMounter) tryDiscoverCommDir(ctx context.Context) (string, err
 	}
 
 	podUID := string(running[0].UID)
-	commDir := filepath.Join(dm.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~empty-dir", commVolumeName)
+	commDir := filepath.Join(dm.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~empty-dir", CommVolumeName)
 	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s", running[0].Name, podUID, commDir)
 	return commDir, nil
 }
