@@ -1,13 +1,5 @@
 # Unreleased
 
-# v2.6.0
-
-[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.6.0/README.md)
-
-### Notable changes
-* Add proxy support via `HTTPS_PROXY` and `NO_PROXY` volume attributes. ([#663](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/663))
-* Update container base image from Amazon Linux 2 to Amazon Linux 2023. ([#753](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/753))
-* Fix reconciler getting stuck when duplicate `MountpointS3PodAttachments` exist by deleting empty duplicates. ([#799](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/799))
 * Support Mountpoint [version 1.22.3](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.22.3) ([#795](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/795))
   * Improve error message when S3 Express session creation fails. ([#1793](https://github.com/awslabs/mountpoint-s3/pull/1793))
   * Update the internal S3 client to use the latest release of the AWS Common Runtime (CRT) libraries. ([#1819](https://github.com/awslabs/mountpoint-s3/pull/1819))
