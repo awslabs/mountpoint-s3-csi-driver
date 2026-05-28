@@ -42,6 +42,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
     environment: ${{ inputs.environment }}
+    concurrency:
+      group: build-image-${{ inputs.ref }}
+      queue: max
     permissions:
       id-token: write
       contents: read
