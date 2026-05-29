@@ -58,7 +58,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
