@@ -107,17 +107,21 @@ sub-image-%:
 .PHONY: image
 image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION):
-	DOCKER_BUILDKIT=1 docker buildx build \
-		-f ${DOCKERFILE} \
-		--platform=$(OS)/$(ARCH) \
-		--progress=plain \
-		--target=$(OS)-$(OSVERSION) \
-		--output=type=$(OUTPUT_TYPE) \
-		-t=$(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) \
-		--build-arg=GOPROXY=$(GOPROXY) \
-		--build-arg=VERSION=$(VERSION) \
-		--provenance=false \
-		.
+	@if [ "$(OUTPUT_TYPE)" = "registry" ] && docker manifest inspect $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) > /dev/null 2>&1; then \
+		echo "Image $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) already exists in registry, skipping build"; \
+	else \
+		DOCKER_BUILDKIT=1 docker buildx build \
+			-f ${DOCKERFILE} \
+			--platform=$(OS)/$(ARCH) \
+			--progress=plain \
+			--target=$(OS)-$(OSVERSION) \
+			--output=type=$(OUTPUT_TYPE) \
+			-t=$(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) \
+			--build-arg=GOPROXY=$(GOPROXY) \
+			--build-arg=VERSION=$(VERSION) \
+			--provenance=false \
+			.; \
+	fi
 	touch $@
 
 .PHONY: push_image
