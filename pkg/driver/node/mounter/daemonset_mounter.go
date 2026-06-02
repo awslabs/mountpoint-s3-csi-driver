@@ -48,11 +48,15 @@ const (
 	MountSockName    = "mount.sock"
 	MountErrorSuffix = ".error"
 
-	daemonsetMountReadyTimeout = 15 * time.Second
-	daemonsetMountPollInterval = 500 * time.Millisecond
+	// TODO: lower sendOptionsTimeout once secondary has concurrent accept to reduce blocks on Mount -> Send -> dialWithRetry
+	sendOptionsTimeout = 15 * time.Second
 
-	commDirCheckInterval    = 5 * time.Second
-	commDirDiscoveryTimeout = 60 * time.Second
+	mountReadyTimeout      = 15 * time.Second
+	mountReadyPollInterval = 500 * time.Millisecond
+
+	commDirCheckInterval      = 5 * time.Second
+	commDirDiscoveryTimeout   = 60 * time.Second
+	commDirRediscoveryTimeout = 15 * time.Second
 )
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
@@ -119,6 +123,10 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		// Note: Skipped handling dm.mount.IsMountpointCorrupted(err) case - we accept that for old
 		// pods they won't recover after daemonset-mounter restart, unlike PodMounter:verifyOrSetupMountTarget
+		// TODO: daemonset mounter pod recovery
+		if dm.mount.IsMountpointCorrupted(err) {
+			klog.Errorf("DaemonsetMounter: mount point %q is corrupted for pod %s: %v", target, credentialCtx.WorkloadPodID, err)
+		}
 		return fmt.Errorf("failed to check if target %q is a mount point (mount target is possibly"+
 			" corrupted, manual pod re-creation %s might be required for mount recovery): %w",
 			target, credentialCtx.WorkloadPodID, err)
@@ -188,7 +196,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 
 	klog.V(4).Infof("DaemonsetMounter: sending mount options for volume %s (mount %s) to %s", volumeId, mountId, sockPath)
 
-	sendCtx, sendCancel := context.WithTimeout(ctx, daemonsetMountReadyTimeout)
+	sendCtx, sendCancel := context.WithTimeout(ctx, sendOptionsTimeout)
 	defer sendCancel()
 
 	err = dm.sendOptionsWithDefault(sendCtx, sockPath, mountoptions.Options{
@@ -308,6 +316,7 @@ func (dm *DaemonsetMounter) DiscoverCommDir(ctx context.Context) error {
 // StartCommDirWatch runs a background health-check loop that periodically verifies
 // the comm dir socket is healthy and re-discovers it on staleness (e.g. secondary pod
 // restart). Also wakes immediately when Mount signals staleness via rediscoverCh.
+// TODO: decrease interval of checks when stale?
 func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 	ticker := time.NewTicker(commDirCheckInterval)
 	defer ticker.Stop()
@@ -335,7 +344,7 @@ func (dm *DaemonsetMounter) checkCommDir() {
 		dm.commDir.Store(nil)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), daemonsetMountReadyTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
 	newDir, err := dm.tryDiscoverCommDir(ctx)
 	if err != nil {
@@ -351,7 +360,7 @@ func (dm *DaemonsetMounter) checkCommDir() {
 func (dm *DaemonsetMounter) getCommDir() (string, error) {
 	dir := dm.commDir.Load()
 	if dir == nil {
-		return "", fmt.Errorf("mounter pod not available (re-discovery in progress)")
+		return "", fmt.Errorf("mounter pod not available")
 	}
 	return *dir, nil
 }
@@ -390,14 +399,14 @@ func (dm *DaemonsetMounter) tryDiscoverCommDir(ctx context.Context) (string, err
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.
 func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, mountId, errFilePath string) error {
-	ctx, cancel := context.WithTimeout(parentCtx, daemonsetMountReadyTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, mountReadyTimeout)
 	defer cancel()
 
 	mountResultCh := make(chan error, 2)
 
 	// Poll for error file
 	go func() {
-		wait.PollUntilContextCancel(ctx, daemonsetMountPollInterval, true, func(ctx context.Context) (bool, error) {
+		wait.PollUntilContextCancel(ctx, mountReadyPollInterval, true, func(ctx context.Context) (bool, error) {
 			content, err := os.ReadFile(errFilePath)
 			if err != nil {
 				return false, nil
@@ -410,7 +419,7 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, moun
 
 	// Poll for mount readiness
 	go func() {
-		err := wait.PollUntilContextCancel(ctx, daemonsetMountPollInterval, true, func(ctx context.Context) (bool, error) {
+		err := wait.PollUntilContextCancel(ctx, mountReadyPollInterval, true, func(ctx context.Context) (bool, error) {
 			isMounted, _ := dm.mount.CheckMountpoint(target)
 			return isMounted, nil
 		})
