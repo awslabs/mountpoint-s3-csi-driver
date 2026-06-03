@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/mount-utils"
@@ -60,17 +61,17 @@ func setupDM(t *testing.T) *dmTestCtx {
 	kubeletPath = filepath.Join(parentDir, filepath.Base(kubeletPath))
 
 	// Chdir to `kubeletPath` so `mountoptions.{Recv, Send}` can use relative paths to Unix sockets
-	// to overcome `bind: invalid argument`.
+	// to overcome `bind: invalid argument` (108 character limit, https://github.com/golang/go/issues/6895).
 	t.Chdir(kubeletPath)
 
-	nodeName := "test-node"
 	bucketName := "test-bucket"
-	volumeID := "s3-csi-driver-volume"
 	podUID := uuid.New().String()
+	volumeID := "s3-csi-driver-volume"
+	nodeName := "test-node"
 	mounterPodUID := uuid.New().String()
 
 	commDir := filepath.Join(kubeletPath, "pods", mounterPodUID, "volumes", "kubernetes.io~empty-dir", mounter.CommVolumeName)
-	err = os.MkdirAll(commDir, 0755)
+	err = os.MkdirAll(commDir, 0750)
 	assert.NoError(t, err)
 
 	// Add s3-csi-daemonset-mounter label for commDir tests
@@ -91,7 +92,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 	client := fake.NewSimpleClientset(pod)
 	fakeMounter := mount.NewFakeMounter(nil)
 
-	tc := &dmTestCtx{
+	testCtx := &dmTestCtx{
 		t:             t,
 		ctx:           ctx,
 		client:        client,
@@ -106,8 +107,8 @@ func setupDM(t *testing.T) *dmTestCtx {
 	}
 
 	mountSyscall := func(target string, opts mpmounter.MountOptions) (int, error) {
-		if tc.mountSyscall != nil {
-			return tc.mountSyscall(target, opts)
+		if testCtx.mountSyscall != nil {
+			return testCtx.mountSyscall(target, opts)
 		}
 		fakeMounter.Mount("mountpoint-s3", target, "fuse", nil)
 		fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
@@ -120,17 +121,8 @@ func setupDM(t *testing.T) *dmTestCtx {
 	err = dm.DiscoverCommDir(ctx)
 	assert.NoError(t, err)
 
-	tc.dm = dm
-	return tc
-}
-
-func (tc *dmTestCtx) receiveMountOptions(target string) mountoptions.Options {
-	tc.t.Helper()
-	sockPath := filepath.Join(tc.commDir, mounter.MountSockName)
-	options, err := mountoptions.Recv(tc.ctx, sockPath)
-	assert.NoError(tc.t, err)
-	tc.mount.Mount("mountpoint-s3", target, "fuse", nil)
-	return options
+	testCtx.dm = dm
+	return testCtx
 }
 
 func TestDaemonsetMounter(t *testing.T) {
@@ -161,7 +153,8 @@ func TestDaemonsetMounter(t *testing.T) {
 				mountRes <- err
 			}()
 
-			got := testCtx.receiveMountOptions(target)
+			got := testCtx.receiveMountOptions()
+			testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 
 			err := <-mountRes
 			assert.NoError(t, err)
@@ -204,6 +197,89 @@ func TestDaemonsetMounter(t *testing.T) {
 				t.Error("mountSyscall should not be called for already-mounted target")
 			}
 		})
+
+		t.Run("Unmounts source if mounter does not receive mount options", func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := filepath.Join(testCtx.kubeletPath, "target")
+
+			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
+				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Create socket but don't listen so no one receives mount options.
+			// mount_options.go Send -> dialWithRetry will retry until context deadline.
+			sockPath := filepath.Join(testCtx.commDir, mounter.MountSockName)
+			_, err := os.Create(sockPath)
+			assert.NoError(t, err)
+
+			shortCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+			defer cancel()
+
+			err = testCtx.dm.Mount(shortCtx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+			if err == nil {
+				t.Fatal("mount should fail if mounter does not receive the mount options")
+			}
+			assert.Contains(t, err.Error(), "failed to send mount options")
+
+			// Expect false, nil output from mount.go CheckMountpoint
+			mounted, err := testCtx.dm.IsMountPoint(target)
+			assert.NoError(t, err)
+			if mounted {
+				t.Error("it should unmount target if mounter does not receive the mount options")
+			}
+			testCtx.assertUnmounted(target)
+		})
+
+		t.Run("Unmounts source if Mountpoint fails to start with error file", func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := filepath.Join(testCtx.kubeletPath, "target")
+
+			// Skip fakeMounter - it caused waitForMount's CheckMountpoint poll would win the
+			// race over .error file poll
+			// TODO perhaps we can update logic in waitForMount for edge case where CheckMountpoint returns true AND error file present?
+			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			// Construct error file path
+			mountId := testCtx.podUID + "-" + testCtx.volumeID
+			errFilePath := filepath.Join(testCtx.commDir, mountId+mounter.MountErrorSuffix)
+
+			mountRes := make(chan error)
+			go func() {
+				mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+					WorkloadPodID: testCtx.podUID,
+					VolumeID:      testCtx.volumeID,
+				}, mountpoint.ParseArgs(nil), "", nil)
+			}()
+
+			testCtx.receiveMountOptions()
+
+			// Do not register mount - simulates Mountpoint receiving fd but fails to start serving.
+
+			// Write error file to simulate Mountpoint crash
+			mountError := "mount-s3 exited with code 1"
+			err := os.WriteFile(errFilePath, []byte(mountError), 0644)
+			assert.NoError(t, err)
+
+			err = <-mountRes
+			if err == nil {
+				t.Fatal("mount should fail if Mountpoint fails to start")
+			}
+			assert.Contains(t, err.Error(), mountError)
+
+			// Can't use IsMountpoint/CheckMountpoint (didn't register mount), so we
+			// verify Unmount was called via FakeMounter log.
+			testCtx.assertUnmounted(target)
+		})
 	})
 
 	t.Run("Unmounting", func(t *testing.T) {
@@ -223,7 +299,8 @@ func TestDaemonsetMounter(t *testing.T) {
 				mountRes <- err
 			}()
 
-			testCtx.receiveMountOptions(target)
+			testCtx.receiveMountOptions()
+			testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 			err := <-mountRes
 			assert.NoError(t, err)
 
@@ -246,4 +323,183 @@ func TestDaemonsetMounter(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("Comm dir lifecycle", func(t *testing.T) {
+		t.Run("DiscoverCommDir rejects invalid pod states", func(t *testing.T) {
+			// DiscoverCommDir -> tryDiscoverCommDir should reject invalid pod states
+			tests := []struct {
+				name    string
+				pods    []runtime.Object
+				wantErr error
+			}{
+				{"no pods", nil, mounter.ErrNoRunningMounterPod},
+				{"multiple running pods", []runtime.Object{
+					mounterPod("mounter-aaa", corev1.PodRunning),
+					mounterPod("mounter-bbb", corev1.PodRunning),
+				}, mounter.ErrMultipleMounterPods},
+				{"non-running pod", []runtime.Object{
+					mounterPod("mounter-pending", corev1.PodPending),
+				}, mounter.ErrNoRunningMounterPod},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Setenv("CONTAINER_KUBELET_PATH", t.TempDir())
+
+					client := fake.NewSimpleClientset(tt.pods...)
+					dm := mounter.NewDaemonsetMounter(client, "test-node", mpmounter.NewWithMount(mount.NewFakeMounter(nil)), nil)
+
+					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					defer cancel()
+
+					err := dm.DiscoverCommDir(ctx)
+					t.Logf("%v", err)
+					if err == nil {
+						t.Fatal("expected error from DiscoverCommDir")
+					}
+					assert.ErrorIs(t, err, tt.wantErr)
+					assert.ErrorIs(t, err, mounter.ErrCommDirDiscoveryFailed)
+				})
+			}
+		})
+
+		t.Run("StartCommDirWatch stops on channel close", func(t *testing.T) {
+			testCtx := setupDM(t)
+
+			stopCh := make(chan struct{})
+			done := make(chan struct{})
+			go func() {
+				testCtx.dm.StartCommDirWatch(stopCh)
+				close(done)
+			}()
+
+			close(stopCh)
+
+			select {
+			case <-done:
+			case <-time.After(1 * time.Second):
+				t.Fatal("StartCommDirWatch did not stop after stopCh was closed")
+			}
+		})
+
+		t.Run("Mount fails fast when commDir not discovered", func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := filepath.Join(testCtx.kubeletPath, "target")
+
+			// Create a fresh DM which has not discovered commDir (setupDM called dm.DiscoverCommDir(ctx))
+			// and has no StartCommDirWatch process to populate it.
+			mountSyscallCalled := false
+			testCtx.dm = mounter.NewDaemonsetMounter(
+				testCtx.client, testCtx.nodeName,
+				mpmounter.NewWithMount(testCtx.mount),
+				func(target string, opts mpmounter.MountOptions) (int, error) {
+					mountSyscallCalled = true
+					return 0, nil
+				},
+			)
+
+			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+			if err == nil {
+				t.Fatal("expected error when commDir is not discovered")
+			}
+			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+			if mountSyscallCalled {
+				t.Error("mountSyscall should not be called when commDir is not available")
+			}
+		})
+
+		t.Run("Mount nils commDir on staleness (socket not found)", func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := filepath.Join(testCtx.kubeletPath, "target-timeout")
+
+			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
+				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+			defer cancel()
+
+			// No receiveMountOptions (socket does not exist). Send -> dialWithRetry will retry
+			// until context timeout (DeadlineExceeded) which should nil commDir on staleness
+			err := testCtx.dm.Mount(ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+			if err == nil {
+				t.Fatal("expected error on send timeout")
+			}
+			assert.Contains(t, err.Error(), "failed to send mount options")
+
+			// Verify commDir was nilled by the staleness detection
+			_, err = testCtx.dm.GetCommDir()
+			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+		})
+
+		t.Run("Cancelled context does not cause stale commDir", func(t *testing.T) {
+			// Kubelet cancels NodePublishVolume when workload pod deleted mid-mount. If
+			// it incorrectly nils commDir, all subsequent mounts fail with "mounter pod
+			// not available" until the watcher re-discovers.
+			testCtx := setupDM(t)
+			target := filepath.Join(testCtx.kubeletPath, "target-cancel")
+
+			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
+				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := testCtx.dm.Mount(ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+			if err == nil {
+				t.Fatal("expected error on cancelled context")
+			}
+			assert.Contains(t, err.Error(), "failed to send mount options")
+
+			// Verify commDir was NOT nilled by the cancelled context
+			_, err = testCtx.dm.GetCommDir()
+			assert.NoError(t, err)
+		})
+	})
+}
+
+func (testCtx *dmTestCtx) receiveMountOptions() mountoptions.Options {
+	testCtx.t.Helper()
+	sockPath := filepath.Join(testCtx.commDir, mounter.MountSockName)
+	options, err := mountoptions.Recv(testCtx.ctx, sockPath)
+	assert.NoError(testCtx.t, err)
+	return options
+}
+
+func (testCtx *dmTestCtx) assertUnmounted(target string) {
+	testCtx.t.Helper()
+	for _, action := range testCtx.mount.GetLog() {
+		if action.Action == mount.FakeActionUnmount && action.Target == target {
+			return
+		}
+	}
+	testCtx.t.Errorf("expected Unmount to be called on %s, FakeMounter log: %v", target, testCtx.mount.GetLog())
+}
+
+func mounterPod(name string, phase corev1.PodPhase) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "kube-system",
+			UID:    types.UID(uuid.New().String()),
+			Labels: map[string]string{"app": "s3-csi-daemonset-mounter"},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node"},
+		Status: corev1.PodStatus{Phase: phase},
+	}
 }

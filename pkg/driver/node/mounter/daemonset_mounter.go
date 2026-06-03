@@ -8,7 +8,7 @@
 //
 // Mount:
 //
-//	IsMountPoint -> getCommDir -> Mount (FUSE) -> Send -> waitForMount
+//	IsMountPoint -> GetCommDir -> Mount (FUSE) -> Send -> waitForMount
 //	Stale path? -> store nil, signal rediscoverCh, return error
 //
 // Background (StartCommDirWatch -> checkCommDir):
@@ -60,6 +60,14 @@ const (
 )
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
+
+// Exported for error matching in tests and NodePublishVolume callers.
+var (
+	ErrCommDirNotReady        = errors.New("comm dir not yet discovered or stale")
+	ErrCommDirDiscoveryFailed = errors.New("comm dir discovery failed")
+	ErrMultipleMounterPods    = errors.New("multiple running mounter pods found")
+	ErrNoRunningMounterPod    = errors.New("no running mounter pod found")
+)
 
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
 type mountSyscallFunc func(target string, opts mpmounter.MountOptions) (int, error)
@@ -136,9 +144,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return nil
 	}
 
-	commDir, err := dm.getCommDir()
+	commDir, err := dm.GetCommDir()
 	if err != nil {
-		return fmt.Errorf("failed to discover mounter pod comm dir: %w", err)
+		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w", err)
 	}
 
 	// Ensure target directory exists (kubelet may not have created it yet)
@@ -308,7 +316,7 @@ func (dm *DaemonsetMounter) DiscoverCommDir(ctx context.Context) error {
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("discovery failed (last: %v): %w", lastErr, err)
+		return fmt.Errorf("%w, check that s3-csi-daemonset-mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
 	}
 	return nil
 }
@@ -355,12 +363,12 @@ func (dm *DaemonsetMounter) checkCommDir() {
 	klog.V(2).Infof("DaemonsetMounter: re-discovered comm dir: %s", newDir)
 }
 
-// getCommDir returns the cached comm dir path without blocking.
+// GetCommDir returns the cached comm dir path without blocking, exported for testing
 // Returns an error if the path is not yet discovered or has been marked stale.
-func (dm *DaemonsetMounter) getCommDir() (string, error) {
+func (dm *DaemonsetMounter) GetCommDir() (string, error) {
 	dir := dm.commDir.Load()
 	if dir == nil {
-		return "", fmt.Errorf("mounter pod not available")
+		return "", ErrCommDirNotReady
 	}
 	return *dir, nil
 }
@@ -385,10 +393,10 @@ func (dm *DaemonsetMounter) tryDiscoverCommDir(ctx context.Context) (string, err
 	}
 
 	if len(running) > 1 {
-		return "", fmt.Errorf("multiple running mounter pods found on node %s (expected exactly 1, got %d)", dm.nodeID, len(running))
+		return "", fmt.Errorf("%w on node %s (expected exactly 1, got %d)", ErrMultipleMounterPods, dm.nodeID, len(running))
 	}
 	if len(running) == 0 {
-		return "", fmt.Errorf("no running mounter pod found on node %s", dm.nodeID)
+		return "", fmt.Errorf("%w on node %s", ErrNoRunningMounterPod, dm.nodeID)
 	}
 
 	podUID := string(running[0].UID)
@@ -424,7 +432,7 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, moun
 			return isMounted, nil
 		})
 		if err != nil {
-			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s", mountId, target)
+			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s, check s3-csi-daemonset-mounter pod logs for mount-s3 startup errors", mountId, target)
 		} else {
 			mountResultCh <- nil
 		}
