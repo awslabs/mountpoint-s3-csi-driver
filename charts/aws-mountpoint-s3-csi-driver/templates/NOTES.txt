@@ -5,4 +5,13 @@ Learn more about the file system operations Mountpoint supports: https://github.
 {{- if .Release.IsUpgrade }}
 
 While the CSI driver has been upgraded, existing Mountpoint Pods remain unchanged to avoid disrupting your active workloads. New Mountpoint Pods with the updated version are created only when workload pods are started or restarted. You can view which pods exist created by older V2 versions of the CSI driver using `kubectl get pods -n mount-s3 --label-columns="s3.csi.aws.com/mounted-by-csi-driver-version"`.
+{{- if eq .Values.experimental.mounterMode "daemonset"}}
+
+IMPORTANT (daemonset mounter mode):
+After helm upgrade, s3-csi-daemonset-mounter pods will continue running the previous version (OnDelete update strategy). 
+This is intentional, since restarting a mounter pod will disrupt ALL active mounts on that node. 
+
+To roll out the update to mounter pods (temporarily breaks ALL active mounts): 
+kubectl delete pod -n {{.Release.Namespace }} -l app=s3-csi-daemonset-mounter
+{{- end }}
 {{- end }}

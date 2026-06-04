@@ -123,6 +123,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
+		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), nil)
 		if err := dm.DiscoverCommDir(context.Background()); err != nil {

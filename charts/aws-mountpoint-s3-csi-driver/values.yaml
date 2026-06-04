@@ -150,9 +150,11 @@ daemonsetMounters:
       requests:
         cpu: 100m
         memory: 256Mi
+    logLevel: 4
     podLabels: {}
     nodeSelector: {}
     tolerateAllTaints: true
+    defaultTolerations: true
     tolerations: []
     affinity: {}
     imagePullSecrets: []

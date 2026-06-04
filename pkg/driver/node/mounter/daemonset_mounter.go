@@ -51,7 +51,7 @@ const (
 	// TODO: lower sendOptionsTimeout once secondary has concurrent accept to reduce blocks on Mount -> Send -> dialWithRetry
 	sendOptionsTimeout = 15 * time.Second
 
-	mountReadyTimeout      = 15 * time.Second
+	mountReadyTimeout      = 2 * time.Minute
 	mountReadyPollInterval = 500 * time.Millisecond
 
 	commDirCheckInterval      = 5 * time.Second
@@ -72,9 +72,6 @@ var (
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
 type mountSyscallFunc func(target string, opts mpmounter.MountOptions) (int, error)
 
-// sendOptionsFunc sends mount options to the mounter via Unix socket. Injectable for testing.
-type sendOptionsFunc func(ctx context.Context, sockPath string, options mountoptions.Options) error
-
 // DaemonsetMounter is a [Mounter] that delegates Mountpoint process management
 // to a secondary daemonset running on the same node. It communicates via the
 // secondary pod's emptyDir volume, accessed through the kubelet pod directory.
@@ -91,7 +88,6 @@ type DaemonsetMounter struct {
 
 	// Injectable for testing. nil = use default.
 	mountSyscall mountSyscallFunc
-	sendOptions  sendOptionsFunc
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
@@ -122,7 +118,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// TODO: change for pod/volume sharing
 	podUID := credentialCtx.WorkloadPodID
 	volumeId := credentialCtx.VolumeID
-	mountId := podUID + "-" + volumeId
+	mountId := GetMountId(podUID, volumeId)
 
 	// Idempotency: if target is already a healthy Mountpoint mount, return early.
 	// Kubelet may call NodePublishVolume repeatedly (requiresRepublish, retries).
@@ -146,7 +142,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 
 	commDir, err := dm.GetCommDir()
 	if err != nil {
-		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w", err)
+		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", err, helpMessageForCheckingMounterPodStatus())
 	}
 
 	// Ensure target directory exists (kubelet may not have created it yet)
@@ -197,7 +193,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 
 	// Step 2: Send mount options to secondary daemonset
 	sockPath := filepath.Join(commDir, MountSockName)
-	errFilePath := filepath.Join(commDir, mountId+MountErrorSuffix)
+	errFilePath := filepath.Join(commDir, GetErrorFileName(mountId))
 
 	// Remove old error file if exists
 	os.Remove(errFilePath)
@@ -207,7 +203,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	sendCtx, sendCancel := context.WithTimeout(ctx, sendOptionsTimeout)
 	defer sendCancel()
 
-	err = dm.sendOptionsWithDefault(sendCtx, sockPath, mountoptions.Options{
+	err = mountoptions.Send(sendCtx, sockPath, mountoptions.Options{
 		Fd:         fd,
 		BucketName: bucketName,
 		Args:       args.SortedList(),
@@ -216,8 +212,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	})
 	if err != nil {
 		// If send failed due to stale path, signal re-discovery and let Kubelet retry NodePublishVolume.
-		// TODO: add helpMessageForGettingMountpointLogs to help users on mount failures
-		// TODO: add tests for these errors to make sure they cover all required error cases
+		// Send -> dialWithRetry retries ENOENT/ECONNREFUSED, so we only check these errors
 		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) || errors.Is(err, context.DeadlineExceeded) {
 			klog.V(4).Infof("DaemonsetMounter: comm dir may be stale, signaling re-discovery")
 			dm.commDir.Store(nil)
@@ -226,7 +221,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 			default:
 			}
 		}
-		return fmt.Errorf("failed to send mount options for volume %s (mount %s): %w", volumeId, mountId, err)
+		return fmt.Errorf("failed to send mount options for volume %s (mount %s): %w. %s", volumeId, mountId, err, helpMessageForGettingMounterLogs())
 	}
 
 	// Close the FD in this process — the secondary daemonset now holds it
@@ -254,12 +249,32 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 
 	// Attempt to clean up stale error files (if Mountpoint crashed after a successful mount)
 	if dir := dm.commDir.Load(); dir != nil {
-		mountId := credentialCtx.PodID + "-" + credentialCtx.VolumeID
-		os.Remove(filepath.Join(*dir, mountId+MountErrorSuffix))
+		mountId := GetMountId(credentialCtx.PodID, credentialCtx.VolumeID)
+		os.Remove(filepath.Join(*dir, GetErrorFileName(mountId)))
 	}
 
 	klog.V(4).Infof("DaemonsetMounter: volume %s unmounted from %s", credentialCtx.VolumeID, target)
 	return nil
+}
+
+// GetMountId returns the mount ID for a given pod UID and volume ID.
+func GetMountId(podUID, volumeId string) string {
+	return podUID + "-" + volumeId
+}
+
+// GetErrorFileName returns the error file name for a given mount ID.
+func GetErrorFileName(mountId string) string {
+	return mountId + MountErrorSuffix
+}
+
+// helpMessageForGettingMounterLogs returns a help message with a command to get mounter logs.
+func helpMessageForGettingMounterLogs() string {
+	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-daemonset-mounter`", mounterNamespace)
+}
+
+// helpMessageForCheckingMounterPodStatus returns a help message with a command to check mounter pod status.
+func helpMessageForCheckingMounterPodStatus() string {
+	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter`", mounterNamespace)
 }
 
 // IsMountPoint returns whether the given target is a Mountpoint mount.
@@ -280,14 +295,6 @@ func (dm *DaemonsetMounter) mountSyscallWithDefault(target string, opts mpmounte
 		return dm.mountSyscall(target, opts)
 	}
 	return dm.mount.Mount(target, opts)
-}
-
-// sendOptionsWithDefault delegates to sendOptions if set, or falls back to mountoptions.Send.
-func (dm *DaemonsetMounter) sendOptionsWithDefault(ctx context.Context, sockPath string, opts mountoptions.Options) error {
-	if dm.sendOptions != nil {
-		return dm.sendOptions(ctx, sockPath, opts)
-	}
-	return mountoptions.Send(ctx, sockPath, opts)
 }
 
 // DiscoverCommDir discovers the comm dir path synchronously with retries.
@@ -432,7 +439,7 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, moun
 			return isMounted, nil
 		})
 		if err != nil {
-			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s, check s3-csi-daemonset-mounter pod logs for mount-s3 startup errors", mountId, target)
+			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s. %s", mountId, target, helpMessageForGettingMounterLogs())
 		} else {
 			mountResultCh <- nil
 		}

@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
@@ -136,6 +136,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
 				fd, err := syscall.Dup(int(devNull.Fd()))
 				assert.NoError(t, err)
+				assert.Equals(t, true, opts.ReadOnly)
 				return fd, nil
 			}
 
@@ -163,14 +164,16 @@ func TestDaemonsetMounter(t *testing.T) {
 			t.Cleanup(func() { gotFile.Close() })
 			mountertest.AssertSameFile(t, devNull, gotFile)
 
-			for _, a := range got.Args {
-				if strings.Contains(a, "read-only") {
-					t.Errorf("--read-only should be removed from sent args, got: %v", got.Args)
-				}
-			}
+			// Reset fd as they might be different in different ends.
+			got.Fd = 0
 
-			assert.Equals(t, testCtx.bucketName, got.BucketName)
-			assert.Equals(t, testCtx.podUID+"-"+testCtx.volumeID, got.VolumeId)
+			env := envprovider.Default()
+			assert.Equals(t, mountoptions.Options{
+				BucketName: testCtx.bucketName,
+				Args:       []string{"--prefix=data/"},
+				Env:        env.List(),
+				VolumeId:   mounter.GetMountId(testCtx.podUID, testCtx.volumeID),
+			}, got)
 		})
 
 		t.Run("Does not duplicate mounts if target is already mounted", func(t *testing.T) {
@@ -201,13 +204,6 @@ func TestDaemonsetMounter(t *testing.T) {
 		t.Run("Unmounts source if mounter does not receive mount options", func(t *testing.T) {
 			testCtx := setupDM(t)
 			target := filepath.Join(testCtx.kubeletPath, "target")
-
-			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
-				testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
-				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
-				assert.NoError(t, err)
-				return fd, nil
-			}
 
 			// Create socket but don't listen so no one receives mount options.
 			// mount_options.go Send -> dialWithRetry will retry until context deadline.
@@ -250,8 +246,8 @@ func TestDaemonsetMounter(t *testing.T) {
 			}
 
 			// Construct error file path
-			mountId := testCtx.podUID + "-" + testCtx.volumeID
-			errFilePath := filepath.Join(testCtx.commDir, mountId+mounter.MountErrorSuffix)
+			mountId := mounter.GetMountId(testCtx.podUID, testCtx.volumeID)
+			errFilePath := filepath.Join(testCtx.commDir, mounter.GetErrorFileName(mountId))
 
 			mountRes := make(chan error)
 			go func() {
