@@ -58,7 +58,11 @@ func main() {
 	conf := config.GetConfigOrDie()
 
 	mgr, err := manager.New(conf, manager.Options{
-		Scheme: scheme,
+		Scheme:                        scheme,
+		LeaderElection:                true,
+		LeaderElectionID:              "aws-s3-csi-controller",
+		LeaderElectionResourceLock:    "leases",
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		log.Error(err, "Failed to create a new manager")
