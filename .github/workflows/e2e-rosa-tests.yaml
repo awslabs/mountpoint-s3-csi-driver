@@ -9,6 +9,11 @@ on:
       ref:
         required: true
         type: string
+      pod_mode_charts_dir:
+        required: false
+        type: string
+        default: ""
+        description: "Helm charts directory to use for pod-mode e2e tests. Leave empty for the default."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
@@ -192,6 +197,7 @@ jobs:
           ACTION: "install_driver"
           TAG: "untested_${{ inputs.ref }}"
           CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
+          CHARTS_DIR: ${{ inputs.pod_mode_charts_dir }}
         run: tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
         env:

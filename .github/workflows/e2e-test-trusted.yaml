@@ -6,6 +6,15 @@ on:
   merge_group:
     types: [ "checks_requested" ]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pod_mode_charts_dir:
+        description: "Helm charts directory to use for pod-mode e2e tests."
+        type: choice
+        default: "charts/aws-mountpoint-s3-csi-driver"
+        options:
+          - "charts/aws-mountpoint-s3-csi-driver"
+          - "dev/daemonset-charts/aws-mountpoint-s3-csi-driver"
 
 permissions:
   id-token: write
@@ -18,7 +27,8 @@ jobs:
     uses: ./.github/workflows/e2e-tests.yaml
     with:
       environment: "trusted"
-      ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha }}
+      ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha || github.sha }}
+      pod_mode_charts_dir: ${{ inputs.pod_mode_charts_dir || '' }}
     secrets: inherit
   e2e-rosa:
     name: E2E ROSA Tests
@@ -26,7 +36,8 @@ jobs:
     uses: ./.github/workflows/e2e-rosa-tests.yaml
     with:
       environment: "rosa-trusted"
-      ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha }}
+      ref: ${{ (github.event_name == 'push' && github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.event.merge_group.head_sha || github.sha }}
+      pod_mode_charts_dir: ${{ inputs.pod_mode_charts_dir || '' }}
     secrets: inherit
   outcome:
     name: All E2E Tests Passed

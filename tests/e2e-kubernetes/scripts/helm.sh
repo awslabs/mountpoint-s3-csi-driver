@@ -52,6 +52,11 @@ function helm_install_driver() {
   MOUNTER_MODE=${9:-pod}
   CHARTS_DIR=${10:-charts/aws-mountpoint-s3-csi-driver}
 
+  # Validate charts directory (can be overridden via workflow_dispatch input)
+  if [[ "${CHARTS_DIR}" =~ [^a-zA-Z0-9_./-] ]]; then
+    echo "ERROR: CHARTS_DIR contains invalid characters: ${CHARTS_DIR}"
+    exit 1
+  fi
   if [[ ! -d "./${CHARTS_DIR}" ]]; then
     echo "ERROR: Charts directory './${CHARTS_DIR}' does not exist."
     exit 1
@@ -79,8 +84,8 @@ function helm_install_driver() {
     MODE_FLAGS="--set experimental.reserveHeadroomForMountpointPods=true"
   fi
 
-  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./${CHARTS_DIR} --values \
-    ./${CHARTS_DIR}/values.yaml \
+  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system "./${CHARTS_DIR}" --values \
+    "./${CHARTS_DIR}/values.yaml" \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
