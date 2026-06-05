@@ -152,6 +152,32 @@ jobs:
           ACTION: "uninstall_driver"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
+      - name: Install the driver (daemonset mode)
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        env:
+          ACTION: "install_driver"
+          MOUNTER_MODE: "daemonset"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Run E2E Tests (daemonset mode)
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        env:
+          ACTION: "run_tests"
+          MOUNTER_MODE: "daemonset"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Post e2e cleanup (daemonset mode)
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        env:
+          ACTION: "e2e_cleanup"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
+      - name: Uninstall the driver (daemonset mode)
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        env:
+          ACTION: "uninstall_driver"
+        run: |
+          tests/e2e-kubernetes/scripts/run.sh
       - name: Delete cluster
         if: always()
         env:

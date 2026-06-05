@@ -49,6 +49,7 @@ function helm_install_driver() {
   KUBECONFIG=${6}
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
   CLUSTER_TYPE=${8}
+  MOUNTER_MODE=${9:-pod}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
@@ -65,16 +66,27 @@ function helm_install_driver() {
     IRSA_FLAG=""
   fi
 
+  MODE_FLAGS=""
+  if [[ "${MOUNTER_MODE}" == "daemonset" ]]; then
+    MODE_FLAGS="--set experimental.mounterMode=daemonset"
+  else
+    MODE_FLAGS="--set experimental.reserveHeadroomForMountpointPods=true"
+  fi
+
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
-    --set experimental.reserveHeadroomForMountpointPods=true \
+    ${MODE_FLAGS} \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
-  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=180s --kubeconfig $KUBECONFIG
+  if [[ "${MOUNTER_MODE}" == "daemonset" ]]; then
+    # Wait for pod readiness directly (rollout status doesn't support OnDelete strategy)
+    $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-mounter -n kube-system --timeout=180s --kubeconfig $KUBECONFIG
+  fi
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
 

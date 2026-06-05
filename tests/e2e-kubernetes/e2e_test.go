@@ -32,6 +32,7 @@ func init() {
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&UpgradeTests, "run-upgrade-tests", false, "run upgrade tests")
 	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
+	flag.StringVar(&MounterMode, "mounter-mode", "pod", "mounter mode (pod or daemonset)")
 	flag.Parse()
 
 	s3client.DefaultRegion = BucketRegion
@@ -76,6 +77,18 @@ var CSITestSuites = []func() framework.TestSuite{
 }
 
 func getCSITestSuites() []func() framework.TestSuite {
+	if MounterMode == "daemonset" {
+		// Daemonset mode runs without the controller, CRD, or mount-s3 namespace.
+		// Excluded suites: cache, credentials, pod sharing, eviction order, taint
+		// removal, proxy, headroom.
+		return []func() framework.TestSuite{
+			testsuites.InitVolumesTestSuite,
+			custom_testsuites.InitS3AccessModeTestSuite,
+			custom_testsuites.InitS3MountOptionsTestSuite,
+			custom_testsuites.InitS3CSIMultiVolumeTestSuite,
+		}
+	}
+
 	suites := CSITestSuites
 	// Headroom feature is not supported on OpenShift
 	if ClusterType != "openshift" {

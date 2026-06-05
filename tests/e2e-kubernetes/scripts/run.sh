@@ -28,6 +28,7 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
+MOUNTER_MODE=${MOUNTER_MODE:-pod}
 IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
@@ -168,11 +169,12 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${TAG}" \
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
-    "${CLUSTER_TYPE}"
+    "${CLUSTER_TYPE}" \
+    "${MOUNTER_MODE}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE} --mounter-mode=${MOUNTER_MODE}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
