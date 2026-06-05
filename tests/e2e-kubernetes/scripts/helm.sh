@@ -50,6 +50,12 @@ function helm_install_driver() {
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
   CLUSTER_TYPE=${8}
   MOUNTER_MODE=${9:-pod}
+  CHARTS_DIR=${10:-charts/aws-mountpoint-s3-csi-driver}
+
+  if [[ ! -d "./${CHARTS_DIR}" ]]; then
+    echo "ERROR: Charts directory './${CHARTS_DIR}' does not exist."
+    exit 1
+  fi
 
   helm_uninstall_driver \
     "$HELM_BIN" \
@@ -73,8 +79,8 @@ function helm_install_driver() {
     MODE_FLAGS="--set experimental.reserveHeadroomForMountpointPods=true"
   fi
 
-  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
-    ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
+  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./${CHARTS_DIR} --values \
+    ./${CHARTS_DIR}/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \

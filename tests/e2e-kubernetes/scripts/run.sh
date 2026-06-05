@@ -29,6 +29,7 @@ KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
 MOUNTER_MODE=${MOUNTER_MODE:-pod}
+CHARTS_DIR=${CHARTS_DIR:-charts/aws-mountpoint-s3-csi-driver}
 IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
@@ -170,7 +171,8 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
     "${CLUSTER_TYPE}" \
-    "${MOUNTER_MODE}"
+    "${MOUNTER_MODE}" \
+    "${CHARTS_DIR}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes

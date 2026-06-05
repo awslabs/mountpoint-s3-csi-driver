@@ -94,12 +94,22 @@ jobs:
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
       MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
+      DAEMONSET_CHARTS_DIR: "dev/daemonset-charts/aws-mountpoint-s3-csi-driver"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+      - name: Check daemonset charts availability
+        id: check_daemonset_charts
+        run: |
+          if [ -d "${{ env.DAEMONSET_CHARTS_DIR }}" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "::notice::Daemonset charts not found at ${{ env.DAEMONSET_CHARTS_DIR }}, skipping daemonset tests"
+          fi
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -153,27 +163,28 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Install the driver (daemonset mode)
-        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests && steps.check_daemonset_charts.outputs.available == 'true' }}
         env:
           ACTION: "install_driver"
           MOUNTER_MODE: "daemonset"
+          CHARTS_DIR: ${{ env.DAEMONSET_CHARTS_DIR }}
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests (daemonset mode)
-        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests && steps.check_daemonset_charts.outputs.available == 'true' }}
         env:
           ACTION: "run_tests"
           MOUNTER_MODE: "daemonset"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup (daemonset mode)
-        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests && steps.check_daemonset_charts.outputs.available == 'true' }}
         env:
           ACTION: "e2e_cleanup"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Uninstall the driver (daemonset mode)
-        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests }}
+        if: ${{ always() && steps.create_cluster.conclusion == 'success' && !inputs.run_upgrade_tests && steps.check_daemonset_charts.outputs.available == 'true' }}
         env:
           ACTION: "uninstall_driver"
         run: |
