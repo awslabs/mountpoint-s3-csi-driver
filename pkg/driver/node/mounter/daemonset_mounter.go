@@ -1,5 +1,10 @@
-// DaemonsetMounter implements Mounter for the two-daemonset architecture.
-// The primary performs FUSE mounts and hands FDs to the secondary via Unix socket.
+// DaemonsetMounter is the primary side of the two-daemonset architecture: where the primary daemonset
+// (s3-csi-node, privileged) performs FUSE mounts and passes file descriptors (fds) to the secondary
+// daemonset (s3-csi-daemonset-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
+//
+// The two daemonsets communicate through the secondary daemonset's emptyDir volume (commDir). The
+// primary daemonset discovers and maintains the commDir path, re-discovering it when the secondary
+// daemonset restarts.
 //
 // Startup (driver.go):
 //
@@ -14,8 +19,6 @@
 // Background (StartCommDirWatch -> checkCommDir):
 //
 //	stat(socket) -> healthy? return : tryDiscoverCommDir
-//
-// Comm dir: <kubeletPath>/pods/<uid>/volumes/kubernetes.io~empty-dir/comm/
 package mounter
 
 import (
