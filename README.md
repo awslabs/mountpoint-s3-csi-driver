@@ -28,7 +28,7 @@ The S3 CSI Driver is distributed through the following supported channels:
 - **Helm repository** — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
 
 > [!WARNING]
-> Installing directly from a Github branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the Github repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries.
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries.
 
 See [Driver Installation](docs/INSTALL.md) for detailed instructions.
 
