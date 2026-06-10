@@ -77,10 +77,8 @@ var CSITestSuites = []func() framework.TestSuite{
 
 func getCSITestSuites() []func() framework.TestSuite {
 	suites := CSITestSuites
-	// Headroom feature is not supported on OpenShift
-	if ClusterType != "openshift" {
-		suites = append(suites, custom_testsuites.InitS3HeadroomTestSuite)
-	}
+	// Headroom feature is not supported on OpenShift (re-enable to check the error)
+	suites = append(suites, custom_testsuites.InitS3HeadroomTestSuite)
 	return suites
 }
 
