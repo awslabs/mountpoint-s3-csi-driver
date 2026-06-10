@@ -58,6 +58,7 @@ const (
 	mountReadyPollInterval = 500 * time.Millisecond
 
 	commDirCheckInterval      = 5 * time.Second
+	commDirStaleCheckInterval = 1 * time.Second
 	commDirDiscoveryTimeout   = 60 * time.Second
 	commDirRediscoveryTimeout = 15 * time.Second
 )
@@ -180,11 +181,10 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// Remove read-only from args since we already passed MS_RDONLY in mount syscall
 	args.Remove(mountpoint.ArgReadOnly)
 
-	// TODO: add --user-agent-prefix for S3 request telemetry (needs kubernetesVersion/variant fields)
+	// TODO: add --user-agent-prefix for S3 request telemetry
 
 	// Build environment
-	// TODO: (pod-level creds) set envs and write tokens
-	// TODO: should we inherit envs from the driver process? or from the mounter? should they overwrite userEnv?
+	// TODO: Credentials support (IRSA / EKS Pod Identity / K8s secret, pod/volume level credentials etc)
 	env := envprovider.Environment{}
 	env.Merge(userEnv)
 	env.Merge(envprovider.Default())
@@ -334,7 +334,6 @@ func (dm *DaemonsetMounter) DiscoverCommDir(ctx context.Context) error {
 // StartCommDirWatch runs a background health-check loop that periodically verifies
 // the comm dir socket is healthy and re-discovers it on staleness (e.g. secondary pod
 // restart). Also wakes immediately when Mount signals staleness via rediscoverCh.
-// TODO: decrease interval of checks when stale?
 func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 	ticker := time.NewTicker(commDirCheckInterval)
 	defer ticker.Stop()
@@ -343,20 +342,25 @@ func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			dm.checkCommDir()
 		case <-dm.rediscoverCh:
-			dm.checkCommDir()
+		}
+		// Polls faster when comm dir is stale
+		if dm.checkCommDir() {
+			ticker.Reset(commDirCheckInterval)
+		} else {
+			ticker.Reset(commDirStaleCheckInterval)
 		}
 	}
 }
 
 // checkCommDir verifies the socket exists and re-discovers if stale.
-func (dm *DaemonsetMounter) checkCommDir() {
+// Returns true if comm dir is healthy after the check.
+func (dm *DaemonsetMounter) checkCommDir() bool {
 	dir := dm.commDir.Load()
 	if dir != nil {
 		sockPath := filepath.Join(*dir, MountSockName)
 		if _, err := os.Stat(sockPath); err == nil {
-			return // healthy, nothing to do
+			return true
 		}
 		klog.V(2).Infof("DaemonsetMounter: socket gone, re-discovering")
 		dm.commDir.Store(nil)
@@ -367,10 +371,11 @@ func (dm *DaemonsetMounter) checkCommDir() {
 	newDir, err := dm.tryDiscoverCommDir(ctx)
 	if err != nil {
 		klog.V(4).Infof("DaemonsetMounter: rediscovery failed: %v", err)
-		return
+		return false
 	}
 	dm.commDir.Store(&newDir)
 	klog.V(2).Infof("DaemonsetMounter: re-discovered comm dir: %s", newDir)
+	return true
 }
 
 // GetCommDir returns the cached comm dir path without blocking, exported for testing

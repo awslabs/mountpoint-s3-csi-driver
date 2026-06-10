@@ -236,9 +236,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			testCtx := setupDM(t)
 			target := filepath.Join(testCtx.kubeletPath, "target")
 
-			// Skip fakeMounter - it caused waitForMount's CheckMountpoint poll would win the
-			// race over .error file poll
-			// TODO perhaps we can update logic in waitForMount for edge case where CheckMountpoint returns true AND error file present?
+			// Skip fakeMounter - it caused waitForMount's CheckMountpoint poll to win the race over .error file poll
 			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
 				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
 				assert.NoError(t, err)
