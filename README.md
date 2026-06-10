@@ -21,6 +21,17 @@ For Amazon EKS clusters, the Mountpoint for Amazon S3 CSI driver is also availab
 
 Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md) for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
 
+## Installation
+
+The S3 CSI Driver is distributed through the following supported channels:
+- **EKS Addon** (recommended for EKS clusters) — see [Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- **Helm repository** — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
+
+> [!WARNING]
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries.
+
+See [Driver Installation](docs/INSTALL.md) for detailed instructions.
+
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|

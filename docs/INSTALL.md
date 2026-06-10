@@ -10,6 +10,9 @@
 
 ## Installation
 
+> [!WARNING]
+> **Supported installation methods:** EKS Addon or the official Helm repository: `https://awslabs.github.io/mountpoint-s3-csi-driver`. Installing from a GitHub branch (`main`, `release-X.Y`, or any other; via `helm install ./charts/...`, or GitOps tools pointing at this repository) is not supported and may break without notice during releases.
+
 ### Cluster setup (optional)
 
 If you don't have an existing cluster, you can follow these steps to setup an Amazon EKS cluster using [eksctl](https://eksctl.io/).
@@ -108,7 +111,7 @@ kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/
 ```
 
 > [!WARNING]
-> Using the main branch to deploy the CSI Driver is not supported. The main branch may contain upcoming features incompatible with the currently released stable version of the CSI Driver.
+> Using a GitHub branch (`main`, `release-X.Y`, or any other) to deploy the CSI Driver is not supported. Charts in the GitHub repository may contain upcoming features incompatible with the currently released stable version of the CSI Driver image.
 
 #### Once Mountpoint for Amazon S3 CSI Driver has been deployed, verify the pods are running:
 
