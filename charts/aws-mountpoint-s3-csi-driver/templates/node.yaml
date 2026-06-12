@@ -101,6 +101,12 @@ spec:
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else }}helm{{ end }}
+            {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            - name: MOUNTER_MODE
+              value: daemonset
+            - name: MOUNTER_NAMESPACE
+              value: {{ .Release.Namespace }}
+            {{- end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

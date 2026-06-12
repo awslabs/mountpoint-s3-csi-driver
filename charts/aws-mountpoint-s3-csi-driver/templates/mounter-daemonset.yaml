@@ -1,0 +1,90 @@
+{{- if eq .Values.experimental.mounterMode "daemonset" }}
+{{- if gt (len .Values.daemonsetMounters) 1 }}
+{{- fail "Only one entry in daemonsetMounters is supported currently" }}
+{{- end }}
+{{- $mounter := index .Values.daemonsetMounters 0 }}
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: s3-csi-daemonset-mounter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+spec:
+  updateStrategy:
+    # We use OnDelete strategy because restarting this pod disrupts ALL active mounts on the node.
+    # Mounter pods will continue running the previous version until the pod is manually restarted.
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: s3-csi-daemonset-mounter
+      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: s3-csi-daemonset-mounter
+        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        {{- with $mounter.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        {{- with $mounter.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      priorityClassName: system-node-critical
+      {{- with $mounter.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      tolerations:
+        {{- if $mounter.tolerateAllTaints | default .Values.node.tolerateAllTaints }}
+        - operator: Exists
+        {{- else if $mounter.defaultTolerations | default .Values.node.defaultTolerations }}
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - key: s3.csi.aws.com/agent-not-ready
+          operator: Exists
+        - operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        {{- end }}
+        {{- with $mounter.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $mounter.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range . }}
+        - name: {{ . }}
+      {{- end }}
+      {{- end }}
+      containers:
+      - name: mounter
+        image: {{ include "csiDriverImageName" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+          - /bin/aws-s3-csi-daemonset-mounter
+        args:
+          - --comm-dir=/comm
+          - --mountpoint-bin-dir=/mountpoint-s3/bin
+          - --v={{ $mounter.logLevel }}
+        securityContext:
+          runAsUser: 1000
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+          - name: comm
+            mountPath: /comm
+        {{- with $mounter.resources }}
+        resources:
+          {{- toYaml . | nindent 12 }}
+        {{- end }}
+      volumes:
+      - name: comm
+        emptyDir: {}
+{{- end }}

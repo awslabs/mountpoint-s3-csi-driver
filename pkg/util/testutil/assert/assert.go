@@ -2,7 +2,9 @@
 package assert
 
 import (
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -22,6 +24,22 @@ func NoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("Expected no error, but got: %s", err)
+	}
+}
+
+// Contains fails the test if `got` does not contain `want`.
+func Contains(t *testing.T, got string, want string) {
+	t.Helper()
+	if !strings.Contains(got, want) {
+		t.Errorf("expected string containing %q, got: %q", want, got)
+	}
+}
+
+// ErrorIs fails the test if `err` does not wrap `target`.
+func ErrorIs(t *testing.T, err error, target error) {
+	t.Helper()
+	if !errors.Is(err, target) {
+		t.Errorf("errors.Is() failed:\n  target: %q\n  got:    %q", target, err)
 	}
 }
 

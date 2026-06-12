@@ -1,3 +1,4 @@
+{{- if ne .Values.experimental.mounterMode "daemonset" -}}
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -83,3 +84,4 @@ spec:
             - name: MOUNTPOINT_HEADROOM_IMAGE
               value: {{ .Values.experimental.headroomPodImage }}
             {{- end }}
+{{- end }}

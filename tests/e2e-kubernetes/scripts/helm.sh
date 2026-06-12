@@ -71,10 +71,11 @@ function helm_install_driver() {
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
-    --set experimental.reserveHeadroomForMountpointPods=true \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+  # Wait for pod readiness (rollout status doesn't support OnDelete strategy)
+  $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-daemonset-mounter -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
 

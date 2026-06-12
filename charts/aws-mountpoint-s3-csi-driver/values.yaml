@@ -135,3 +135,26 @@ experimental:
   reserveHeadroomForMountpointPods: false
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10
   headroomPodLabels: {}
+  # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
+  # In-place updates with daemonset mode may not be supported.
+  # Mounter mode: "pod" (V2 default) or "daemonset" (experimental two-daemonset architecture).
+  # In daemonset mode, one mounter daemonset pod handles all mountpoint processes instead of 
+  # one mountpoint pod per workload in pod mode.
+  mounterMode: "daemonset"
+
+# WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
+# Configuration for the secondary mounter daemonset(s).
+# Only used when experimental.mounterMode is "daemonset".
+daemonsetMounters:
+  - resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    logLevel: 4
+    podLabels: {}
+    nodeSelector: {}
+    tolerateAllTaints: true
+    defaultTolerations: true
+    tolerations: []
+    affinity: {}
+    imagePullSecrets: []
