@@ -82,7 +82,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		var pods []*v1.Pod
 		node := l.config.ClientNodeSelection
 		// Create each pod with pvc
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			index := i + 1
 			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, node))
 			pod, err := e2epod.CreatePod(ctx, f.ClientSet, f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{pvc}, admissionapi.LevelBaseline, "")
@@ -107,13 +107,13 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 
 		pod1WritesTo := filepath.Join(path, "file1.txt")
 		seed := time.Now().UTC().UnixNano()
-		checkWriteToPath(f, pods[0], pod1WritesTo, toWrite, seed)
-		checkReadFromPath(f, pods[1], pod1WritesTo, toWrite, seed)
+		checkWriteToPath(ctx, f, pods[0], pod1WritesTo, toWrite, seed)
+		checkReadFromPath(ctx, f, pods[1], pod1WritesTo, toWrite, seed)
 
 		pod2WritesTo := filepath.Join(path, "file2.txt")
 		seed = time.Now().UTC().UnixNano()
-		checkWriteToPath(f, pods[1], pod2WritesTo, toWrite, seed)
-		checkReadFromPath(f, pods[0], pod2WritesTo, toWrite, seed)
+		checkWriteToPath(ctx, f, pods[1], pod2WritesTo, toWrite, seed)
+		checkReadFromPath(ctx, f, pods[0], pod2WritesTo, toWrite, seed)
 	}
 
 	testOnePodTwoVolumes := func(ctx context.Context, pvcs []*v1.PersistentVolumeClaim, seed int64, doWrite bool) {
@@ -124,15 +124,15 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
 		}()
-		for i := 0; i < len(pvcs); i++ {
+		for i := range pvcs {
 			fileInVol := fmt.Sprintf("/mnt/volume%d/file.txt", i+1)
 			volSeed := seed + int64(i)
 			if doWrite {
 				ginkgo.By(fmt.Sprintf("Checking write to volume #%d", i))
-				checkWriteToPath(f, pod, fileInVol, toWrite, volSeed)
+				checkWriteToPath(ctx, f, pod, fileInVol, toWrite, volSeed)
 			}
 			ginkgo.By(fmt.Sprintf("Checking read from volume #%d", i))
-			checkReadFromPath(f, pod, fileInVol, toWrite, volSeed)
+			checkReadFromPath(ctx, f, pod, fileInVol, toWrite, volSeed)
 		}
 	}
 
@@ -169,7 +169,7 @@ func (t *s3CSIMultiVolumeTestSuite) DefineTests(driver storageframework.TestDriv
 		var pvcs []*v1.PersistentVolumeClaim
 		numVols := 2
 
-		for i := 0; i < numVols; i++ {
+		for range numVols {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 			pvcs = append(pvcs, resource.Pvc)

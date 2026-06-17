@@ -36,7 +36,6 @@ import (
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -208,44 +207,44 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		size int
 	}
 
-	expectWriteToSucceed := func(pod *v1.Pod) writtenFile {
+	expectWriteToSucceed := func(ctx context.Context, pod *v1.Pod) writtenFile {
 		seed := time.Now().UTC().UnixNano()
 		framework.Logf("checking writing to %s", testFilePath)
-		checkWriteToPath(f, pod, testFilePath, testWriteSize, seed)
+		checkWriteToPath(ctx, f, pod, testFilePath, testWriteSize, seed)
 		return writtenFile{testFilePath, seed, testWriteSize}
 	}
 
-	expectReadToSucceed := func(pod *v1.Pod, file writtenFile) {
+	expectReadToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking reading from %s", file.path)
-		checkReadFromPath(f, pod, file.path, file.size, file.seed)
+		checkReadFromPath(ctx, f, pod, file.path, file.size, file.seed)
 	}
 
-	expectDeleteToSucceed := func(pod *v1.Pod, file writtenFile) {
+	expectDeleteToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking if deletion of %s succeeds", file.path)
-		checkDeletingPath(f, pod, file.path)
+		checkDeletingPath(ctx, f, pod, file.path)
 	}
 
-	expectWriteToFail := func(pod *v1.Pod) {
+	expectWriteToFail := func(ctx context.Context, pod *v1.Pod) {
 		seed := time.Now().UTC().UnixNano()
 		framework.Logf("checking if writing to %s fails", testFilePath)
-		checkWriteToPathFails(f, pod, testFilePath, testWriteSize, seed)
+		checkWriteToPathFails(ctx, f, pod, testFilePath, testWriteSize, seed)
 	}
 
-	expectListToSucceed := func(pod *v1.Pod) {
+	expectListToSucceed := func(ctx context.Context, pod *v1.Pod) {
 		framework.Logf("checking listing %s", testVolumePath)
-		checkListingPath(f, pod, testVolumePath)
+		checkListingPath(ctx, f, pod, testVolumePath)
 	}
 
-	expectReadOnly := func(pod *v1.Pod) {
-		expectListToSucceed(pod)
-		expectWriteToFail(pod)
+	expectReadOnly := func(ctx context.Context, pod *v1.Pod) {
+		expectListToSucceed(ctx, pod)
+		expectWriteToFail(ctx, pod)
 	}
 
-	expectFullAccess := func(pod *v1.Pod) {
-		writtenFile := expectWriteToSucceed(pod)
-		expectReadToSucceed(pod, writtenFile)
-		expectDeleteToSucceed(pod, writtenFile)
-		expectListToSucceed(pod)
+	expectFullAccess := func(ctx context.Context, pod *v1.Pod) {
+		writtenFile := expectWriteToSucceed(ctx, pod)
+		expectReadToSucceed(ctx, pod, writtenFile)
+		expectDeleteToSucceed(ctx, pod, writtenFile)
+		expectListToSucceed(ctx, pod)
 	}
 
 	expectFailToMount := func(ctx context.Context, withServiceAccountName string, mountOptions []string) {
@@ -409,12 +408,12 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				// see the comments in the beginning of this function.
 				It("should use ec2 instance profile's full access role", func(ctx context.Context) {
 					pod := createPodAllowsDelete(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use ec2 instance profile's full access role as non-root", func(ctx context.Context) {
 					pod := createPodAllowsDeleteNonRoot(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 			})
 
@@ -428,19 +427,19 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should use service account's read-only role", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3ReadOnlyAccess)
 					pod := createPodWithVolume(ctx)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should use service account's full access role", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use service account's full access role as non-root", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDeleteNonRoot(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
@@ -462,19 +461,19 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should use service account's read-only role", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3ReadOnlyAccess)
 					pod := createPodWithVolume(ctx)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should use service account's full access role", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use service account's full access role as non-root", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDeleteNonRoot(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should fail to mount if service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
@@ -487,19 +486,19 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should use read-only access aws credentials", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3ReadOnlyAccess)
 					pod := createPodWithVolume(ctx)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should use full access aws credentials", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use full access aws credentials as non-root", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDeleteNonRoot(ctx)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
@@ -632,17 +631,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should use pod's service account's read-only role", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, false, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should use pod's service account's full access role", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true, false)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use pod's service account's full access role as non-root", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3FullAccess, true, true)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
@@ -675,7 +674,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
 					framework.ExpectNoError(err)
 
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 
 					// Associate SA with read-only access role
 					sa = assignPolicyToServiceAccount(ctx, sa, iamPolicyS3ReadOnlyAccess)
@@ -689,28 +688,28 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					}()
 
 					// The pod should only have a read-only access now
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use csi driver's service account STS tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use driver-level kubernetes secrets", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
@@ -729,14 +728,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(err)
 					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
 
-					expectReadOnly(podReadOnlyAccess)
-					expectFullAccess(podFullAccess)
+					expectReadOnly(ctx, podReadOnlyAccess)
+					expectFullAccess(ctx, podFullAccess)
 
 					// Write a file on full-access pod and expect it to be readable by read-only pod,
 					// but writes from read-only pod should still fail.
-					writtenFile := expectWriteToSucceed(podFullAccess)
-					expectReadToSucceed(podReadOnlyAccess, writtenFile)
-					expectWriteToFail(podReadOnlyAccess)
+					writtenFile := expectWriteToSucceed(ctx, podFullAccess)
+					expectReadToSucceed(ctx, podReadOnlyAccess, writtenFile)
+					expectWriteToFail(ctx, podReadOnlyAccess)
 				})
 
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
@@ -752,7 +751,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(err)
 					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should automatically detect the STS region if IMDS is available", func(ctx context.Context) {
@@ -768,7 +767,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
 					framework.ExpectNoError(err)
 
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 			})
 
@@ -784,17 +783,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 				It("should use pod's service account's read-only role", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, false, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should use pod's service account's full access role", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3FullAccess, true, false)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should use pod's service account's full access role as non-root", func(ctx context.Context) {
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3FullAccess, true, true)
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 				})
 
 				It("should fail to mount if pod's service account's role does not allow s3::ListObjectsV2", func(ctx context.Context) {
@@ -813,7 +812,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
 					framework.ExpectNoError(err)
 
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 
 					// Delete association
 					deletePodIdentityAssociation(ctx, sa, association.AssociationId)
@@ -830,28 +829,28 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					}()
 
 					// The pod should only have a read-only access now
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use csi driver's service account STS tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use csi driver's service account EKS tokens", func(ctx context.Context) {
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not use driver-level kubernetes secrets", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
@@ -870,14 +869,14 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(err)
 					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
 
-					expectReadOnly(podReadOnlyAccess)
-					expectFullAccess(podFullAccess)
+					expectReadOnly(ctx, podReadOnlyAccess)
+					expectFullAccess(ctx, podFullAccess)
 
 					// Write a file on full-access pod and expect it to be readable by read-only pod,
 					// but writes from read-only pod should still fail.
-					writtenFile := expectWriteToSucceed(podFullAccess)
-					expectReadToSucceed(podReadOnlyAccess, writtenFile)
-					expectWriteToFail(podReadOnlyAccess)
+					writtenFile := expectWriteToSucceed(ctx, podFullAccess)
+					expectReadToSucceed(ctx, podReadOnlyAccess, writtenFile)
+					expectWriteToFail(ctx, podReadOnlyAccess)
 				})
 
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
@@ -893,7 +892,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					framework.ExpectNoError(err)
 					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 			})
 
@@ -921,7 +920,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					pod, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, sa.Name)
 					framework.ExpectNoError(err)
 
-					expectFullAccess(pod)
+					expectFullAccess(ctx, pod)
 
 					// Associate SA with read-only access role using IRSA
 					sa = assignPolicyToServiceAccount(ctx, sa, iamPolicyS3ReadOnlyAccess)
@@ -935,7 +934,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					}()
 
 					// The pod should only have a read-only access now
-					expectReadOnly(pod)
+					expectReadOnly(ctx, pod)
 				})
 			})
 		})
@@ -1029,15 +1028,15 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
-		RoleName:                 ptr.To(roleName),
-		AssumeRolePolicyDocument: ptr.To(assumeRolePolicyDocument),
+		RoleName:                 new(roleName),
+		AssumeRolePolicyDocument: new(assumeRolePolicyDocument),
 	})
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
 		framework.Logf("Deleting IAM role")
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		return err
 	}
@@ -1045,8 +1044,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	for _, policyName := range policyNames {
 		policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 		_, err := client.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
-			RoleName:  ptr.To(roleName),
-			PolicyArn: ptr.To(policyArn),
+			RoleName:  new(roleName),
+			PolicyArn: new(policyArn),
 		})
 		framework.ExpectNoError(err)
 	}
@@ -1054,7 +1053,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.Logf("Waiting until all policies are attached to IAM role")
 	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
 		policies, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
-			RoleName: ptr.To(roleName),
+			RoleName: new(roleName),
 		})
 		if err != nil {
 			return false, err
@@ -1079,8 +1078,8 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 		for _, policyName := range policyNames {
 			policyArn := fmt.Sprintf("arn:%s:iam::aws:policy/%s", getARNPartition(*identity.Arn), policyName)
 			_, err := client.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
-				RoleName:  ptr.To(roleName),
-				PolicyArn: ptr.To(policyArn),
+				RoleName:  new(roleName),
+				PolicyArn: new(policyArn),
 			})
 			errs = append(errs, err)
 		}
@@ -1094,9 +1093,9 @@ func assumeRole(ctx context.Context, f *framework.Framework, roleArn string) *st
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	return waitUntilRoleIsAssumableSTS(ctx, client.AssumeRole, &sts.AssumeRoleInput{
-		RoleArn:         ptr.To(roleArn),
-		RoleSessionName: ptr.To(f.BaseName),
-		DurationSeconds: ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:         new(roleArn),
+		RoleSessionName: new(f.BaseName),
+		DurationSeconds: new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
@@ -1157,10 +1156,10 @@ func waitUntilRoleIsAssumableWithWebIdentity(ctx context.Context, f *framework.F
 
 	client := sts.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableSTS(ctx, client.AssumeRoleWithWebIdentity, &sts.AssumeRoleWithWebIdentityInput{
-		RoleArn:          ptr.To(roleARN),
-		RoleSessionName:  ptr.To(f.BaseName),
-		WebIdentityToken: ptr.To(serviceAccountToken.Status.Token),
-		DurationSeconds:  ptr.To(int32(stsAssumeRoleCredentialDuration.Seconds())),
+		RoleArn:          new(roleARN),
+		RoleSessionName:  new(f.BaseName),
+		WebIdentityToken: new(serviceAccountToken.Status.Token),
+		DurationSeconds:  new(int32(stsAssumeRoleCredentialDuration.Seconds())),
 	})
 }
 
@@ -1186,8 +1185,8 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	client := eksauth.NewFromConfig(awsConfig(ctx))
 	waitUntilRoleIsAssumableEKS(ctx, client.AssumeRoleForPodIdentity, &eksauth.AssumeRoleForPodIdentityInput{
-		ClusterName: ptr.To(ClusterName),
-		Token:       ptr.To(serviceAccountToken.Status.Token),
+		ClusterName: new(ClusterName),
+		Token:       new(serviceAccountToken.Status.Token),
 	})
 }
 
@@ -1337,7 +1336,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 		return ""
 	}
 
-	var configuration map[string]interface{}
+	var configuration map[string]any
 	err = json.Unmarshal(response, &configuration)
 	if err != nil {
 		framework.Logf("failed to parse OIDC configuration: %v", err)

@@ -25,16 +25,14 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"k8s.io/utils/ptr"
 )
 
 const defaultNonRootUser = int64(1001)
 const defaultNonRootGroup = int64(2000)
 
-type jsonMap = map[string]interface{}
+type jsonMap = map[string]any
 
 const NamespacePrefix = "aws-s3-csi-e2e-"
 
@@ -56,35 +54,38 @@ func genBinDataFromSeed(len int, seed int64) []byte {
 	return binData
 }
 
-func checkWriteToPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkWriteToPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite))
-	framework.Logf("written data with sha: %x", sha256.Sum256(data))
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite))
+	if err != nil {
+		framework.Logf("written data with sha: %x", sha256.Sum256(data))
+	}
+	return err
 }
 
-func checkWriteToPathFails(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkWriteToPathFails(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2evolume.VerifyExecInPodFail(f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
+	e2epod.VerifyExecInPodFail(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
 }
 
-func checkReadFromPath(f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkReadFromPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
+	return e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
 }
 
-func checkDeletingPath(f *framework.Framework, pod *v1.Pod, path string) {
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("rm %s", path))
+func checkDeletingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("rm %s", path))
 }
 
-func checkListingPath(f *framework.Framework, pod *v1.Pod, path string) {
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("ls %s", path))
+func checkListingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("ls %s", path))
 }
 
-func checkListingPathWithEntries(f *framework.Framework, pod *v1.Pod, path string, entries []string) {
+func checkListingPathWithEntries(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, entries []string) {
 	cmd := fmt.Sprintf("ls %s", path)
-	stdout, stderr, err := e2evolume.PodExec(f, pod, cmd)
+	stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(ctx, f, pod.Name, cmd)
 	framework.ExpectNoError(err,
 		"%q should succeed, but failed with error message %q\nstdout: %s\nstderr: %s",
 		cmd, err, stdout, stderr)
@@ -135,7 +136,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 			Namespace: f.Namespace.Name,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""), // for static provisioning
+			StorageClassName: new(""), // for static provisioning
 			VolumeName:       pvName,
 			AccessModes:      []v1.PersistentVolumeAccessMode{accessMode},
 			Resources: v1.VolumeResourceRequirements{
@@ -206,25 +207,25 @@ func podModifierNonRoot(pod *v1.Pod) {
 	if pod.Spec.SecurityContext == nil {
 		pod.Spec.SecurityContext = &v1.PodSecurityContext{}
 	}
-	pod.Spec.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-	pod.Spec.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
-	pod.Spec.SecurityContext.RunAsNonRoot = ptr.To(true)
+	pod.Spec.SecurityContext.RunAsUser = new(defaultNonRootUser)
+	pod.Spec.SecurityContext.RunAsGroup = new(defaultNonRootGroup)
+	pod.Spec.SecurityContext.RunAsNonRoot = new(true)
 
 	for _, container := range pod.Spec.Containers {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &v1.SecurityContext{}
 		}
-		container.SecurityContext.RunAsUser = ptr.To(defaultNonRootUser)
-		container.SecurityContext.RunAsGroup = ptr.To(defaultNonRootGroup)
-		container.SecurityContext.RunAsNonRoot = ptr.To(true)
+		container.SecurityContext.RunAsUser = new(defaultNonRootUser)
+		container.SecurityContext.RunAsGroup = new(defaultNonRootGroup)
+		container.SecurityContext.RunAsNonRoot = new(true)
 	}
 }
 
-func copySmallFileToPod(_ context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
+func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
 	framework.ExpectNoError(err)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2evolume.VerifyExecInPodSucceed(f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
+	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
 }
 
 // In some cases like changing Secret object, it's useful to trigger recreation of our pods.

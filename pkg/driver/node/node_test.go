@@ -1,13 +1,13 @@
 package node_test
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
-	"golang.org/x/net/context"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"

@@ -5,7 +5,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 )
 
 // Variant represents different Kubernetes distributions
@@ -16,7 +15,7 @@ const (
 	OpenShift                        // OpenShift K8s
 )
 
-var defaultMountpointUID = ptr.To(int64(1000))
+var defaultMountpointUID = new(int64(1000))
 
 // DetectVariant determines Kubernetes variant by checking API groups.
 func DetectVariant(client *rest.Config, log logr.Logger) Variant {

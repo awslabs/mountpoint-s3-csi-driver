@@ -8,11 +8,15 @@ CW_LOG_RETENTION_DAYS=30
 
 function eksctl_install() {
   INSTALL_PATH=${1}
-  EKSCTL_VERSION=${2}
+
+  ARCH=amd64
+  PLATFORM=$(uname -s)_$ARCH
+
   if [[ ! -e ${INSTALL_PATH}/eksctl ]]; then
-    EKSCTL_DOWNLOAD_URL="https://github.com/weaveworks/eksctl/releases/download/v${EKSCTL_VERSION}/eksctl_$(uname -s)_amd64.tar.gz"
-    curl --silent --location "${EKSCTL_DOWNLOAD_URL}" | tar xz -C "${INSTALL_PATH}"
-    chmod +x "${INSTALL_PATH}"/eksctl
+    curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+    curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
+    tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+    sudo install -m 0755 /tmp/eksctl ${INSTALL_PATH} && rm /tmp/eksctl
   fi
 }
 
@@ -120,9 +124,13 @@ function eksctl_delete_cluster() {
   REGION=${3}
   FORCE=${4:-false}
 
+  STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
   if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
     # Try to delete CloudFormation stack even if the cluster does not exists just in case
     # if the stack is stuck in `ROLLBACK_COMPLETE` status.
+    if eksctl_is_cluster_cf_stack_exists "${STACK_NAME}" "${REGION}"; then
+      aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
+    fi
     eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
     return 0
   fi
@@ -133,7 +141,9 @@ function eksctl_delete_cluster() {
     return 0
   fi
 
-  ${BIN} delete cluster "${CLUSTER_NAME}"
+
+  aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
+  ${BIN} delete cluster "${CLUSTER_NAME}" --wait --disable-nodegroup-eviction
   eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
 }
 
@@ -197,6 +207,21 @@ function eksctl_delete_cluster_cf_stack() {
     if ! eksctl_is_cluster_cf_stack_exists "${STACK_NAME}" "${REGION}"; then
         echo "CloudFormation stack ${STACK_NAME} does not exist, skipping cleanup"
         return 0
+    fi
+
+    # Delete any subnets orphaned by a CloudFormation SDK retry during stack creation.
+    # CreateSubnet is not idempotent: if the first API call succeeds but the response times out
+    # (a transient issue), the SDK retries and gets a CIDR conflict error. CFN sees only the
+    # failure, records no PhysicalResourceId, and cannot clean up the subnet during rollback.
+    # These orphaned subnets are still tagged with the stack name but are unknown to CFN,
+    # and will block VPC deletion.
+    SUBNETS=$(aws ec2 describe-subnets --region ${REGION} \
+        --filters "Name=tag:aws:cloudformation:stack-name,Values=${STACK_NAME}" \
+        --query 'Subnets[*].SubnetId' --output text)
+    if [ -n "$SUBNETS" ]; then
+        for SUBNET_ID in $SUBNETS; do
+            aws ec2 delete-subnet --region ${REGION} --subnet-id ${SUBNET_ID} || true
+        done
     fi
 
     aws cloudformation delete-stack --region ${REGION} --stack-name ${STACK_NAME}

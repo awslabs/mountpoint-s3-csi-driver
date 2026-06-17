@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2evolume "k8s.io/kubernetes/test/e2e/framework/volume"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 )
@@ -114,7 +113,7 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		const podsNum = 3
 		var pods []*v1.Pod
 		nodeName := ""
-		for i := 0; i < podsNum; i++ {
+		for i := range podsNum {
 			index := i + 1
 			ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, nodeName))
 			nodeSelector := make(map[string]string)
@@ -137,11 +136,11 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		ginkgo.By("Installing fio in pods")
 		var wg sync.WaitGroup
 		wg.Add(podsNum)
-		for i := 0; i < podsNum; i++ {
+		for i := range podsNum {
 			go func(podId int) {
 				defer ginkgo.GinkgoRecover()
 				defer wg.Done()
-				e2evolume.VerifyExecInPodSucceed(f, pods[podId], "apt-get update && apt-get install fio -y")
+				e2epod.VerifyExecInPodSucceed(ctx, f, pods[podId], "apt-get update && apt-get install fio -y")
 			}(i)
 		}
 		wg.Wait()
@@ -149,17 +148,17 @@ func (t *s3CSIPerformanceTestSuite) DefineTests(driver storageframework.TestDriv
 		var output []benchmarkEntry
 		for _, cfgName := range getFioCfgNames() {
 			ginkgo.By(fmt.Sprintf("Running benchmark with config: %s", cfgName))
-			for i := 0; i < podsNum; i++ {
+			for i := range podsNum {
 				copySmallFileToPod(ctx, f, pods[i], FioCfgHostDir+cfgName+".fio", FioCfgPodFile)
 			}
 			throughputs := make([]float32, podsNum)
 			var wg sync.WaitGroup
 			wg.Add(podsNum)
-			for i := 0; i < podsNum; i++ {
+			for i := range podsNum {
 				go func(podId int) {
 					defer ginkgo.GinkgoRecover()
 					defer wg.Done()
-					stdout, stderr, err := e2evolume.PodExec(f, pods[podId], fmt.Sprintf("FILENAME=/mnt/volume1/%s_%d fio %s --output-format=json", cfgName, podId, FioCfgPodFile))
+					stdout, stderr, err := e2epod.ExecCommandInContainerWithFullOutput(f, pods[podId].Name, fmt.Sprintf("FILENAME=/mnt/volume1/%s_%d fio %s --output-format=json", cfgName, podId, FioCfgPodFile))
 					if err != nil {
 						fmt.Printf("pod%d: [%s] [%s] [%s] [%v]", podId, cfgName, stdout, stderr, err)
 					}
