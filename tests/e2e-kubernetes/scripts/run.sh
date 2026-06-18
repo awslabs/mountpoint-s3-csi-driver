@@ -28,6 +28,7 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
+DRIVER_NAMESPACE=${DRIVER_NAMESPACE:-kube-system}
 IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
@@ -86,7 +87,7 @@ function kubectl_install() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n $DRIVER_NAMESPACE --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
@@ -148,7 +149,7 @@ function e2e_cleanup() {
 }
 
 function print_cluster_info() {
-  $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
+  $KUBECTL_BIN logs -l app=s3-csi-node -n $DRIVER_NAMESPACE --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }

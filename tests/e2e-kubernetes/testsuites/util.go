@@ -37,10 +37,16 @@ type jsonMap = map[string]any
 
 const NamespacePrefix = "aws-s3-csi-e2e-"
 
-const (
-	csiDriverDaemonSetName      = "s3-csi-node"
-	csiDriverDaemonSetNamespace = "kube-system"
-)
+const csiDriverDaemonSetName = "s3-csi-node"
+
+var csiDriverDaemonSetNamespace = getDriverNamespace()
+
+func getDriverNamespace() string {
+	if namespace := os.Getenv("DRIVER_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+	return "kube-system"
+}
 
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {

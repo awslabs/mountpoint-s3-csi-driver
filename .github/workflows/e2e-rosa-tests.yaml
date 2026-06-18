@@ -23,6 +23,7 @@ env:
   TAG_PASSED: "test_passed_${{ inputs.ref }}"
   CLUSTER_TYPE: "openshift"
   CLUSTER_NAME: "s3-csi-${{ inputs.environment }}"
+  DRIVER_NAMESPACE: "s3-csi-driver"
 jobs:
   build:
     runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471

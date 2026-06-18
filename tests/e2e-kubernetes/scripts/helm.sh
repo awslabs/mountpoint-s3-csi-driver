@@ -25,14 +25,14 @@ function helm_uninstall_driver() {
     if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
       echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
       set +e
-      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+      $HELM_BIN uninstall $RELEASE_NAME --namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG
       set -e
-      $KUBECTL_BIN delete secret --namespace kube-system sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
+      $KUBECTL_BIN delete secret --namespace $DRIVER_NAMESPACE sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
     else
-      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+      $HELM_BIN uninstall $RELEASE_NAME --namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG
     fi
 
-    $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+    $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n $DRIVER_NAMESPACE --timeout=60s --kubeconfig $KUBECONFIG
   else
     echo "driver does not seem to be installed"
   fi
@@ -65,7 +65,15 @@ function helm_install_driver() {
     IRSA_FLAG=""
   fi
 
-  $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
+  # OpenShift blocks SA creation in kube-system via admission webhook.
+  # So we install into a dedicated namespace and grant privileged SCC.
+  # https://github.com/openshift/managed-cluster-validating-webhooks/commit/e270e2b5d61009ff595c2443732c126fdd04fa2a
+  if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
+    $KUBECTL_BIN create namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG 2>/dev/null || true
+    oc adm policy add-scc-to-user privileged -z s3-csi-driver-sa -n $DRIVER_NAMESPACE
+  fi
+
+  $HELM_BIN upgrade --install $RELEASE_NAME --namespace $DRIVER_NAMESPACE ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
@@ -74,9 +82,9 @@ function helm_install_driver() {
     --set experimental.reserveHeadroomForMountpointPods=true \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
-  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN rollout status daemonset s3-csi-node -n $DRIVER_NAMESPACE --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
-  echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
+  echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n $DRIVER_NAMESPACE -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
 
   helm_validate_driver \
     "$HELM_BIN" \
@@ -99,7 +107,7 @@ function helm_validate_driver() {
   echo "Validating $RELEASE_NAME on the server side..."
 
   # Get all installed manifests and validate them on the server side
-  $HELM_BIN get manifest --namespace kube-system --kubeconfig ${KUBECONFIG} $RELEASE_NAME | \
+  $HELM_BIN get manifest --namespace $DRIVER_NAMESPACE --kubeconfig ${KUBECONFIG} $RELEASE_NAME | \
     $KUBECTL_BIN replace --kubeconfig $KUBECONFIG --dry-run=server --validate=strict --warnings-as-errors -f -
 }
 
