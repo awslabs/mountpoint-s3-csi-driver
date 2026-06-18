@@ -14,6 +14,7 @@ spec:
     metadata:
       labels:
         app: s3-csi-node
+        s3.csi.aws.com/chart-source: "github-main"
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
         {{- if .Values.node.podLabels }}
         {{- toYaml .Values.node.podLabels | nindent 8 }}

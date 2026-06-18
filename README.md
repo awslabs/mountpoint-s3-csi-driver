@@ -29,6 +29,7 @@ The S3 CSI Driver is distributed through the following supported channels:
 
 > [!WARNING]
 > Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries.
+> **After September 1, 2026, charts on the main branch will no longer be installable.** Please migrate to the Helm repository or EKS Addon installation method before this date.
 
 See [Driver Installation](docs/INSTALL.md) for detailed instructions.
 
