@@ -1246,7 +1246,7 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 func createCredentialSecret(ctx context.Context, f *framework.Framework, credentials *ststypes.Credentials) (*v1.Secret, func(context.Context) error) {
 	framework.Logf("Creating Kubernetes Secret for AWS Credentials")
 
-	client := f.ClientSet.CoreV1().Secrets(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.CoreV1().Secrets(DriverNamespace)
 
 	secret, err := client.Create(ctx, &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1270,7 +1270,7 @@ func createCredentialSecret(ctx context.Context, f *framework.Framework, credent
 
 func deleteCredentialSecret(ctx context.Context, f *framework.Framework) error {
 	framework.Logf("Deleting Kubernetes Secret")
-	client := f.ClientSet.CoreV1().Secrets(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.CoreV1().Secrets(DriverNamespace)
 
 	err := client.Delete(ctx, credentialSecretName, metav1.DeleteOptions{})
 	if err != nil {
@@ -1407,7 +1407,7 @@ func oidcProviderForCluster(ctx context.Context, f *framework.Framework) string 
 // eksPodIdentityAgentDaemonSetForCluster tries to find configured EKS Pod Identity Agent for the cluster we're testing against.
 func eksPodIdentityAgentDaemonSetForCluster(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
 	eksPodIdentityAgentDaemonSetName := "eks-pod-identity-agent"
-	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.AppsV1().DaemonSets(DriverNamespace)
 	ds, err := client.Get(ctx, eksPodIdentityAgentDaemonSetName, metav1.GetOptions{})
 	if err != nil {
 		return nil

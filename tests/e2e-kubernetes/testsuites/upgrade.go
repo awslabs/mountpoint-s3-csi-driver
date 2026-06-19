@@ -70,7 +70,6 @@ const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
 const helmChartName = "aws-mountpoint-s3-csi-driver"
 const helmReleaseName = "mountpoint-s3-csi-driver"
-const helmReleaseNamespace = "kube-system"
 
 var helmChartPreviousVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION")
 var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
@@ -599,7 +598,7 @@ func pullCSIDriver(settings *cli.EnvSettings, cfg *action.Configuration, version
 func installCSIDriver(cfg *action.Configuration, version string, chartPath string) {
 	installClient := action.NewInstall(cfg)
 	installClient.ReleaseName = helmReleaseName
-	installClient.Namespace = helmReleaseNamespace
+	installClient.Namespace = DriverNamespace
 	installClient.Version = version
 	installClient.Wait = true
 	installClient.Timeout = 30 * time.Second
@@ -642,7 +641,7 @@ func monitorWorkloadsForDuration(
 // upgradeCSIDriver upgrades the CSI Driver's Helm chart to the new version.
 func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version string, chartPath string) {
 	upgradeClient := action.NewUpgrade(cfg)
-	upgradeClient.Namespace = helmReleaseNamespace
+	upgradeClient.Namespace = DriverNamespace
 	upgradeClient.Version = version
 	upgradeClient.Wait = true
 	upgradeClient.Timeout = 30 * time.Second
@@ -699,7 +698,7 @@ func initHelmClient() (*cli.EnvSettings, *action.Configuration) {
 	actionConfig := new(action.Configuration)
 	err := actionConfig.Init(
 		settings.RESTClientGetter(),
-		helmReleaseNamespace,
+		DriverNamespace,
 		os.Getenv("HELM_DRIVER"),
 		logger.Printf)
 	framework.ExpectNoError(err)

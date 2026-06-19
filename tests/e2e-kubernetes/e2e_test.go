@@ -29,6 +29,7 @@ func init() {
 	flag.StringVar(&ClusterName, "cluster-name", "", "name of the cluster")
 	flag.StringVar(&ClusterType, "cluster-type", "eksctl", "type of cluster (eksctl or openshift)")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
+	flag.StringVar(&DriverNamespace, "driver-namespace", "kube-system", "namespace where the CSI driver is installed")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&UpgradeTests, "run-upgrade-tests", false, "run upgrade tests")
 	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
@@ -38,6 +39,7 @@ func init() {
 	custom_testsuites.DefaultRegion = BucketRegion
 	custom_testsuites.ClusterName = ClusterName
 	custom_testsuites.ClusterType = ClusterType
+	custom_testsuites.DriverNamespace = DriverNamespace
 	custom_testsuites.IMDSAvailable = IMDSAvailable
 }
 

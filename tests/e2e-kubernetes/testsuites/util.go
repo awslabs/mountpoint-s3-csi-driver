@@ -39,14 +39,7 @@ const NamespacePrefix = "aws-s3-csi-e2e-"
 
 const csiDriverDaemonSetName = "s3-csi-node"
 
-var csiDriverDaemonSetNamespace = getDriverNamespace()
-
-func getDriverNamespace() string {
-	if namespace := os.Getenv("DRIVER_NAMESPACE"); namespace != "" {
-		return namespace
-	}
-	return "kube-system"
-}
+var DriverNamespace string
 
 // genBinDataFromSeed generate binData with random seed
 func genBinDataFromSeed(len int, seed int64) []byte {
@@ -247,7 +240,7 @@ func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod
 func killCSIDriverPods(ctx context.Context, f *framework.Framework) {
 	framework.Logf("Killing CSI Driver Pods")
 	ds := csiDriverDaemonSet(ctx, f)
-	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.CoreV1().Pods(DriverNamespace)
 
 	pods, err := client.List(ctx, metav1.ListOptions{
 		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
@@ -281,7 +274,7 @@ func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
 
 func csiDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
 	ds := csiDriverDaemonSet(ctx, f)
-	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.CoreV1().Pods(DriverNamespace)
 
 	pods, err := client.List(ctx, metav1.ListOptions{
 		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
@@ -293,7 +286,7 @@ func csiDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
 }
 
 func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
-	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.AppsV1().DaemonSets(DriverNamespace)
 	ds, err := client.Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
 	framework.ExpectNoError(err)
 	gomega.Expect(ds).ToNot(gomega.BeNil())
@@ -303,7 +296,7 @@ func csiDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.Dae
 func csiDriverServiceAccount(ctx context.Context, f *framework.Framework) *v1.ServiceAccount {
 	ds := csiDriverDaemonSet(ctx, f)
 
-	client := f.ClientSet.CoreV1().ServiceAccounts(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.CoreV1().ServiceAccounts(DriverNamespace)
 	sa, err := client.Get(ctx, ds.Spec.Template.Spec.ServiceAccountName, metav1.GetOptions{})
 
 	framework.ExpectNoError(err)

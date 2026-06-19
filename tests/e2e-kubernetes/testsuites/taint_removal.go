@@ -138,7 +138,7 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 // getCSIDriverNode returns a node where the CSI driver is running
 func getCSIDriverNode(ctx context.Context, f *framework.Framework) *v1.Node {
 	ds := csiDriverDaemonSet(ctx, f)
-	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+	pods, err := f.ClientSet.CoreV1().Pods(DriverNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
 	})
 	framework.ExpectNoError(err)

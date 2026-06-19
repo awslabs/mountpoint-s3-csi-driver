@@ -424,7 +424,7 @@ func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
 
 // ebsCSIDriverDaemonSet returns the DaemonSet of EBS CSI Driver if its installed in the cluster.
 func ebsCSIDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
-	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	client := f.ClientSet.AppsV1().DaemonSets(DriverNamespace)
 	ds, err := client.Get(ctx, "ebs-csi-node", metav1.GetOptions{})
 	if err != nil {
 		return nil
