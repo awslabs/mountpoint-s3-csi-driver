@@ -22,16 +22,7 @@ function helm_uninstall_driver() {
   CLUSTER_TYPE=${5}
 
   if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
-    if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
-      echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
-      set +e
-      $HELM_BIN uninstall $RELEASE_NAME --namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG
-      set -e
-      $KUBECTL_BIN delete secret --namespace $DRIVER_NAMESPACE sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
-    else
-      $HELM_BIN uninstall $RELEASE_NAME --namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG
-    fi
-
+    $HELM_BIN uninstall $RELEASE_NAME --namespace $DRIVER_NAMESPACE --kubeconfig $KUBECONFIG
     $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n $DRIVER_NAMESPACE --timeout=60s --kubeconfig $KUBECONFIG
   else
     echo "driver does not seem to be installed"
