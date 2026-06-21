@@ -59,6 +59,9 @@ You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed a
 > [!IMPORTANT]
 > When upgrading the CSI Driver, existing [Mountpoint Pods](ARCHITECTURE.md#the-mounter-component--mountpoint-pod-aws-s3-csi-mounter) remain unchanged to avoid disrupting your active workloads. New Mountpoint Pods with the updated version are created only when workload pods are started or restarted.
 
+> [!NOTE]
+> If you install the driver into any namespace other than `kube-system`, you must restrict that namespace to cluster administrators only. Do not grant untrusted users access to the driver namespace.
+
 #### Amazon EKS managed add-on
 
 See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
@@ -101,6 +104,22 @@ We recommend customers to separate the controller components from the nodes runn
 helm upgrade --install aws-mountpoint-s3-csi-driver \
     --namespace kube-system \
     --set controller.nodeSelector."kubernetes\.io/role"="control-plane" \
+    aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
+```
+
+#### OpenShift / ROSA
+
+On OpenShift and ROSA ([Red Hat OpenShift Service on AWS](https://aws.amazon.com/rosa/)) clusters, the driver must be installed in a dedicated namespace rather than `kube-system`. This is because OpenShift's [managed-cluster-validating-webhooks](https://github.com/openshift/managed-cluster-validating-webhooks) block ServiceAccount creation in managed namespaces.
+
+> [!IMPORTANT]
+> The driver namespace must be restricted to cluster admins only. Do not grant untrusted users access to the driver namespace.
+
+```sh
+oc create namespace s3-csi-driver
+oc adm policy add-scc-to-user privileged -z s3-csi-driver-sa -n s3-csi-driver
+
+helm upgrade --install aws-mountpoint-s3-csi-driver \
+    --namespace s3-csi-driver \
     aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
 ```
 
