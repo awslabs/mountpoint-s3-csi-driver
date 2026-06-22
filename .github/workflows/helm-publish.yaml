@@ -21,12 +21,12 @@ jobs:
     environment: "trusted"
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
       - name: Checkout verification script from main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           path: main-branch
@@ -75,7 +75,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' && !inputs.dry-run }}
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0

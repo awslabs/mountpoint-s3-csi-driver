@@ -47,7 +47,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
@@ -96,7 +96,7 @@ jobs:
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
