@@ -36,6 +36,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -72,6 +73,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
