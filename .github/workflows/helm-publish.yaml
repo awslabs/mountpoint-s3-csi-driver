@@ -79,6 +79,12 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+      - name: Mark chart as published via Helm repository
+        # Disables the unsupported-installation warning and tracking label that shows
+        # when installing directly from a GitHub branch.
+        run: |
+          sed -i 's/^isHelmRepo: false/isHelmRepo: true/' charts/aws-mountpoint-s3-csi-driver/values.yaml
+          grep '^isHelmRepo: true' charts/aws-mountpoint-s3-csi-driver/values.yaml
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
