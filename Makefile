@@ -32,6 +32,7 @@ REGISTRY?=""
 IMAGE_NAME?=""
 IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
+FORCE_BUILD?=false
 
 DOCKERFILE?="Dockerfile"
 
@@ -107,7 +108,7 @@ sub-image-%:
 .PHONY: image
 image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION):
-	@if [ "$(OUTPUT_TYPE)" = "registry" ] && docker manifest inspect $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) > /dev/null 2>&1; then \
+	@if [ "$(FORCE_BUILD)" != "true" ] && [ "$(OUTPUT_TYPE)" = "registry" ] && docker manifest inspect $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) > /dev/null 2>&1; then \
 		echo "Image $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) already exists in registry, skipping build"; \
 	else \
 		DOCKER_BUILDKIT=1 docker buildx build \
