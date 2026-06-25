@@ -102,14 +102,14 @@ The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.30+ a
 
 The following table provides the support status for various distros with regards to CSI Driver version:
 
-| Distro                                  | Experimental | Stable | Deprecated | Removed |
-|-----------------------------------------|-------------:|-------:|-----------:|--------:|
-| Amazon Linux 2       |         - |   1.0.0 |          - |       - |
-| Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
-| Ubuntu 20.04         |         - |   1.0.0 |          - |   2.5.0 |
-| Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
-| Ubuntu 24.04         |         - |   2.0.0 |          - |       - |
-| Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
+| Distro               | Stable     | Removed | Currently Supported EKS Versions |
+|----------------------|-----------:|--------:|----------------------------------|
+| Amazon Linux 2       |      1.0.0 |   2.8.0 | —                                |
+| Amazon Linux 2023    |      1.0.0 |       — | 1.30 – 1.36                      |
+| Ubuntu 20.04         |      1.0.0 |   2.5.0 | —                                |
+| Ubuntu 22.04         |      1.0.0 |   2.8.0 | —                                |
+| Ubuntu 24.04         |      2.0.0 |       — | 1.33 – 1.36                      |
+| Bottlerocket >1.19.2 |      1.4.0 |       — | 1.30 – 1.36                      |
 
 ## Documentation
 
