@@ -1,5 +1,8 @@
 # Unreleased
 
+### Notable changes
+* Removed support for AL2, and Ubuntu 22.04.
+
 # v2.7.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.7.0/README.md)
