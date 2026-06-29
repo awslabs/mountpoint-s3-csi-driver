@@ -45,7 +45,7 @@ func TestReplaceFile(t *testing.T) {
 
 		dest := filepath.Join(basedir, "dest")
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0644, nil)
 		assert.NoError(t, err)
 
 		expectContentAndPerm(t, dest, content, 0644)
@@ -60,7 +60,7 @@ func TestReplaceFile(t *testing.T) {
 		dest := filepath.Join(basedir, "dest")
 		createFileWithRandomBytes(t, dest, 0644, 1024)
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0644, nil)
 		assert.NoError(t, err)
 
 		expectContentAndPerm(t, dest, content, 0644)
@@ -75,7 +75,7 @@ func TestReplaceFile(t *testing.T) {
 		dest := filepath.Join(basedir, "dest")
 		createFileWithRandomBytes(t, dest, 0777, 1024)
 
-		err := util.ReplaceFile(dest, source, 0644)
+		err := util.ReplaceFile(dest, source, 0644, nil)
 		assert.NoError(t, err)
 
 		expectContentAndPerm(t, dest, content, 0644)
@@ -93,7 +93,7 @@ func TestReplaceFile(t *testing.T) {
 		for range 32 {
 			wg.Go(func() {
 
-				err := util.ReplaceFile(dest, source, 0644)
+				err := util.ReplaceFile(dest, source, 0644, nil)
 				assert.NoError(t, err)
 			})
 		}

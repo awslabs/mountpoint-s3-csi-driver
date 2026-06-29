@@ -87,7 +87,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		klog.V(4).Infof("Providing credentials from pod with STS Web Identity provider (IRSA)")
 
 		// Copy STS Token file to WritePath
-		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
+		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
 		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to write service account STS token: %v", err)
@@ -106,7 +106,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 		if eksPodIdentityCredentialsEnvironmentError == nil {
 			// Copy EKS Token file to WritePath
-			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
+			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
 			err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
@@ -126,13 +126,13 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 // cleanupFromPod removes any credential files that were created for pod-level authentication via [Provider.provideFromPod].
 func (c *Provider) cleanupFromPod(cleanupCtx CleanupContext) error {
-	tokenNameSTS := podLevelSTSWebIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID)
+	tokenNameSTS := podLevelSTSWebIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID, cleanupCtx.MountKind)
 	errSTS := c.cleanupToken(cleanupCtx.WritePath, tokenNameSTS)
 	if errSTS != nil {
 		errSTS = status.Errorf(codes.Internal, "Failed to cleanup service account STS token: %v", errSTS)
 	}
 
-	tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID)
+	tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(cleanupCtx.PodID, cleanupCtx.VolumeID, cleanupCtx.MountKind)
 	errEKS := c.cleanupToken(cleanupCtx.WritePath, tokenNameEKS)
 	if errEKS != nil {
 		errEKS = status.Errorf(codes.Internal, "Failed to cleanup service account EKS Pod Identity token: %v", errEKS)
@@ -149,6 +149,7 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 	podServiceAccount := provideCtx.ServiceAccountName
 
 	// In PodMounter we get IAM Role ARN from MountpointS3PodAttachment custom resource
+	// TODO(vlaad): In DaemonsetMounter we should get IAM Role ARN from in-memory cache (or from volume's .meta)
 	if provideCtx.IsPodMountpoint() {
 		if provideCtx.ServiceAccountEKSRoleARN != "" {
 			return provideCtx.ServiceAccountEKSRoleARN, nil
@@ -177,17 +178,23 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 }
 
 // podLevelSTSWebIdentityServiceAccountTokenName returns service account token name for Pod-level identity.
-// It escapes from slashes to make this token name path-safe.
-func podLevelSTSWebIdentityServiceAccountTokenName(podID string, volumeID string) string {
-	id := escapedVolumeIdentifier(podID, volumeID)
-	return id + ".token"
+// For daemonset mounts the write path is already unique per mount, so a fixed name suffices.
+// For other mount kinds it includes podID and volumeID for uniqueness.
+func podLevelSTSWebIdentityServiceAccountTokenName(podID string, volumeID string, mountKind MountKind) string {
+	if mountKind == MountKindDaemonset {
+		return webIdentityServiceAccountTokenName
+	}
+	return escapedVolumeIdentifier(podID, volumeID) + ".token"
 }
 
 // podLevelEksPodIdentityServiceAccountTokenName returns service account token name for Pod-level identity with EKS Pod Identity.
-// It escapes from slashes to make this token name path-safe.
-func podLevelEksPodIdentityServiceAccountTokenName(podID string, volumeID string) string {
-	id := escapedVolumeIdentifier(podID, volumeID)
-	return id + "-eks-pod-identity.token"
+// For daemonset mounts the write path is already unique per mount, so a fixed name suffices.
+// For other mount kinds it includes podID and volumeID for uniqueness.
+func podLevelEksPodIdentityServiceAccountTokenName(podID string, volumeID string, mountKind MountKind) string {
+	if mountKind == MountKindDaemonset {
+		return eksPodIdentityServiceAccountTokenName
+	}
+	return escapedVolumeIdentifier(podID, volumeID) + "-eks-pod-identity.token"
 }
 
 // createIRSACredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with IRSA
@@ -208,7 +215,7 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 	}
 
 	podID := provideCtx.GetCredentialPodID()
-	tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
+	tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
 	return envprovider.Environment{
@@ -222,7 +229,7 @@ func (c *Provider) createIRSACredentialsEnvironment(ctx context.Context, provide
 // createEKSPodIdentityCredentialsEnvironment creates an environment with the environment variables needed for pod-level authentication with EKS Pod Identity
 func (c *Provider) createEKSPodIdentityCredentialsEnvironment(provideCtx ProvideContext) (envprovider.Environment, error) {
 	podID := provideCtx.GetCredentialPodID()
-	tokenName := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID)
+	tokenName := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
 	tokenFile := filepath.Join(provideCtx.EnvPath, tokenName)
 
 	eksPodIdentityAgentCredentialsURI := os.Getenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI")
