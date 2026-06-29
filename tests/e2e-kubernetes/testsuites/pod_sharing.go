@@ -262,10 +262,10 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			secondFile := "/mnt/volume1/file2.txt"
 			seed := time.Now().UTC().UnixNano()
 			// pods[0] should get a read-write mount
-			checkWriteToPath(ctx, f, pods[0], firstFile, toWrite, seed)
+			checkWriteToPathSucceed(ctx, f, pods[0], firstFile, toWrite, seed)
 
 			// pods[1] should get a read-only mount
-			checkReadFromPath(ctx, f, pods[1], firstFile, toWrite, seed)
+			checkReadFromPathSucceed(ctx, f, pods[1], firstFile, toWrite, seed)
 			checkWriteToPathFails(ctx, f, pods[1], secondFile, toWrite, seed)
 		})
 
@@ -289,10 +289,10 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			secondFile := "/mnt/volume1/file2.txt"
 			seed := time.Now().UTC().UnixNano()
 			// pods[0] should get a read-write mount
-			checkWriteToPath(ctx, f, pods[0], firstFile, toWrite, seed)
+			checkWriteToPathSucceed(ctx, f, pods[0], firstFile, toWrite, seed)
 
 			// pods[1] should get a read-only mount
-			checkReadFromPath(ctx, f, pods[1], firstFile, toWrite, seed)
+			checkReadFromPathSucceed(ctx, f, pods[1], firstFile, toWrite, seed)
 			checkWriteToPathFails(ctx, f, pods[1], secondFile, toWrite, seed)
 		})
 
@@ -314,8 +314,8 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			toWrite := 1024 // 1KB
 			path := "/mnt/volume1/new-file-after-pod1-terminated.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPath(ctx, f, pods[1], path, toWrite, seed)
-			checkReadFromPath(ctx, f, pods[1], path, toWrite, seed)
+			checkWriteToPathSucceed(ctx, f, pods[1], path, toWrite, seed)
+			checkReadFromPathSucceed(ctx, f, pods[1], path, toWrite, seed)
 		})
 
 		ginkgo.It("should keep Mountpoint Pod running during graceful termination period", func(ctx context.Context) {
@@ -632,8 +632,8 @@ func checkPodWriteAndOtherPodRead(ctx context.Context, f *framework.Framework, w
 	filePath := filepath.Join(basePath, filename)
 	seed := time.Now().UTC().UnixNano()
 
-	checkWriteToPath(ctx, f, writerPod, filePath, size, seed)
-	checkReadFromPath(ctx, f, readerPod, filePath, size, seed)
+	checkWriteToPathSucceed(ctx, f, writerPod, filePath, size, seed)
+	checkReadFromPathSucceed(ctx, f, readerPod, filePath, size, seed)
 }
 
 type podLevelIdentityConfig struct {

@@ -60,7 +60,7 @@ func checkExecInPodSucceed(ctx context.Context, f *framework.Framework, pod *v1.
 	framework.ExpectNoError(err, "exec in pod %s/%s failed for cmd %q: %v", pod.Namespace, pod.Name, cmd, err)
 }
 
-func checkWriteToPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkWriteToPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
 	cmd := fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite)
@@ -75,20 +75,20 @@ func checkWriteToPathFails(ctx context.Context, f *framework.Framework, pod *v1.
 	framework.ExpectNoError(err, "write to path %q in pod %s/%s expected to fail with a specific exit code: %v", path, pod.Namespace, pod.Name, err)
 }
 
-func checkReadFromPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+func checkReadFromPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
 	cmd := fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum)
 	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
 	framework.ExpectNoError(err, "read from path %q in pod %s/%s failed (expected sha256 %x, size %d): %v", path, pod.Namespace, pod.Name, sum, toWrite, err)
 }
 
-func checkDeletingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+func checkDeletingPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
 	cmd := fmt.Sprintf("rm %s", path)
 	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
 	framework.ExpectNoError(err, "delete path %q in pod %s/%s failed: %v", path, pod.Namespace, pod.Name, err)
 }
 
-func checkListingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+func checkListingPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
 	cmd := fmt.Sprintf("ls %s", path)
 	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
 	framework.ExpectNoError(err, "list path %q in pod %s/%s failed: %v", path, pod.Namespace, pod.Name, err)
