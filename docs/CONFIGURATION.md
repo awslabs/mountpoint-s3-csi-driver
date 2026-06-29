@@ -470,6 +470,29 @@ There are potential race conditions on node startup (especially when a node is f
 
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
+## Configure node host network and health check port
+
+The node DaemonSet exposes two Helm values to control its pod networking and the port used by its health check (`livenessProbe`):
+
+| Helm value         | Default | Description                                                                 |
+| ------------------ | ------- | --------------------------------------------------------------------------- |
+| `node.hostNetwork` | `false` | When `true`, runs the node pods in the host's network namespace (`hostNetwork: true`). |
+| `node.healthzPort` | `9808`  | The container port used by the liveness probe and the `livenessprobe` sidecar's `--health-port`. |
+
+### When to enable `hostNetwork`
+
+By default each node pod gets its own pod IP from the cluster CNI. On clusters where pod IP address space is constrained (for example, the [AWS VPC CNI](https://github.com/aws/amazon-vpc-cni-k8s) allocates IPs from the VPC subnet and the per-node IP budget is limited by the instance type), running the node DaemonSet with `hostNetwork: true` lets the pods share the node's network namespace instead of consuming a dedicated pod IP on every node. This frees those IPs for your application workloads.
+
+### When to change `healthzPort`
+
+When `hostNetwork` is enabled, the liveness probe port is opened directly on the host. If the default port `9808` is already in use on your nodes (for example, by another DaemonSet or host process), set `node.healthzPort` to a free port to avoid a port conflict. The value is applied consistently to both the driver container's health check port and the `livenessprobe` sidecar.
+
+```yaml
+node:
+  hostNetwork: true
+  healthzPort: 9809
+```
+
 ## Cross-account bucket access
 Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
