@@ -102,10 +102,16 @@ spec:
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else }}helm{{ end }}
             {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            {{- $mounter := index .Values.daemonsetMounters 0 }}
+            {{- if lt (int $mounter.maxVolumesPerNode) 1 }}
+            {{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 1" }}
+            {{- end }}
             - name: MOUNTER_MODE
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
+            - name: MAX_VOLUMES_PER_NODE
+              value: "{{ $mounter.maxVolumesPerNode }}"
             {{- end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
