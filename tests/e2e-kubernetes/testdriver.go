@@ -50,7 +50,8 @@ func initS3Driver() *s3Driver {
 				"", // Default fsType
 			),
 			Capabilities: map[framework.Capability]bool{
-				framework.CapPersistence: true,
+				framework.CapPersistence:  true,
+				framework.CapVolumeLimits: true,
 			},
 			RequiredAccessModes: []v1.PersistentVolumeAccessMode{
 				v1.ReadWriteMany,

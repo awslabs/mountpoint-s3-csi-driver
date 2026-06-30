@@ -50,6 +50,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -61,11 +62,12 @@ const (
 )
 
 var (
-	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
-	mounterMode            = os.Getenv("MOUNTER_MODE")
-	mounterModeDaemonset   = "daemonset"
-	podWatcherResyncPeriod = time.Minute
-	scheme                 = runtime.NewScheme()
+	mountpointPodNamespace   = os.Getenv("MOUNTPOINT_NAMESPACE")
+	mounterMode              = os.Getenv("MOUNTER_MODE")
+	mounterModeDaemonset     = "daemonset"
+	maxVolumesPerNodeEnvName = "MAX_VOLUMES_PER_NODE"
+	podWatcherResyncPeriod   = time.Minute
+	scheme                   = runtime.NewScheme()
 )
 
 func init() {
@@ -119,7 +121,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	stopCh := make(chan struct{})
 
-	var nodeMounter mounter.Mounter
+	var nodeServer *node.S3NodeServer
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
@@ -131,7 +133,15 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		}
 		go dm.StartCommDirWatch(stopCh)
 
-		nodeMounter = dm
+		maxVolumesPerNode, err := util.GetEnvAsIntOrFallback(maxVolumesPerNodeEnvName, 0)
+		if err != nil {
+			return nil, err
+		}
+		if maxVolumesPerNode < 1 {
+			return nil, fmt.Errorf("%s must be >= 1, got %d", maxVolumesPerNodeEnvName, maxVolumesPerNode)
+		}
+
+		nodeServer = node.NewS3NodeServer(nodeID, dm, int64(maxVolumesPerNode))
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -153,10 +163,8 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		if err != nil {
 			klog.Fatalln(err)
 		}
-		nodeMounter = podMounter
+		nodeServer = node.NewS3NodeServer(nodeID, podMounter, 0) // maxVolumesPerNode = 0 means no limit
 	}
-
-	nodeServer := node.NewS3NodeServer(nodeID, nodeMounter)
 
 	return &Driver{
 		Endpoint:   endpoint,

@@ -63,12 +63,13 @@ const (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID  string
-	Mounter mounter.Mounter
+	NodeID            string
+	Mounter           mounter.Mounter
+	MaxVolumesPerNode int64
 }
 
-func NewS3NodeServer(nodeID string, mounter mounter.Mounter) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter}
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter, maxVolumesPerNode int64) *S3NodeServer {
+	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, MaxVolumesPerNode: maxVolumesPerNode}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -282,7 +283,8 @@ func (ns *S3NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoReq
 	klog.V(4).Infof("NodeGetInfo: called with args %+v", req)
 
 	return &csi.NodeGetInfoResponse{
-		NodeId: ns.NodeID,
+		NodeId:            ns.NodeID,
+		MaxVolumesPerNode: ns.MaxVolumesPerNode,
 	}, nil
 }
 
