@@ -75,8 +75,7 @@ func (t *s3CSIEvictionOrderTestSuite) DefineTests(driver storageframework.TestDr
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024
 		filePath := path.Join(e2epod.VolumeMountPath1, "file.txt")
-		err := checkWriteToPath(ctx, f, workloadPods[0], filePath, toWrite, seed)
-		framework.ExpectNoError(err)
+		checkWriteToPathSucceed(ctx, f, workloadPods[0], filePath, toWrite, seed)
 
 		// Find the Mountpoint pods associated with our volume
 		mpPods, err := findMountpointPods(ctx, f.ClientSet, vol.Pv.Name)
@@ -94,8 +93,7 @@ func (t *s3CSIEvictionOrderTestSuite) DefineTests(driver storageframework.TestDr
 
 		// Check we can still use the mount insde the workload
 		for _, pod := range workloadPods {
-			err = checkReadFromPath(ctx, f, pod, filePath, toWrite, seed)
-			framework.ExpectNoError(err)
+			checkReadFromPathSucceed(ctx, f, pod, filePath, toWrite, seed)
 		}
 	})
 }
