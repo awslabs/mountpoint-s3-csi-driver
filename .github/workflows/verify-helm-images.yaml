@@ -15,7 +15,7 @@ jobs:
     name: Verify chart images exist in public ECR
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install crane
         run: |
           cd /tmp
