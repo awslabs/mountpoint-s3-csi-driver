@@ -957,6 +957,30 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(pod.Pod)
 			waitForObjectToDisappear(s3pa)
 		})
+
+		It("should keep S3 Pod Attachment while workload pod is terminating but still running", func() {
+			vol := createVolume()
+			vol.bind()
+
+			gracePeriod := int64(300)
+			pod := createPod(withPVC(vol.pvc), func(p *corev1.Pod) {
+				p.Spec.TerminationGracePeriodSeconds = &gracePeriod
+			})
+			pod.schedule(testNode)
+
+			// Pod gets a Mountpoint Pod and transitions to Running
+			s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+			pod.running()
+
+			// Pod is deleted but ignores SIGTERM — still Running with DeletionTimestamp set
+			pod.terminate()
+
+			// S3PA should persist while the pod is still running during graceful termination
+			Consistently(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa)).To(Succeed())
+				g.Expect(findMountpointPodNameForWorkload(s3pa, string(pod.UID))).ToNot(BeEmpty())
+			}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+		})
 	})
 
 	Context("Duplicate S3PodAttachments recovery", func() {

@@ -298,6 +298,10 @@ type workloadVolume struct {
 // the Mountpoint Pod will be scheduled for termination as well. This is because if `workloadPod` never transition into its `Running` state,
 // the Mountpoint Pod might never got a successful mount operation, and thus it might never get unmount operation to cleanly exit
 // and might hang there until it reaches its timeout. We just terminate it in this case to prevent unnecessary waits.
+//
+// If `workloadPod` is `Running` and scheduled for termination (i.e., `DeletionTimestamp` is non-nil during graceful shutdown),
+// it is still treated as active. The pod may still be accessing the S3 volume during its termination grace period
+// (e.g., if it ignores SIGTERM), so the Mountpoint Pod and S3PodAttachment must remain until the pod actually exits.
 func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
@@ -1108,12 +1112,11 @@ func extractCSISpecFromPV(pv *corev1.PersistentVolume) *corev1.CSIPersistentVolu
 	return csi
 }
 
-// isPodActive returns whether given the Pod is active and not in the process of termination.
-// Copied from https://github.com/kubernetes/kubernetes/blob/8770bd58d04555303a3a15b30c245a58723d0f4a/pkg/controller/controller_utils.go#L1009-L1013.
+// isPodActive returns whether the given Pod is active.
+// A pod is active if it is running (regardless of terminating status, to allow shut-downs
+// which access the volume), or if it is pending and not terminating.
 func isPodActive(p *corev1.Pod) bool {
-	return corev1.PodSucceeded != p.Status.Phase &&
-		corev1.PodFailed != p.Status.Phase &&
-		p.DeletionTimestamp == nil
+	return isPodRunning(p) || (p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil)
 }
 
 // isPodTerminating returns whether the given Pod is terminating.
