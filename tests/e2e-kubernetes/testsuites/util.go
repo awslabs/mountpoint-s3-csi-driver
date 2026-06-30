@@ -55,33 +55,43 @@ func genBinDataFromSeed(len int, seed int64) []byte {
 	return binData
 }
 
-func checkWriteToPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
+func checkExecInPodSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, cmd string) {
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "exec in pod %s/%s failed for cmd %q: %v", pod.Namespace, pod.Name, cmd, err)
+}
+
+func checkWriteToPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite))
-	if err != nil {
-		framework.Logf("written data with sha: %x", sha256.Sum256(data))
-	}
-	return err
+	cmd := fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite)
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "write to path %q in pod %s/%s failed: %v", path, pod.Namespace, pod.Name, err)
 }
 
 func checkWriteToPathFails(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2epod.VerifyExecInPodFail(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
+	err := e2epod.VerifyExecInPodFail(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite), 1)
+	framework.ExpectNoError(err, "write to path %q in pod %s/%s expected to fail with a specific exit code: %v", path, pod.Namespace, pod.Name, err)
 }
 
-func checkReadFromPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) error {
+func checkReadFromPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	return e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum))
+	cmd := fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum)
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "read from path %q in pod %s/%s failed (expected sha256 %x, size %d): %v", path, pod.Namespace, pod.Name, sum, toWrite, err)
 }
 
-func checkDeletingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
-	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("rm %s", path))
+func checkDeletingPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+	cmd := fmt.Sprintf("rm %s", path)
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "delete path %q in pod %s/%s failed: %v", path, pod.Namespace, pod.Name, err)
 }
 
-func checkListingPath(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
-	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("ls %s", path))
+func checkListingPathSucceed(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+	cmd := fmt.Sprintf("ls %s", path)
+	err := e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "list path %q in pod %s/%s failed: %v", path, pod.Namespace, pod.Name, err)
 }
 
 func checkListingPathWithEntries(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, entries []string) {
@@ -232,9 +242,11 @@ func podModifierNonRoot(pod *v1.Pod) {
 
 func copySmallFileToPod(ctx context.Context, f *framework.Framework, pod *v1.Pod, hostPath, podPath string) {
 	data, err := os.ReadFile(hostPath)
-	framework.ExpectNoError(err)
+	framework.ExpectNoError(err, "read host file %q failed: %v", hostPath, err)
 	encoded := base64.StdEncoding.EncodeToString(data)
-	e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath))
+	cmd := fmt.Sprintf("echo %s | base64 -d > %s", encoded, podPath)
+	err = e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	framework.ExpectNoError(err, "copy file to path %q in pod %s/%s failed: %v", podPath, pod.Namespace, pod.Name, err)
 }
 
 // In some cases like changing Secret object, it's useful to trigger recreation of our pods.
