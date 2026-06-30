@@ -107,7 +107,7 @@ func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
 func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
 	driverServiceAccountTokenFile := os.Getenv(envprovider.EnvWebIdentityTokenFile)
 	tokenFile := filepath.Join(provideCtx.WritePath, webIdentityServiceAccountTokenName)
-	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm, provideCtx.FileOwnership)
+	err := util.ReplaceFile(tokenFile, driverServiceAccountTokenFile, CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: sts-web-identity: failed to copy driver's service account token: %w", err)
 	}
@@ -122,7 +122,7 @@ func provideStsWebIdentityCredentialsFromDriver(provideCtx ProvideContext) (envp
 // It basically copies driver's injected service account token to [provideCtx.WritePath].
 func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerAuthorizationTokenFile string, containerCredentialsFullURI string) (envprovider.Environment, error) {
 	tokenFile := filepath.Join(provideCtx.WritePath, eksPodIdentityServiceAccountTokenName)
-	err := util.ReplaceFile(tokenFile, containerAuthorizationTokenFile, CredentialFilePerm, provideCtx.FileOwnership)
+	err := util.ReplaceFile(tokenFile, containerAuthorizationTokenFile, CredentialFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("credentialprovider: container: failed to copy driver's service account token: %w", err)
 	}

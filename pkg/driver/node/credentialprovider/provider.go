@@ -17,7 +17,6 @@ import (
 	k8sstrings "k8s.io/utils/strings"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 // CredentialFilePerm is the default permissions to be used for credential files.
@@ -95,9 +94,6 @@ type ProvideContext struct {
 
 	// MountKind indicates whether the mount is managed by systemd or pod mounter
 	MountKind MountKind
-
-	// FileOwnership specifies UID/GID for credential files. Nil uses process defaults.
-	FileOwnership *util.FileOwnership
 
 	// The following values are provided from CSI volume context.
 	AuthenticationSource     AuthenticationSource

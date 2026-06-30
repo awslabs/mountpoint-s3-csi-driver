@@ -356,7 +356,6 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, mou
 	credentialCtx.WritePath = mountCredDir
 	credentialCtx.EnvPath = filepath.Join("/comm", mountId)
 	credentialCtx.MountKind = credentialprovider.MountKindDaemonset
-	credentialCtx.FileOwnership = &util.FileOwnership{UID: 0, GID: 0}
 
 	env, _, err := dm.credProvider.Provide(ctx, *credentialCtx)
 	if err != nil {
