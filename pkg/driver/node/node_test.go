@@ -21,6 +21,8 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
+const testNodeID = "test-nodeID"
+
 type nodeServerTestEnv struct {
 	mockCtl     *gomock.Controller
 	mockMounter *mock_driver.MockMounter
@@ -30,7 +32,7 @@ type nodeServerTestEnv struct {
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	server := node.NewS3NodeServer("test-nodeID", mockMounter)
+	server := node.NewS3NodeServer(testNodeID, mockMounter, 0)
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,
@@ -992,6 +994,52 @@ func TestNodeGetCapabilitiesForPodMounter(t *testing.T) {
 	}, resp.GetCapabilities())
 
 	nodeTestEnv.mockCtl.Finish()
+}
+
+func TestNodeGetInfo(t *testing.T) {
+	testCases := []struct {
+		name     string
+		testFunc func(t *testing.T)
+	}{
+		{
+			name: "returns MaxVolumesPerNode when configured",
+			testFunc: func(t *testing.T) {
+				var maxVolumesPerNode int64 = 50
+				nodeTestEnv := initNodeServerTestEnv(t)
+				nodeTestEnv.server.MaxVolumesPerNode = maxVolumesPerNode
+
+				ctx := context.Background()
+				req := &csi.NodeGetInfoRequest{}
+
+				resp, err := nodeTestEnv.server.NodeGetInfo(ctx, req)
+				if err != nil {
+					t.Fatalf("NodeGetInfo failed: %v", err)
+				}
+				assert.Equals(t, testNodeID, resp.NodeId)
+				assert.Equals(t, maxVolumesPerNode, resp.MaxVolumesPerNode)
+			},
+		},
+		{
+			name: "returns zero when MaxVolumesPerNode not set (unbounded, for pod mode)",
+			testFunc: func(t *testing.T) {
+				nodeTestEnv := initNodeServerTestEnv(t)
+
+				ctx := context.Background()
+				req := &csi.NodeGetInfoRequest{}
+
+				resp, err := nodeTestEnv.server.NodeGetInfo(ctx, req)
+				if err != nil {
+					t.Fatalf("NodeGetInfo failed: %v", err)
+				}
+				assert.Equals(t, testNodeID, resp.NodeId)
+				assert.Equals(t, int64(0), resp.MaxVolumesPerNode)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.testFunc)
+	}
 }
 
 var _ mounter.Mounter = &dummyMounter{}
