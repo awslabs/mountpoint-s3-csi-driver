@@ -15,11 +15,6 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
-const (
-	webIdentityServiceAccountTokenName    = "token"
-	eksPodIdentityServiceAccountTokenName = "eks-pod-identity-token"
-)
-
 // provideFromDriver provides driver-level AWS credentials.
 func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Environment, error) {
 	klog.V(4).Infof("credentialprovider: Using driver identity and %s mount kind", provideCtx.MountKind)
@@ -70,7 +65,7 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 	// Container credential provider (EKS Pod Identity)
 	containerAuthorizationTokenFile := os.Getenv(envprovider.EnvContainerAuthorizationTokenFile)
 	containerCredentialsFullURI := os.Getenv(envprovider.EnvContainerCredentialsFullURI)
-	if provideCtx.IsPodMountpoint() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
+	if !provideCtx.IsSystemDMountpoint() && containerAuthorizationTokenFile != "" && containerCredentialsFullURI != "" {
 		klog.V(4).Infof("Providing credentials from driver with Container credential provider (EKS Pod Identity)")
 		containerCredsEnv, err := provideContainerCredentialsFromDriver(provideCtx, containerAuthorizationTokenFile, containerCredentialsFullURI)
 		if err != nil {
@@ -85,14 +80,14 @@ func (c *Provider) provideFromDriver(provideCtx ProvideContext) (envprovider.Env
 
 // cleanupFromDriver removes any credential files that were created for driver-level authentication via [Provider.provideFromDriver].
 func (c *Provider) cleanupFromDriver(cleanupCtx CleanupContext) error {
-	prefix := driverLevelLongTermCredentialsProfilePrefix(cleanupCtx.PodID, cleanupCtx.VolumeID)
+	prefix := driverLevelLongTermCredentialsProfilePrefix(cleanupCtx.PodID, cleanupCtx.VolumeID, cleanupCtx.MountKind)
 	errLongTerm := awsprofile.Cleanup(awsprofile.Settings{
 		Basepath: cleanupCtx.WritePath,
 		Prefix:   prefix,
 	})
 
 	var errSTS, errEKS error
-	if cleanupCtx.IsPodMountpoint() {
+	if !cleanupCtx.IsSystemDMountpoint() {
 		errSTS = c.cleanupToken(cleanupCtx.WritePath, webIdentityServiceAccountTokenName)
 		if errSTS != nil {
 			errSTS = status.Errorf(codes.Internal, "Failed to cleanup driver-level service account STS token: %v", errSTS)
@@ -142,7 +137,7 @@ func provideContainerCredentialsFromDriver(provideCtx ProvideContext, containerA
 // These variables injected to driver's Pod from a configured Kubernetes secret if configured, here it basically
 // created a AWS Profile from these credentials in [provideCtx.WritePath].
 func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID, secretAccessKey, sessionToken string) (envprovider.Environment, error) {
-	prefix := driverLevelLongTermCredentialsProfilePrefix(provideCtx.GetCredentialPodID(), provideCtx.VolumeID)
+	prefix := driverLevelLongTermCredentialsProfilePrefix(provideCtx.GetCredentialPodID(), provideCtx.VolumeID, provideCtx.MountKind)
 	awsProfile, err := awsprofile.Create(awsprofile.Settings{
 		Basepath: provideCtx.WritePath,
 		Prefix:   prefix,
@@ -169,6 +164,10 @@ func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID
 
 // driverLevelLongTermCredentialsProfilePrefix generates a prefix for AWS credential profile names
 // when using driver-level authentication. The prefix includes both pod and volume IDs to ensure uniqueness.
-func driverLevelLongTermCredentialsProfilePrefix(podID, volumeID string) string {
+// In daemonset mounter write path is unique per mount, file names will be the same.
+func driverLevelLongTermCredentialsProfilePrefix(podID, volumeID string, mountKind MountKind) string {
+	if mountKind == MountKindDaemonset {
+		return ""
+	}
 	return escapedVolumeIdentifier(podID, volumeID) + "-"
 }
