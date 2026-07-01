@@ -146,7 +146,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		}
 		if err := dm.cleanupCredentials(commDir, mountId, credentialCtx.ToCleanupCtx()); err != nil {
 			klog.Errorf("DaemonsetMounter: failed to clean up credential directory for mount %s: %v", mountId, err)
-			// todo: once we have UID allocation, we don't return UID to the pool here, we need to cleanup creds first
+			// TODO(vlaad): once we have UID allocation, we shouldn't return UID to the pool here, we need to cleanup creds first
 		}
 	}()
 

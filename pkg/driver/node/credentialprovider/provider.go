@@ -92,7 +92,7 @@ type ProvideContext struct {
 	MountpointPodID string
 	VolumeID        string
 
-	// MountKind indicates whether the mount is managed by systemd or pod mounter
+	// MountKind indicates whether the mount is managed by systemd, pod mounter or daemonset mounter
 	MountKind MountKind
 
 	// The following values are provided from CSI volume context.
@@ -143,6 +143,7 @@ func (ctx *ProvideContext) IsPodMountpoint() bool {
 	return ctx.MountKind == MountKindPod
 }
 
+// ToCleanupCtx constructs CleanupContext from ProvideContext.
 func (ctx *ProvideContext) ToCleanupCtx() CleanupContext {
 	return CleanupContext{
 		WritePath: ctx.WritePath,

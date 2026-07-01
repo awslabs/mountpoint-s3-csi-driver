@@ -164,9 +164,10 @@ func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID
 
 // driverLevelLongTermCredentialsProfilePrefix generates a prefix for AWS credential profile names
 // when using driver-level authentication. The prefix includes both pod and volume IDs to ensure uniqueness.
+// In daemonset mounter write path is unique per mount, file names will be the same.
 func driverLevelLongTermCredentialsProfilePrefix(podID, volumeID string, mountKind MountKind) string {
 	if mountKind == MountKindDaemonset {
-		return "" // in daemonset write path is unique per mount, file names will be the same
+		return ""
 	}
 	return escapedVolumeIdentifier(podID, volumeID) + "-"
 }
