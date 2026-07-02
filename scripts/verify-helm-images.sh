@@ -12,11 +12,24 @@ set -euo pipefail
 #   - Liveness probe sidecar
 #   - Headroom pod image (pause container)
 #
+# Usage:
+#   ./verify-helm-images.sh                # Full verification (incl. EKS-addon private ECR repo; needs AWS creds)
+#   ./verify-helm-images.sh --public-only  # Verify only public ECR images (no AWS creds needed)
+#
 # Prerequisites:
 #   - yq: YAML processor (https://github.com/mikefarah/yq)
 #   - crane: Container registry tool (https://github.com/google/go-containerregistry/tree/main/cmd/crane)
 #
-# Note: AWS credentials are required with ecr:GetAuthorizationToken and ecr:BatchGetImage permissions to access EKS add-on repositories.
+# Note: For the default (full) mode, AWS credentials with ecr:GetAuthorizationToken and
+# ecr:BatchGetImage permissions are required to access EKS add-on repositories.
+
+PUBLIC_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --public-only) PUBLIC_ONLY=1 ;;
+    *) echo "ERROR: Unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
 
 CHART_DIR="charts/aws-mountpoint-s3-csi-driver"
 VALUES_FILE="${CHART_DIR}/values.yaml"
@@ -54,9 +67,11 @@ fi
 echo "Verifying all images referenced in ${VALUES_FILE}..."
 echo ""
 
-if ! aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "${EKS_REGISTRY}"; then
-  echo "ERROR: Failed to authenticate with ECR"
-  exit 1
+if [[ ${PUBLIC_ONLY} -eq 0 ]]; then
+  if ! aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "${EKS_REGISTRY}"; then
+    echo "ERROR: Failed to authenticate with ECR"
+    exit 1
+  fi
 fi
 
 FAILED=0
@@ -109,8 +124,10 @@ verify_sidecar_images_in_chart() {
 echo "== Verifying standard images =="
 verify_sidecar_images_in_chart "helm template $CHART_DIR"
 
-echo "== Verifying EKS Addon images =="
-verify_sidecar_images_in_chart "helm template $CHART_DIR --set isEKSAddon=true --set sidecars.livenessProbe.image.containerRegistry=$EKS_REGISTRY --set sidecars.nodeDriverRegistrar.image.containerRegistry=$EKS_REGISTRY"
+if [[ ${PUBLIC_ONLY} -eq 0 ]]; then
+  echo "== Verifying EKS Addon images =="
+  verify_sidecar_images_in_chart "helm template $CHART_DIR --set isEKSAddon=true --set sidecars.livenessProbe.image.containerRegistry=$EKS_REGISTRY --set sidecars.nodeDriverRegistrar.image.containerRegistry=$EKS_REGISTRY"
+fi
 
 # Verify headroom pod image (used when experimental.reserveHeadroomForMountpointPods is enabled)
 HEADROOM_IMAGE=$(yq eval '.experimental.headroomPodImage' "${VALUES_FILE}")

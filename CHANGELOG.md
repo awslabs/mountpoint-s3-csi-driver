@@ -1,5 +1,17 @@
 # Unreleased
 
+### Notable changes
+* Removed support for AL2, and Ubuntu 22.04.
+
+# v2.7.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.7.0/README.md)
+
+### Notable changes
+* Add controller leader election to prevent duplicate MountpointS3PodAttachment resources from being created during controller rolling updates, when the old and new controller pods briefly co-exist. ([#814](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/814))
+* Update Go to 1.26.4. ([#823](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/823))
+* Update csi-node-driver-registrar to v2.17.0-eksbuild.2 and livenessprobe to v2.19.0-eksbuild.2. ([#824](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/824))
+
 # v2.6.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.6.0/README.md)

@@ -1,0 +1,28 @@
+name: "Verify Helm Images"
+
+on:
+  push:
+    branches: [ "main", "feature/*" ]
+  pull_request:
+  merge_group:
+    types: [ "checks_requested" ]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify chart images exist in public ECR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install crane
+        run: |
+          cd /tmp
+          curl -sL "https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz" > crane.tar.gz
+          tar -xzf crane.tar.gz crane
+          sudo mv crane /usr/local/bin/crane
+          sudo chmod +x /usr/local/bin/crane
+          crane version
+      - name: Verify public ECR images referenced in chart
+        run: ./scripts/verify-helm-images.sh --public-only
