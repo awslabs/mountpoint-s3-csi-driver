@@ -114,6 +114,9 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		resource := createVolumeResource(proxy, l.config, pattern, v1.ReadWriteMany, []string{
+			fmt.Sprintf("uid=%d", defaultNonRootUser),
+			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+			"allow-other",
 			"debug",
 			"debug-crt",
 		})
@@ -179,7 +182,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking write to a volume")
-		checkWriteToPath(ctx, f, pod, fileInVol, toWrite, seed)
+		checkWriteToPathSucceed(ctx, f, pod, fileInVol, toWrite, seed)
 
 		ginkgo.By("Checking mountpoint actually operate behind proxy")
 		// Find the Mountpoint pods associated with our volume

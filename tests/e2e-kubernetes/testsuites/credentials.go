@@ -231,18 +231,18 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	expectWriteToSucceed := func(ctx context.Context, pod *v1.Pod) writtenFile {
 		seed := time.Now().UTC().UnixNano()
 		framework.Logf("checking writing to %s", testFilePath)
-		checkWriteToPath(ctx, f, pod, testFilePath, testWriteSize, seed)
+		checkWriteToPathSucceed(ctx, f, pod, testFilePath, testWriteSize, seed)
 		return writtenFile{testFilePath, seed, testWriteSize}
 	}
 
 	expectReadToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking reading from %s", file.path)
-		checkReadFromPath(ctx, f, pod, file.path, file.size, file.seed)
+		checkReadFromPathSucceed(ctx, f, pod, file.path, file.size, file.seed)
 	}
 
 	expectDeleteToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking if deletion of %s succeeds", file.path)
-		checkDeletingPath(ctx, f, pod, file.path)
+		checkDeletingPathSucceed(ctx, f, pod, file.path)
 	}
 
 	expectWriteToFail := func(ctx context.Context, pod *v1.Pod) {
@@ -253,7 +253,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	expectListToSucceed := func(ctx context.Context, pod *v1.Pod) {
 		framework.Logf("checking listing %s", testVolumePath)
-		checkListingPath(ctx, f, pod, testVolumePath)
+		checkListingPathSucceed(ctx, f, pod, testVolumePath)
 	}
 
 	expectReadOnly := func(ctx context.Context, pod *v1.Pod) {
