@@ -1,6 +1,12 @@
 # Default values for Mountpoint for Amazon S3 CSI Driver Helm chart.
 # You can customize any values here during installation.
 
+# Automatically set to true when the chart is published to the official Helm repository.
+# Installing directly from a GitHub branch is not supported.
+# Use the Helm repository (https://awslabs.github.io/mountpoint-s3-csi-driver) or EKS Addon instead.
+# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md for details.
+isHelmRepo: false
+
 # Set to true if running on OpenShift/ROSA.
 # If not set, auto-detects OpenShift where possible.
 isOpenShift: null
@@ -12,7 +18,7 @@ image:
   repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v2.6.0"
+  tag: "v2.7.0"
 
 node:
   kubeletPath: /var/lib/kubelet

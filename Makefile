@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=2.6.0
+VERSION=2.7.0
 
 PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
@@ -134,7 +134,7 @@ login_registry:
 
 .PHONY: download_go_deps
 download_go_deps:
-	go mod download
+	go mod download || (echo "go mod download failed, retrying (1/2)..." && sleep 5 && go mod download) || (echo "go mod download failed, retrying (2/2)..." && sleep 10 && go mod download)
 
 .PHONY: bin
 bin:

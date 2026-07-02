@@ -114,6 +114,9 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		resource := createVolumeResource(proxy, l.config, pattern, v1.ReadWriteMany, []string{
+			fmt.Sprintf("uid=%d", defaultNonRootUser),
+			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+			"allow-other",
 			"debug",
 			"debug-crt",
 		})

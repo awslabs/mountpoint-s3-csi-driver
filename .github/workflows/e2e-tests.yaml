@@ -47,10 +47,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -96,10 +98,12 @@ jobs:
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:

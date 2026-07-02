@@ -32,10 +32,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -68,18 +70,18 @@ jobs:
       AWS_REGION: "${{ vars.AWS_REGION }}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: "1.14.9" # FIXME - Remove pin once Terraform >= 1.15.1 is released
       - name: Configure AWS Credentials
         id: aws-creds
         uses: aws-actions/configure-aws-credentials@v6
