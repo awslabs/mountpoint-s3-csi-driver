@@ -141,7 +141,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		}
 		go dm.StartCommDirWatch(stopCh)
 
-		maxVolumesPerNode, err := util.GetEnvAsIntOrFallback(maxVolumesPerNodeEnvName, 0)
+		maxVolumesPerNode, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
 		if err != nil {
 			return nil, err
 		}

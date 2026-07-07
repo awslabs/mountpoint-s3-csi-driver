@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -9,16 +10,16 @@ func SupportLegacySystemdMounts() bool {
 	return os.Getenv("SUPPORT_LEGACY_SYSTEMD_MOUNTS") == "true"
 }
 
-// GetEnvAsIntOrFallback returns the env variable (parsed as integer) for
-// the given key and falls back to the given defaultValue if not set.
-// Copied from https://github.com/kubernetes/kubernetes/blob/release-1.36/pkg/util/env/env.go
-func GetEnvAsIntOrFallback(key string, defaultValue int) (int, error) {
-	if v := os.Getenv(key); v != "" {
-		value, err := strconv.Atoi(v)
-		if err != nil {
-			return defaultValue, err
-		}
-		return value, nil
+// GetEnvAsInt returns the env variable parsed as an integer.
+// Returns an error if the variable is not set or not a valid integer.
+func GetEnvAsInt(key string) (int, error) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return 0, fmt.Errorf("%s environment variable is required", key)
 	}
-	return defaultValue, nil
+	value, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid integer, got %q: %w", key, val, err)
+	}
+	return value, nil
 }
