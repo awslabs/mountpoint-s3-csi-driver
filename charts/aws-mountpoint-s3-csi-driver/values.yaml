@@ -156,12 +156,17 @@ daemonsetMounters:
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
     # Shared volumes (same PV used by multiple pods) are counted once.
   - maxVolumesPerNode: 10
-    # Resource requests and limits for the mounter DaemonSet pod.
-    # requests.memory should be sized to maxMountsPerNode × per-mount memory
-    # (e.g., 10 mounts × 2Gi = 20Gi).
+    # Total resource requests and limits for the mounter DaemonSet pod.
+    # requests.memory should be sized to maxVolumesPerNode × per-mount memory
+    # (e.g., 4 mounts × 512Mi = 2Gi, or 10 mounts × 4Gi = 40Gi).
+    # Please refer to Mountpoint documentation for recommended resource configurations.
+    # TODO: Add link for Mountpoint documentation
+    # requests.cpu should also be sized to maxVolumesPerNode × per-mount CPU
+    # (e.g.  4 mounts × 500Mi = 2000m, or 10 mounts × 500m = 5000m).
+    # TODO: update guidances with memory limiter integration
     resources:
       requests:
-        memory: "1Gi"
+        memory: "2Gi"
         cpu: "500m"
     logLevel: 4
     podLabels: {}
