@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,99 +63,155 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		credentialprovider.AuthenticationSourceUnspecified,
 	}
 
-	t.Run("only long-term credentials (SystemD)", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForLongTermCredentials(t)
+	t.Run("only long-term credentials", func(t *testing.T) {
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+			wantPrefix      string
+			cleanupPodId    string
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd, wantPrefix: testSystemDProfilePrefix, cleanupPodId: testPodID},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID, wantPrefix: testPodMounterProfilePrefix, cleanupPodId: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset, wantPrefix: ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForLongTermCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindSystemd,
-			}
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testSystemDProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
-			}, env)
-			assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
-		}
-	})
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_PROFILE":                 tc.wantPrefix + "s3-csi",
+						"AWS_CONFIG_FILE":             testEnvPath + "/" + tc.wantPrefix + "s3-csi-config",
+						"AWS_SHARED_CREDENTIALS_FILE": testEnvPath + "/" + tc.wantPrefix + "s3-csi-credentials",
+					}, env)
+					assertLongTermCredentials(t, writePath, tc.wantPrefix)
 
-	t.Run("only long-term credentials (PodMounter)", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForLongTermCredentials(t)
+					err = provider.Cleanup(credentialprovider.CleanupContext{
+						WritePath: writePath,
+						PodID:     tc.cleanupPodId,
+						VolumeID:  testVolumeID,
+						MountKind: tc.mountKind,
+					})
+					assert.NoError(t, err)
 
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				MountpointPodID:      testMountpointPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindPod,
-			}
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testPodMounterProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testPodMounterProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testPodMounterProfilePrefix + "s3-csi-credentials",
-			}, env)
-			assertLongTermCredentials(t, writePath, testPodMounterProfilePrefix)
+					assert.FileNotExists(t, filepath.Join(writePath, tc.wantPrefix+"s3-csi-config"))
+					assert.FileNotExists(t, filepath.Join(writePath, tc.wantPrefix+"s3-csi-credentials"))
+				}
+			})
 		}
 	})
 
 	t.Run("only sts web identity credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForStsWebIdentityCredentials(t)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+			shouldCleanup   bool
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID, shouldCleanup: true},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset, shouldCleanup: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForStsWebIdentityCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindPod,
-			}
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-			}, env)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_ROLE_ARN":                testRoleARN,
+						"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+					}, env)
+					assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+
+					err = provider.Cleanup(credentialprovider.CleanupContext{
+						WritePath: writePath,
+						PodID:     testPodID,
+						VolumeID:  testVolumeID,
+						MountKind: tc.mountKind,
+					})
+					assert.NoError(t, err)
+
+					if tc.shouldCleanup {
+						assert.FileNotExists(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+					} else {
+						assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+					}
+				}
+			})
 		}
 	})
 
-	t.Run("only container credentials (PodMounter)", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForContainerCredentials(t)
+	t.Run("only container credentials", func(t *testing.T) {
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForContainerCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := provideCtx(t, writePath, authSource)
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-			}, env)
-			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+						"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+					}, env)
+					assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+
+					err = provider.Cleanup(credentialprovider.CleanupContext{
+						WritePath: writePath,
+						PodID:     testPodID,
+						VolumeID:  testVolumeID,
+						MountKind: tc.mountKind,
+					})
+					assert.NoError(t, err)
+
+					assert.FileNotExists(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+				}
+			})
 		}
 	})
 
@@ -205,247 +260,333 @@ func TestProvidingDriverLevelCredentials(t *testing.T) {
 		}, env)
 	})
 
-	t.Run("no profile credentials (PodMounter)", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				MountpointPodID:      testMountpointPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindPod,
-			}
+	t.Run("no profile credentials", func(t *testing.T) {
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					// Profile provider passthrough is only supported for SystemD mounts,
+					// these should be ignored for other mount kinds.
+					basepath := t.TempDir()
+					t.Setenv("AWS_CONFIG_FILE", filepath.Join(basepath, "config"))
+					t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(basepath, "credentials"))
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{}, env)
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
+
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{}, env)
+				}
+			})
 		}
 	})
 
 	t.Run("long-term and sts web identity credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForLongTermCredentials(t)
-			setEnvForStsWebIdentityCredentials(t)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+			wantPrefix      string
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd, wantPrefix: testSystemDProfilePrefix},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID, wantPrefix: testPodMounterProfilePrefix},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset, wantPrefix: ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForLongTermCredentials(t)
+					setEnvForStsWebIdentityCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindPod,
-			}
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                 testSystemDProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":             "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-			}, env)
-			assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_PROFILE":                 tc.wantPrefix + "s3-csi",
+						"AWS_CONFIG_FILE":             testEnvPath + "/" + tc.wantPrefix + "s3-csi-config",
+						"AWS_SHARED_CREDENTIALS_FILE": testEnvPath + "/" + tc.wantPrefix + "s3-csi-credentials",
+						"AWS_ROLE_ARN":                testRoleARN,
+						"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+					}, env)
+					assertLongTermCredentials(t, writePath, tc.wantPrefix)
+					assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+				}
+			})
 		}
 	})
 
 	t.Run("long-term and container credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForLongTermCredentials(t)
-			setEnvForContainerCredentials(t)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+			wantPrefix      string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID, wantPrefix: testPodMounterProfilePrefix},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset, wantPrefix: ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForLongTermCredentials(t)
+					setEnvForContainerCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := provideCtx(t, writePath, authSource)
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_PROFILE":                            testSystemDProfilePrefix + "s3-csi",
-				"AWS_CONFIG_FILE":                        "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-				"AWS_SHARED_CREDENTIALS_FILE":            "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
-				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-			}, env)
-			assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
-			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_PROFILE":                            tc.wantPrefix + "s3-csi",
+						"AWS_CONFIG_FILE":                        testEnvPath + "/" + tc.wantPrefix + "s3-csi-config",
+						"AWS_SHARED_CREDENTIALS_FILE":            testEnvPath + "/" + tc.wantPrefix + "s3-csi-credentials",
+						"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+						"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+					}, env)
+					assertLongTermCredentials(t, writePath, tc.wantPrefix)
+					assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+				}
+			})
 		}
 	})
 
 	t.Run("sts web identity credentials and containter credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			setEnvForContainerCredentials(t)
-			setEnvForStsWebIdentityCredentials(t)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					setEnvForContainerCredentials(t)
+					setEnvForStsWebIdentityCredentials(t)
 
-			writePath := t.TempDir()
-			provideCtx := provideCtx(t, writePath, authSource)
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_ROLE_ARN":                           testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-			}, env)
-			assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-			assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{
+						"AWS_ROLE_ARN":                           testRoleARN,
+						"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+						"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+						"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+					}, env)
+					assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+					assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
+				}
+			})
 		}
 	})
 
 	t.Run("incomplete long-term credentials", func(t *testing.T) {
-		// Only set access key without secret
-		t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// Only set access key without secret
+				t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
 
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindPod,
+				provider := credentialprovider.New(nil, dummyRegionProvider)
+				writePath := t.TempDir()
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					WritePath:            writePath,
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					MountpointPodID:      tc.mountpointPodID,
+					VolumeID:             testVolumeID,
+					MountKind:            tc.mountKind,
+				}
+
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
+
+				// Only set secret key without access key
+				t.Setenv("AWS_ACCESS_KEY_ID", "")
+				t.Setenv("AWS_SECRET_ACCESS_KEY", testSecretAccessKey)
+
+				env, source, err = provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
+			})
 		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
-
-		// Only set secret key without access key
-		t.Setenv("AWS_ACCESS_KEY_ID", "")
-		t.Setenv("AWS_SECRET_ACCESS_KEY", testSecretAccessKey)
-
-		env, source, err = provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
 	})
 
 	t.Run("incomplete sts web identity credentials", func(t *testing.T) {
-		// Only set role ARN without token file
-		t.Setenv("AWS_ROLE_ARN", testRoleARN)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// Only set role ARN without token file
+				t.Setenv("AWS_ROLE_ARN", testRoleARN)
 
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindPod,
+				provider := credentialprovider.New(nil, dummyRegionProvider)
+				writePath := t.TempDir()
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					WritePath:            writePath,
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					MountpointPodID:      tc.mountpointPodID,
+					VolumeID:             testVolumeID,
+					MountKind:            tc.mountKind,
+				}
+
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
+
+				// Only set token file without role ARN
+				tokenPath := filepath.Join(t.TempDir(), "token")
+				assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
+				t.Setenv("AWS_ROLE_ARN", "")
+				t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
+
+				env, source, err = provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
+			})
 		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
-
-		// Only set token file without role ARN
-		tokenPath := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(tokenPath, []byte(testWebIdentityToken), 0600))
-		t.Setenv("AWS_ROLE_ARN", "")
-		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
-
-		env, source, err = provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
 	})
 
 	t.Run("incomplete container credentials", func(t *testing.T) {
-		// Only set container credentials full URI without token file
-		t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// Only set container credentials full URI without token file
+				t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
 
-		provider := credentialprovider.New(nil, dummyRegionProvider)
+				provider := credentialprovider.New(nil, dummyRegionProvider)
+				writePath := t.TempDir()
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					WritePath:            writePath,
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					MountpointPodID:      tc.mountpointPodID,
+					VolumeID:             testVolumeID,
+					MountKind:            tc.mountKind,
+				}
 
-		provideCtx := provideCtx(t, t.TempDir(), credentialprovider.AuthenticationSourceDriver)
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
 
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+				// Only set token file without credentials URI
+				tokenPath := filepath.Join(t.TempDir(), "token")
+				assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
+				t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "")
+				t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", tokenPath)
 
-		// Only set token file without role ARN
-		tokenPath := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(tokenPath, []byte(testContainerAuthorizationToken), 0600))
-		t.Setenv("AWS_ROLE_ARN", "")
-		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath)
-
-		env, source, err = provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{}, env)
+				env, source, err = provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+				assert.Equals(t, envprovider.Environment{}, env)
+			})
+		}
 	})
 
 	t.Run("no credentials", func(t *testing.T) {
-		for _, authSource := range authenticationSourceVariants {
-			writePath := t.TempDir()
-			provideCtx := credentialprovider.ProvideContext{
-				AuthenticationSource: authSource,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindPod,
-			}
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+		}{
+			{name: "SystemD", mountKind: credentialprovider.MountKindSystemd},
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, authSource := range authenticationSourceVariants {
+					writePath := t.TempDir()
+					provideCtx := credentialprovider.ProvideContext{
+						AuthenticationSource: authSource,
+						WritePath:            writePath,
+						EnvPath:              testEnvPath,
+						WorkloadPodID:        testPodID,
+						MountpointPodID:      tc.mountpointPodID,
+						VolumeID:             testVolumeID,
+						MountKind:            tc.mountKind,
+					}
 
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-			assert.Equals(t, envprovider.Environment{}, env)
+					env, source, err := provider.Provide(context.Background(), provideCtx)
+					assert.NoError(t, err)
+					assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
+					assert.Equals(t, envprovider.Environment{}, env)
+				}
+			})
 		}
-	})
-
-	t.Run("daemonset mounter kind file paths and env vars", func(t *testing.T) {
-		setEnvForLongTermCredentials(t)
-		setEnvForStsWebIdentityCredentials(t)
-		setEnvForContainerCredentials(t)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindDaemonset,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_PROFILE":                            "s3-csi",
-			"AWS_CONFIG_FILE":                        testEnvPath + "/s3-csi-config",
-			"AWS_SHARED_CREDENTIALS_FILE":            testEnvPath + "/s3-csi-credentials",
-			"AWS_ROLE_ARN":                           testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE":            filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-		}, env)
-
-		// expect fixed file names (no per-mount prefix)
-		awsprofiletest.AssertCredentialsFromAWSProfile(t, "s3-csi",
-			credentialprovider.CredentialFilePerm,
-			filepath.Join(writePath, "s3-csi-config"),
-			filepath.Join(writePath, "s3-csi-credentials"),
-			testAccessKeyID, testSecretAccessKey, testSessionToken)
-
-		_, err = os.Stat(filepath.Join(writePath, testWebIdentityServiceAccountToken))
-		assert.NoError(t, err)
-
-		_, err = os.Stat(filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-		assert.NoError(t, err)
 	})
 }
 
@@ -453,198 +594,163 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 
 	t.Run("correct values for EKS Pod Identity", func(t *testing.T) {
-		t.Setenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.23/v1/credentials")
+		for _, tc := range []struct {
+			name            string
+			mountKind       credentialprovider.MountKind
+			mountpointPodID string
+			wantTokenName   string
+		}{
+			{name: "PodMounter", mountKind: credentialprovider.MountKindPod, mountpointPodID: testMountpointPodID, wantTokenName: testMountpointPodID + "-" + testVolumeID + "-eks-pod-identity.token"},
+			{name: "DaemonsetMounter", mountKind: credentialprovider.MountKindDaemonset, wantTokenName: testEKSPodIdentityServiceAccountToken},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.23/v1/credentials")
 
-		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
-		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+				clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
+				provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
 
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			PodNamespace:         testPodNamespace,
-			ServiceAccountName:   testPodServiceAccount,
-			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				serviceAccountTokenAudienceSTS: {
-					Token: testWebIdentityToken,
-				},
-				serviceAccountTokenAudienceEKS: {
-					Token: testContainerAuthorizationToken,
-				},
-			}),
-			MountKind: credentialprovider.MountKindPod,
+				writePath := t.TempDir()
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+					WritePath:            writePath,
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					MountpointPodID:      tc.mountpointPodID,
+					VolumeID:             testVolumeID,
+					PodNamespace:         testPodNamespace,
+					ServiceAccountName:   testPodServiceAccount,
+					ServiceAccountTokens: serviceAccountTokens(t, tokens{
+						serviceAccountTokenAudienceSTS: {
+							Token: testWebIdentityToken,
+						},
+						serviceAccountTokenAudienceEKS: {
+							Token: testContainerAuthorizationToken,
+						},
+					}),
+					MountKind: tc.mountKind,
+				}
+
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
+				assert.Equals(t, envprovider.Environment{
+					"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, tc.wantTokenName),
+					"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+					"AWS_EC2_METADATA_DISABLED":              "true",
+				}, env)
+				assertContainerTokenFile(t, filepath.Join(writePath, tc.wantTokenName))
+
+				err = provider.Cleanup(credentialprovider.CleanupContext{
+					WritePath: writePath,
+					PodID:     testMountpointPodID,
+					VolumeID:  testVolumeID,
+					MountKind: tc.mountKind,
+				})
+				assert.NoError(t, err)
+				assert.FileNotExists(t, filepath.Join(writePath, tc.wantTokenName))
+			})
 		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testPodLevelEksPodIdentityServiceAccountToken),
-			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-
-			// Disable EC2 credentials
-			"AWS_EC2_METADATA_DISABLED": "true",
-		}, env)
-		assertContainerTokenFile(t, filepath.Join(writePath, testPodLevelEksPodIdentityServiceAccountToken))
 	})
 
-	t.Run("correct values for IRSA (SystemD)", func(t *testing.T) {
-		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
-			"eks.amazonaws.com/role-arn": testRoleARN,
-		}))
-		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+	t.Run("correct values for IRSA", func(t *testing.T) {
+		for _, tc := range []struct {
+			name                  string
+			mountKind             credentialprovider.MountKind
+			mountpointPodID       string
+			serviceAccountRoleARN string
+			wantTokenName         string
+			wantEnv               envprovider.Environment
+			cleanupPodId          string
+		}{
+			{
+				name:          "SystemD",
+				mountKind:     credentialprovider.MountKindSystemd,
+				wantTokenName: testSystemDPodLevelServiceAccountToken,
+				wantEnv: envprovider.Environment{
+					"AWS_ROLE_ARN":                  testRoleARN,
+					"AWS_WEB_IDENTITY_TOKEN_FILE":   filepath.Join(testEnvPath, testSystemDPodLevelServiceAccountToken),
+					"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
+					"AWS_CONFIG_FILE":               testEnvPath + "/disable-config",
+					"AWS_SHARED_CREDENTIALS_FILE":   testEnvPath + "/disable-credentials",
+					"AWS_EC2_METADATA_DISABLED":     "true",
+					"AWS_REGION":                    testIMDSRegion,
+					"AWS_DEFAULT_REGION":            testIMDSRegion,
+				},
+				cleanupPodId: testPodID,
+			},
+			{
+				name:                  "PodMounter",
+				mountKind:             credentialprovider.MountKindPod,
+				mountpointPodID:       testMountpointPodID,
+				serviceAccountRoleARN: testRoleARN,
+				wantTokenName:         testPodMounterPodLevelServiceAccountToken,
+				wantEnv: envprovider.Environment{
+					"AWS_ROLE_ARN":                testRoleARN,
+					"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testPodMounterPodLevelServiceAccountToken),
+					"AWS_EC2_METADATA_DISABLED":   "true",
+					"AWS_REGION":                  testIMDSRegion,
+					"AWS_DEFAULT_REGION":          testIMDSRegion,
+				},
+				cleanupPodId: testMountpointPodID,
+			},
+			{
+				name:          "DaemonsetMounter",
+				mountKind:     credentialprovider.MountKindDaemonset,
+				wantTokenName: testWebIdentityServiceAccountToken,
+				wantEnv: envprovider.Environment{
+					"AWS_ROLE_ARN":                testRoleARN,
+					"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+					"AWS_EC2_METADATA_DISABLED":   "true",
+					"AWS_REGION":                  testIMDSRegion,
+					"AWS_DEFAULT_REGION":          testIMDSRegion,
+				},
+				cleanupPodId: testPodID,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
+					"eks.amazonaws.com/role-arn": testRoleARN,
+				}))
+				provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
 
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			PodNamespace:         testPodNamespace,
-			ServiceAccountName:   testPodServiceAccount,
-			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				serviceAccountTokenAudienceSTS: {
-					Token: testWebIdentityToken,
-				},
-				serviceAccountTokenAudienceEKS: {
-					Token: testContainerAuthorizationToken,
-				},
-			}),
-			MountKind: credentialprovider.MountKindSystemd,
+				writePath := t.TempDir()
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource:     credentialprovider.AuthenticationSourcePod,
+					WritePath:                writePath,
+					EnvPath:                  testEnvPath,
+					WorkloadPodID:            testPodID,
+					MountpointPodID:          tc.mountpointPodID,
+					VolumeID:                 testVolumeID,
+					PodNamespace:             testPodNamespace,
+					ServiceAccountName:       testPodServiceAccount,
+					ServiceAccountEKSRoleARN: tc.serviceAccountRoleARN,
+					ServiceAccountTokens: serviceAccountTokens(t, tokens{
+						serviceAccountTokenAudienceSTS: {
+							Token: testWebIdentityToken,
+						},
+						serviceAccountTokenAudienceEKS: {
+							Token: testContainerAuthorizationToken,
+						},
+					}),
+					MountKind: tc.mountKind,
+				}
+
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
+				assert.Equals(t, tc.wantEnv, env)
+				assertWebIdentityTokenFile(t, filepath.Join(writePath, tc.wantTokenName))
+
+				err = provider.Cleanup(credentialprovider.CleanupContext{
+					WritePath: writePath,
+					PodID:     tc.cleanupPodId,
+					VolumeID:  testVolumeID,
+					MountKind: tc.mountKind,
+				})
+				assert.NoError(t, err)
+				assert.FileNotExists(t, filepath.Join(writePath, tc.wantTokenName))
+			})
 		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_ROLE_ARN":                testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testSystemDPodLevelServiceAccountToken),
-
-			// Having a unique cache key for namespace/serviceaccount pair
-			"UNSTABLE_MOUNTPOINT_CACHE_KEY": testPodNamespace + "/" + testPodServiceAccount,
-
-			// Disable long-term credentials
-			"AWS_CONFIG_FILE":             "/test-env/disable-config",
-			"AWS_SHARED_CREDENTIALS_FILE": "/test-env/disable-credentials",
-
-			// Disable EC2 credentials
-			"AWS_EC2_METADATA_DISABLED": "true",
-
-			"AWS_REGION":         testIMDSRegion,
-			"AWS_DEFAULT_REGION": testIMDSRegion,
-		}, env)
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testSystemDPodLevelServiceAccountToken))
-	})
-
-	t.Run("correct values for IRSA (PodMounter)", func(t *testing.T) {
-		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
-		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			MountpointPodID:      testMountpointPodID,
-			VolumeID:             testVolumeID,
-			PodNamespace:         testPodNamespace,
-			ServiceAccountName:   testPodServiceAccount,
-			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				serviceAccountTokenAudienceSTS: {
-					Token: testWebIdentityToken,
-				},
-				serviceAccountTokenAudienceEKS: {
-					Token: testContainerAuthorizationToken,
-				},
-			}),
-			ServiceAccountEKSRoleARN: testRoleARN,
-			MountKind:                credentialprovider.MountKindPod,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_ROLE_ARN":                testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testPodMounterPodLevelServiceAccountToken),
-
-			// Disable EC2 credentials
-			"AWS_EC2_METADATA_DISABLED": "true",
-
-			"AWS_REGION":         testIMDSRegion,
-			"AWS_DEFAULT_REGION": testIMDSRegion,
-		}, env)
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testPodMounterPodLevelServiceAccountToken))
-	})
-
-	t.Run("daemonset mounter kind file paths and env vars", func(t *testing.T) {
-		baseProvideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			PodNamespace:         testPodNamespace,
-			ServiceAccountName:   testPodServiceAccount,
-			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				serviceAccountTokenAudienceSTS: {Token: testWebIdentityToken},
-				serviceAccountTokenAudienceEKS: {Token: testContainerAuthorizationToken},
-			}),
-			MountKind: credentialprovider.MountKindDaemonset,
-		}
-
-		t.Run("IRSA", func(t *testing.T) {
-			clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
-				"eks.amazonaws.com/role-arn": testRoleARN,
-			}))
-			provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
-
-			provideCtx := baseProvideCtx
-			provideCtx.WritePath = t.TempDir()
-			provideCtx.ServiceAccountEKSRoleARN = testRoleARN
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_ROLE_ARN":                testRoleARN,
-				"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-				"AWS_EC2_METADATA_DISABLED":   "true",
-				"AWS_REGION":                  testIMDSRegion,
-				"AWS_DEFAULT_REGION":          testIMDSRegion,
-			}, env)
-
-			info, err := os.Stat(filepath.Join(provideCtx.WritePath, testWebIdentityServiceAccountToken))
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.CredentialFilePerm, info.Mode().Perm())
-		})
-
-		t.Run("EKS Pod Identity", func(t *testing.T) {
-			t.Setenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.23/v1/credentials")
-
-			clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{}))
-			provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
-
-			provideCtx := baseProvideCtx
-			provideCtx.WritePath = t.TempDir()
-
-			env, source, err := provider.Provide(context.Background(), provideCtx)
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-			assert.Equals(t, envprovider.Environment{
-				"AWS_CONTAINER_CREDENTIALS_FULL_URI":     "http://169.254.170.23/v1/credentials",
-				"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-				"AWS_EC2_METADATA_DISABLED":              "true",
-			}, env)
-
-			info, err := os.Stat(filepath.Join(provideCtx.WritePath, testEKSPodIdentityServiceAccountToken))
-			assert.NoError(t, err)
-			assert.Equals(t, credentialprovider.CredentialFilePerm, info.Mode().Perm())
-		})
 	})
 
 	t.Run("missing information", func(t *testing.T) {
@@ -1082,217 +1188,6 @@ func TestProvidingPodLevelCredentialsWithSlashInIDs(t *testing.T) {
 
 func TestCleanup(t *testing.T) {
 	testutil.CleanRegionEnv(t)
-
-	t.Run("cleanup driver level long-term credentials", func(t *testing.T) {
-		// Provide/create long-term credentials first
-		setEnvForLongTermCredentials(t)
-
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindSystemd,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_PROFILE":                 testSystemDProfilePrefix + "s3-csi",
-			"AWS_CONFIG_FILE":             "/test-env/" + testSystemDProfilePrefix + "s3-csi-config",
-			"AWS_SHARED_CREDENTIALS_FILE": "/test-env/" + testSystemDProfilePrefix + "s3-csi-credentials",
-		}, env)
-		assertLongTermCredentials(t, writePath, testSystemDProfilePrefix)
-
-		// Perform cleanup
-		err = provider.Cleanup(credentialprovider.CleanupContext{
-			WritePath: writePath,
-			PodID:     testPodID,
-			VolumeID:  testVolumeID,
-			MountKind: credentialprovider.MountKindSystemd,
-		})
-		assert.NoError(t, err)
-
-		// Verify files were removed
-		_, err = os.Stat(filepath.Join(writePath, testSystemDProfilePrefix+"s3-csi-config"))
-		if err == nil {
-			t.Fatalf("AWS Config file should be cleaned up")
-		}
-		assert.Equals(t, fs.ErrNotExist, err)
-
-		_, err = os.Stat(filepath.Join(writePath, testSystemDProfilePrefix+"s3-csi-credentials"))
-		if err == nil {
-			t.Fatalf("AWS Credentials file should be cleaned up")
-		}
-		assert.Equals(t, fs.ErrNotExist, err)
-	})
-
-	t.Run("cleanup driver level sts web identity token (PodMounter)", func(t *testing.T) {
-		setEnvForStsWebIdentityCredentials(t)
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindPod,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_ROLE_ARN":                testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-		}, env)
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
-
-		// Perform cleanup
-		err = provider.Cleanup(credentialprovider.CleanupContext{
-			WritePath: writePath,
-			PodID:     testPodID,
-			VolumeID:  testVolumeID,
-			MountKind: credentialprovider.MountKindPod,
-		})
-		assert.NoError(t, err)
-
-		// Verify token was removed
-		_, err = os.Stat(filepath.Join(writePath, testWebIdentityServiceAccountToken))
-		if err == nil {
-			t.Fatalf("sts web identity token should be cleaned up")
-		}
-		assert.Equals(t, fs.ErrNotExist, err)
-	})
-
-	t.Run("do not cleanup driver level sts web identity token (SystemD)", func(t *testing.T) {
-		setEnvForStsWebIdentityCredentials(t)
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindSystemd,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_ROLE_ARN":                testRoleARN,
-			"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
-		}, env)
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
-
-		// Perform cleanup
-		err = provider.Cleanup(credentialprovider.CleanupContext{
-			WritePath: writePath,
-			PodID:     testPodID,
-			VolumeID:  testVolumeID,
-			MountKind: credentialprovider.MountKindSystemd,
-		})
-		assert.NoError(t, err)
-
-		// Verify token was not removed
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testWebIdentityServiceAccountToken))
-	})
-
-	t.Run("cleanup driver level EKS Pod Identity token (PodMounter)", func(t *testing.T) {
-		setEnvForContainerCredentials(t)
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindPod,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourceDriver, source)
-		assert.Equals(t, envprovider.Environment{
-			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
-			"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
-		}, env)
-		assertContainerTokenFile(t, filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-
-		err = provider.Cleanup(credentialprovider.CleanupContext{
-			WritePath: writePath,
-			PodID:     testPodID,
-			VolumeID:  testVolumeID,
-			MountKind: credentialprovider.MountKindPod,
-		})
-		assert.NoError(t, err)
-
-		// Verify token was removed
-		_, err = os.Stat(filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-		if err == nil {
-			t.Fatalf("EKS Pod Identity token should be cleaned up")
-		}
-		assert.Equals(t, fs.ErrNotExist, err)
-	})
-
-	t.Run("cleanup pod level", func(t *testing.T) {
-		// Provide/create STS Web Identity credentials first
-		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
-			"eks.amazonaws.com/role-arn": testRoleARN,
-		}))
-		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
-
-		writePath := t.TempDir()
-		provideCtx := credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-			WritePath:            writePath,
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			PodNamespace:         testPodNamespace,
-			ServiceAccountName:   testPodServiceAccount,
-			ServiceAccountTokens: serviceAccountTokens(t, tokens{
-				serviceAccountTokenAudienceSTS: {
-					Token: testWebIdentityToken,
-				},
-			}),
-			MountKind: credentialprovider.MountKindSystemd,
-		}
-
-		env, source, err := provider.Provide(context.Background(), provideCtx)
-		assert.NoError(t, err)
-		assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
-		assert.Equals(t, testRoleARN, env["AWS_ROLE_ARN"])
-		assert.Equals(t, filepath.Join(testEnvPath, testSystemDPodLevelServiceAccountToken), env["AWS_WEB_IDENTITY_TOKEN_FILE"])
-		assertWebIdentityTokenFile(t, filepath.Join(writePath, testSystemDPodLevelServiceAccountToken))
-
-		// Perform cleanup
-		err = provider.Cleanup(credentialprovider.CleanupContext{
-			WritePath: writePath,
-			PodID:     testPodID,
-			VolumeID:  testVolumeID,
-			MountKind: credentialprovider.MountKindSystemd,
-		})
-		assert.NoError(t, err)
-
-		// Verify file was removed
-		_, err = os.Stat(filepath.Join(writePath, testSystemDPodLevelServiceAccountToken))
-		if err == nil {
-			t.Fatalf("Service Account Token should be cleaned up")
-		}
-		assert.Equals(t, fs.ErrNotExist, err)
-	})
 
 	t.Run("cleanup with non-existent files", func(t *testing.T) {
 		writePath := t.TempDir()
