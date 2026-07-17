@@ -60,10 +60,6 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	cmd := exec.Command(mountpointPath, cmdArgs...)
 	cmd.ExtraFiles = []*os.File{fuseDev}
 
-	// TODO: we might need to make the child to inherit credentials ENV from this process (for driver-level creds)
-	// e.g. AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE,
-	//      AWS_CONTAINER_CREDENTIALS_FULL_URI, AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
-
 	cmd.Env = options.Env
 	cmd.Stdout = newPrefixWriter(os.Stdout, mountId)
 	cmd.Stderr = newPrefixWriter(os.Stderr, mountId)
