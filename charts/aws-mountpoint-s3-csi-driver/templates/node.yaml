@@ -105,9 +105,12 @@ spec:
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else }}helm{{ end }}
             {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            {{- if ne (len .Values.daemonsetMounters) 1 }}
+            {{- fail "daemonsetMounters must have exactly one entry" }}
+            {{- end }}
             {{- $mounter := index .Values.daemonsetMounters 0 }}
-            {{- if lt (int $mounter.maxVolumesPerNode) 1 }}
-            {{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 1" }}
+            {{- if lt (int $mounter.maxVolumesPerNode) 0 }}
+            {{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 0" }}
             {{- end }}
             - name: MOUNTER_MODE
               value: daemonset

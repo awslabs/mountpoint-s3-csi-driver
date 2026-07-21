@@ -154,16 +154,14 @@ experimental:
 daemonsetMounters:
     # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
-    # Shared volumes (same PV used by multiple pods) are counted once.
-  - maxVolumesPerNode: 10
+    # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
+    # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
+    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to 
+    # track volume usage.
+  - maxVolumesPerNode: 4
     # Total resource requests and limits for the mounter DaemonSet pod.
     # requests.memory should be sized to maxVolumesPerNode × per-mount memory
     # (e.g., 4 mounts × 512Mi = 2Gi, or 10 mounts × 4Gi = 40Gi).
-    # Please refer to Mountpoint documentation for recommended resource configurations.
-    # TODO: Add link for Mountpoint documentation
-    # requests.cpu should also be sized to maxVolumesPerNode × per-mount CPU
-    # (e.g.  4 mounts × 500Mi = 2000m, or 10 mounts × 500m = 5000m).
-    # TODO: update guidances with memory limiter integration
     resources:
       requests:
         memory: "2Gi"
