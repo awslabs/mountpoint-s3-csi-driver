@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,7 +111,6 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 	// max pod limit on a node.
 	// And one extra pod with a CSI volume should get Pending with a condition
 	// that says it's unschedulable because of volume limit.
-	// BEWARE: the test may create lot of volumes and it's really slow.
 	f.It("should support volume limits", f.WithSerial(), func(ctx context.Context) {
 		driverInfo := driver.GetDriverInfo()
 
@@ -129,6 +129,12 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 		limit, err := getCSINodeLimits(ctx, f, nodeName, driverInfo.Name)
 		framework.ExpectNoError(err)
 		framework.Logf("Node %s can handle %d volumes of driver %s", nodeName, limit, driverInfo.Name)
+
+		ginkgo.By("Verifying node has no pre-existing S3 volumes")
+		existing, err := countS3VolumesOnNode(ctx, f, nodeName, driverInfo.Name)
+		framework.ExpectNoError(err)
+		gomega.Expect(existing).To(gomega.Equal(0),
+			"node %s already has %d %s volume(s); test requires no pre-existing S3 volumes", nodeName, existing, driverInfo.Name)
 
 		// Create <limit> PVCs for one gigantic pod.
 		var pvcs []*v1.PersistentVolumeClaim
@@ -154,6 +160,12 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 		ginkgo.By("Waiting for the pod running")
 		err = e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name, testSlowMultiplier*f.Timeouts.PodStart)
 		framework.ExpectNoError(err)
+
+		ginkgo.By("Verifying node is now at the volume limit")
+		inUse, err := countS3VolumesOnNode(ctx, f, nodeName, driverInfo.Name)
+		framework.ExpectNoError(err)
+		gomega.Expect(inUse).To(gomega.Equal(limit),
+			"expected node %s to have %d (volume limit) volumes in use, got %d", nodeName, limit, inUse)
 
 		ginkgo.By("Creating an extra pod with one volume to exceed the limit")
 		extraResource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
@@ -189,62 +201,6 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 		})
 		framework.ExpectNoError(err)
 	})
-
-	// TODO: Uncomment when pod sharing is implemented. Alternatively just add to test above
-	// Verifies that the scheduler's volumeHandle dedup works correctly:
-	// a workload reusing an already-mounted PV should be admitted without counting
-	// against the volume limit (same PV = same Mountpoint process = counted once).
-	// f.It("should admit a pod reusing an already-mounted PV without counting it twice", f.WithSerial(), func(ctx context.Context) {
-	// 	driverInfo := driver.GetDriverInfo()
-
-	// 	ginkgo.By("Picking a node")
-	// 	nodeName := l.config.ClientNodeSelection.Name
-	// 	if nodeName == "" {
-	// 		node, err := e2enode.GetRandomReadySchedulableNode(ctx, f.ClientSet)
-	// 		framework.ExpectNoError(err)
-	// 		nodeName = node.Name
-	// 	}
-
-	// 	ginkgo.By("Checking node limits")
-	// 	limit, err := getCSINodeLimits(ctx, f, nodeName, driverInfo.Name)
-	// 	framework.ExpectNoError(err)
-	// 	framework.Logf("Node %s can handle %d volumes of driver %s", nodeName, limit, driverInfo.Name)
-
-	// 	// Create <limit> PVCs for one gigantic pod.
-	// 	var pvcs []*v1.PersistentVolumeClaim
-	// 	ginkgo.By(fmt.Sprintf("Creating %d volume(s)", limit))
-	// 	for range limit {
-	// 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
-	// 		l.resources = append(l.resources, resource)
-	// 		pvcs = append(pvcs, resource.Pvc)
-	// 	}
-
-	// 	ginkgo.By("Creating pod to use all PVC(s)")
-	// 	// pod.Spec.NodeName should not be set directly because it will bypass the scheduler. Use SetNodeSelection instead for these 2 occurences.
-	// 	// https://github.com/kubernetes/kubernetes/blob/24e2b02af5543d7910c2bb074c7264df5a8f0467/test/e2e/framework/pod/node_selection.go#L96-L101
-	// 	selection := e2epod.NodeSelection{Name: nodeName}
-	// 	pod := e2epod.MakePod(f.Namespace.Name, nil, pvcs, admissionapi.LevelBaseline, "")
-	// 	e2epod.SetNodeSelection(&pod.Spec, selection)
-	// 	pod, err = createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod)
-	// 	framework.ExpectNoError(err)
-	// 	defer func() {
-	// 		framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
-	// 	}()
-
-	// 	err = e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name, testSlowMultiplier*f.Timeouts.PodStart)
-	// 	framework.ExpectNoError(err)
-
-	// 	// Create a new pod referencing an EXISTING PVC (mounted by the first pod).
-	// 	// The scheduler should admit it because the same volumeHandle is not counted twice.
-	// 	ginkgo.By("Creating a pod reusing an already-mounted PV (should not be stuck in pending)")
-	// 	sharedPod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{pvcs[0]}, admissionapi.LevelBaseline, "")
-	// 	e2epod.SetNodeSelection(&sharedPod.Spec, selection)
-	// 	sharedPod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, sharedPod)
-	// 	framework.ExpectNoError(err, "pod reusing an already-mounted PV should be admitted (not counted against volume limit)")
-	// 	defer func() {
-	// 		framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, sharedPod))
-	// 	}()
-	// })
 
 	ginkgo.It("should verify that all csinodes have volume limits", func(ctx context.Context) {
 		driverInfo := driver.GetDriverInfo()
@@ -309,4 +265,39 @@ func getCSINodeLimits(ctx context.Context, f *framework.Framework, nodeName, dri
 		return 0, fmt.Errorf("could not get CSINode limit for driver %s: %w", driverName, err)
 	}
 	return limit, nil
+}
+
+// countS3VolumesOnNode counts distinct volumes (by volumeHandle) for the given CSI driver that are
+// in use by pods scheduled on nodeName. Dedup is similar to scheduler which dedups via driverName/volumeHandle.
+// See https://github.com/kubernetes/kubernetes/blob/v1.36.2/pkg/scheduler/framework/plugins/nodevolumelimits/csi.go#L451
+func countS3VolumesOnNode(ctx context.Context, f *framework.Framework, nodeName, driverName string) (int, error) {
+	pods, err := f.ClientSet.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("listing pods on node %s: %w", nodeName, err)
+	}
+
+	handles := map[string]struct{}{}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		for _, vol := range pod.Spec.Volumes {
+			// Skip volumes without PVC.
+			if vol.PersistentVolumeClaim == nil {
+				continue
+			}
+			// Skip if the PVC can't be read / isn't bound to a PV.
+			pvc, err := f.ClientSet.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, vol.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+			if err != nil || pvc.Spec.VolumeName == "" {
+				continue
+			}
+			// Skip if the PV can't be read / isn't a volume of our CSI driver.
+			pv, err := f.ClientSet.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+			if err != nil || pv.Spec.CSI == nil || pv.Spec.CSI.Driver != driverName {
+				continue
+			}
+			handles[pv.Spec.CSI.VolumeHandle] = struct{}{}
+		}
+	}
+	return len(handles), nil
 }
