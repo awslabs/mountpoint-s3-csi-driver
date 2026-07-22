@@ -1,6 +1,6 @@
 module github.com/awslabs/mountpoint-s3-csi-driver
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
