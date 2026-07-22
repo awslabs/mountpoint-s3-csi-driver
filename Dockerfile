@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-ARG MOUNTPOINT_VERSION=1.22.3
+ARG MOUNTPOINT_VERSION=1.23.0
 
 # Download the mountpoint tarball and produce an installable directory
 FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023 as mp_builder
