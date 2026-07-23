@@ -2,6 +2,7 @@
 
 ### Notable changes
 * Removed support for AL2, and Ubuntu 22.04.
+* Drop support for Kubernetes 1.30.
 * Support Mountpoint [version 1.23.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.23.0) ([#868](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/868))
   * Add support for CRC64NVME full-object checksums on uploads. The `--upload-checksums` argument now accepts `crc64nvme` in addition to the existing `crc32c` and `off` values. ([#1838](https://github.com/awslabs/mountpoint-s3/pull/1838))
   * Add `--infer-content-type` flag to infer the `Content-Type` of new objects based on their file extension instead of using the default `binary/octet-stream`. ([#1790](https://github.com/awslabs/mountpoint-s3/pull/1790))

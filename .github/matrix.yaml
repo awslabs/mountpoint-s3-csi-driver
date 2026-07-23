@@ -11,7 +11,7 @@ matrix:
       "Ubuntu2404",
     ]
   kubernetes-version:
-    ["1.30.4", "1.31.0", "1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1"]
+    ["1.31.0", "1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1"]
   include:
     # Enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
     # field rather than trying to exclude all other variants.
@@ -20,9 +20,6 @@ matrix:
   exclude:
     # Ubuntu2404 is only supported on EKS >= 1.33.
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
-    - cluster-type: "eksctl"
-      family: "Ubuntu2404"
-      kubernetes-version: "1.30.4"
     - cluster-type: "eksctl"
       family: "Ubuntu2404"
       kubernetes-version: "1.31.0"
