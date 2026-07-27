@@ -43,7 +43,17 @@ func init() {
 
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "S3 CSI E2E Suite")
+
+	// The upstream Kubernetes e2e framework registers many unrelated conformance
+	// specs (e.g. "[sig-storage] Projected configMap", "[sig-node] Variable
+	// Expansion") into the suite as an import side-effect of the test framework
+	// packages we depend on. We only want to run this driver's specs, which the
+	// framework tags with "[Driver: s3.csi.aws.com]".
+	suiteConfig, reporterConfig := ginkgo.GinkgoConfiguration()
+	if len(suiteConfig.FocusStrings) == 0 {
+		suiteConfig.FocusStrings = []string{`\[Driver: s3\.csi\.aws\.com\]`}
+	}
+	ginkgo.RunSpecs(t, "S3 CSI E2E Suite", suiteConfig, reporterConfig)
 }
 
 var CSITestSuites = []func() framework.TestSuite{
