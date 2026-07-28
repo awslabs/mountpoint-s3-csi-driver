@@ -132,13 +132,16 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 // Mount mounts the given S3 bucket at the target path with pod-sharing support.
 //
 // Flow:
-//  1. If target is already mounted (republish): refresh credentials without locking, return early
-//  2. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
-//  3. Provision credentials (under lock to avoid race with cleanup on failure)
-//  4. If an existing healthy source mount exists for this volumeID → bind mount to target
-//  5. If no source exists (or dead) → FUSE mount at source path, send FD to mounter, wait for readiness
-//  6. Bind mount source → target
-//  7. Track the target in MountMap for refcounting
+//  1. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
+//  2. If entry is initialized, check source health:
+//     - Dead source → tear down and reset entry to allow fresh mount
+//     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
+//  3. If not initialized (fresh or recovered from dead): write meta, set SourcePath/CommDir
+//  4. Provision credentials (under lock to avoid race with cleanup on failure)
+//  5. If target is already mounted (republish/retry): creds refreshed above, return early
+//  6. If entry is initialized (healthy source) → bind mount to new target, bump refcount
+//  7. If not initialized → FUSE mount at source, send FD to mounter, wait for readiness,
+//     bind mount source → target, mark entry initialized
 //
 // On initial mount failure (fuseMount or bindMount), credentials are cleaned up immediately
 // under the lock. On unmount of last consumer, the FUSE source is unmounted (causing mount-s3
