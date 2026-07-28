@@ -2,14 +2,13 @@
 package mounter
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"k8s.io/klog/v2"
+	mountutils "k8s.io/mount-utils"
 )
 
 // MetaFileName returns the path to the .meta.json file for a given volume.
@@ -23,10 +22,11 @@ func MetaFileName(kubeletPath, volumeID string) string {
 // and for subsequent share requests after driver restart.
 type MountMeta struct {
 	VolumeID                 string   `json:"volumeID"`
+	CommDir                  string   `json:"commDir,omitempty"`
 	MountOptions             []string `json:"mountOptions"`
 	AuthenticationSource     string   `json:"authenticationSource"`
 	ServiceAccountName       string   `json:"serviceAccountName"`
-	ServiceAccountEKSRoleARN string   `json:"serviceAccountEKSRoleARN,omitempty"`
+	ServiceAccountEKSRoleARN string   `json:"serviceAccountEKSRoleARN"`
 	PodNamespace             string   `json:"podNamespace"`
 	FSGroup                  string   `json:"fsGroup"`
 }
@@ -36,6 +36,7 @@ type MountMeta struct {
 func WriteMeta(kubeletPath string, entry *MountEntry) error {
 	meta := MountMeta{
 		VolumeID:                 entry.VolumeID,
+		CommDir:                  entry.CommDir,
 		MountOptions:             entry.Params.MountOptions,
 		AuthenticationSource:     entry.Params.AuthenticationSource,
 		ServiceAccountName:       entry.Params.ServiceAccountName,
@@ -90,40 +91,19 @@ func readMeta(path string) (*MountMeta, error) {
 	return &meta, nil
 }
 
-// mountInfoEntry represents a single line from /proc/self/mountinfo.
-type mountInfoEntry struct {
-	MountPoint string // the mount point path
-	DeviceID   string // major:minor device ID
+// parseMountInfoFromProc reads /proc/self/mountinfo and returns all entries
+// using the well-tested k8s.io/mount-utils library.
+func parseMountInfoFromProc() ([]mountutils.MountInfo, error) {
+	return mountutils.ParseMountInfo("/proc/self/mountinfo")
 }
 
-// parseMountInfoFromProc reads /proc/self/mountinfo and returns all entries.
-// This is the default implementation used in production (Linux).
-func parseMountInfoFromProc() ([]mountInfoEntry, error) {
-	f, err := os.Open("/proc/self/mountinfo")
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var entries []mountInfoEntry
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		// mountinfo format: mountID parentID major:minor root mountPoint ...
-		if len(fields) < 5 {
-			continue
-		}
-		entries = append(entries, mountInfoEntry{
-			DeviceID:   fields[2], // major:minor
-			MountPoint: fields[4], // mount point
-		})
-	}
-	return entries, scanner.Err()
+// deviceID returns the "major:minor" string for a MountInfo entry.
+func deviceID(mi *mountutils.MountInfo) string {
+	return fmt.Sprintf("%d:%d", mi.Major, mi.Minor)
 }
 
 // findMountByPath finds the mountinfo entry for a given mount path.
-func findMountByPath(entries []mountInfoEntry, path string) *mountInfoEntry {
+func findMountByPath(entries []mountutils.MountInfo, path string) *mountutils.MountInfo {
 	for i := range entries {
 		if entries[i].MountPoint == path {
 			return &entries[i]
@@ -134,11 +114,11 @@ func findMountByPath(entries []mountInfoEntry, path string) *mountInfoEntry {
 
 // findBindMountTargets finds all mount points sharing the same device ID as the source,
 // excluding the source path itself. These are the bind mount targets.
-func findBindMountTargets(entries []mountInfoEntry, deviceID, sourcePath string) []string {
+func findBindMountTargets(entries []mountutils.MountInfo, majorMinor, sourcePath string) []string {
 	var targets []string
-	for _, e := range entries {
-		if e.DeviceID == deviceID && e.MountPoint != sourcePath {
-			targets = append(targets, e.MountPoint)
+	for i := range entries {
+		if deviceID(&entries[i]) == majorMinor && entries[i].MountPoint != sourcePath {
+			targets = append(targets, entries[i].MountPoint)
 		}
 	}
 	return targets

@@ -184,6 +184,47 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			checkWriteToPathSucceed(ctx, f, pod2, "/mnt/volume1/from-fsgroup-2000.txt", 512, time.Now().UTC().UnixNano())
 		})
 
+		ginkgo.It("should allow pods with different service accounts to share mount with driver auth", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			// Create a second service account in the namespace
+			ginkgo.By("Creating a second service account")
+			sa2 := &v1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "s3-e2e-sa-different",
+					Namespace: f.Namespace.Name,
+				},
+			}
+			sa2, err := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name).Create(ctx, sa2, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			// First pod with default SA
+			ginkgo.By("Creating first pod with default service account")
+			pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod1, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
+			framework.ExpectNoError(err)
+			targetNode := pod1.Spec.NodeName
+			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1) }()
+
+			// Verify first pod works
+			checkWriteToPathSucceed(ctx, f, pod1, "/mnt/volume1/from-sa-default.txt", 512, time.Now().UTC().UnixNano())
+
+			// Second pod with different SA — should succeed because driver auth doesn't enforce SA match
+			ginkgo.By("Creating second pod with different service account on the same node (should succeed with driver auth)")
+			pod2 := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": targetNode}, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod2.Spec.ServiceAccountName = sa2.Name
+			pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err)
+			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2) }()
+
+			// Both pods should be able to read/write
+			ginkgo.By("Verifying both pods can read and write to shared volume")
+			seed := time.Now().UTC().UnixNano()
+			checkWriteToPathSucceed(ctx, f, pod2, "/mnt/volume1/from-sa-different.txt", 512, seed)
+			checkReadFromPathSucceed(ctx, f, pod1, "/mnt/volume1/from-sa-different.txt", 512, seed)
+		})
+
 		ginkgo.It("should handle concurrent pod creation on the same node sharing same volume", func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
@@ -597,7 +638,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 				"expected .meta.json file to exist for volume %s", pvName)
 		})
 
-		ginkgo.It("should clean up meta file and source mount after last consumer unmounts", func(ctx context.Context) {
+		ginkgo.It("should clean up meta file, credentials, and source mount after last consumer unmounts", func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
@@ -609,6 +650,12 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			ginkgo.By("Verifying meta file exists while pod is mounted")
 			metaExists := checkMetaFileExists(ctx, f, targetNode, pvName)
 			gomega.Expect(metaExists).To(gomega.BeTrue())
+
+			// Credential directory should exist while pod is mounted
+			ginkgo.By("Verifying credential directory exists in mounter pod while pod is mounted")
+			credDirExists := checkCredentialDirExists(ctx, f, targetNode, pvName)
+			gomega.Expect(credDirExists).To(gomega.BeTrue(),
+				"expected credential directory for volume %s to exist while pod is mounted", pvName)
 
 			// FUSE source should exist in mount table
 			ginkgo.By("Verifying FUSE source mount exists while pod is mounted")
@@ -649,6 +696,12 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 				count := countMountpointProcessesForVolume(ctx, f, targetNode, bucketName)
 				return count, nil
 			}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal(0))
+
+			// Verify credential directory is cleaned up from mounter pod's comm volume
+			ginkgo.By("Verifying credential directory is removed from mounter pod after last consumer unmounts")
+			credDirExists = checkCredentialDirExists(ctx, f, targetNode, pvName)
+			gomega.Expect(credDirExists).To(gomega.BeFalse(),
+				"expected credential directory for volume %s to be removed after last consumer unmounts", pvName)
 		})
 
 		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods", func(ctx context.Context) {
@@ -1349,4 +1402,39 @@ func dumpMountpointProcesses(ctx context.Context, f *framework.Framework, nodeNa
 	} else {
 		framework.Logf("[%s] mount-s3 processes on node %s:\n%s", label, nodeName, stdout)
 	}
+}
+
+// checkCredentialDirExists checks if the per-mount credential directory exists in the mounter pod's comm volume.
+// The credential directory lives at <commDir>/<volumeID>/ inside the mounter pod.
+// Retries on transient exec errors for up to 1 minute.
+func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
+	var result bool
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=s3-csi-daemonset-mounter",
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil || len(pods.Items) == 0 {
+			framework.Logf("Failed to find mounter pod on node %s (retrying): %v", nodeName, err)
+			return "", fmt.Errorf("mounter pod not found on node %s", nodeName)
+		}
+
+		mounterPod := &pods.Items[0]
+		// The comm volume is mounted at /comm in the mounter container.
+		// Credential directory is /comm/<volumeID>/
+		credDir := fmt.Sprintf("/comm/%s", volumeID)
+		cmd := fmt.Sprintf("test -d %s && echo EXISTS || echo MISSING", credDir)
+
+		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, mounterPod.Name, "mounter", []string{"/bin/sh", "-c", cmd})
+		if err != nil {
+			framework.Logf("Failed to check credential dir (retrying): %v", err)
+			return "", fmt.Errorf("exec failed: %w", err)
+		}
+
+		output := strings.TrimSpace(stdout)
+		framework.Logf("Credential dir check for %s on node %s: %s", volumeID, nodeName, output)
+		result = output == "EXISTS"
+		return output, nil
+	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).ShouldNot(gomega.BeEmpty())
+	return result
 }

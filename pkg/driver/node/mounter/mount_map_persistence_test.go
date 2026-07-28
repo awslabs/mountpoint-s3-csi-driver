@@ -2,16 +2,18 @@ package mounter
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
+	mountutils "k8s.io/mount-utils"
 )
 
 // fakeMountInfoProvider returns a mountInfoProviderFunc that returns the given entries.
-func fakeMountInfoProvider(entries []mountInfoEntry) mountInfoProviderFunc {
-	return func() ([]mountInfoEntry, error) {
+func fakeMountInfoProvider(entries []mountutils.MountInfo) mountInfoProviderFunc {
+	return func() ([]mountutils.MountInfo, error) {
 		return entries, nil
 	}
 }
@@ -217,7 +219,7 @@ func TestWriteMeta_EmptyMountOptions(t *testing.T) {
 	}
 }
 
-func TestWriteMeta_EmptyEKSRoleARN_OmittedInJSON(t *testing.T) {
+func TestWriteMeta_EmptyEKSRoleARN_PresentInJSON(t *testing.T) {
 	kubeletPath := t.TempDir()
 
 	entry := &MountEntry{
@@ -233,8 +235,8 @@ func TestWriteMeta_EmptyEKSRoleARN_OmittedInJSON(t *testing.T) {
 	var raw map[string]interface{}
 	err = json.Unmarshal(data, &raw)
 	assert.NoError(t, err)
-	if _, exists := raw["serviceAccountEKSRoleARN"]; exists {
-		t.Fatal("expected serviceAccountEKSRoleARN to be omitted when empty")
+	if _, exists := raw["serviceAccountEKSRoleARN"]; !exists {
+		t.Fatal("expected serviceAccountEKSRoleARN to be present in JSON even when empty")
 	}
 
 	meta, err := readMeta(MetaFileName(kubeletPath, "vol-no-arn"))
@@ -245,20 +247,20 @@ func TestWriteMeta_EmptyEKSRoleARN_OmittedInJSON(t *testing.T) {
 // --- Tests for mountinfo parsing helpers ---
 
 func TestFindMountByPath_Found(t *testing.T) {
-	entries := []mountInfoEntry{
-		{MountPoint: "/mnt/a", DeviceID: "0:100"},
-		{MountPoint: "/mnt/b", DeviceID: "0:101"},
-		{MountPoint: "/mnt/c", DeviceID: "0:102"},
+	entries := []mountutils.MountInfo{
+		{MountPoint: "/mnt/a", Major: 0, Minor: 100},
+		{MountPoint: "/mnt/b", Major: 0, Minor: 101},
+		{MountPoint: "/mnt/c", Major: 0, Minor: 102},
 	}
 	result := findMountByPath(entries, "/mnt/b")
 	if result == nil {
 		t.Fatal("expected to find entry for /mnt/b")
 	}
-	assert.Equals(t, "0:101", result.DeviceID)
+	assert.Equals(t, "0:101", fmt.Sprintf("%d:%d", result.Major, result.Minor))
 }
 
 func TestFindMountByPath_NotFound(t *testing.T) {
-	entries := []mountInfoEntry{{MountPoint: "/mnt/a", DeviceID: "0:100"}}
+	entries := []mountutils.MountInfo{{MountPoint: "/mnt/a", Major: 0, Minor: 100}}
 	result := findMountByPath(entries, "/mnt/nonexistent")
 	if result != nil {
 		t.Fatal("expected nil for nonexistent path")
@@ -273,12 +275,12 @@ func TestFindMountByPath_EmptyEntries(t *testing.T) {
 }
 
 func TestFindBindMountTargets_MultipleTargets(t *testing.T) {
-	entries := []mountInfoEntry{
-		{MountPoint: "/source", DeviceID: "0:50"},
-		{MountPoint: "/target-a", DeviceID: "0:50"},
-		{MountPoint: "/target-b", DeviceID: "0:50"},
-		{MountPoint: "/other", DeviceID: "0:99"},
-		{MountPoint: "/target-c", DeviceID: "0:50"},
+	entries := []mountutils.MountInfo{
+		{MountPoint: "/source", Major: 0, Minor: 50},
+		{MountPoint: "/target-a", Major: 0, Minor: 50},
+		{MountPoint: "/target-b", Major: 0, Minor: 50},
+		{MountPoint: "/other", Major: 0, Minor: 99},
+		{MountPoint: "/target-c", Major: 0, Minor: 50},
 	}
 	targets := findBindMountTargets(entries, "0:50", "/source")
 	assert.Equals(t, 3, len(targets))
@@ -290,9 +292,9 @@ func TestFindBindMountTargets_MultipleTargets(t *testing.T) {
 }
 
 func TestFindBindMountTargets_NoTargets(t *testing.T) {
-	entries := []mountInfoEntry{
-		{MountPoint: "/source", DeviceID: "0:50"},
-		{MountPoint: "/other", DeviceID: "0:99"},
+	entries := []mountutils.MountInfo{
+		{MountPoint: "/source", Major: 0, Minor: 50},
+		{MountPoint: "/other", Major: 0, Minor: 99},
 	}
 	targets := findBindMountTargets(entries, "0:50", "/source")
 	assert.Equals(t, 0, len(targets))
@@ -369,8 +371,8 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Mount table has NO entry for sourcePath → source is dead
-	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountInfoEntry{
-		{MountPoint: "/some/other/mount", DeviceID: "0:99"},
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: "/some/other/mount", Major: 0, Minor: 99},
 	}))
 	err = dm.RebuildMountMap()
 	assert.NoError(t, err)
@@ -407,12 +409,12 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Simulate mount table: source + 3 bind mount targets share device ID
-	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountInfoEntry{
-		{MountPoint: sourcePath, DeviceID: "0:42"},
-		{MountPoint: "/pods/pod-a/volumes/mount", DeviceID: "0:42"},
-		{MountPoint: "/pods/pod-b/volumes/mount", DeviceID: "0:42"},
-		{MountPoint: "/pods/pod-c/volumes/mount", DeviceID: "0:42"},
-		{MountPoint: "/unrelated", DeviceID: "0:99"},
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourcePath, Major: 0, Minor: 42},
+		{MountPoint: "/pods/pod-a/volumes/mount", Major: 0, Minor: 42},
+		{MountPoint: "/pods/pod-b/volumes/mount", Major: 0, Minor: 42},
+		{MountPoint: "/pods/pod-c/volumes/mount", Major: 0, Minor: 42},
+		{MountPoint: "/unrelated", Major: 0, Minor: 99},
 	}))
 	err = dm.RebuildMountMap()
 	assert.NoError(t, err)
@@ -450,9 +452,9 @@ func TestRebuildMountMap_SourceWithNoBindMounts(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Source exists in mount table but no bind mounts share its device ID
-	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountInfoEntry{
-		{MountPoint: sourcePath, DeviceID: "0:55"},
-		{MountPoint: "/unrelated", DeviceID: "0:99"},
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourcePath, Major: 0, Minor: 55},
+		{MountPoint: "/unrelated", Major: 0, Minor: 99},
 	}))
 	err = dm.RebuildMountMap()
 	assert.NoError(t, err)
@@ -487,12 +489,12 @@ func TestRebuildMountMap_MultipleVolumes(t *testing.T) {
 	err = WriteMeta(kubeletPath, entryB)
 	assert.NoError(t, err)
 
-	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountInfoEntry{
-		{MountPoint: sourceA, DeviceID: "0:10"},
-		{MountPoint: "/target-a1", DeviceID: "0:10"},
-		{MountPoint: "/target-a2", DeviceID: "0:10"},
-		{MountPoint: sourceB, DeviceID: "0:20"},
-		{MountPoint: "/target-b1", DeviceID: "0:20"},
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourceA, Major: 0, Minor: 10},
+		{MountPoint: "/target-a1", Major: 0, Minor: 10},
+		{MountPoint: "/target-a2", Major: 0, Minor: 10},
+		{MountPoint: sourceB, Major: 0, Minor: 20},
+		{MountPoint: "/target-b1", Major: 0, Minor: 20},
 	}))
 	err = dm.RebuildMountMap()
 	assert.NoError(t, err)

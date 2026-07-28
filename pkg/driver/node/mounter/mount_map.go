@@ -46,14 +46,18 @@ func (existing *MountParams) ValidateCompatibility(incoming *MountParams) error 
 			existing.AuthenticationSource, incoming.AuthenticationSource)
 	}
 
-	if existing.ServiceAccountName != incoming.ServiceAccountName {
-		return fmt.Errorf("serviceAccountName mismatch: existing=%q, incoming=%q",
-			existing.ServiceAccountName, incoming.ServiceAccountName)
-	}
+	// SA and role ARN only matter for pod-level authentication. When auth source is "driver",
+	// credentials come from the CSI driver's own service account — the workload pod's SA is irrelevant.
+	if existing.AuthenticationSource == "pod" {
+		if existing.ServiceAccountName != incoming.ServiceAccountName {
+			return fmt.Errorf("serviceAccountName mismatch: existing=%q, incoming=%q",
+				existing.ServiceAccountName, incoming.ServiceAccountName)
+		}
 
-	if existing.ServiceAccountEKSRoleARN != incoming.ServiceAccountEKSRoleARN {
-		return fmt.Errorf("serviceAccountEKSRoleARN mismatch: existing=%q, incoming=%q",
-			existing.ServiceAccountEKSRoleARN, incoming.ServiceAccountEKSRoleARN)
+		if existing.ServiceAccountEKSRoleARN != incoming.ServiceAccountEKSRoleARN {
+			return fmt.Errorf("serviceAccountEKSRoleARN mismatch: existing=%q, incoming=%q",
+				existing.ServiceAccountEKSRoleARN, incoming.ServiceAccountEKSRoleARN)
+		}
 	}
 
 	if existing.PodNamespace != incoming.PodNamespace {
@@ -88,6 +92,11 @@ type MountEntry struct {
 	// VolumeID is the PV name, used as the sharing key, credential directory name,
 	// error file name, and mount identifier when communicating with the secondary daemonset.
 	VolumeID string
+
+	// CommDir is the comm directory path at the time this mount was created.
+	// Cleanup uses this to ensure resources are cleaned in the same location where they were
+	// provisioned, avoiding mismatches if the mounter pod restarts between mount and unmount.
+	CommDir string
 
 	// Params records the mount parameters for validation of subsequent share requests.
 	Params MountParams

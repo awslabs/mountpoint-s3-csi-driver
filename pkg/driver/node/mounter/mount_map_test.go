@@ -116,10 +116,19 @@ func TestValidateCompatibility_AuthMismatch(t *testing.T) {
 }
 
 func TestValidateCompatibility_ServiceAccountMismatch(t *testing.T) {
-	existing := &MountParams{ServiceAccountName: "sa-a"}
-	incoming := &MountParams{ServiceAccountName: "sa-b"}
+	existing := &MountParams{AuthenticationSource: "pod", ServiceAccountName: "sa-a"}
+	incoming := &MountParams{AuthenticationSource: "pod", ServiceAccountName: "sa-b"}
 	err := existing.ValidateCompatibility(incoming)
 	assert.Contains(t, err.Error(), "serviceAccountName mismatch")
+}
+
+func TestValidateCompatibility_ServiceAccountIgnoredWithDriverAuth(t *testing.T) {
+	existing := &MountParams{AuthenticationSource: "driver", ServiceAccountName: "sa-a"}
+	incoming := &MountParams{AuthenticationSource: "driver", ServiceAccountName: "sa-b"}
+	err := existing.ValidateCompatibility(incoming)
+	if err != nil {
+		t.Errorf("expected no error for SA mismatch with driver auth, got: %v", err)
+	}
 }
 
 func TestValidateCompatibility_NamespaceMismatch(t *testing.T) {
@@ -138,10 +147,12 @@ func TestValidateCompatibility_FSGroupMismatch(t *testing.T) {
 
 func TestValidateCompatibility_ServiceAccountEKSRoleARNMismatch(t *testing.T) {
 	existing := &MountParams{
+		AuthenticationSource:     "pod",
 		ServiceAccountName:       "sa-a",
 		ServiceAccountEKSRoleARN: "arn:aws:iam::111111111111:role/role-a",
 	}
 	incoming := &MountParams{
+		AuthenticationSource:     "pod",
 		ServiceAccountName:       "sa-a",
 		ServiceAccountEKSRoleARN: "arn:aws:iam::111111111111:role/role-b",
 	}
@@ -217,7 +228,33 @@ func TestMountEntry_ResetAllowsDifferentParams(t *testing.T) {
 func TestMountEntry_ShareRejectedWithDifferentParams(t *testing.T) {
 	m := NewMountMap()
 
-	// First workload mounts
+	// First workload mounts with pod auth
+	entry, _ := m.GetOrCreate("vol-1")
+	entry.mu.Lock()
+	entry.SourcePath = "/source"
+	entry.Params = MountParams{ServiceAccountName: "sa-a", AuthenticationSource: "pod"}
+	entry.RefCount = 1
+	entry.Targets = []string{"/target-a"}
+	entry.initialized = true
+	entry.mu.Unlock()
+
+	// Second workload tries to share with different SA — should fail with pod auth
+	entry2, _ := m.GetOrCreate("vol-1")
+	entry2.mu.Lock()
+	defer entry2.mu.Unlock()
+
+	incoming := &MountParams{ServiceAccountName: "sa-b", AuthenticationSource: "pod"}
+	err := entry2.Params.ValidateCompatibility(incoming)
+	if err == nil {
+		t.Fatal("expected validation error for different SA with pod auth, got nil")
+	}
+	assert.Contains(t, err.Error(), "serviceAccountName mismatch")
+}
+
+func TestMountEntry_ShareAllowedWithDifferentSADriverAuth(t *testing.T) {
+	m := NewMountMap()
+
+	// First workload mounts with driver auth
 	entry, _ := m.GetOrCreate("vol-1")
 	entry.mu.Lock()
 	entry.SourcePath = "/source"
@@ -227,17 +264,16 @@ func TestMountEntry_ShareRejectedWithDifferentParams(t *testing.T) {
 	entry.initialized = true
 	entry.mu.Unlock()
 
-	// Second workload tries to share with different SA — should fail
+	// Second workload with different SA — should succeed with driver auth
 	entry2, _ := m.GetOrCreate("vol-1")
 	entry2.mu.Lock()
 	defer entry2.mu.Unlock()
 
 	incoming := &MountParams{ServiceAccountName: "sa-b", AuthenticationSource: "driver"}
 	err := entry2.Params.ValidateCompatibility(incoming)
-	if err == nil {
-		t.Fatal("expected validation error for different SA, got nil")
+	if err != nil {
+		t.Fatalf("expected no error for different SA with driver auth, got: %v", err)
 	}
-	assert.Contains(t, err.Error(), "serviceAccountName mismatch")
 }
 
 func TestMountEntry_ShareAllowedWithSameParams(t *testing.T) {
