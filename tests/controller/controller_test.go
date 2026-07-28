@@ -663,6 +663,7 @@ var _ = Describe("Mountpoint Controller", func() {
 								StorageClassName: vol.pvc.Spec.StorageClassName,
 								AccessModes:      vol.pvc.Spec.AccessModes,
 								Resources:        vol.pvc.Spec.Resources,
+								VolumeName:       vol.pvc.Spec.VolumeName,
 							},
 						}
 						Expect(k8sClient.Create(ctx, pvc2)).To(Succeed())
@@ -1478,11 +1479,23 @@ var _ = Describe("Mountpoint Controller", func() {
 			s3Vol := createVolume()
 			s3Vol.bind()
 
-			// Create EBS volume but do NOT bind it — simulates WaitForFirstConsumer.
-			// Note: spec.volumeName remains empty for dynamically provisioned PVCs.
-			ebsVol := createVolume(withCSIDriver(ebsCSIDriver))
+			// Create a standalone EBS PVC with no PV
+			ebsPVC := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-ebs-pvc",
+					Namespace:    defaultNamespace,
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					StorageClassName: ptr.To("gp3"),
+					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")}},
+					// note: no VolumeName
+				},
+			}
+			Expect(k8sClient.Create(ctx, ebsPVC)).To(Succeed())
+			waitForObject(ebsPVC)
 
-			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsVol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
 
 			// Headroom pod should be created for the S3 volume
 			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
@@ -1745,6 +1758,7 @@ func (v *testVolume) bind() {
 	v.pv.Status.Phase = corev1.VolumeBound
 	Expect(k8sClient.Status().Update(ctx, v.pv)).To(Succeed())
 
+	// createVolume already set `v.pvc.Spec.VolumeName = v.pv.Name`
 	v.pvc.Status.Phase = corev1.ClaimBound
 	Expect(k8sClient.Status().Update(ctx, v.pvc)).To(Succeed())
 
