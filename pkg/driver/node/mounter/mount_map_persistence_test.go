@@ -427,7 +427,7 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	assert.Equals(t, sourcePath, recovered.SourcePath)
 	assert.Equals(t, 3, recovered.RefCount)
 	assert.Equals(t, 3, len(recovered.Targets))
-	assert.Equals(t, true, recovered.initialized)
+	assert.Equals(t, true, recovered.sourceMounted)
 
 	// Verify params were restored
 	assert.Equals(t, "pod", recovered.Params.AuthenticationSource)
@@ -465,7 +465,7 @@ func TestRebuildMountMap_SourceWithNoBindMounts(t *testing.T) {
 	}
 	assert.Equals(t, 0, recovered.RefCount)
 	assert.Equals(t, 0, len(recovered.Targets))
-	assert.Equals(t, true, recovered.initialized)
+	assert.Equals(t, true, recovered.sourceMounted)
 }
 
 func TestRebuildMountMap_MultipleVolumes(t *testing.T) {

@@ -133,15 +133,15 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 //
 // Flow:
 //  1. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
-//  2. If entry is initialized, check source health:
+//  2. If source is mounted, check source health:
 //     - Dead source → tear down and reset entry to allow fresh mount
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
-//  3. If not initialized (fresh or recovered from dead): write meta, set SourcePath/CommDir
+//  3. If source not mounted (fresh or recovered from dead): write meta, set SourcePath/CommDir
 //  4. Provision credentials (under lock to avoid race with cleanup on failure)
 //  5. If target is already mounted (republish/retry): creds refreshed above, return early
-//  6. If entry is initialized (healthy source) → bind mount to new target, bump refcount
-//  7. If not initialized → FUSE mount at source, send FD to mounter, wait for readiness,
-//     bind mount source → target, mark entry initialized
+//  6. If source is mounted (healthy source) → bind mount to new target, bump refcount
+//  7. If source not mounted → FUSE mount at source, send FD to mounter, wait for readiness,
+//     bind mount source → target, mark source as mounted
 //
 // On initial mount failure (fuseMount or bindMount), credentials are cleaned up immediately
 // under the lock. On unmount of last consumer, the FUSE source is unmounted (causing mount-s3
@@ -199,15 +199,15 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		FSGroup:                  fsGroup,
 	}
 
-	// If entry is initialized, check health first. Dead source = tear down and treat as fresh.
+	// If source is mounted, check health first. Dead source = tear down and treat as fresh.
 	// Only enforce compatibility on a healthy (living) source.
-	if entry.initialized {
+	if entry.sourceMounted {
 		if !dm.IsSourceHealthy(entry.SourcePath) {
 			// Dead source — tear down and allow fresh mount with any params.
 			klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, resetting entry for fresh mount", entry.SourcePath, volumeID)
 			dm.mount.Unmount(entry.SourcePath)
 			os.Remove(entry.SourcePath)
-			entry.initialized = false
+			entry.sourceMounted = false
 		} else {
 			// Healthy source — enforce compatibility before any credential writes.
 			if err := entry.Params.ValidateCompatibility(&incomingParams); err != nil {
@@ -216,7 +216,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		}
 	}
 
-	if !entry.initialized {
+	if !entry.sourceMounted {
 		// New mount (or recovered from dead source): write meta BEFORE credentials.
 		entry.Params = incomingParams
 		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
@@ -227,8 +227,8 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	// Provision credentials under the lock. We use the fresh commDir (from GetCommDir at the
-	// top of Mount) for all publish operations. When entry is initialized (source healthy),
-	// commDir == entry.CommDir because the mounter pod hasn't restarted. When not initialized
+	// top of Mount) for all publish operations. When source is mounted (source healthy),
+	// commDir == entry.CommDir because the mounter pod hasn't restarted. When source not mounted
 	// (fresh mount or dead-source recovery), entry.CommDir is empty/stale, so the fresh
 	// commDir is the only valid path. Cleanup (releaseTarget) uses entry.CommDir to clean
 	// resources in the same location where they were originally created.
@@ -249,7 +249,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		return nil
 	}
 
-	if entry.initialized {
+	if entry.sourceMounted {
 		// Source was confirmed healthy above. Bind mount to new target.
 		if err := dm.BindMount(entry.SourcePath, target); err != nil {
 			return err
@@ -285,7 +285,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// Populate entry — SourcePath and CommDir already set above.
 	entry.RefCount = 1
 	entry.Targets = []string{target}
-	entry.initialized = true
+	entry.sourceMounted = true
 
 	klog.V(4).Infof("DaemonsetMounter: new shared mount for volume %s at source %s → %s", volumeID, entry.SourcePath, target)
 	return nil
@@ -743,7 +743,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		}
 		entry.RefCount = len(targets)
 		entry.Targets = targets
-		entry.initialized = true
+		entry.sourceMounted = true
 		entry.mu.Unlock()
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))

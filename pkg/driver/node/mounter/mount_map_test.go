@@ -12,14 +12,14 @@ func TestMountMap_GetOrCreate_NewEntry(t *testing.T) {
 	entry, existed := m.GetOrCreate("vol-1")
 	assert.Equals(t, false, existed)
 	assert.Equals(t, "vol-1", entry.VolumeID)
-	assert.Equals(t, false, entry.initialized)
+	assert.Equals(t, false, entry.sourceMounted)
 }
 
 func TestMountMap_GetOrCreate_ExistingEntry(t *testing.T) {
 	m := NewMountMap()
 	entry1, _ := m.GetOrCreate("vol-1")
 	entry1.mu.Lock()
-	entry1.initialized = true
+	entry1.sourceMounted = true
 	entry1.SourcePath = "/source"
 	entry1.mu.Unlock()
 
@@ -191,13 +191,13 @@ func TestMountEntry_ResetAllowsDifferentParams(t *testing.T) {
 	entry.Params = MountParams{ServiceAccountName: "sa-a", AuthenticationSource: "driver"}
 	entry.RefCount = 1
 	entry.Targets = []string{"/target-a"}
-	entry.initialized = true
+	entry.sourceMounted = true
 	entry.mu.Unlock()
 
 	// Simulate unmount of last consumer
 	entry.mu.Lock()
 	entry.RefCount--
-	entry.initialized = false
+	entry.sourceMounted = false
 	entry.SourcePath = ""
 	entry.Params = MountParams{}
 	entry.Targets = nil
@@ -209,8 +209,8 @@ func TestMountEntry_ResetAllowsDifferentParams(t *testing.T) {
 	entry2.mu.Lock()
 	defer entry2.mu.Unlock()
 
-	// entry.initialized is false, so no validation runs — new mount is allowed
-	assert.Equals(t, false, entry2.initialized)
+	// entry.sourceMounted is false, so no validation runs — new mount is allowed
+	assert.Equals(t, false, entry2.sourceMounted)
 
 	// Simulate new mount with different params
 	newParams := MountParams{ServiceAccountName: "sa-b", AuthenticationSource: "pod"}
@@ -218,7 +218,7 @@ func TestMountEntry_ResetAllowsDifferentParams(t *testing.T) {
 	entry2.Params = newParams
 	entry2.RefCount = 1
 	entry2.Targets = []string{"/target-b"}
-	entry2.initialized = true
+	entry2.sourceMounted = true
 
 	// Verify new params took effect
 	assert.Equals(t, "sa-b", entry2.Params.ServiceAccountName)
@@ -235,7 +235,7 @@ func TestMountEntry_ShareRejectedWithDifferentParams(t *testing.T) {
 	entry.Params = MountParams{ServiceAccountName: "sa-a", AuthenticationSource: "pod"}
 	entry.RefCount = 1
 	entry.Targets = []string{"/target-a"}
-	entry.initialized = true
+	entry.sourceMounted = true
 	entry.mu.Unlock()
 
 	// Second workload tries to share with different SA — should fail with pod auth
@@ -261,7 +261,7 @@ func TestMountEntry_ShareAllowedWithDifferentSADriverAuth(t *testing.T) {
 	entry.Params = MountParams{ServiceAccountName: "sa-a", AuthenticationSource: "driver"}
 	entry.RefCount = 1
 	entry.Targets = []string{"/target-a"}
-	entry.initialized = true
+	entry.sourceMounted = true
 	entry.mu.Unlock()
 
 	// Second workload with different SA — should succeed with driver auth
@@ -292,7 +292,7 @@ func TestMountEntry_ShareAllowedWithSameParams(t *testing.T) {
 	}
 	entry.RefCount = 1
 	entry.Targets = []string{"/target-a"}
-	entry.initialized = true
+	entry.sourceMounted = true
 	entry.mu.Unlock()
 
 	// Second workload tries to share with same params — should succeed
@@ -323,7 +323,7 @@ func TestMountMap_Delete_EntryRemoved(t *testing.T) {
 	m := NewMountMap()
 	entry, _ := m.GetOrCreate("vol-1")
 	entry.mu.Lock()
-	entry.initialized = true
+	entry.sourceMounted = true
 	entry.RefCount = 1
 	entry.mu.Unlock()
 
@@ -340,7 +340,7 @@ func TestMountMap_Delete_GetOrCreateReturnsNewEntry(t *testing.T) {
 	// Create and populate an entry
 	entry1, _ := m.GetOrCreate("vol-1")
 	entry1.mu.Lock()
-	entry1.initialized = true
+	entry1.sourceMounted = true
 	entry1.SourcePath = "/old-source"
 	entry1.mu.Unlock()
 
@@ -353,7 +353,7 @@ func TestMountMap_Delete_GetOrCreateReturnsNewEntry(t *testing.T) {
 	if entry2 == entry1 {
 		t.Fatal("expected new entry after delete, got same pointer")
 	}
-	assert.Equals(t, false, entry2.initialized)
+	assert.Equals(t, false, entry2.sourceMounted)
 	assert.Equals(t, "", entry2.SourcePath)
 }
 
@@ -390,7 +390,7 @@ func TestMountMap_RetryLoop_ConvergesAfterDelete(t *testing.T) {
 	if entry == orphan {
 		t.Fatal("expected a new entry, not the orphaned one")
 	}
-	assert.Equals(t, false, entry.initialized)
+	assert.Equals(t, false, entry.sourceMounted)
 }
 
 func TestMountMap_ConcurrentDeleteAndGetOrCreate(t *testing.T) {
@@ -417,7 +417,7 @@ func TestMountMap_ConcurrentDeleteAndGetOrCreate(t *testing.T) {
 					}
 					entry.mu.Unlock()
 				}
-				entry.initialized = true
+				entry.sourceMounted = true
 				entry.RefCount++
 				entry.mu.Unlock()
 			} else {

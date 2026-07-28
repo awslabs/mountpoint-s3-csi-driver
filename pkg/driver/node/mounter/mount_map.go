@@ -108,9 +108,9 @@ type MountEntry struct {
 	// Targets is the set of active per-pod bind-mount target paths.
 	Targets []string
 
-	// initialized is true once the entry has a real source mount backing it.
+	// sourceMounted is true once the FUSE source mount exists and is serving.
 	// Used to distinguish between a placeholder (LoadOrStore created) and a populated entry.
-	initialized bool
+	sourceMounted bool
 }
 
 // MountMap is a lock-free map tracking active source mounts keyed by volume ID.
@@ -125,7 +125,7 @@ func NewMountMap() *MountMap {
 	return &MountMap{}
 }
 
-// GetOrCreate returns the existing entry for volumeID, or creates a new uninitialized one.
+// GetOrCreate returns the existing entry for volumeID, or creates a new unmounted one.
 // The caller must lock the returned entry before using it.
 // The bool indicates whether the entry already existed (true) or was just created (false).
 func (m *MountMap) GetOrCreate(volumeID string) (*MountEntry, bool) {
