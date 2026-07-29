@@ -181,6 +181,7 @@ deploy_containers() {
     ALL_ARCH_linux="amd64" \
     TAG="latest" \
     DOCKERFILE="${dockerfile}" \
+    FORCE_BUILD=true \
       make login_registry all-push
 
     # Restart the node, controller and mounter daemonset pod
