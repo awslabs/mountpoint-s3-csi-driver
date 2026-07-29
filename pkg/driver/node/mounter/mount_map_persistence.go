@@ -12,9 +12,10 @@ import (
 )
 
 // MetaFileName returns the path to the .meta.json file for a given volume.
-// The file lives alongside the FUSE source mount directory.
+// Meta files live in a dedicated directory separate from FUSE source mounts to avoid
+// collisions with PV names that could end in ".meta.json".
 func MetaFileName(kubeletPath, volumeID string) string {
-	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt", volumeID+".meta.json")
+	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta", volumeID+".meta.json")
 }
 
 // MountMeta is the JSON-serializable structure persisted alongside each source mount.
@@ -22,7 +23,7 @@ func MetaFileName(kubeletPath, volumeID string) string {
 // and for subsequent share requests after driver restart.
 type MountMeta struct {
 	VolumeID                 string   `json:"volumeID"`
-	CommDir                  string   `json:"commDir,omitempty"`
+	CommDir                  string   `json:"commDir"`
 	MountOptions             []string `json:"mountOptions"`
 	AuthenticationSource     string   `json:"authenticationSource"`
 	ServiceAccountName       string   `json:"serviceAccountName"`

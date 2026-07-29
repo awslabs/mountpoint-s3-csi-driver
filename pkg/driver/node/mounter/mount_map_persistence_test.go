@@ -1,15 +1,30 @@
 package mounter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 	mountutils "k8s.io/mount-utils"
 )
+
+// noopCredProvider is a credential provider that does nothing, for tests that need cleanupMount.
+type noopCredProvider struct{}
+
+func (p *noopCredProvider) Provide(_ context.Context, _ credentialprovider.ProvideContext) (envprovider.Environment, string, error) {
+	return nil, "", nil
+}
+
+func (p *noopCredProvider) Cleanup(_ credentialprovider.CleanupContext) error {
+	return nil
+}
 
 // fakeMountInfoProvider returns a mountInfoProviderFunc that returns the given entries.
 func fakeMountInfoProvider(entries []mountutils.MountInfo) mountInfoProviderFunc {
@@ -25,6 +40,19 @@ func newTestDMWithMountInfo(kubeletPath string, provider mountInfoProviderFunc) 
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
+	}
+}
+
+// newTestDMWithMountInfoAndCredProvider creates a DaemonsetMounter with a no-op credential
+// provider and fake mounter, suitable for tests that exercise cleanupMount during rebuild.
+func newTestDMWithMountInfoAndCredProvider(kubeletPath string, provider mountInfoProviderFunc) *DaemonsetMounter {
+	fakeMounter := mountutils.NewFakeMounter(nil)
+	return &DaemonsetMounter{
+		kubeletPath:       kubeletPath,
+		mountInfoProvider: provider,
+		mountMap:          NewMountMap(),
+		mount:             mpmounter.NewWithMount(fakeMounter),
+		credProvider:      &noopCredProvider{},
 	}
 }
 
@@ -102,7 +130,7 @@ func TestWriteMeta_CreatesDirectoryIfMissing(t *testing.T) {
 
 	entry := &MountEntry{VolumeID: "vol-mkdir", SourcePath: "/source"}
 
-	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
+	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	_, err := os.Stat(metaDir)
 	if !os.IsNotExist(err) {
 		t.Fatal("expected meta directory to not exist initially")
@@ -175,7 +203,7 @@ func TestReadMeta_ParsesCorrectly(t *testing.T) {
 
 func TestReadMeta_InvalidJSON(t *testing.T) {
 	kubeletPath := t.TempDir()
-	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
+	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	err := os.MkdirAll(metaDir, 0750)
 	assert.NoError(t, err)
 
@@ -198,7 +226,7 @@ func TestReadMeta_FileNotFound(t *testing.T) {
 
 func TestMetaFileName_Format(t *testing.T) {
 	path := MetaFileName("/var/lib/kubelet", "vol-test-123")
-	expected := "/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/vol-test-123.meta.json"
+	expected := "/var/lib/kubelet/plugins/s3.csi.aws.com/meta/vol-test-123.meta.json"
 	assert.Equals(t, expected, path)
 }
 
@@ -323,7 +351,7 @@ func TestRebuildMountMap_NoMetaDirectory(t *testing.T) {
 
 func TestRebuildMountMap_SkipsNonMetaFiles(t *testing.T) {
 	kubeletPath := t.TempDir()
-	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
+	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	err := os.MkdirAll(metaDir, 0750)
 	assert.NoError(t, err)
 
@@ -342,7 +370,7 @@ func TestRebuildMountMap_SkipsNonMetaFiles(t *testing.T) {
 
 func TestRebuildMountMap_SkipsInvalidMetaJSON(t *testing.T) {
 	kubeletPath := t.TempDir()
-	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
+	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	err := os.MkdirAll(metaDir, 0750)
 	assert.NoError(t, err)
 
@@ -371,7 +399,7 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Mount table has NO entry for sourcePath → source is dead
-	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+	dm := newTestDMWithMountInfoAndCredProvider(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
 		{MountPoint: "/some/other/mount", Major: 0, Minor: 99},
 	}))
 	err = dm.RebuildMountMap()
@@ -392,10 +420,12 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-live")
+	commDir := "/var/lib/kubelet/pods/mounter-uid-abc/volumes/kubernetes.io~empty-dir/comm"
 
 	entry := &MountEntry{
 		VolumeID:   "vol-live",
 		SourcePath: sourcePath,
+		CommDir:    commDir,
 		Params: MountParams{
 			MountOptions:             []string{"--allow-other"},
 			AuthenticationSource:     "pod",
@@ -425,6 +455,7 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	}
 
 	assert.Equals(t, sourcePath, recovered.SourcePath)
+	assert.Equals(t, commDir, recovered.CommDir)
 	assert.Equals(t, 3, recovered.RefCount)
 	assert.Equals(t, 3, len(recovered.Targets))
 	assert.Equals(t, true, recovered.sourceMounted)
@@ -564,4 +595,50 @@ func TestRemoveMeta_OnlyRemovesTargetVolume(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = os.Stat(MetaFileName(kubeletPath, "vol-also-keep"))
 	assert.NoError(t, err)
+}
+
+func TestRebuildMountMap_DeadSourceCleansCredentials(t *testing.T) {
+	kubeletPath := t.TempDir()
+
+	// Create a comm dir with credential files that should be cleaned up
+	commDir := filepath.Join(kubeletPath, "pods", "mounter-uid", "volumes", "kubernetes.io~empty-dir", "comm")
+	credDir := filepath.Join(commDir, "vol-dead-creds")
+	err := os.MkdirAll(credDir, 0750)
+	assert.NoError(t, err)
+	// Simulate a token file in the cred dir
+	os.WriteFile(filepath.Join(credDir, "token.jwt"), []byte("secret"), 0600)
+	// Simulate an error file
+	os.WriteFile(filepath.Join(commDir, "vol-dead-creds.error"), []byte("mount failed"), 0600)
+
+	entry := &MountEntry{
+		VolumeID:   "vol-dead-creds",
+		SourcePath: SourceMountPath(kubeletPath, "vol-dead-creds"),
+		CommDir:    commDir,
+		Params:     MountParams{AuthenticationSource: "driver"},
+	}
+	err = WriteMeta(kubeletPath, entry)
+	assert.NoError(t, err)
+
+	// Mount table has NO entry for sourcePath → source is dead
+	dm := newTestDMWithMountInfoAndCredProvider(kubeletPath, fakeMountInfoProvider(nil))
+	err = dm.RebuildMountMap()
+	assert.NoError(t, err)
+
+	// Credential directory should be cleaned up
+	_, err = os.Stat(credDir)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected credential directory to be removed for dead source")
+	}
+
+	// Error file should be cleaned up
+	_, err = os.Stat(filepath.Join(commDir, "vol-dead-creds.error"))
+	if !os.IsNotExist(err) {
+		t.Fatal("expected error file to be removed for dead source")
+	}
+
+	// Meta file should be cleaned up
+	_, err = os.Stat(MetaFileName(kubeletPath, "vol-dead-creds"))
+	if !os.IsNotExist(err) {
+		t.Fatal("expected meta file to be removed for dead source")
+	}
 }

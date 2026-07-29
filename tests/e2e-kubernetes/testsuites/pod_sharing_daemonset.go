@@ -1058,7 +1058,7 @@ func checkMetaFileExists(ctx context.Context, f *framework.Framework, nodeName, 
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
 		cmd := fmt.Sprintf("test -f %s && echo EXISTS || echo MISSING", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
@@ -1145,7 +1145,7 @@ func readMetaFileContent(ctx context.Context, f *framework.Framework, nodeName, 
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
 		cmd := fmt.Sprintf("cat %s 2>/dev/null || echo ''", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
@@ -1208,7 +1208,7 @@ func getMetaFileMtime(ctx context.Context, f *framework.Framework, nodeName, vol
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/mnt/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
 		cmd := fmt.Sprintf("stat -c '%%Y' %s 2>/dev/null || echo ''", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})

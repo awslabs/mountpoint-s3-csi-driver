@@ -375,9 +375,9 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 // Unmount unmounts the target path with pod-sharing awareness.
 //
 // Flow:
-//   - Unmounts the bind mount at target
-//   - Decrements refcount in MountMap
-//   - If refcount reaches 0, unmounts the FUSE source and removes the entry
+//  1. Unmounts the bind mount at target
+//  2. Decrements refcount in MountMap
+//  3. If refcount reaches 0, unmounts the FUSE source and removes the entry
 func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
 	parsedTarget, err := targetpath.Parse(target)
 	if err != nil {
@@ -685,7 +685,7 @@ func (dm *DaemonsetMounter) mountInfoProviderWithDefault() ([]mountutils.MountIn
 //
 // Entries with dead source mounts are skipped (meta file cleaned up).
 func (dm *DaemonsetMounter) RebuildMountMap() error {
-	metaDir := filepath.Join(dm.kubeletPath, "plugins", "s3.csi.aws.com", "mnt")
+	metaDir := filepath.Join(dm.kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	entries, err := os.ReadDir(metaDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -719,8 +719,18 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		// Find the source mount in mountinfo
 		sourceMI := findMountByPath(mountInfos, sourcePath)
 		if sourceMI == nil {
-			// Source mount is gone — clean up the meta file
+			// Source mount is gone — full cleanup of all resources before removing meta.
 			klog.V(2).Infof("MountMap: source mount %s for volume %s not found in mount table, cleaning up", sourcePath, meta.VolumeID)
+			entry := &MountEntry{
+				VolumeID:   meta.VolumeID,
+				SourcePath: sourcePath,
+				CommDir:    meta.CommDir,
+			}
+			cleanupCtx := credentialprovider.CleanupContext{VolumeID: meta.VolumeID}
+			if cleanErr := dm.cleanupMount(entry, cleanupCtx); cleanErr != nil {
+				klog.Errorf("MountMap: cleanup for dead volume %s failed: %v (keeping meta for retry)", meta.VolumeID, cleanErr)
+				continue
+			}
 			os.Remove(metaPath)
 			continue
 		}

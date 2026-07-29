@@ -131,11 +131,20 @@ func TestValidateCompatibility_ServiceAccountIgnoredWithDriverAuth(t *testing.T)
 	}
 }
 
-func TestValidateCompatibility_NamespaceMismatch(t *testing.T) {
-	existing := &MountParams{PodNamespace: "ns-a"}
-	incoming := &MountParams{PodNamespace: "ns-b"}
+func TestValidateCompatibility_NamespaceMismatch_PodAuth(t *testing.T) {
+	existing := &MountParams{AuthenticationSource: "pod", PodNamespace: "ns-a"}
+	incoming := &MountParams{AuthenticationSource: "pod", PodNamespace: "ns-b"}
 	err := existing.ValidateCompatibility(incoming)
 	assert.Contains(t, err.Error(), "podNamespace mismatch")
+}
+
+func TestValidateCompatibility_NamespaceIgnoredWithDriverAuth(t *testing.T) {
+	existing := &MountParams{AuthenticationSource: "driver", PodNamespace: "ns-a"}
+	incoming := &MountParams{AuthenticationSource: "driver", PodNamespace: "ns-b"}
+	err := existing.ValidateCompatibility(incoming)
+	if err != nil {
+		t.Errorf("expected no error for namespace mismatch with driver auth, got: %v", err)
+	}
 }
 
 func TestValidateCompatibility_FSGroupMismatch(t *testing.T) {

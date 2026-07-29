@@ -55,11 +55,6 @@ func (testCtx *dmTestCtx) targetPath(podUID string) string {
 	return filepath.Join(testCtx.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~csi", testCtx.volumeID, "mount")
 }
 
-// targetPathWithVolume returns a valid kubelet-style target path for a specific volumeID.
-func (testCtx *dmTestCtx) targetPathWithVolume(podUID, volumeID string) string {
-	return filepath.Join(testCtx.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~csi", volumeID, "mount")
-}
-
 func setupDM(t *testing.T) *dmTestCtx {
 	t.Helper()
 
