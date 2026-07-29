@@ -134,18 +134,22 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 // Flow:
 //  1. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
 //  2. If source is mounted, check source health:
-//     - Dead source → tear down and reset entry to allow fresh mount
+//     - Dead source → mark sourceMounted=false (fall through to step 3)
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
-//  3. If source not mounted (fresh or recovered from dead): write meta, set SourcePath/CommDir
+//  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
+//     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
+//     - Write meta file, set SourcePath/CommDir on the entry
 //  4. Provision credentials (under lock to avoid race with cleanup on failure)
 //  5. If target is already mounted (republish/retry): creds refreshed above, return early
-//  6. If source is mounted (healthy source) → bind mount to new target, bump refcount
-//  7. If source not mounted → FUSE mount at source, send FD to mounter, wait for readiness,
-//     bind mount source → target, mark source as mounted
+//  6. If source is mounted (healthy) → bind mount to new target, bump refcount
+//  7. If source not mounted → FUSE mount at source, bind mount source → target,
+//     set sourceMounted=true and refcount=1
 //
-// On initial mount failure (fuseMount or bindMount), credentials are cleaned up immediately
-// under the lock. On unmount of last consumer, the FUSE source is unmounted (causing mount-s3
-// to exit via kernel FUSE teardown) and credentials are removed.
+// Error handling:
+//   - If fuseMount or bindMount fails, cleanupMount is called. If cleanup succeeds,
+//     the map entry and meta file are removed (clean slate for next retry). If cleanup
+//     fails, the entry and meta are preserved so the next retry enters step 3 and
+//     retries cleanup before proceeding.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
