@@ -199,14 +199,11 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		FSGroup:                  fsGroup,
 	}
 
-	// If source is mounted, check health first. Dead source = tear down and treat as fresh.
-	// Only enforce compatibility on a healthy (living) source.
+	// If source is mounted, check health first. Dead source = mark not mounted so we go
+	// through the fresh-mount path below. Only enforce compatibility on a healthy (living) source.
 	if entry.sourceMounted {
 		if !dm.IsSourceHealthy(entry.SourcePath) {
-			// Dead source — tear down and allow fresh mount with any params.
-			klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, resetting entry for fresh mount", entry.SourcePath, volumeID)
-			dm.mount.Unmount(entry.SourcePath)
-			os.Remove(entry.SourcePath)
+			klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, will clean up and re-mount", entry.SourcePath, volumeID)
 			entry.sourceMounted = false
 		} else {
 			// Healthy source — enforce compatibility before any credential writes.
@@ -217,7 +214,13 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	if !entry.sourceMounted {
-		// New mount (or recovered from dead source): write meta BEFORE credentials.
+		// Fresh mount: ensure no associated resources (credentials, error file, FUSE mount,
+		// source directory) are left behind from a previous attempt or dead source before
+		// creating new ones. cleanupMount is idempotent — safe when resources don't exist.
+		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
+			return fmt.Errorf("failed to clean up stale resources for volume %s, cannot proceed with fresh mount: %w", volumeID, cleanErr)
+		}
+
 		entry.Params = incomingParams
 		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
 		entry.CommDir = commDir
@@ -266,6 +269,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, args, userEnv, credsEnv); err != nil {
 		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
 			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failure for volume %s: %v", volumeID, cleanErr)
+			return err
 		}
 		dm.mountMap.Delete(volumeID)
 		RemoveMeta(dm.kubeletPath, volumeID)
@@ -276,6 +280,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	if err := dm.BindMount(entry.SourcePath, target); err != nil {
 		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
 			klog.Errorf("DaemonsetMounter: cleanup after BindMount failure for volume %s: %v", volumeID, cleanErr)
+			return err
 		}
 		dm.mountMap.Delete(volumeID)
 		RemoveMeta(dm.kubeletPath, volumeID)
@@ -476,8 +481,8 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 		}
 	}
 
-	//[future] Clean cache dir
-	// [future] Verify no MP process running
+	//[TODO] Clean cache dir
+	//[TODO] Verify no MP process running
 
 	if len(errs) > 0 {
 		return fmt.Errorf("incomplete cleanup for volume %s (%d errors)", entry.VolumeID, len(errs))
