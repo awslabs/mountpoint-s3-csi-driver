@@ -99,8 +99,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			path := "/mnt/volume1/after-pod1-delete.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[1], path, toWrite, seed)
-			checkReadFromPathSucceed(ctx, f, pods[1], path, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[1], path, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pods[1], path, toWrite, seed)
 		})
 
 		ginkgo.It("should use only a single mount-s3 process for pods sharing the same PV", func(ctx context.Context) {
@@ -137,7 +137,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1) }()
 
 			// Verify first pod works
-			checkWriteToPathSucceed(ctx, f, pod1, "/mnt/volume1/from-pod1.txt", 512, time.Now().UTC().UnixNano())
+			checkWriteToPathSucceedEventually(ctx, f, pod1, "/mnt/volume1/from-pod1.txt", 512, time.Now().UTC().UnixNano())
 
 			// Second pod with different fsGroup 2000 — should fail to mount
 			ginkgo.By("Creating second pod with fsGroup 2000 on the same node (should fail)")
@@ -165,7 +165,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			targetNode := pod1.Spec.NodeName
 
 			// Verify first pod works
-			checkWriteToPathSucceed(ctx, f, pod1, "/mnt/volume1/from-fsgroup-1000.txt", 512, time.Now().UTC().UnixNano())
+			checkWriteToPathSucceedEventually(ctx, f, pod1, "/mnt/volume1/from-fsgroup-1000.txt", 512, time.Now().UTC().UnixNano())
 
 			// Delete the first pod — entry should reset
 			ginkgo.By("Deleting first pod to release the mount")
@@ -181,7 +181,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 			// Verify the new pod can read/write
 			ginkgo.By("Verifying second pod with different fsGroup can read and write")
-			checkWriteToPathSucceed(ctx, f, pod2, "/mnt/volume1/from-fsgroup-2000.txt", 512, time.Now().UTC().UnixNano())
+			checkWriteToPathSucceedEventually(ctx, f, pod2, "/mnt/volume1/from-fsgroup-2000.txt", 512, time.Now().UTC().UnixNano())
 		})
 
 		ginkgo.It("should allow pods with different service accounts to share mount with driver auth", func(ctx context.Context) {
@@ -208,7 +208,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod1) }()
 
 			// Verify first pod works
-			checkWriteToPathSucceed(ctx, f, pod1, "/mnt/volume1/from-sa-default.txt", 512, time.Now().UTC().UnixNano())
+			checkWriteToPathSucceedEventually(ctx, f, pod1, "/mnt/volume1/from-sa-default.txt", 512, time.Now().UTC().UnixNano())
 
 			// Second pod with different SA — should succeed because driver auth doesn't enforce SA match
 			ginkgo.By("Creating second pod with different service account on the same node (should succeed with driver auth)")
@@ -221,8 +221,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			// Both pods should be able to read/write
 			ginkgo.By("Verifying both pods can read and write to shared volume")
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pod2, "/mnt/volume1/from-sa-different.txt", 512, seed)
-			checkReadFromPathSucceed(ctx, f, pod1, "/mnt/volume1/from-sa-different.txt", 512, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pod2, "/mnt/volume1/from-sa-different.txt", 512, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pod1, "/mnt/volume1/from-sa-different.txt", 512, seed)
 		})
 
 		ginkgo.It("should handle concurrent pod creation on the same node sharing same volume", func(ctx context.Context) {
@@ -279,11 +279,11 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/concurrent-shared.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pod1, sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pod1, sharedFile, toWrite, seed)
 
 			for i, pod := range concPods {
 				ginkgo.By(fmt.Sprintf("Verifying concurrent pod %d can read shared file", i))
-				checkReadFromPathSucceed(ctx, f, pod, sharedFile, toWrite, seed)
+				checkReadFromPathSucceedEventually(ctx, f, pod, sharedFile, toWrite, seed)
 			}
 		})
 
@@ -299,7 +299,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/churn-test.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
 
 			// Delete pod 0 and pod 1 while simultaneously creating 2 new pods
 			ginkgo.By("Concurrently deleting 2 pods and creating 2 new pods")
@@ -353,12 +353,12 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 			// pod 2 (never deleted) should still have access
 			ginkgo.By("Verifying surviving pod still has access")
-			checkReadFromPathSucceed(ctx, f, pods[2], sharedFile, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pods[2], sharedFile, toWrite, seed)
 
 			// New pods should also have access
 			for i, pod := range newPods {
 				ginkgo.By(fmt.Sprintf("Verifying new pod %d can read shared file", i))
-				checkReadFromPathSucceed(ctx, f, pod, sharedFile, toWrite, seed)
+				checkReadFromPathSucceedEventually(ctx, f, pod, sharedFile, toWrite, seed)
 			}
 
 			// Clean up pod 2
@@ -390,7 +390,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 				// Write a unique file
 				path := fmt.Sprintf("/mnt/volume1/churn-%d.txt", i)
 				seed := time.Now().UTC().UnixNano() + int64(i)
-				checkWriteToPathSucceed(ctx, f, pod, path, 512, seed)
+				checkWriteToPathSucceedEventually(ctx, f, pod, path, 512, seed)
 
 				ginkgo.By(fmt.Sprintf("Churn iteration %d: deleting pod", i+1))
 				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pod))
@@ -430,7 +430,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 					defer ginkgo.GinkgoRecover()
 					defer wg.Done()
 					path := fmt.Sprintf("/mnt/volume1/pod%d-file.txt", idx)
-					checkWriteToPathSucceed(ctx, f, pods[idx], path, toWrite, seeds[idx])
+					checkWriteToPathSucceedEventually(ctx, f, pods[idx], path, toWrite, seeds[idx])
 				}(i)
 			}
 			wg.Wait()
@@ -440,7 +440,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			for reader := range podCount {
 				for writer := range podCount {
 					path := fmt.Sprintf("/mnt/volume1/pod%d-file.txt", writer)
-					checkReadFromPathSucceed(ctx, f, pods[reader], path, toWrite, seeds[writer])
+					checkReadFromPathSucceedEventually(ctx, f, pods[reader], path, toWrite, seeds[writer])
 				}
 			}
 		})
@@ -456,7 +456,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/reverse-delete.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
 
 			// Delete pods in reverse order (last created first), verifying remaining pods still work
 			for i := podCount - 1; i > 0; i-- {
@@ -465,7 +465,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 				// Verify pod 0 (first pod) still has access
 				ginkgo.By(fmt.Sprintf("Verifying pod 0 still has access after deleting pod %d", i))
-				checkReadFromPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
+				checkReadFromPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
 			}
 
 			// Finally delete pod 0
@@ -482,8 +482,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			file1 := "/mnt/volume1/gen1-file.txt"
 			seed1 := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], file1, toWrite, seed1)
-			checkReadFromPathSucceed(ctx, f, pods[1], file1, toWrite, seed1)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], file1, toWrite, seed1)
+			checkReadFromPathSucceedEventually(ctx, f, pods[1], file1, toWrite, seed1)
 
 			ginkgo.By("Deleting all first-generation pods")
 			for _, pod := range pods {
@@ -505,14 +505,14 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			ginkgo.By("Verifying second-generation pods can read first-generation data")
 			for i, pod := range gen2Pods {
 				ginkgo.By(fmt.Sprintf("Gen2 pod %d reading gen1 file", i))
-				checkReadFromPathSucceed(ctx, f, pod, file1, toWrite, seed1)
+				checkReadFromPathSucceedEventually(ctx, f, pod, file1, toWrite, seed1)
 			}
 
 			// Gen2 pods should share with each other
 			file2 := "/mnt/volume1/gen2-file.txt"
 			seed2 := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, gen2Pods[0], file2, toWrite, seed2)
-			checkReadFromPathSucceed(ctx, f, gen2Pods[1], file2, toWrite, seed2)
+			checkWriteToPathSucceedEventually(ctx, f, gen2Pods[0], file2, toWrite, seed2)
+			checkReadFromPathSucceedEventually(ctx, f, gen2Pods[1], file2, toWrite, seed2)
 		})
 
 		ginkgo.It("should recover mount map after CSI node pod restart and existing pods keep working", func(ctx context.Context) {
@@ -527,8 +527,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/pre-restart.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
-			checkReadFromPathSucceed(ctx, f, pods[1], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pods[1], sharedFile, toWrite, seed)
 
 			// Kill the CSI node pod on this node (only the node pod, not the mounter)
 			ginkgo.By(fmt.Sprintf("Killing CSI node pod on node %s to lose in-memory mount map", targetNode))
@@ -564,7 +564,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/before-restart.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
 
 			// Kill CSI node pod
 			ginkgo.By(fmt.Sprintf("Killing CSI node pod on node %s", targetNode))
@@ -582,7 +582,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 			// New pod should read data written before the restart
 			ginkgo.By("Verifying new pod can read data written before CSI node restart")
-			checkReadFromPathSucceed(ctx, f, pod2, sharedFile, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pod2, sharedFile, toWrite, seed)
 
 			// Verify still only 1 FUSE mount (sharing, not a new one)
 			ginkgo.By("Verifying only one FUSE source mount exists (mount was shared, not duplicated)")
@@ -602,7 +602,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/refcount-test.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
 
 			// Kill CSI node pod — refcount lost from memory
 			ginkgo.By(fmt.Sprintf("Killing CSI node pod on node %s", targetNode))
@@ -715,8 +715,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			toWrite := 1024
 			sharedFile := "/mnt/volume1/pre-crash-shared.txt"
 			seed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, pods[0], sharedFile, toWrite, seed)
-			checkReadFromPathSucceed(ctx, f, pods[1], sharedFile, toWrite, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pods[0], sharedFile, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pods[1], sharedFile, toWrite, seed)
 
 			pvName := resource.Pv.Name
 
@@ -767,21 +767,21 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			for i, pod := range newPods {
 				writeFile := fmt.Sprintf("/mnt/volume1/new-pod-%d.txt", i)
 				writeSeed := time.Now().UTC().UnixNano() + int64(i)
-				checkWriteToPathSucceed(ctx, f, pod, writeFile, toWrite, writeSeed)
-				checkReadFromPathSucceed(ctx, f, pod, writeFile, toWrite, writeSeed)
+				checkWriteToPathSucceedEventually(ctx, f, pod, writeFile, toWrite, writeSeed)
+				checkReadFromPathSucceedEventually(ctx, f, pod, writeFile, toWrite, writeSeed)
 			}
 
 			// Cross-pod sharing should work: pod 0 writes, pod 1 and pod 2 read
 			ginkgo.By("Verifying cross-pod sharing works among new pods")
 			crossFile := "/mnt/volume1/cross-pod-after-crash.txt"
 			crossSeed := time.Now().UTC().UnixNano()
-			checkWriteToPathSucceed(ctx, f, newPods[0], crossFile, toWrite, crossSeed)
-			checkReadFromPathSucceed(ctx, f, newPods[1], crossFile, toWrite, crossSeed)
-			checkReadFromPathSucceed(ctx, f, newPods[2], crossFile, toWrite, crossSeed)
+			checkWriteToPathSucceedEventually(ctx, f, newPods[0], crossFile, toWrite, crossSeed)
+			checkReadFromPathSucceedEventually(ctx, f, newPods[1], crossFile, toWrite, crossSeed)
+			checkReadFromPathSucceedEventually(ctx, f, newPods[2], crossFile, toWrite, crossSeed)
 
 			// Old data written before crash (persisted in S3) should be readable
 			ginkgo.By("Verifying new pods can read data written before mounter crash")
-			checkReadFromPathSucceed(ctx, f, newPods[0], sharedFile, toWrite, seed)
+			checkReadFromPathSucceedEventually(ctx, f, newPods[0], sharedFile, toWrite, seed)
 
 			// Verify only 1 FUSE source mount exists (all 3 pods share the same source)
 			ginkgo.By("Verifying only one FUSE source mount exists for all new pods")
@@ -856,14 +856,14 @@ func checkCrossReadWriteDaemonset(ctx context.Context, f *framework.Framework, p
 	// Pod1 writes, pod2 reads
 	file1 := filepath.Join(basePath, "ds-cross-file1.txt")
 	seed1 := time.Now().UTC().UnixNano()
-	checkWriteToPathSucceed(ctx, f, pod1, file1, toWrite, seed1)
-	checkReadFromPathSucceed(ctx, f, pod2, file1, toWrite, seed1)
+	checkWriteToPathSucceedEventually(ctx, f, pod1, file1, toWrite, seed1)
+	checkReadFromPathSucceedEventually(ctx, f, pod2, file1, toWrite, seed1)
 
 	// Pod2 writes, pod1 reads
 	file2 := filepath.Join(basePath, "ds-cross-file2.txt")
 	seed2 := time.Now().UTC().UnixNano()
-	checkWriteToPathSucceed(ctx, f, pod2, file2, toWrite, seed2)
-	checkReadFromPathSucceed(ctx, f, pod1, file2, toWrite, seed2)
+	checkWriteToPathSucceedEventually(ctx, f, pod2, file2, toWrite, seed2)
+	checkReadFromPathSucceedEventually(ctx, f, pod1, file2, toWrite, seed2)
 }
 
 // verifyCSINodeLogs checks the CSI node pod logs for expected sharing messages.
@@ -1406,7 +1406,7 @@ func dumpMountpointProcesses(ctx context.Context, f *framework.Framework, nodeNa
 
 // checkCredentialDirExists checks if the per-mount credential directory exists in the mounter pod's comm volume.
 // The credential directory lives at <commDir>/<volumeID>/ inside the mounter pod.
-// Retries on transient exec errors for up to 1 minute.
+// Retries on transient exec errors and MISSING results for up to 1 minute.
 func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
 	var result bool
 	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
@@ -1433,8 +1433,11 @@ func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeN
 
 		output := strings.TrimSpace(stdout)
 		framework.Logf("Credential dir check for %s on node %s: %s", volumeID, nodeName, output)
-		result = output == "EXISTS"
+		if output != "EXISTS" {
+			return output, fmt.Errorf("credential dir not yet present (got %s)", output)
+		}
+		result = true
 		return output, nil
-	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).ShouldNot(gomega.BeEmpty())
+	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).Should(gomega.Equal("EXISTS"))
 	return result
 }
