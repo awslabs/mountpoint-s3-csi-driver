@@ -46,9 +46,15 @@ func (existing *MountParams) ValidateCompatibility(incoming *MountParams) error 
 			existing.AuthenticationSource, incoming.AuthenticationSource)
 	}
 
-	// SA and role ARN only matter for pod-level authentication. When auth source is "driver",
-	// credentials come from the CSI driver's own service account — the workload pod's SA is irrelevant.
+	// SA, role ARN, and namespace only matter for pod-level authentication. When auth source is "driver",
+	// credentials come from the CSI driver's own service account — the workload pod's namespace and SA are irrelevant.
+	// This matches V2 PodMounter behavior (see buildFieldFilters in reconciler.go).
 	if existing.AuthenticationSource == "pod" {
+		if existing.PodNamespace != incoming.PodNamespace {
+			return fmt.Errorf("podNamespace mismatch: existing=%q, incoming=%q",
+				existing.PodNamespace, incoming.PodNamespace)
+		}
+
 		if existing.ServiceAccountName != incoming.ServiceAccountName {
 			return fmt.Errorf("serviceAccountName mismatch: existing=%q, incoming=%q",
 				existing.ServiceAccountName, incoming.ServiceAccountName)
@@ -58,11 +64,6 @@ func (existing *MountParams) ValidateCompatibility(incoming *MountParams) error 
 			return fmt.Errorf("serviceAccountEKSRoleARN mismatch: existing=%q, incoming=%q",
 				existing.ServiceAccountEKSRoleARN, incoming.ServiceAccountEKSRoleARN)
 		}
-	}
-
-	if existing.PodNamespace != incoming.PodNamespace {
-		return fmt.Errorf("podNamespace mismatch: existing=%q, incoming=%q",
-			existing.PodNamespace, incoming.PodNamespace)
 	}
 
 	if existing.FSGroup != incoming.FSGroup {

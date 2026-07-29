@@ -316,15 +316,9 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 	}
 
 	fdClosed := false
-	unmount := true
 	defer func() {
 		if !fdClosed {
 			dm.closeFUSEDevFD(fd)
-		}
-		if unmount {
-			if umErr := dm.mount.Unmount(mountPath); umErr != nil {
-				klog.Errorf("Failed to unmount %q during cleanup: %v", mountPath, umErr)
-			}
 		}
 	}()
 
@@ -375,7 +369,6 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 		return err
 	}
 
-	unmount = false
 	return nil
 }
 
@@ -738,6 +731,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		entry, _ := dm.mountMap.GetOrCreate(meta.VolumeID)
 		entry.mu.Lock()
 		entry.SourcePath = sourcePath
+		entry.CommDir = meta.CommDir
 		entry.Params = MountParams{
 			MountOptions:             meta.MountOptions,
 			AuthenticationSource:     meta.AuthenticationSource,
