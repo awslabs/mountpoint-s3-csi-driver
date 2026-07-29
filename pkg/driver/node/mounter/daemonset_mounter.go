@@ -503,7 +503,6 @@ func (dm *DaemonsetMounter) IsMountPoint(target string) (bool, error) {
 }
 
 // IsSourceHealthy checks if the FUSE mount at sourcePath is alive and serving.
-
 func (dm *DaemonsetMounter) IsSourceHealthy(sourcePath string) bool {
 	return dm.mount.IsHealthyMountpoint(sourcePath)
 }
@@ -527,8 +526,6 @@ func (dm *DaemonsetMounter) bindMountSyscallWithDefault(source, target string) e
 	}
 	return dm.mount.BindMount(source, target)
 }
-
-// TODO: refactor closeFUSEDevFD into a shared helper (duplicated in pod_mounter.go)
 func (dm *DaemonsetMounter) closeFUSEDevFD(fd int) {
 	if err := mpmounter.CloseFD(fd); err != nil {
 		klog.V(4).Infof("DaemonsetMounter: failed to close /dev/fuse fd %d: %v", fd, err)
