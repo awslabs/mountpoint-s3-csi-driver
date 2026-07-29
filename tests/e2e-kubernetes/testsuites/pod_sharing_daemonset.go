@@ -653,6 +653,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 			// Credential directory should exist while pod is mounted
 			ginkgo.By("Verifying credential directory exists in mounter pod while pod is mounted")
+			listCommDirContents(ctx, f, targetNode, pvName)
 			credDirExists := checkCredentialDirExists(ctx, f, targetNode, pvName)
 			gomega.Expect(credDirExists).To(gomega.BeTrue(),
 				"expected credential directory for volume %s to exist while pod is mounted", pvName)
@@ -699,9 +700,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 
 			// Verify credential directory is cleaned up from mounter pod's comm volume
 			ginkgo.By("Verifying credential directory is removed from mounter pod after last consumer unmounts")
-			credDirExists = checkCredentialDirExists(ctx, f, targetNode, pvName)
-			gomega.Expect(credDirExists).To(gomega.BeFalse(),
-				"expected credential directory for volume %s to be removed after last consumer unmounts", pvName)
+			checkCredentialDirRemoved(ctx, f, targetNode, pvName)
 		})
 
 		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods", func(ctx context.Context) {
@@ -1404,40 +1403,82 @@ func dumpMountpointProcesses(ctx context.Context, f *framework.Framework, nodeNa
 	}
 }
 
-// checkCredentialDirExists checks if the per-mount credential directory exists in the mounter pod's comm volume.
-// The credential directory lives at <commDir>/<volumeID>/ inside the mounter pod.
-// Retries on transient exec errors and MISSING results for up to 1 minute.
+// listCommDirContents dumps the contents of /comm/ inside the mounter pod for debugging.
+func listCommDirContents(ctx context.Context, f *framework.Framework, nodeName, volumeID string) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=s3-csi-daemonset-mounter",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil || len(pods.Items) == 0 {
+		framework.Logf("DEBUG: Could not find mounter pod for listing: %v", err)
+		return
+	}
+	cmd := fmt.Sprintf("echo '--- /comm/ top-level ---'; ls -la /comm/ 2>&1; echo '--- /comm/%s/ ---'; ls -la /comm/%s/ 2>&1 || true", volumeID, volumeID)
+	stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, pods.Items[0].Name, "mounter", []string{"/bin/sh", "-c", cmd})
+	if err != nil {
+		framework.Logf("DEBUG: listing /comm/ failed: %v", err)
+		return
+	}
+	framework.Logf("DEBUG /comm/ contents on node %s (looking for %s):\n%s", nodeName, volumeID, stdout)
+}
+
+// queryCredentialDirStatus execs into the mounter pod and returns "EXISTS" or "MISSING" for the credential directory.
+// Returns an error if the exec fails or the mounter pod is not found.
+func queryCredentialDirStatus(ctx context.Context, f *framework.Framework, nodeName, volumeID string) (string, error) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=s3-csi-daemonset-mounter",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil || len(pods.Items) == 0 {
+		return "", fmt.Errorf("mounter pod not found on node %s: %v", nodeName, err)
+	}
+
+	mounterPod := &pods.Items[0]
+	credDir := fmt.Sprintf("/comm/%s", volumeID)
+	cmd := fmt.Sprintf("test -d %s && echo EXISTS || echo MISSING", credDir)
+
+	stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, mounterPod.Name, "mounter", []string{"/bin/sh", "-c", cmd})
+	if err != nil {
+		return "", fmt.Errorf("exec failed: %w", err)
+	}
+
+	output := strings.TrimSpace(stdout)
+	framework.Logf("Credential dir check for %s on node %s: %s", volumeID, nodeName, output)
+	return output, nil
+}
+
+// checkCredentialDirExists polls until the credential directory EXISTS in the mounter pod (up to 1 minute).
 func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
 	var result bool
 	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
-		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app=s3-csi-daemonset-mounter",
-			FieldSelector: "spec.nodeName=" + nodeName,
-		})
-		if err != nil || len(pods.Items) == 0 {
-			framework.Logf("Failed to find mounter pod on node %s (retrying): %v", nodeName, err)
-			return "", fmt.Errorf("mounter pod not found on node %s", nodeName)
-		}
-
-		mounterPod := &pods.Items[0]
-		// The comm volume is mounted at /comm in the mounter container.
-		// Credential directory is /comm/<volumeID>/
-		credDir := fmt.Sprintf("/comm/%s", volumeID)
-		cmd := fmt.Sprintf("test -d %s && echo EXISTS || echo MISSING", credDir)
-
-		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, mounterPod.Name, "mounter", []string{"/bin/sh", "-c", cmd})
+		status, err := queryCredentialDirStatus(ctx, f, nodeName, volumeID)
 		if err != nil {
 			framework.Logf("Failed to check credential dir (retrying): %v", err)
-			return "", fmt.Errorf("exec failed: %w", err)
+			return "", err
 		}
-
-		output := strings.TrimSpace(stdout)
-		framework.Logf("Credential dir check for %s on node %s: %s", volumeID, nodeName, output)
-		if output != "EXISTS" {
-			return output, fmt.Errorf("credential dir not yet present (got %s)", output)
+		if status != "EXISTS" {
+			return status, fmt.Errorf("credential dir not yet present (got %s)", status)
 		}
 		result = true
-		return output, nil
+		return status, nil
 	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).Should(gomega.Equal("EXISTS"))
+	return result
+}
+
+// checkCredentialDirRemoved polls until the credential directory is MISSING from the mounter pod (up to 1 minute).
+func checkCredentialDirRemoved(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
+	var result bool
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+		status, err := queryCredentialDirStatus(ctx, f, nodeName, volumeID)
+		if err != nil {
+			framework.Logf("Failed to check credential dir removal (retrying): %v", err)
+			return "", err
+		}
+		if status != "MISSING" {
+			return status, fmt.Errorf("credential dir still present (got %s)", status)
+		}
+		result = true
+		return status, nil
+	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).Should(gomega.Equal("MISSING"))
 	return result
 }
