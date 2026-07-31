@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/mount-utils"
+	mountutils "k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
@@ -136,7 +137,14 @@ func setupDM(t *testing.T) *dmTestCtx {
 
 	dm := mounter.NewDaemonsetMounter(client, nodeName, mpmounter.NewWithMount(fakeMounter), mockCredProvider, mountSyscall, func(source, target string) error {
 		return fakeMounter.Mount(source, target, "bind", []string{"bind"})
-	}, nil)
+	}, func() ([]mountutils.MountInfo, error) {
+		// Return mount info entries matching what FakeMounter has registered.
+		var infos []mountutils.MountInfo
+		for _, mp := range fakeMounter.MountPoints {
+			infos = append(infos, mountutils.MountInfo{MountPoint: mp.Path})
+		}
+		return infos, nil
+	})
 	err = dm.DiscoverCommDir(ctx)
 	assert.NoError(t, err)
 
@@ -334,8 +342,10 @@ func TestDaemonsetMounter(t *testing.T) {
 			testCtx := setupDM(t)
 			target := testCtx.targetPath(testCtx.podUID)
 
-			// Skip fakeMounter - it caused waitForMount's CheckMountpoint poll to win the race over .error file poll
+			// Skip fakeMounter's CheckMountpoint match (don't register as "mountpoint-s3")
+			// but register the path in the mount table so unmountIfMounted can find it.
 			testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				testCtx.mount.Mount("fuse-pending", tgt, "fuse", nil)
 				fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
 				assert.NoError(t, err)
 				return fd, nil
