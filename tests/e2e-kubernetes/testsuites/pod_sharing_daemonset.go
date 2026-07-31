@@ -810,6 +810,52 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			gomega.Expect(metaMtimeAfter).ToNot(gomega.Equal(metaMtimeBefore),
 				"meta file mtime should change after fresh mount overwrites it")
 		})
+		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods with different params", func(ctx context.Context) {
+			// Create PV with --read-only mount option
+			readOnlyResource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"--read-only"})
+			l.resources = append(l.resources, readOnlyResource)
+
+			// Mount pod 1 with read-only params
+			ginkgo.By("Creating pod 1 with read-only mount")
+			targetNode, pods := createPodsOnSameNode(ctx, f, 1, readOnlyResource)
+			defer deletePodsInOrder(ctx, f, pods)
+
+			// Verify pod 1 can read but not write (read-only mount)
+			ginkgo.By("Verifying pod 1 has a working read-only mount (read succeeds, write fails)")
+			toWrite := 1024
+			seed := time.Now().UTC().UnixNano()
+			checkListingPathSucceed(ctx, f, pods[0], "/mnt/volume1/")
+			checkWriteToPathFails(ctx, f, pods[0], "/mnt/volume1/should-fail.txt", toWrite, seed)
+
+			// Kill mounter pod
+			ginkgo.By(fmt.Sprintf("Killing mounter pod on node %s", targetNode))
+			killMounterPodOnNode(ctx, f, targetNode)
+			waitForMounterPodReady(ctx, f, targetNode)
+			time.Sleep(15 * time.Second)
+
+			// Verify pod 1 now has transport errors (dead FUSE mount)
+			ginkgo.By("Verifying pod 1 has transport errors after mounter crash")
+			assertPodIOFails(ctx, f, pods[0], "/mnt/volume1/")
+
+			// Create a new PV/PVC without --read-only for the new pod (same bucket, different params)
+			ginkgo.By("Creating new volume resource without --read-only for new pod")
+			writableResource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, writableResource)
+
+			// Create pod 2 on the same node with writable PV
+			ginkgo.By("Creating pod 2 with writable mount on same node after mounter crash")
+			pod2 := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": targetNode}, []*v1.PersistentVolumeClaim{writableResource.Pvc}, admissionapi.LevelBaseline, "")
+			pod2, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err, "failed to create pod 2 with writable mount")
+			defer e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2)
+
+			// Pod 2 should be able to write (proves fresh mount with new params, not stale read-only)
+			ginkgo.By("Verifying pod 2 can write (fresh mount without --read-only)")
+			writeFile := "/mnt/volume1/after-crash-writable.txt"
+			writeSeed := time.Now().UTC().UnixNano()
+			checkWriteToPathSucceedEventually(ctx, f, pod2, writeFile, toWrite, writeSeed)
+			checkReadFromPathSucceedEventually(ctx, f, pod2, writeFile, toWrite, writeSeed)
+		})
 	})
 }
 

@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/mount-utils"
 	mountutils "k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -38,7 +37,7 @@ type dmTestCtx struct {
 
 	dm           *mounter.DaemonsetMounter
 	client       *fake.Clientset
-	mount        *mount.FakeMounter
+	mount        *mountutils.FakeMounter
 	mountSyscall func(target string, opts mpmounter.MountOptions) (int, error)
 
 	nodeName      string
@@ -65,7 +64,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 	t.Setenv("MOUNTER_NAMESPACE", "kube-system")
 
 	kubeletPath := t.TempDir()
-	// Eval symlinks on `kubeletPath` as `mount.NewFakeMounter` also does that and we rely on
+	// Eval symlinks on `kubeletPath` as `mountutils.NewFakeMounter` also does that and we rely on
 	// `mount.List()` to compare mount points and they need to be the same.
 	parentDir, err := filepath.EvalSymlinks(filepath.Dir(kubeletPath))
 	assert.NoError(t, err)
@@ -101,7 +100,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	fakeMounter := mount.NewFakeMounter(nil)
+	fakeMounter := mountutils.NewFakeMounter(nil)
 
 	testCtx := &dmTestCtx{
 		t:             t,
@@ -451,7 +450,7 @@ func TestDaemonsetMounter(t *testing.T) {
 					t.Setenv("CONTAINER_KUBELET_PATH", t.TempDir())
 
 					client := fake.NewSimpleClientset(tt.pods...)
-					dm := mounter.NewDaemonsetMounter(client, "test-node", mpmounter.NewWithMount(mount.NewFakeMounter(nil)), nil, nil, nil, nil)
+					dm := mounter.NewDaemonsetMounter(client, "test-node", mpmounter.NewWithMount(mountutils.NewFakeMounter(nil)), nil, nil, nil, nil)
 
 					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 					defer cancel()
@@ -873,7 +872,7 @@ func (testCtx *dmTestCtx) receiveMountOptions() mountoptions.Options {
 func (testCtx *dmTestCtx) assertUnmounted(target string) {
 	testCtx.t.Helper()
 	for _, action := range testCtx.mount.GetLog() {
-		if action.Action == mount.FakeActionUnmount && action.Target == target {
+		if action.Action == mountutils.FakeActionUnmount && action.Target == target {
 			return
 		}
 	}
