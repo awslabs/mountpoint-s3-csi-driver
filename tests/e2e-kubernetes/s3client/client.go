@@ -4,6 +4,7 @@ package s3client
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
 // DefaultRegion is the default AWS region to use if unspecified.
@@ -78,12 +80,22 @@ func (c *Client) CreateStandardBucket(ctx context.Context) (string, DeleteBucket
 	return bucketName, c.create(ctx, input)
 }
 
+// expressAZ returns the S3 Express availability zone for the client's region.
+// It checks the S3_EXPRESS_AZ environment variable first, allowing callers to override
+// the built-in map for regions not yet in the hardcoded list.
+func (c *Client) expressAZ() string {
+	if az := os.Getenv("S3_EXPRESS_AZ"); az != "" {
+		return az
+	}
+	return expressAZs[c.region]
+}
+
 // CreateDirectoryBucket creates a new directory S3 bucket with a random name (by following
 // "Directory bucket naming rules") and returns the bucket name and a clean up function.
 func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucketFunc) {
-	regionAz := expressAZs[c.region]
+	regionAz := c.expressAZ()
 	if regionAz == "" {
-		framework.Failf("Unknown S3 Express region %s\n", c.region)
+		e2eskipper.Skipf("Unknown S3 Express region %s\n", c.region)
 	}
 
 	// refer to s3 express bucket naming conventions
