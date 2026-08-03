@@ -155,6 +155,9 @@ test:
 	# skipping controller test cases because we don't implement controller for static provisioning,
 	# this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities" -ginkgo.skip="should remove target path"
+	# Run unit tests in e2e-kubernetes (image override, parsing, etc.) without requiring a cluster.
+	# TestE2E is the Ginkgo e2e suite entry point which requires a live cluster, so we skip it.
+	cd tests/e2e-kubernetes && go test -v -skip TestE2E ./...
 
 .PHONY: cover
 cover:
