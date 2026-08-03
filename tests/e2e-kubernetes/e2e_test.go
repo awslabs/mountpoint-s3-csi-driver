@@ -2,10 +2,13 @@ package e2e
 
 import (
 	"flag"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 	custom_testsuites "github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/testsuites"
+	"github.com/distribution/reference"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -13,6 +16,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/storage/framework"
 	"k8s.io/kubernetes/test/e2e/storage/testsuites"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 func init() {
@@ -35,6 +39,40 @@ func init() {
 	custom_testsuites.ClusterName = ClusterName
 	custom_testsuites.IMDSAvailable = IMDSAvailable
 	custom_testsuites.IsPodMounter = IsPodMounter
+
+	// Override the upstream K8s e2e framework's default test image (BusyBox) with
+	// our TEST_POD_IMAGE so that tests like InitVolumesTestSuite use an image
+	// accessible from all regions instead of registry.k8s.io.
+	overrideUpstreamTestImage()
+}
+
+func overrideUpstreamTestImage() {
+	img := os.Getenv("TEST_POD_IMAGE")
+	if img == "" {
+		img = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+	}
+
+	ref, err := reference.Parse(img)
+	if err != nil {
+		panic(fmt.Sprintf("overrideUpstreamTestImage: invalid image reference %q: %v", img, err))
+	}
+
+	named, ok := ref.(reference.Named)
+	if !ok {
+		panic(fmt.Sprintf("overrideUpstreamTestImage: image reference %q has no name", img))
+	}
+
+	version := "latest"
+	if tagged, ok := ref.(reference.Tagged); ok {
+		version = tagged.Tag()
+	}
+
+	configs := imageutils.GetImageConfigs()
+	cfg := configs[imageutils.BusyBox]
+	cfg.SetRegistry(reference.Domain(named))
+	cfg.SetName(reference.Path(named))
+	cfg.SetVersion(version)
+	configs[imageutils.BusyBox] = cfg
 }
 
 func TestE2E(t *testing.T) {
