@@ -125,7 +125,15 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Info("Using daemonset mounter mode")
 		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
-		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil)
+		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil)
+
+		// Rebuild mount map from persisted .meta.json files + kernel mount table.
+		// Fatal on failure: operating with an empty map while FUSE mounts exist
+		// would cause duplicate mounts or incorrect unmounts.
+		if err := dm.RebuildMountMap(); err != nil {
+			klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
+		}
+
 		if err := dm.DiscoverCommDir(context.Background()); err != nil {
 			klog.Fatalf("Failed to discover mounter pod: %v", err)
 		}

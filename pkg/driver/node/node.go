@@ -239,8 +239,13 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 	if !mounted {
-		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", targetContainer)
-		return &csi.NodeUnpublishVolumeResponse{}, nil
+		// For daemonset mounter, always call Unmount for bookkeeping (MountMap refcount).
+		// For other mounters, skip if not mounted (original behavior).
+		if _, isDaemonset := ns.Mounter.(*mounter.DaemonsetMounter); !isDaemonset {
+			klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", targetContainer)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, calling Unmount for bookkeeping", targetContainer)
 	}
 
 	credentialCtx := credentialCleanupContextFromUnpublishRequest(req)

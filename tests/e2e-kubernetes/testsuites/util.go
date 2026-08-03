@@ -383,3 +383,15 @@ func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName 
 
 	return matchingPods, nil
 }
+
+// isDaemonsetMounterMode returns true if the cluster has daemonset mounter pods running,
+// indicating the driver is deployed in daemonset architecture mode.
+func isDaemonsetMounterMode(ctx context.Context, f *framework.Framework) bool {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=s3-csi-daemonset-mounter",
+	})
+	if err != nil {
+		return false
+	}
+	return len(pods.Items) > 0
+}

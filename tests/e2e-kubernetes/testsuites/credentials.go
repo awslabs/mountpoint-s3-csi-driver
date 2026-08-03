@@ -753,6 +753,13 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
+					// In daemonset mode, pods with different service accounts sharing the same PV
+					// on the same node will be rejected by ValidateCompatibility. This test relies
+					// on both pods mounting successfully which only works with per-pod Mountpoint processes.
+					if isDaemonsetMounterMode(ctx, f) {
+						Skip("Skipping in daemonset mode: different SAs cannot share the same FUSE source mount on the same node")
+					}
+
 					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
@@ -891,6 +898,13 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
+					// In daemonset mode, pods with different service accounts sharing the same PV
+					// on the same node will be rejected by ValidateCompatibility. This test relies
+					// on both pods mounting successfully which only works with per-pod Mountpoint processes.
+					if isDaemonsetMounterMode(ctx, f) {
+						Skip("Skipping in daemonset mode: different SAs cannot share the same FUSE source mount on the same node")
+					}
+
 					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
