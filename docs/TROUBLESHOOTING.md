@@ -32,7 +32,7 @@ spec:
     # ...
 ```
 
-Kubernetes will only process the mount procedure for one of the volumes, and the other volume will be stuck pending and therefore the Pod will be stuck at `ContainerCreating` status. You need to make sure `volumeHandle` is unique in each volume. See [multiple_buckets_one_pod.yaml](../examples/kubernetes/static_provisioning/multiple_pods_one_pv.yaml) example for a correct usage.
+Kubernetes will only process the mount procedure for one of the volumes, and the other volume will be stuck pending and therefore the Pod will be stuck at `ContainerCreating` status. You need to make sure `volumeHandle` is unique in each volume. See [multiple_buckets_one_pod.yaml](../examples/kubernetes/static_provisioning/multiple_buckets_one_pod.yaml) example for a correct usage.
 
 When encountering this issue, you may see errors similar to the one below in `kubelet` logs:
 
