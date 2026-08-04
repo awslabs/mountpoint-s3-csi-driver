@@ -1,0 +1,122 @@
+name: Merge main to feature/daemonset-architecture branch
+
+on:
+  schedule:
+    # Runs twice a month on the 1st and 15th at 9:00 UTC
+    - cron: '0 9 1,15 * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  merge-main-to-feature:
+    runs-on: ubuntu-latest
+    env:
+      FEATURE_BRANCH: feature/daemonset-architecture
+      BASE_BRANCH: main
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.FEATURE_BRANCH }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch latest main
+        run: |
+          git fetch origin ${{ env.BASE_BRANCH }}
+
+      - name: Check if main has new commits
+        id: check
+        run: |
+          MERGE_BASE=$(git merge-base HEAD origin/${{ env.BASE_BRANCH }})
+          MAIN_HEAD=$(git rev-parse origin/${{ env.BASE_BRANCH }})
+          if [ "$MERGE_BASE" = "$MAIN_HEAD" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "Feature branch already contains all commits from main. Nothing to do."
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+            echo "Main has new commits to merge."
+          fi
+
+      - name: Attempt merge
+        if: steps.check.outputs.up_to_date == 'false'
+        id: merge
+        run: |
+          if git merge origin/${{ env.BASE_BRANCH }} --no-edit; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create PR with clean merge
+        if: steps.check.outputs.up_to_date == 'false' && steps.merge.outputs.conflict == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MERGE_BRANCH="merge-main-to-feature-daemonset-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$MERGE_BRANCH"
+          git push origin "$MERGE_BRANCH"
+
+          gh pr create \
+            --base "${{ env.FEATURE_BRANCH }}" \
+            --head "$MERGE_BRANCH" \
+            --title "chore: merge main to feature/daemonset-architecture" \
+            --body "## ✅ Clean Merge from main
+
+          This is an automated bi-weekly merge of \`main\` into \`feature/daemonset-architecture\`.
+
+          No conflicts detected. Please review and merge.
+
+          > **Note:** Please delete the \`${MERGE_BRANCH}\` branch after merging this PR.
+
+          ---
+          *Created automatically by the bi-weekly merge workflow.*"
+
+      - name: Create PR for conflict resolution
+        if: steps.check.outputs.up_to_date == 'false' && steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MERGE_BRANCH="merge-main-to-feature-daemonset-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$MERGE_BRANCH"
+
+          # Create a dummy commit so PR can be created (branch needs to differ from base)
+          git commit --allow-empty -m "chore: placeholder for merge conflict resolution"
+          git push origin "$MERGE_BRANCH"
+
+          # Create the PR
+          gh pr create \
+            --base "${{ env.FEATURE_BRANCH }}" \
+            --head "$MERGE_BRANCH" \
+            --title "chore: merge main to feature/daemonset-architecture (conflicts)" \
+            --body "## ⚠️ Merge Conflicts Detected
+
+          This automated merge of \`main\` into \`feature/daemonset-architecture\` has conflicts.
+
+          ### Steps to resolve
+          \`\`\`bash
+          git fetch origin
+          git checkout ${MERGE_BRANCH}
+          # Reset the dummy placeholder commit
+          git reset HEAD~1
+          git merge origin/main
+          # Resolve conflicts in your editor
+          git add .
+          git commit
+          git push --force-with-lease origin ${MERGE_BRANCH}
+          \`\`\`
+
+          After pushing, this PR will be ready to merge. Delete the branch after merging.
+
+          ---
+          *Created automatically by the merge workflow.*"
