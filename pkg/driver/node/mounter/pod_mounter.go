@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -135,6 +136,15 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	if err != nil {
 		klog.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource for %q: %v. %s", target, err, pm.helpMessageForGettingControllerLogs())
 		return fmt.Errorf("Failed to find corresponding MountpointS3PodAttachment custom resource: %w. %s", err, pm.helpMessageForGettingControllerLogs())
+	}
+
+	// If target is already mounted (republish) but the MP pod is gone, return success to avoid
+	// kubelet exponential backoff that would block NodePublishVolume for all other pods on this volume.
+	if isTargetMountPoint {
+		if _, err := pm.podWatcher.Get(mpPodName); apierrors.IsNotFound(err) {
+			klog.Errorf("Mountpoint Pod %q for %q not found, credentials not updated. %s", mpPodName, target, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
+			return nil
+		}
 	}
 
 	pod, podPath, err := pm.waitForMountpointPod(ctx, mpPodName)
