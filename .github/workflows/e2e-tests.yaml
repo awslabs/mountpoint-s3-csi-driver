@@ -54,7 +54,7 @@ jobs:
           # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
           allow-unsafe-pr-checkout: true
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: "go.mod"
       - name: Set up Docker Buildx
@@ -105,7 +105,7 @@ jobs:
           # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
           allow-unsafe-pr-checkout: true
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: "go.mod"
       - name: Configure AWS Credentials
