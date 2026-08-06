@@ -281,6 +281,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, "mp-", mpPod.GenerateName)
 		assert.Equals(t, "", mpPod.Name)
 		assert.Equals(t, namespace, mpPod.Namespace)
+		assert.Equals(t, map[string]string{corev1.LabelOSStable: "linux"}, mpPod.Spec.NodeSelector)
 		assert.Equals(t, map[string]string{
 			mppod.LabelMountpointVersion: mountpointVersion,
 			mppod.LabelCSIDriverVersion:  csiDriverVersion,
@@ -933,7 +934,6 @@ func TestPodLabels(t *testing.T) {
 		// Verify driver labels take priority (cannot be overridden)
 		assert.Equals(t, mountpointVersion, mpPod.Labels[mppod.LabelMountpointVersion])
 		assert.Equals(t, csiDriverVersion, mpPod.Labels[mppod.LabelCSIDriverVersion])
-		assert.Equals(t, map[string]string{corev1.LabelOSStable: "linux"}, mpPod.Spec.NodeSelector)
 	})
 
 	t.Run("Headroom Pod", func(t *testing.T) {
@@ -965,6 +965,7 @@ func TestPodLabels(t *testing.T) {
 		// Verify driver labels take priority (cannot be overridden)
 		assert.Equals(t, string(workloadPod.UID), hrPod.Labels[mppod.LabelHeadroomForPod])
 		assert.Equals(t, testVolName, hrPod.Labels[mppod.LabelHeadroomForVolume])
+		assert.Equals(t, map[string]string{corev1.LabelOSStable: "linux"}, hrPod.Spec.NodeSelector)
 	})
 
 	t.Run("Empty Labels", func(t *testing.T) {
