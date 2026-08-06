@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1479,17 +1480,23 @@ var _ = Describe("Mountpoint Controller", func() {
 			s3Vol := createVolume()
 			s3Vol.bind()
 
-			// Create a standalone EBS PVC with no PV
+			sc := &storagev1.StorageClass{
+				ObjectMeta:        metav1.ObjectMeta{Name: "ebs-" + uuid.New().String()[:8]},
+				Provisioner:       ebsCSIDriver,
+				VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
+			}
+			Expect(k8sClient.Create(ctx, sc)).To(Succeed())
+
 			ebsPVC := &corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-ebs-pvc",
 					Namespace:    defaultNamespace,
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
-					StorageClassName: ptr.To("gp3"),
+					StorageClassName: &sc.Name,
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")}},
-					// note: no VolumeName
+					// note: no VolumeName (unbound)
 				},
 			}
 			Expect(k8sClient.Create(ctx, ebsPVC)).To(Succeed())

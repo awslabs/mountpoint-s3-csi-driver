@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -902,10 +903,18 @@ func (r *Reconciler) getBoundS3PVForPodClaim(
 		return nil, fmt.Errorf("Failed to get PVC for Pod: %w", err)
 	}
 
-	// S3 CSI Driver doesn't support dynamic provisioning, so the claim has to reference a PV
-	// TODO: support dynamic provisioning (check `provisioner` field of the StorageClass?)
 	if pvc.Spec.VolumeName == "" {
-		return nil, errPVCIsNotS3
+		// A PVC with no `volumeName` is either not yet bound or dynamically provisioned by another driver.
+		// Distinguishing these requires fetching the StorageClass, which is only worthwhile when the
+		// headroom feature is enabled - there scheduling gates can deadlock against a non-S3
+		// WaitForFirstConsumer PVC that never binds until its Pod is scheduled (see issue #855).
+		// In the default mode we skip the extra StorageClass lookup and just requeue to wait for binding.
+		if r.isHeadroomForMountpointPodsFeatureEnabled() && r.isNonS3DynamicPVC(ctx, pvc) {
+			log.V(debugLevel).Info("PVC is unbound but uses a non-S3 WaitForFirstConsumer StorageClass - skipping")
+			return nil, errPVCIsNotS3
+		}
+		// Conservative: if we can't confirm this is a non-S3 PVC, treat as possibly S3 and wait for it to bind.
+		return nil, errPVCIsNotBoundToAPV
 	}
 
 	pv := &corev1.PersistentVolume{}
@@ -939,6 +948,28 @@ func (r *Reconciler) getBoundS3PVForPodClaim(
 		pvc:     pvc,
 		csiSpec: csi,
 	}, nil
+}
+
+// isNonS3DynamicPVC returns true if the PVC's StorageClass uses WaitForFirstConsumer binding
+// and its provisioner is not the S3 CSI driver. Such PVCs will never bind until the pod is
+// scheduled, so we must skip them to avoid a deadlock with scheduling gates.
+// Returns false (conservative) if the StorageClass is unset, empty, or cannot be fetched.
+func (r *Reconciler) isNonS3DynamicPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) bool {
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
+		return false
+	}
+
+	sc := &storagev1.StorageClass{}
+	err := r.Get(ctx, types.NamespacedName{Name: *pvc.Spec.StorageClassName}, sc)
+	if err != nil {
+		return false
+	}
+
+	if sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer {
+		return false
+	}
+
+	return sc.Provisioner != mountpointCSIDriverName
 }
 
 // findIRSAServiceAccountRole retrieves the IAM role ARN associated with a pod's service account
