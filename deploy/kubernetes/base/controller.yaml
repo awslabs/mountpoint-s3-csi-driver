@@ -44,3 +44,5 @@ spec:
               value: mount-s3
             - name: MOUNTPOINT_PRIORITY_CLASS_NAME
               value: mount-s3-critical
+            - name: MOUNTPOINT_POD_LABELS
+              value: "{}"
