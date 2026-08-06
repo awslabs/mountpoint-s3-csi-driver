@@ -933,6 +933,7 @@ func TestPodLabels(t *testing.T) {
 		// Verify driver labels take priority (cannot be overridden)
 		assert.Equals(t, mountpointVersion, mpPod.Labels[mppod.LabelMountpointVersion])
 		assert.Equals(t, csiDriverVersion, mpPod.Labels[mppod.LabelCSIDriverVersion])
+		assert.Equals(t, map[string]string{corev1.LabelOSStable: "linux"}, mpPod.Spec.NodeSelector)
 	})
 
 	t.Run("Headroom Pod", func(t *testing.T) {
