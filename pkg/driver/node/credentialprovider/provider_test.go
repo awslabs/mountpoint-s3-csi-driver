@@ -28,7 +28,6 @@ const testContainerCredentialsFullURI = "http://169.254.170.23/v1/credentials"
 const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
 const testContainerAuthorizationToken = "test-container-authorization-token"
 const testEKSPodIdentityServiceAccountToken = "eks-pod-identity-token"
-const testPodLevelEksPodIdentityServiceAccountToken = testPodID + "-" + testVolumeID + "-eks-pod-identity.token"
 
 const testPodID = "2a17db00-0bf3-4052-9b3f-6c89dcee5d79"
 const testMountpointPodID = "6984d258-b0bc-4103-a104-3d7fc5440744"
@@ -1306,17 +1305,6 @@ func TestProvideContext_GetCredentialPodID(t *testing.T) {
 }
 
 //-- Utilities for tests
-
-func provideCtx(t *testing.T, writePath string, authSource string) credentialprovider.ProvideContext {
-	return credentialprovider.ProvideContext{
-		AuthenticationSource: authSource,
-		WritePath:            writePath,
-		EnvPath:              testEnvPath,
-		WorkloadPodID:        testPodID,
-		VolumeID:             testVolumeID,
-		MountKind:            credentialprovider.MountKindPod,
-	}
-}
 
 func setEnvForLongTermCredentials(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
