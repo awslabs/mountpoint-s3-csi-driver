@@ -5,13 +5,13 @@ go 1.26.5
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.2
 	github.com/aws/aws-sdk-go-v2/config v1.32.33
-	github.com/aws/aws-sdk-go-v2/service/iam v1.56.2
+	github.com/aws/aws-sdk-go-v2/service/iam v1.57.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.2
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.2
 	github.com/awslabs/mountpoint-s3-csi-driver v1.14.0
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.32.0
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/gomega v1.42.1
 	helm.sh/helm/v3 v3.21.3
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3

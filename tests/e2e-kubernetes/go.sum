@@ -58,8 +58,8 @@ github.com/aws/aws-sdk-go-v2/service/eks v1.90.2 h1:lxEuqPFuXUERP30IFjLiB7L64OdU
 github.com/aws/aws-sdk-go-v2/service/eks v1.90.2/go.mod h1:yt8ljVMOYoO0ydj8lTLfiaMI1XI19pw+jNloE73ChSw=
 github.com/aws/aws-sdk-go-v2/service/eksauth v1.15.2 h1:CcFCV3LLhLiHg1voTAThDPvgtfnRnY8xsxw0x46JgvE=
 github.com/aws/aws-sdk-go-v2/service/eksauth v1.15.2/go.mod h1:3pyQX0PvYnJhZmSG0r0Q8YERvzyJukvfPm8DspJCpMc=
-github.com/aws/aws-sdk-go-v2/service/iam v1.56.2 h1:ppo6PbzN9Q582Rt+5xbf/D+DpDFudutA/tyucJH7/Vw=
-github.com/aws/aws-sdk-go-v2/service/iam v1.56.2/go.mod h1:vXOtv4pXRgGwWMyhblIp2+qI20iajYYlmrzMaIJF86s=
+github.com/aws/aws-sdk-go-v2/service/iam v1.57.0 h1:n8wvZQGLzmMEz1y073wyxdN5uGAGb3fa/k8ZRxpzg4I=
+github.com/aws/aws-sdk-go-v2/service/iam v1.57.0/go.mod h1:vXOtv4pXRgGwWMyhblIp2+qI20iajYYlmrzMaIJF86s=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.14 h1:SA43nfaY7+1jjMNIc2ywu99JLJLButtIdLP6j+bT870=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.14/go.mod h1:Du3llKcwbQvHsTXSLzTOGQz0DTDBMEzdg7DAGu7inrY=
 github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.26 h1:Eflerh7atY6HN0yz60peNLOkJA2ZKUyYjZexMbqwMCE=
@@ -337,8 +337,8 @@ github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f h1:y5//uYreIhSUg3J
 github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f/go.mod h1:ZdcZmHo+o7JKHSa8/e818NopupXU1YMK5fe1lsApnBw=
 github.com/onsi/ginkgo/v2 v2.32.0 h1:Hw7s2pVrQo/8Yz5N77qdnpHaoc+c6cC9WIV1Jce+J6E=
 github.com/onsi/ginkgo/v2 v2.32.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
-github.com/onsi/gomega v1.40.0 h1:Vtol0e1MghCD2ZVIilPDIg44XSL9l2QAn8ZNaljWcJc=
-github.com/onsi/gomega v1.40.0/go.mod h1:M/Uqpu/8qTjtzCLUA2zJHX9Iilrau25x1PdoSRbWh5A=
+github.com/onsi/gomega v1.42.1 h1:iN1rCUX+44NZ1Dc97MPoeFYbFR0vh8zxoxMFwKdyZ6I=
+github.com/onsi/gomega v1.42.1/go.mod h1:REff/hsDsodHoKlWsP2mAPhu1+5/6hVYNf9rIEBpeSg=
 github.com/opencontainers/cgroups v0.0.6 h1:tfZFWTIIGaUUFImTyuTg+Mr5x8XRiSdZESgEBW7UxuI=
 github.com/opencontainers/cgroups v0.0.6/go.mod h1:oWVzJsKK0gG9SCRBfTpnn16WcGEqDI8PAcpMGbqWxcs=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
