@@ -515,7 +515,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			checkReadFromPathSucceedEventually(ctx, f, gen2Pods[1], file2, toWrite, seed2)
 		})
 
-		ginkgo.It("should recover mount map after CSI node pod restart and existing pods keep working", func(ctx context.Context) {
+		ginkgo.It("should recover mount map after CSI node pod restart and existing pods keep working", ginkgo.Serial, func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
@@ -553,7 +553,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			checkReadFromPathSucceedEventually(ctx, f, pods[1], postRestartFile, toWrite, postSeed)
 		})
 
-		ginkgo.It("should allow new pod to join shared mount after CSI node pod restart", func(ctx context.Context) {
+		ginkgo.It("should allow new pod to join shared mount after CSI node pod restart", ginkgo.Serial, func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
@@ -592,7 +592,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 				"expected exactly 1 FUSE source mount for volume %s after restart, got %d", pvName, fuseCount)
 		})
 
-		ginkgo.It("should correctly unmount after CSI node pod restart with recovered refcount", func(ctx context.Context) {
+		ginkgo.It("should correctly unmount after CSI node pod restart with recovered refcount", ginkgo.Serial, func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
@@ -703,7 +703,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			checkCredentialDirRemoved(ctx, f, targetNode, pvName)
 		})
 
-		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods", func(ctx context.Context) {
+		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods", ginkgo.Serial, func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
 
@@ -810,7 +810,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			gomega.Expect(metaMtimeAfter).ToNot(gomega.Equal(metaMtimeBefore),
 				"meta file mtime should change after fresh mount overwrites it")
 		})
-		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods with different params", func(ctx context.Context) {
+		ginkgo.It("should recover from mounter pod crash with fresh source mount for new pods with different params", ginkgo.Serial, func(ctx context.Context) {
 			// Create PV with --read-only mount option
 			readOnlyResource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"--read-only"})
 			l.resources = append(l.resources, readOnlyResource)
