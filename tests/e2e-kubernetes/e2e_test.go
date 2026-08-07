@@ -104,7 +104,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	// testsuites.InitMultiVolumeTestSuite,
 	// testsuites.InitVolumeExpandTestSuite,
 	// testsuites.InitDisruptiveTestSuite,
-	// testsuites.InitVolumeLimitsTestSuite,
+	// testsuites.InitVolumeLimitsTestSuite, // custom_testsuites.InitS3CSIVolumeLimitsTestSuite adapts this
 	// testsuites.InitTopologyTestSuite,
 	// testsuites.InitVolumeStressTestSuite,
 	// testsuites.InitFsGroupChangePolicyTestSuite,
@@ -117,6 +117,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3MountOptionsTestSuite,
 	custom_testsuites.InitS3CSICredentialsTestSuite,
 	custom_testsuites.InitS3CSIPodSharingDaemonsetTestSuite,
+	custom_testsuites.InitS3CSIVolumeLimitsTestSuite,
 	// TODO: reenable or rewrite when credentials / cache / pod sharing are implemented for daemonset mode
 	// custom_testsuites.InitS3CSICacheTestSuite,
 	// custom_testsuites.InitS3CSIPodSharingTestSuite,

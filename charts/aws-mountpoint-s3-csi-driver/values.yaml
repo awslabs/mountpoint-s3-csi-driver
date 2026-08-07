@@ -152,10 +152,20 @@ experimental:
 # Configuration for the secondary mounter daemonset(s).
 # Only used when experimental.mounterMode is "daemonset".
 daemonsetMounters:
-  - resources:
+    # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
+    # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
+    # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
+    # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
+    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to 
+    # track volume usage.
+  - maxVolumesPerNode: 4
+    # Total resource requests and limits for the mounter DaemonSet pod.
+    # requests.memory should be sized to maxVolumesPerNode × per-mount memory
+    # (e.g., 4 mounts × 512Mi = 2Gi, or 10 mounts × 4Gi = 40Gi).
+    resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
+        memory: "2Gi"
+        cpu: "500m"
     logLevel: 4
     podLabels: {}
     nodeSelector: {}
