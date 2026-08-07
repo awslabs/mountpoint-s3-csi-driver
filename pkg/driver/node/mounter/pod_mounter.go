@@ -104,10 +104,12 @@ func NewPodMounter(
 // If Mountpoint is already mounted at `target`, it will return early at step 3 to ensure credentials are up-to-date.
 // If Mountpoint is already mounted at `source`, it will skip steps 4-7 and only perform bind mount to `target`.
 func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
-	volumeName, err := pm.volumeNameFromTargetPath(target)
+	tp, err := targetpath.Parse(target)
 	if err != nil {
 		return fmt.Errorf("Failed to extract volume name from %q: %w", target, err)
 	}
+	volumeName := tp.VolumeID
+	workloadPodID := tp.PodID
 
 	isTargetMountPoint, err := pm.IsMountPoint(target)
 	if err != nil {
@@ -142,7 +144,7 @@ func (pm *PodMounter) Mount(ctx context.Context, bucketName string, target strin
 	// kubelet exponential backoff that would block NodePublishVolume for all other pods on this volume.
 	if isTargetMountPoint {
 		if _, err := pm.podWatcher.Get(mpPodName); apierrors.IsNotFound(err) {
-			klog.Errorf("Mountpoint Pod %q for %q not found, credentials not updated. %s", mpPodName, target, pm.helpMessageForGettingMountpointPodStatus(err, mpPodName))
+			klog.Errorf("Mountpoint Pod %q for %q not found, credentials not updated. Mount will not recover — restart the workload %q to get a fresh mount.", mpPodName, target, workloadPodID)
 			return nil
 		}
 	}
@@ -514,15 +516,6 @@ func (pm *PodMounter) bindMountSyscallWithDefault(source, target string) error {
 // unmountTarget calls `unmount` syscall on `target`.
 func (pm *PodMounter) unmountTarget(target string) error {
 	return pm.mount.Unmount(target)
-}
-
-// volumeNameFromTargetPath tries to extract PersistentVolume's name from `target` path.
-func (pm *PodMounter) volumeNameFromTargetPath(target string) (string, error) {
-	tp, err := targetpath.Parse(target)
-	if err != nil {
-		return "", err
-	}
-	return tp.VolumeID, nil
 }
 
 // helpMessageForGettingMountpointLogs returns a help message to troubleshoot Mountpoint failures.
