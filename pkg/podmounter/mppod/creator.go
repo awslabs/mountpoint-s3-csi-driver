@@ -125,6 +125,9 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			},
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				corev1.LabelOSStable: "linux",
+			},
 			// Mountpoint terminates with zero exit code on a successful termination,
 			// and in turn `/bin/aws-s3-csi-mounter` also exits with Mountpoint process' exit code,
 			// here `restartPolicy: OnFailure` allows Pod to only restart on non-zero exit codes (i.e. some failures)
