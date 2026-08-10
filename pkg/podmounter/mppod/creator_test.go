@@ -270,6 +270,7 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 		CSIDriverVersion:  csiDriverVersion,
 		ClusterVariant:    clusterVariant,
 		PodLabels:         map[string]string{},
+		PodAnnotations:    map[string]string{},
 		HeadroomPodLabels: map[string]string{},
 	}
 }
@@ -1007,5 +1008,53 @@ func TestPodLabels(t *testing.T) {
 		assert.Equals(t, string(workloadPod.UID), hrPod.Labels[mppod.LabelHeadroomForPod])
 		assert.Equals(t, testVolName, hrPod.Labels[mppod.LabelHeadroomForVolume])
 		assert.Equals(t, 2, len(hrPod.Labels))
+	})
+}
+
+func TestPodAnnotations(t *testing.T) {
+	t.Run("Configured annotations", func(t *testing.T) {
+		config := createTestConfig(cluster.DefaultKubernetes)
+		config.PodAnnotations = map[string]string{
+			"example.com/exclude":                         "true",
+			mppod.AnnotationVolumeName:                    "should-be-overridden",
+			mppod.AnnotationClusterAutoscalerDaemonsetPod: "false",
+		}
+		creator := mppod.NewCreator(config, testr.New(t))
+
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
+				},
+			},
+		}
+
+		mpPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+
+		assert.Equals(t, "true", mpPod.Annotations["example.com/exclude"])
+		assert.Equals(t, testVolName, mpPod.Annotations[mppod.AnnotationVolumeName])
+		assert.Equals(t, testVolID, mpPod.Annotations[mppod.AnnotationVolumeId])
+		assert.Equals(t, "true", mpPod.Annotations[mppod.AnnotationClusterAutoscalerDaemonsetPod])
+	})
+
+	t.Run("Nil annotations", func(t *testing.T) {
+		config := createTestConfig(cluster.DefaultKubernetes)
+		config.PodAnnotations = nil
+		creator := mppod.NewCreator(config, testr.New(t))
+
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
+				},
+			},
+		}
+
+		mpPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+		assert.Equals(t, 3, len(mpPod.Annotations))
 	})
 }
