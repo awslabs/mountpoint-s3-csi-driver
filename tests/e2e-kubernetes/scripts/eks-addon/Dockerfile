@@ -79,7 +79,7 @@ exec ginkgo -vv -timeout 60m \
     --bucket-prefix="${CLUSTER_NAME}" \
     --imds-available=true \
     --cluster-name="${CLUSTER_NAME}" \
-    --cluster-type=eksctl
+    --pod-mounter=false
 
 EOF
 RUN chmod +x /entrypoint.sh
