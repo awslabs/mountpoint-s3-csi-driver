@@ -115,7 +115,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           # Upgrade tests takes around 3 hours to run to ensure they hit multiple credential refresh cycles.
           # That's why we're increasing the AWS credential duration here compared to regular end-to-end tests.
-          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade.go`.
+          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade_and_rollback.go`.
           role-duration-seconds: ${{ inputs.run_upgrade_tests && 14400 || 7200 }}
       - name: Install tools
         env:
