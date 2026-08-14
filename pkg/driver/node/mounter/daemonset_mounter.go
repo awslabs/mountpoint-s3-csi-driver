@@ -618,48 +618,6 @@ func (dm *DaemonsetMounter) isSystemDMountpoint(target string) bool {
 	return len(references) == 0
 }
 
-// isV1MountOnHost checks if a direct (non-bind) FUSE mount exists at the given target path on the
-// host by reading /proc/1/mountinfo (the init process's mount namespace).
-//
-// The CSI node pod uses Bidirectional mount propagation, so host mounts eventually appear in the
-// container — but there's a brief window after container start where propagation hasn't completed.
-// During this window, IsMountPoint (which reads /proc/self/mountinfo) returns false, but
-// /proc/1/mountinfo already has the entry.
-//
-// To distinguish a direct V1 FUSE mount from a V3 bind mount (both show as "fuse" at the target),
-// we check if any OTHER mountpoint shares the same Major:Minor device. A bind mount shares its
-// device with the source FUSE mount; a direct V1 FUSE mount has a unique device.
-func (dm *DaemonsetMounter) isV1MountOnHost(target string) bool {
-	infos, err := mountutils.ParseMountInfo("/proc/1/mountinfo")
-	if err != nil {
-		klog.V(4).Infof("DaemonsetMounter: cannot parse /proc/1/mountinfo for V1 host mount check: %v", err)
-		return false
-	}
-
-	// Find the FUSE mount entry at the target path.
-	var targetInfo *mountutils.MountInfo
-	for i := range infos {
-		if infos[i].MountPoint == target && (infos[i].FsType == "fuse" || strings.HasPrefix(infos[i].FsType, "fuse.")) {
-			targetInfo = &infos[i]
-			break
-		}
-	}
-	if targetInfo == nil {
-		return false // no FUSE mount at target on host
-	}
-
-	// If any other mountpoint shares the same Major:Minor device, this is a bind mount (V3).
-	// A direct V1 FUSE mount has a unique device — nothing else references it.
-	for i := range infos {
-		if infos[i].MountPoint != target &&
-			infos[i].Major == targetInfo.Major && infos[i].Minor == targetInfo.Minor {
-			return false // shared device = bind mount from source = V3, not V1
-		}
-	}
-
-	return true // unique FUSE device at target = direct V1 systemd mount
-}
-
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.
 func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, error) {
 	mountCredDir := filepath.Join(commDir, volumeID)

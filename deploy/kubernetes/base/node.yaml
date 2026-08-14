@@ -74,6 +74,8 @@ spec:
               value: /var/lib/kubelet
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "true"
+            - name: MOUNT_PROPAGATION_DELAY_SECONDS
+              value: "5"
             - name: MOUNTPOINT_NAMESPACE
               value: mount-s3
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
