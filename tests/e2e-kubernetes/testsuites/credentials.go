@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -73,6 +74,9 @@ const credentialSecretName = "aws-secret"
 
 const serviceAccountTokenAudienceEKS = "pods.eks.amazonaws.com"
 
+// AWS Service Principal for EKS Pod Identity
+var eksPodsServicePrincipal = determineEksPodsServicePrincipal()
+
 // DefaultRegion specifies the STS region explicitly.
 var DefaultRegion string
 var ClusterName string
@@ -83,6 +87,16 @@ var IMDSAvailable bool
 
 type s3CSICredentialsTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
+}
+
+func determineEksPodsServicePrincipal() string {
+	const envVarKey = "POD_IDENTITY_SERVICE_PRINCIPAL"
+	fromEnv := strings.TrimSpace(os.Getenv(envVarKey))
+	if len(fromEnv) == 0 {
+		return "pods.eks.amazonaws.com"
+	} else {
+		return fromEnv
+	}
 }
 
 func InitS3CSICredentialsTestSuite() storageframework.TestSuite {
@@ -1003,7 +1017,7 @@ func eksPodIdentityRoleTrustPolicyDocument() string {
 			{
 				"Effect": "Allow",
 				"Principal": jsonMap{
-					"Service": serviceAccountTokenAudienceEKS,
+					"Service": eksPodsServicePrincipal,
 				},
 				"Action": []string{"sts:AssumeRole", "sts:TagSession"},
 			},
@@ -1021,12 +1035,12 @@ func getARNPartition(arn string) string {
 }
 
 func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDocument string, policyNames ...string) (*iamtypes.Role, func(context.Context) error) {
-	framework.Logf("Creating IAM role")
 	identity := stsCallerIdentity(ctx)
 
 	client := iam.NewFromConfig(awsConfig(ctx))
 
 	roleName := fmt.Sprintf("%s-%s", f.BaseName, uuid.NewString())
+	framework.Logf("Creating IAM role '%s' with assumeRolePolicyDocument \"%s\"", roleName, assumeRolePolicyDocument)
 	role, err := client.CreateRole(ctx, &iam.CreateRoleInput{
 		RoleName:                 new(roleName),
 		AssumeRolePolicyDocument: new(assumeRolePolicyDocument),
@@ -1034,7 +1048,7 @@ func createRole(ctx context.Context, f *framework.Framework, assumeRolePolicyDoc
 	framework.ExpectNoError(err)
 
 	deleteRole := func(ctx context.Context) error {
-		framework.Logf("Deleting IAM role")
+		framework.Logf("Deleting IAM role '%s'", roleName)
 		_, err := client.DeleteRole(ctx, &iam.DeleteRoleInput{
 			RoleName: new(roleName),
 		})
