@@ -98,6 +98,8 @@ spec:
               value: {{ .Values.node.kubeletPath }}
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
+            - name: MOUNT_PROPAGATION_DELAY_SECONDS
+              value: "{{ .Values.mountPropagationDelaySeconds }}"
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
