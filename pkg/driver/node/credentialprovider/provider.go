@@ -170,11 +170,11 @@ type CleanupContext struct {
 	PodID     string
 	VolumeID  string
 
-	// MountKind indicates whether the mount is managed by systemd, pod mounter or daemonset mounter
+	// MountKind indicates whether the mount is managed by systemd, pod mounter or daemonset mounter or daemonset mounter
 	MountKind MountKind
 }
 
-// SetAsSystemDMountpoint marks this context as managed by systemd instead of pod mounter.
+// SetAsSystemDMountpoint marks this context as managed by systemd instead of pod mounter or daemonset mounter.
 func (ctx *CleanupContext) SetAsSystemDMountpoint() {
 	ctx.MountKind = MountKindSystemd
 }
