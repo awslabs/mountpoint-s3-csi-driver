@@ -153,6 +153,25 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
+	// Handle V1 (systemd) legacy mounts before anything else.
+	// V1 mounts have the FUSE mount directly at the target path (no source + bind-mount indirection).
+	// V3 never puts a FUSE mount at the target — it mounts FUSE at a source path and bind-mounts to target.
+	// Detection: target is already a mountpoint with zero bind-mount references.
+	// The startup delay in driver.go ensures mount propagation has settled before we reach here.
+	isMounted, err := dm.IsMountPoint(target)
+	if err == nil && isMounted && dm.isSystemDMountpoint(target) {
+		klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, refreshing credentials", target, credentialCtx.VolumeID)
+		credentialCtx.SetAsSystemDMountpoint()
+		credentialsPath := hostPluginDirWithDefault()
+		credentialCtx.SetWriteAndEnvPath(credentialsPath, credentialsPath)
+
+		if _, _, err := dm.credProvider.Provide(ctx, credentialCtx); err != nil {
+			klog.Errorf("DaemonsetMounter: failed to refresh V1 (systemd) credentials for %q: %v", target, err)
+			return fmt.Errorf("Failed to provide systemd credentials: %w", err)
+		}
+		return nil
+	}
+
 	// Extract PV name from target path to use as the volume identifier for sharing and filesystem paths.
 	// PV names are Kubernetes resource names — guaranteed DNS-safe (no '/', no '..', alphanumeric + '-' + '.').
 	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount
@@ -380,11 +399,30 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 //  2. Decrements refcount in MountMap
 //  3. If refcount reaches 0, unmounts the FUSE source and removes the entry
 func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credentialCtx credentialprovider.CleanupContext) error {
+	// Handle V1 (systemd) legacy mounts
+	// Check IsMountPoint first — if not mounted, isSystemDMountpoint would falsely match
+	// (zero refs on an unmounted path).
+	isMounted, mountErr := dm.IsMountPoint(target)
+	if mountErr == nil && isMounted && dm.isSystemDMountpoint(target) {
+		klog.Infof("DaemonsetMounter: unmounting legacy V1 (systemd) mount at %s for volume %s", target, credentialCtx.VolumeID)
+		if err := dm.unmountIfMounted(target); err != nil {
+			return fmt.Errorf("failed to unmount V1 (systemd) target %q: %w", target, err)
+		}
+		credentialCtx.SetAsSystemDMountpoint()
+		credentialCtx.WritePath = hostPluginDirWithDefault()
+		if err := dm.credProvider.Cleanup(credentialCtx); err != nil {
+			klog.Errorf("DaemonsetMounter: failed to clean up V1 (systemd) credentials for %s: %v", target, err)
+		}
+		return nil
+	}
+
+	// Extract PV name from target path for V3 unmount flow.
 	parsedTarget, err := targetpath.Parse(target)
 	if err != nil {
 		return fmt.Errorf("failed to parse target path %q: %w", target, err)
 	}
 	volumeID := parsedTarget.VolumeID // This is the PV name
+
 	return dm.releaseTarget(target, volumeID, credentialCtx)
 }
 
@@ -561,6 +599,65 @@ func (dm *DaemonsetMounter) unmountIfMounted(target string) error {
 		return nil // not in mount table — intent already satisfied
 	}
 	return dm.mount.Unmount(target)
+}
+
+// isSystemDMountpoint determines whether the specified target path is a V1 systemd-managed mountpoint.
+// A systemd mountpoint has zero bind-mount references to it — systemd mounts directly to the target
+// (unlike V2/V3 which bind-mount from a source path, creating references).
+func (dm *DaemonsetMounter) isSystemDMountpoint(target string) bool {
+	if !util.SupportLegacySystemdMounts() {
+		return false
+	}
+
+	references, err := dm.mount.FindReferencesToMountpoint(target)
+	if err != nil {
+		klog.Warningf("DaemonsetMounter: failed to find references to %s for systemd detection: %v", target, err)
+		return false
+	}
+
+	return len(references) == 0
+}
+
+// isV1MountOnHost checks if a direct (non-bind) FUSE mount exists at the given target path on the
+// host by reading /proc/1/mountinfo (the init process's mount namespace).
+//
+// The CSI node pod uses Bidirectional mount propagation, so host mounts eventually appear in the
+// container — but there's a brief window after container start where propagation hasn't completed.
+// During this window, IsMountPoint (which reads /proc/self/mountinfo) returns false, but
+// /proc/1/mountinfo already has the entry.
+//
+// To distinguish a direct V1 FUSE mount from a V3 bind mount (both show as "fuse" at the target),
+// we check if any OTHER mountpoint shares the same Major:Minor device. A bind mount shares its
+// device with the source FUSE mount; a direct V1 FUSE mount has a unique device.
+func (dm *DaemonsetMounter) isV1MountOnHost(target string) bool {
+	infos, err := mountutils.ParseMountInfo("/proc/1/mountinfo")
+	if err != nil {
+		klog.V(4).Infof("DaemonsetMounter: cannot parse /proc/1/mountinfo for V1 host mount check: %v", err)
+		return false
+	}
+
+	// Find the FUSE mount entry at the target path.
+	var targetInfo *mountutils.MountInfo
+	for i := range infos {
+		if infos[i].MountPoint == target && (infos[i].FsType == "fuse" || strings.HasPrefix(infos[i].FsType, "fuse.")) {
+			targetInfo = &infos[i]
+			break
+		}
+	}
+	if targetInfo == nil {
+		return false // no FUSE mount at target on host
+	}
+
+	// If any other mountpoint shares the same Major:Minor device, this is a bind mount (V3).
+	// A direct V1 FUSE mount has a unique device — nothing else references it.
+	for i := range infos {
+		if infos[i].MountPoint != target &&
+			infos[i].Major == targetInfo.Major && infos[i].Minor == targetInfo.Minor {
+			return false // shared device = bind mount from source = V3, not V1
+		}
+	}
+
+	return true // unique FUSE device at target = direct V1 systemd mount
 }
 
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.

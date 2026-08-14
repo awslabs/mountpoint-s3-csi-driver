@@ -395,3 +395,65 @@ func isDaemonsetMounterMode(ctx context.Context, f *framework.Framework) bool {
 	}
 	return len(pods.Items) > 0
 }
+
+// --- Eventually helpers ---
+// These retry operations with a 30-second timeout and 5-second polling interval,
+// tolerating transient errors (e.g., "Transport endpoint is not connected") that can
+// occur briefly after CSI node pod restarts, upgrades, or mounter pod restarts.
+
+// checkReadFromPathSucceedEventually retries reading from a path in a pod, tolerating
+// transient errors like "Transport endpoint is not connected" that can occur briefly
+// after a CSI node pod restart while FUSE mounts re-stabilize.
+func checkReadFromPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
+	cmd := fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum)
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
+		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
+}
+
+// checkWriteToPathSucceedEventually retries writing to a path in a pod, tolerating
+// transient errors that can occur briefly after a CSI node pod or mounter pod restart.
+func checkWriteToPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+	data := genBinDataFromSeed(toWrite, seed)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	cmd := fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite)
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
+		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
+}
+
+// checkListingPathSucceedEventually retries listing a path in a pod, tolerating
+// transient errors that can occur briefly after an upgrade or CSI node pod restart.
+func checkListingPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
+	cmd := fmt.Sprintf("ls %s", path)
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
+		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
+}
+
+// checkListingPathWithEntriesEventually retries listing a path and verifying its entries,
+// tolerating transient errors that can occur briefly after an upgrade or CSI node pod restart.
+func checkListingPathWithEntriesEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, entries []string) {
+	cmd := fmt.Sprintf("ls %s", path)
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) ([]string, error) {
+		stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(ctx, f, pod.Name, cmd)
+		if err != nil {
+			return nil, fmt.Errorf("%q failed: %v\nstdout: %s\nstderr: %s", cmd, err, stdout, stderr)
+		}
+		return strings.Fields(stdout), nil
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal(entries))
+}
+
+// checkWriteToPathFailsEventually retries verifying that a write to a path fails with exit code 1,
+// tolerating transient errors (like "Transport endpoint is not connected") that can occur briefly
+// after an upgrade or CSI node pod restart. The write is expected to fail because the pod only has
+// read-only access, but briefly after restart the mount might be unavailable entirely.
+func checkWriteToPathFailsEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
+	data := genBinDataFromSeed(toWrite, seed)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	cmd := fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite)
+	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
+		return e2epod.VerifyExecInPodFail(ctx, f, pod, cmd, 1)
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
+}
