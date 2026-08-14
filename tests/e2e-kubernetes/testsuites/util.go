@@ -396,14 +396,8 @@ func isDaemonsetMounterMode(ctx context.Context, f *framework.Framework) bool {
 	return len(pods.Items) > 0
 }
 
-// --- Eventually helpers ---
-// These retry operations with a 30-second timeout and 5-second polling interval,
-// tolerating transient errors (e.g., "Transport endpoint is not connected") that can
-// occur briefly after CSI node pod restarts, upgrades, or mounter pod restarts.
-
 // checkReadFromPathSucceedEventually retries reading from a path in a pod, tolerating
-// transient errors like "Transport endpoint is not connected" that can occur briefly
-// after a CSI node pod restart while FUSE mounts re-stabilize.
+// transient errors
 func checkReadFromPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
 	cmd := fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum)
@@ -413,7 +407,7 @@ func checkReadFromPathSucceedEventually(ctx context.Context, f *framework.Framew
 }
 
 // checkWriteToPathSucceedEventually retries writing to a path in a pod, tolerating
-// transient errors that can occur briefly after a CSI node pod or mounter pod restart.
+// transient errors
 func checkWriteToPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)
@@ -424,7 +418,7 @@ func checkWriteToPathSucceedEventually(ctx context.Context, f *framework.Framewo
 }
 
 // checkListingPathSucceedEventually retries listing a path in a pod, tolerating
-// transient errors that can occur briefly after an upgrade or CSI node pod restart.
+// transient errors
 func checkListingPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
 	cmd := fmt.Sprintf("ls %s", path)
 	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
@@ -433,7 +427,7 @@ func checkListingPathSucceedEventually(ctx context.Context, f *framework.Framewo
 }
 
 // checkListingPathWithEntriesEventually retries listing a path and verifying its entries,
-// tolerating transient errors that can occur briefly after an upgrade or CSI node pod restart.
+// tolerating transient errors
 func checkListingPathWithEntriesEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, entries []string) {
 	cmd := fmt.Sprintf("ls %s", path)
 	framework.Gomega().Eventually(ctx, func(ctx context.Context) ([]string, error) {
@@ -446,9 +440,7 @@ func checkListingPathWithEntriesEventually(ctx context.Context, f *framework.Fra
 }
 
 // checkWriteToPathFailsEventually retries verifying that a write to a path fails with exit code 1,
-// tolerating transient errors (like "Transport endpoint is not connected") that can occur briefly
-// after an upgrade or CSI node pod restart. The write is expected to fail because the pod only has
-// read-only access, but briefly after restart the mount might be unavailable entirely.
+// tolerating transient errors
 func checkWriteToPathFailsEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
 	data := genBinDataFromSeed(toWrite, seed)
 	encoded := base64.StdEncoding.EncodeToString(data)

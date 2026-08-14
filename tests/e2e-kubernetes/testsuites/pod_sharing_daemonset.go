@@ -1334,8 +1334,6 @@ func dumpMountTable(ctx context.Context, f *framework.Framework, nodeName, label
 	}
 }
 
-// checkReadFromPathSucceedEventually retries reading from a path in a pod, tolerating
-
 // waitForCSINodePodStable waits for the CSI node pod to have been Running continuously
 // for at least 5 seconds. This prevents race conditions where we exec into a pod that
 // just started but hasn't fully initialized (e.g., RebuildMountMap + DiscoverCommDir).
