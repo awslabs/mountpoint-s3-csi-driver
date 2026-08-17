@@ -433,7 +433,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		if rollbackSucceeded {
 			framework.Logf("Rollback phase completed successfully")
 		} else {
-			fmt.Println("::warning file=upgrade.go,line=318::Rollback phase failed but upgrade succeeded - test marked as passed")
+			fmt.Println("::warning file=upgrade_and_rollback.go,line=318::Rollback phase failed but upgrade succeeded - test marked as passed")
 			framework.Logf("WARNING: Rollback phase failed, but test is still marked as passed since upgrade succeeded")
 		}
 	}
