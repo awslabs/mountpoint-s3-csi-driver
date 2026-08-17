@@ -422,7 +422,6 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 		return fmt.Errorf("failed to parse target path %q: %w", target, err)
 	}
 	volumeID := parsedTarget.VolumeID // This is the PV name
-
 	return dm.releaseTarget(target, volumeID, credentialCtx)
 }
 

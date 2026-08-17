@@ -135,11 +135,6 @@ eksPodIdentityAgent:
 # TODO: Remove this in v3 as systemd mount support will be discontinued
 supportLegacySystemDMounts: true
 
-# Time in seconds to wait for host mounts to propagate into the CSI node container's
-# mount namespace after a pod restart. This ensures RebuildMountMap can see existing
-# FUSE mounts before processing. Set to 0 to disable the delay.
-mountPropagationDelaySeconds: 5
-
 experimental:
   # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
