@@ -127,19 +127,6 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Info("Using daemonset mounter mode")
 		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
-		// Wait for mount propagation to settle before rebuilding the mount map.
-		// After CSI node pod restart (e.g., during upgrade), existing FUSE mounts
-		// on the host need time to propagate into this container's mount namespace
-		// via Bidirectional mount propagation. Without this delay, RebuildMountMap
-		// may not see existing mounts and incorrectly clean them up, or during
-		// upgrades older version mounts may get a new mount.
-		// Configurable via MOUNT_PROPAGATION_DELAY_SECONDS (default: 5s, set to 0 to disable).
-		if propagationDelay := util.MountPropagationDelay(); propagationDelay > 0 {
-			klog.Infof("Waiting %v for mount propagation to settle before rebuilding mount map", propagationDelay)
-			time.Sleep(propagationDelay)
-			klog.Info("Mount propagation delay complete, proceeding with startup")
-		}
-
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil)
 
 		// Rebuild mount map from persisted .meta.json files + kernel mount table.

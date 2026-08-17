@@ -366,8 +366,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
 
-		// Workload health checks use Eventually with retries, so they tolerate the brief
-		// window after upgrade where V1 credentials haven't been refreshed yet.
+		// Ensure the workloads are still healthy
 		framework.Logf("Monitoring all 12 workloads (Set A + B + C + D) for %d minutes...", UPGRADE_TEST_DURATION_IN_MINUTES)
 		allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
 		allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
