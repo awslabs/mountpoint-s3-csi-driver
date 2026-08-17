@@ -50,6 +50,9 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				corev1.LabelOSStable: "linux",
+			},
 			PriorityClassName: c.config.HeadroomPriorityClassName,
 			Affinity: &corev1.Affinity{
 				// Specify inter-pod affinity rule to Workload Pod to
