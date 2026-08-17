@@ -157,10 +157,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// V1 mounts have the FUSE mount directly at the target path (no source + bind-mount indirection).
 	// V3 never puts a FUSE mount at the target — it mounts FUSE at a source path and bind-mounts to target.
 	// Detection: target is already a mountpoint with zero bind-mount references.
-	// The startup delay in driver.go ensures mount propagation has settled before we reach here.
 	isMounted, err := dm.IsMountPoint(target)
 	if err == nil && isMounted && dm.isSystemDMountpoint(target) {
-		klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, refreshing credentials", target, credentialCtx.VolumeID)
+		klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, will only refresh credentials", target, credentialCtx.VolumeID)
 		credentialCtx.SetAsSystemDMountpoint()
 		credentialsPath := hostPluginDirWithDefault()
 		credentialCtx.SetWriteAndEnvPath(credentialsPath, credentialsPath)
