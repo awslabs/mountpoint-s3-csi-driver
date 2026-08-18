@@ -1976,6 +1976,7 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 	Expect(mountpointPod.ObjectMeta.Annotations).To(HaveKeyWithValue(mppod.AnnotationVolumeId, vol.pv.Spec.CSI.VolumeHandle))
 
 	Expect(mountpointPod.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
+	Expect(mountpointPod.Spec.NodeSelector).To(Equal(map[string]string{corev1.LabelOSStable: "linux"}))
 
 	Expect(mountpointPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms).To(Equal([]corev1.NodeSelectorTerm{
 		{
