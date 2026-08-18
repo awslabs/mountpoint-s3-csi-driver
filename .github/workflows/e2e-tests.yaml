@@ -24,7 +24,7 @@ on:
       upgrade_tests_is_major_version_upgrade:
         required: false
         type: boolean
-        description: "Only used if `run_upgrade_tests` is true. Set true when the upgrade crosses a major version boundary; terminates new-version workloads (Set D) before rollback since they can't survive a rollback to the previous major version."
+        description: "Only used if `run_upgrade_tests` is true. Set true when the upgrade crosses a major version boundary; terminates new-version workloads before rollback since they can't survive a rollback to the previous major version."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}

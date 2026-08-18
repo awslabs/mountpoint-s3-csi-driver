@@ -332,7 +332,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Set A	|Before upgrade	| Test pre-upgrade workloads on rollback	|After rollback monitoring
 		// Set B	|Before upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
 		// Set C	|After upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
-		// Set D	|After upgrade	| Test new version works after upgrade		|Before rollback
+		// Set D	|After upgrade	| Test new version works; on same-major runs, verify it survives rollback	|Major-version upgrade: before rollback. Otherwise: after rollback monitoring
 		// Set E	|After rollback	| Test new workload creation post-rollback	|After rollback monitoring
 
 		// Create Set A + Set B (for upgrade test + rollback test)
@@ -436,7 +436,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback", verifyWorkloadHealth)
 
-			// Terminate the monitored workloads (Set A + E, plus Set D on non-downgrade runs).
+			// Terminate the monitored workloads (Set A + E, plus Set D on non-major version upgrade runs).
 			framework.Logf("Terminating post-rollback workloads to test termination after rollback...")
 			podsToTerminate := slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetE, readOnlyAccessPodsSetE)
 			if !isMajorVersionUpgrade {
