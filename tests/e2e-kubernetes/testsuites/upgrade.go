@@ -77,6 +77,13 @@ var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
 var helmChartContainerRepository = os.Getenv("REPOSITORY")
 var helmChartContainerTag = os.Getenv("TAG")
 
+// isMajorVersionUpgrade indicates the upgrade crosses a major version boundary, so rolling
+// the driver back to the previous major version cannot serve mounts created by the new major
+// version. In that case, workloads created on the new version (Set D) cannot survive the
+// rollback and must be terminated before it. Defaults to false (same-major upgrade), where
+// Set D is kept through the rollback and monitored to verify existing workloads survive.
+var isMajorVersionUpgrade = os.Getenv("MOUNTPOINT_CSI_DRIVER_IS_MAJOR_VERSION_UPGRADE") == "true"
+
 // tokenExpirationPostRenderer patches CSIDriver and ServiceAccount to use shorter token expiration for tests
 type tokenExpirationPostRenderer struct {
 	expirationSeconds int64
@@ -378,7 +385,18 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
 			e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
 		}
-		framework.Logf("Set B and Set C terminated successfully. Set A and Set D remain running.")
+		framework.Logf("Set B and Set C terminated successfully.")
+		// Set D was created on the new version. On a MAJOR version upgrade, rolling the driver
+		// back to the previous major version cannot serve mounts created by the new major
+		// version, so Set D must be terminated before rollback.
+		if isMajorVersionUpgrade {
+			framework.Logf("Major version upgrade: Set A remains running, terminating Set D workloads before rollback (new-version workloads can't survive rollback to the previous major)...")
+			for _, pod := range slices.Concat(fullAccessPodsSetD, readOnlyAccessPodsSetD) {
+				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+			}
+		} else {
+			framework.Logf("Set A and Set D remain running.")
+		}
 
 		framework.Logf("Upgrade phase completed successfully, proceeding to rollback test...")
 
@@ -406,20 +424,28 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
 			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
 
-			// Monitor Set A + D + E for 150 minutes after rollback
-			framework.Logf("Monitoring workloads (Set A + D + E) for %d minutes after rollback...", ROLLBACK_TEST_DURATION_IN_MINUTES)
-
-			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetD, fullAccessPodsSetE)
-			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
+			// Monitor Set A + E (+ Set D on non-major version upgrade runs) after rollback.
+			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetE)
+			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetE)
+			if !isMajorVersionUpgrade {
+				allFullAccessAfterRollback = slices.Concat(allFullAccessAfterRollback, fullAccessPodsSetD)
+				allReadOnlyAfterRollback = slices.Concat(allReadOnlyAfterRollback, readOnlyAccessPodsSetD)
+			}
+			framework.Logf("Monitoring workloads (Set A + E%s) for %d minutes after rollback...",
+				map[bool]string{true: "", false: " + D"}[isMajorVersionUpgrade], ROLLBACK_TEST_DURATION_IN_MINUTES)
 
 			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback", verifyWorkloadHealth)
 
-			// Terminate Set A + D + E (test termination after rollback)
-			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
-			for _, pod := range slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetD, readOnlyAccessPodsSetD, fullAccessPodsSetE, readOnlyAccessPodsSetE) {
+			// Terminate the monitored workloads (Set A + E, plus Set D on non-downgrade runs).
+			framework.Logf("Terminating post-rollback workloads to test termination after rollback...")
+			podsToTerminate := slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetE, readOnlyAccessPodsSetE)
+			if !isMajorVersionUpgrade {
+				podsToTerminate = slices.Concat(podsToTerminate, fullAccessPodsSetD, readOnlyAccessPodsSetD)
+			}
+			for _, pod := range podsToTerminate {
 				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
 			}
-			framework.Logf("Set A, Set D, and Set E terminated successfully")
+			framework.Logf("Post-rollback workloads terminated successfully")
 		}()
 
 		// Log rollback outcome with GitHub Actions annotation if failed
