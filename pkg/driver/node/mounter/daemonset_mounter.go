@@ -409,6 +409,9 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 		}
 		credentialCtx.SetAsSystemDMountpoint()
 		credentialCtx.WritePath = hostPluginDirWithDefault()
+		// Best-effort credential cleanup: the unmount above already succeeded, so we
+		// don't fail the RPC over leftover cred files. A retry would skip this branch
+		// (target no longer mounted) anyway.
 		if err := dm.credProvider.Cleanup(credentialCtx); err != nil {
 			klog.Errorf("DaemonsetMounter: failed to clean up V1 (systemd) credentials for %s: %v", target, err)
 		}
