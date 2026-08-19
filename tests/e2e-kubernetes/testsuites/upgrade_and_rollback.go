@@ -268,9 +268,8 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		return []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
 	}
 
-	// writeAndVerifyTestFile writes a test file and verifies it can be read
-	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod) (testFile string, testWriteSize int, seed int64) {
-		seed = time.Now().UTC().UnixNano()
+	// writeAndVerifyTestFile writes a test file with content derived from seed and verifies it can be read.
+	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod, seed int64) (testFile string, testWriteSize int) {
 		testWriteSize = 1024
 		testFile = filepath.Join(e2epod.VolumeMountPath1, "test.txt")
 		for _, pod := range pods {
@@ -340,14 +339,17 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		fullAccessPodsSetA, readOnlyAccessPodsSetA := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 		fullAccessPodsSetB, readOnlyAccessPodsSetB := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 
+		// One seed for all sets: monitoring verifies every pod against a single seed.
+		seed := time.Now().UTC().UnixNano()
+
 		// Test Set A workloads
 		framework.Logf("Testing Set A workloads...")
-		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPodsSetA)
+		testFile, testWriteSize := writeAndVerifyTestFile(ctx, fullAccessPodsSetA, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetA, testFile, testWriteSize, seed)
 
 		// Test Set B workloads
 		framework.Logf("Testing Set B workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetB, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetB, testFile, testWriteSize, seed)
 
 		// Upgrade to the new version with token expiration patching
@@ -365,12 +367,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 		// Test Set C workloads
 		framework.Logf("Testing Set C workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetC, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
 
 		// Test Set D workloads
 		framework.Logf("Testing Set D workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetD, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
 
 		// Ensure the workloads are still healthy
@@ -421,7 +423,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			// Test Set E workloads
 			framework.Logf("Testing Set E workloads...")
-			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
+			testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetE, seed)
 			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
 
 			// Monitor Set A + E (+ Set D on non-major version upgrade runs) after rollback.
@@ -664,6 +666,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 }
 
 // monitorWorkloadsForDuration monitors workload health for a specified duration, checking every minute and logging progress.
+// TODO: track the seed per set so each set can write distinct content, which would also catch a pod reading another set's volume.
 func monitorWorkloadsForDuration(
 	ctx context.Context,
 	fullAccessPods []*v1.Pod,
