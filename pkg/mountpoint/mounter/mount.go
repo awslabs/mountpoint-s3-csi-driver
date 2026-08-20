@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"syscall"
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
@@ -126,12 +127,32 @@ func (m *Mounter) IsMountPoint(target Target) (bool, error) {
 	return m.mount.IsMountPoint(target)
 }
 
-// IsHealthyMountpoint checks whether `target` is both a valid Mountpoint mount AND the FUSE daemon is alive.
+// IsHealthyMountpoint reports whether `target` is a live Mountpoint mount.
+//
+// It returns a three-way result so callers can distinguish "definitely dead"
+// from "couldn't determine", and avoid tearing down a possibly-live source on a
+// transient error:
+//   - (true, nil):  healthy.
+//   - (false, nil): definitely dead — not a Mountpoint mount, corrupted mount,
+//     or the FUSE daemon returned ENOTCONN.
+//   - (false, err): UNKNOWN — a transient error (e.g. failure reading the mount
+//     table, EINTR, fd exhaustion) prevented a determination. Callers MUST NOT
+//     treat this as dead; they should retry later.
+//
 // A dead FUSE mount (after mounter pod crash) stays in the mount table but returns ENOTCONN on any I/O.
-func (m *Mounter) IsHealthyMountpoint(target Target) bool {
+func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 	isMounted, err := m.CheckMountpoint(target)
-	if err != nil || !isMounted {
-		return false
+	if err != nil {
+		// A corrupted mount is a definite "dead" signal.
+		if m.IsMountpointCorrupted(err) {
+			return false, nil
+		}
+		// Anything else (e.g. couldn't stat or list the mount table) is UNKNOWN.
+		return false, fmt.Errorf("cannot determine mount health for %q: %w", target, err)
+	}
+	if !isMounted {
+		// Not our mount (or not a mount at all) — definitely not a live Mountpoint.
+		return false, nil
 	}
 
 	// Mount entry exists in the table — verify the FUSE daemon is alive.
@@ -142,10 +163,15 @@ func (m *Mounter) IsHealthyMountpoint(target Target) bool {
 	// causing false negatives during transient network issues.
 	f, err := os.Open(target)
 	if err != nil {
-		return false
+		// A dead FUSE daemon returns ENOTCONN — that's a definite "dead".
+		if errors.Is(err, syscall.ENOTCONN) {
+			return false, nil
+		}
+		// Transient errors (EINTR, EMFILE/ENFILE, ENOMEM, ...) are UNKNOWN, not dead.
+		return false, fmt.Errorf("cannot open %q to probe FUSE liveness: %w", target, err)
 	}
 	f.Close()
-	return true
+	return true, nil
 }
 
 // IsMountpointCorrupted returns whether an error returned from [Mounter.CheckMountpoint]
