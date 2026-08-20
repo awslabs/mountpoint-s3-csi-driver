@@ -95,6 +95,11 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
+	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
+	if cm.reconciler.s3paExpectations.isPending(fieldFilters) {
+		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
+		cm.reconciler.s3paExpectations.clear(fieldFilters)
+	}
 	modified := false
 
 	now := time.Now().UTC()
