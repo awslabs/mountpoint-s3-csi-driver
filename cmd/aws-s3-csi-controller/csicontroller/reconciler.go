@@ -55,11 +55,13 @@ type Reconciler struct {
 	//
 	// Management: We carefully manage expectations to avoid indefinite waiting:
 	// - setPending() is called in handleNewS3PodAttachment() immediately after successfully creating a new S3PA
-	// - clear() is called in two scenarios:
+	// - clear() is called in four scenarios:
 	//   1. In handleExistingS3PodAttachment() when a pending S3PA is found (it appeared in the cache)
-	//   2. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	//   2. In recoverFromDuplicateS3PodAttachments() after deleting all empty duplicates
+	//   3. In cleanupStaleWorkloads() when the stale attachment cleaner observes a pending S3PA
+	//   4. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
 	//
-	// Note: Reconcile() processes events sequentially, eliminating concurrency concerns.
+	// Note: Reconcile() processes events sequentially, but the stale attachment cleaner can access expectations concurrently.
 	s3paExpectations *expectations
 	client.Client
 }
@@ -380,6 +382,26 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 		fieldFilters[crdv2.FieldWorkloadNamespace] = workloadPod.Namespace
 		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
 		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
+	}
+
+	return fieldFilters
+}
+
+// fieldFiltersForS3PodAttachment reconstructs the filters used to track a creation expectation from an existing S3PA.
+func fieldFiltersForS3PodAttachment(s3pa *crdv2.MountpointS3PodAttachment) client.MatchingFields {
+	fieldFilters := client.MatchingFields{
+		crdv2.FieldNodeName:             s3pa.Spec.NodeName,
+		crdv2.FieldPersistentVolumeName: s3pa.Spec.PersistentVolumeName,
+		crdv2.FieldVolumeID:             s3pa.Spec.VolumeID,
+		crdv2.FieldMountOptions:         s3pa.Spec.MountOptions,
+		crdv2.FieldWorkloadFSGroup:      s3pa.Spec.WorkloadFSGroup,
+		crdv2.FieldAuthenticationSource: s3pa.Spec.AuthenticationSource,
+	}
+
+	if s3pa.Spec.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		fieldFilters[crdv2.FieldWorkloadNamespace] = s3pa.Spec.WorkloadNamespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = s3pa.Spec.WorkloadServiceAccountName
+		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = s3pa.Spec.WorkloadServiceAccountIAMRoleARN
 	}
 
 	return fieldFilters
