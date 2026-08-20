@@ -3,8 +3,6 @@ package custom_testsuites
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -1334,30 +1332,6 @@ func dumpMountTable(ctx context.Context, f *framework.Framework, nodeName, label
 	if !dumped {
 		framework.Logf("[%s] Could not dump mount table on node %s after retries (non-fatal)", label, nodeName)
 	}
-}
-
-// checkReadFromPathSucceedEventually retries reading from a path in a pod, tolerating
-// transient errors like "Transport endpoint is not connected" that can occur briefly
-// after a CSI node pod restart while FUSE mounts re-stabilize.
-// Timeout: 30 seconds, polling: 5 seconds.
-func checkReadFromPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
-	sum := sha256.Sum256(genBinDataFromSeed(toWrite, seed))
-	cmd := fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", path, toWrite, sum)
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
-		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
-}
-
-// checkWriteToPathSucceedEventually retries writing to a path in a pod, tolerating
-// transient errors that can occur briefly after a CSI node pod or mounter pod restart.
-// Timeout: 30 seconds, polling: 5 seconds.
-func checkWriteToPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
-	data := genBinDataFromSeed(toWrite, seed)
-	encoded := base64.StdEncoding.EncodeToString(data)
-	cmd := fmt.Sprintf("echo %s | base64 -d | dd conv=fsync of=%s bs=%d count=1", encoded, path, toWrite)
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) error {
-		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
 }
 
 // waitForCSINodePodStable waits for the CSI node pod to have been Running continuously

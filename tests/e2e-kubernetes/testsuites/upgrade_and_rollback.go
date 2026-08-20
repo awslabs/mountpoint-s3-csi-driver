@@ -77,6 +77,13 @@ var helmChartNewVersion = os.Getenv("MOUNTPOINT_CSI_DRIVER_NEW_VERSION")
 var helmChartContainerRepository = os.Getenv("REPOSITORY")
 var helmChartContainerTag = os.Getenv("TAG")
 
+// isMajorVersionUpgrade indicates the upgrade crosses a major version boundary, so rolling
+// the driver back to the previous major version cannot serve mounts created by the new major
+// version. In that case, workloads created on the new version (Set D) cannot survive the
+// rollback and must be terminated before it. Defaults to false (same-major upgrade), where
+// Set D is kept through the rollback and monitored to verify existing workloads survive.
+var isMajorVersionUpgrade = os.Getenv("MOUNTPOINT_CSI_DRIVER_IS_MAJOR_VERSION_UPGRADE") == "true"
+
 // tokenExpirationPostRenderer patches CSIDriver and ServiceAccount to use shorter token expiration for tests
 type tokenExpirationPostRenderer struct {
 	expirationSeconds int64
@@ -210,11 +217,11 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		path := filepath.Join(e2epod.VolumeMountPath1, filename)
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPathSucceed(ctx, f, pod, path, testWriteSize, seed)
-		checkReadFromPathSucceed(ctx, f, pod, path, testWriteSize, seed)
-		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{filename, "test.txt"})
+		checkWriteToPathSucceedEventually(ctx, f, pod, path, testWriteSize, seed)
+		checkReadFromPathSucceedEventually(ctx, f, pod, path, testWriteSize, seed)
+		checkListingPathWithEntriesEventually(ctx, f, pod, e2epod.VolumeMountPath1, []string{filename, "test.txt"})
 		checkDeletingPathSucceed(ctx, f, pod, path)
-		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{"test.txt"})
+		checkListingPathWithEntriesEventually(ctx, f, pod, e2epod.VolumeMountPath1, []string{"test.txt"})
 	}
 
 	updateCSIDriversServiceAccountRole := func(ctx context.Context, oidcProvider, policyName string) {
@@ -261,14 +268,13 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		return []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
 	}
 
-	// writeAndVerifyTestFile writes a test file and verifies it can be read
-	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod) (testFile string, testWriteSize int, seed int64) {
-		seed = time.Now().UTC().UnixNano()
+	// writeAndVerifyTestFile writes a test file with content derived from seed and verifies it can be read.
+	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod, seed int64) (testFile string, testWriteSize int) {
 		testWriteSize = 1024
 		testFile = filepath.Join(e2epod.VolumeMountPath1, "test.txt")
 		for _, pod := range pods {
-			checkWriteToPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
-			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
+			checkWriteToPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 		return
 	}
@@ -276,8 +282,8 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyReadOnlyAccess verifies pods can list but not write
 	verifyReadOnlyAccess := func(ctx context.Context, pods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range pods {
-			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
+			checkListingPathSucceedEventually(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFailsEventually(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
 
@@ -295,12 +301,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyWorkloadHealth checks if pods can perform expected operations
 	verifyWorkloadHealth := func(ctx context.Context, fullAccessPods, readOnlyPods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range fullAccessPods {
-			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
 			checkBasicFileOperations(ctx, pod)
 		}
 		for _, pod := range readOnlyPods {
-			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
+			checkListingPathSucceedEventually(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFailsEventually(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
 
@@ -325,7 +331,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		// Set A	|Before upgrade	| Test pre-upgrade workloads on rollback	|After rollback monitoring
 		// Set B	|Before upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
 		// Set C	|After upgrade	| Test upgrade + termination after upgrade	|After upgrade monitoring
-		// Set D	|After upgrade	| Test post-upgrade workloads on rollback	|After rollback monitoring
+		// Set D	|After upgrade	| Test new version works; on same-major runs, verify it survives rollback	|Major-version upgrade: before rollback. Otherwise: after rollback monitoring
 		// Set E	|After rollback	| Test new workload creation post-rollback	|After rollback monitoring
 
 		// Create Set A + Set B (for upgrade test + rollback test)
@@ -333,14 +339,17 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		fullAccessPodsSetA, readOnlyAccessPodsSetA := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 		fullAccessPodsSetB, readOnlyAccessPodsSetB := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 
+		// One seed for all sets: monitoring verifies every pod against a single seed.
+		seed := time.Now().UTC().UnixNano()
+
 		// Test Set A workloads
 		framework.Logf("Testing Set A workloads...")
-		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPodsSetA)
+		testFile, testWriteSize := writeAndVerifyTestFile(ctx, fullAccessPodsSetA, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetA, testFile, testWriteSize, seed)
 
 		// Test Set B workloads
 		framework.Logf("Testing Set B workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetB, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetB, testFile, testWriteSize, seed)
 
 		// Upgrade to the new version with token expiration patching
@@ -358,12 +367,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 		// Test Set C workloads
 		framework.Logf("Testing Set C workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetC, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
 
 		// Test Set D workloads
 		framework.Logf("Testing Set D workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetD, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
 
 		// Ensure the workloads are still healthy
@@ -378,7 +387,18 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
 			e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
 		}
-		framework.Logf("Set B and Set C terminated successfully. Set A and Set D remain running.")
+		framework.Logf("Set B and Set C terminated successfully.")
+		// Set D was created on the new version. On a MAJOR version upgrade, rolling the driver
+		// back to the previous major version cannot serve mounts created by the new major
+		// version, so Set D must be terminated before rollback.
+		if isMajorVersionUpgrade {
+			framework.Logf("Major version upgrade: Set A remains running, terminating Set D workloads before rollback (new-version workloads can't survive rollback to the previous major)...")
+			for _, pod := range slices.Concat(fullAccessPodsSetD, readOnlyAccessPodsSetD) {
+				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+			}
+		} else {
+			framework.Logf("Set A and Set D remain running.")
+		}
 
 		framework.Logf("Upgrade phase completed successfully, proceeding to rollback test...")
 
@@ -403,30 +423,38 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			// Test Set E workloads
 			framework.Logf("Testing Set E workloads...")
-			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
+			testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetE, seed)
 			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
 
-			// Monitor Set A + D + E for 150 minutes after rollback
-			framework.Logf("Monitoring workloads (Set A + D + E) for %d minutes after rollback...", ROLLBACK_TEST_DURATION_IN_MINUTES)
-
-			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetD, fullAccessPodsSetE)
-			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
+			// Monitor Set A + E (+ Set D on non-major version upgrade runs) after rollback.
+			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetE)
+			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetE)
+			if !isMajorVersionUpgrade {
+				allFullAccessAfterRollback = slices.Concat(allFullAccessAfterRollback, fullAccessPodsSetD)
+				allReadOnlyAfterRollback = slices.Concat(allReadOnlyAfterRollback, readOnlyAccessPodsSetD)
+			}
+			framework.Logf("Monitoring workloads (Set A + E%s) for %d minutes after rollback...",
+				map[bool]string{true: "", false: " + D"}[isMajorVersionUpgrade], ROLLBACK_TEST_DURATION_IN_MINUTES)
 
 			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback", verifyWorkloadHealth)
 
-			// Terminate Set A + D + E (test termination after rollback)
-			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
-			for _, pod := range slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetD, readOnlyAccessPodsSetD, fullAccessPodsSetE, readOnlyAccessPodsSetE) {
+			// Terminate the monitored workloads (Set A + E, plus Set D on non-major version upgrade runs).
+			framework.Logf("Terminating post-rollback workloads to test termination after rollback...")
+			podsToTerminate := slices.Concat(fullAccessPodsSetA, readOnlyAccessPodsSetA, fullAccessPodsSetE, readOnlyAccessPodsSetE)
+			if !isMajorVersionUpgrade {
+				podsToTerminate = slices.Concat(podsToTerminate, fullAccessPodsSetD, readOnlyAccessPodsSetD)
+			}
+			for _, pod := range podsToTerminate {
 				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
 			}
-			framework.Logf("Set A, Set D, and Set E terminated successfully")
+			framework.Logf("Post-rollback workloads terminated successfully")
 		}()
 
 		// Log rollback outcome with GitHub Actions annotation if failed
 		if rollbackSucceeded {
 			framework.Logf("Rollback phase completed successfully")
 		} else {
-			fmt.Println("::warning file=upgrade.go,line=318::Rollback phase failed but upgrade succeeded - test marked as passed")
+			fmt.Println("::warning file=upgrade_and_rollback.go,line=318::Rollback phase failed but upgrade succeeded - test marked as passed")
 			framework.Logf("WARNING: Rollback phase failed, but test is still marked as passed since upgrade succeeded")
 		}
 	}
@@ -485,8 +513,24 @@ func buildHelmValuesForUpgrade() map[string]any {
 		values["image"] = map[string]any{
 			"repository": helmChartContainerRepository,
 			"tag":        helmChartContainerTag,
+			"pullPolicy": "Always",
 		}
 	}
+	// Disable maxVolumesPerNode limit for tests — the upgrade test creates 12+ PVs
+	// on a single node. Must provide full array element because Helm replaces arrays
+	// entirely (doesn't merge individual fields into array items).
+	values["daemonsetMounters"] = []map[string]any{{
+		"maxVolumesPerNode":  0,
+		"resources":          map[string]any{"requests": map[string]any{"cpu": "500m", "memory": "2Gi"}},
+		"logLevel":           4,
+		"podLabels":          map[string]any{},
+		"nodeSelector":       map[string]any{},
+		"tolerateAllTaints":  true,
+		"defaultTolerations": true,
+		"tolerations":        []any{},
+		"affinity":           map[string]any{},
+		"imagePullSecrets":   []any{},
+	}}
 	return values
 }
 
@@ -622,6 +666,7 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 }
 
 // monitorWorkloadsForDuration monitors workload health for a specified duration, checking every minute and logging progress.
+// TODO: track the seed per set so each set can write distinct content, which would also catch a pod reading another set's volume.
 func monitorWorkloadsForDuration(
 	ctx context.Context,
 	fullAccessPods []*v1.Pod,

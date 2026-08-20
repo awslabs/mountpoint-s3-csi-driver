@@ -174,7 +174,7 @@ type CleanupContext struct {
 	MountKind MountKind
 }
 
-// SetAsSystemDMountpoint marks this context as managed by systemd instead of pod mounter.
+// SetAsSystemDMountpoint marks this context as managed by systemd instead of pod mounter or daemonset mounter.
 func (ctx *CleanupContext) SetAsSystemDMountpoint() {
 	ctx.MountKind = MountKindSystemd
 }

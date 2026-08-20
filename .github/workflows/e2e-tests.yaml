@@ -21,6 +21,10 @@ on:
         required: false
         type: string
         description: "Only used if `run_upgrade_tests` is true, specifies the new version to test upgrade to."
+      upgrade_tests_is_major_version_upgrade:
+        required: false
+        type: boolean
+        description: "Only used if `run_upgrade_tests` is true. Set true when the upgrade crosses a major version boundary; terminates new-version workloads before rollback since they can't survive a rollback to the previous major version."
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
@@ -96,6 +100,7 @@ jobs:
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
       MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
+      MOUNTPOINT_CSI_DRIVER_IS_MAJOR_VERSION_UPGRADE: "${{ inputs.upgrade_tests_is_major_version_upgrade }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -115,7 +120,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           # Upgrade tests takes around 3 hours to run to ensure they hit multiple credential refresh cycles.
           # That's why we're increasing the AWS credential duration here compared to regular end-to-end tests.
-          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade.go`.
+          # See comments on top of `UPGRADE_TEST_DURATION_IN_MINUTES` constant in `tests/e2e-kubernetes/testsuites/upgrade_and_rollback.go`.
           role-duration-seconds: ${{ inputs.run_upgrade_tests && 14400 || 7200 }}
       - name: Install tools
         env:

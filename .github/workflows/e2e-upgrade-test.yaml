@@ -7,6 +7,10 @@ on:
         description: "Previous version to upgrade from (e.g., 1.14.1)"
       new_version:
         description: "New version to upgrade to (e.g., 2.0.0-beta)"
+      is_major_version_upgrade:
+        description: "Set true when the upgrade crosses a major version boundary (e.g. 1.x -> 2.x). Terminates new-version workloads before rollback instead of keeping them, since they can't survive a rollback to the previous major version."
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -22,4 +26,5 @@ jobs:
       run_upgrade_tests: true
       upgrade_tests_old_version: "${{ inputs.old_version }}"
       upgrade_tests_new_version: "${{ inputs.new_version }}"
+      upgrade_tests_is_major_version_upgrade: ${{ inputs.is_major_version_upgrade }}
     secrets: inherit
