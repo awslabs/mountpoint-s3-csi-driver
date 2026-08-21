@@ -4,8 +4,8 @@ package mounter
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"syscall"
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
@@ -143,6 +143,11 @@ func (m *Mounter) IsMountPoint(target Target) (bool, error) {
 func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 	isMounted, err := m.CheckMountpoint(target)
 	if err != nil {
+		// A missing target directory means there is no mount there at all —
+		// definitely not a live Mountpoint, so treat it as dead.
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
 		// A corrupted mount is a definite "dead" signal.
 		if m.IsMountpointCorrupted(err) {
 			return false, nil
@@ -163,8 +168,10 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 	// causing false negatives during transient network issues.
 	f, err := os.Open(target)
 	if err != nil {
-		// A dead FUSE daemon returns ENOTCONN — that's a definite "dead".
-		if errors.Is(err, syscall.ENOTCONN) {
+		// Same classification as the CheckMountpoint probe above: a vanished target
+		// (ENOENT) or a corrupted/dead mount (ENOTCONN, ESTALE, EIO, ...) is a
+		// definite "dead" signal. IsMountpointCorrupted unwraps the *os.PathError.
+		if errors.Is(err, fs.ErrNotExist) || m.IsMountpointCorrupted(err) {
 			return false, nil
 		}
 		// Transient errors (EINTR, EMFILE/ENFILE, ENOMEM, ...) are UNKNOWN, not dead.

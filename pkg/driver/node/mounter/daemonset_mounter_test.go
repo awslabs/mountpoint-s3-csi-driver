@@ -890,3 +890,186 @@ func mounterPod(name string, phase corev1.PodPhase) *corev1.Pod {
 		Status: corev1.PodStatus{Phase: phase},
 	}
 }
+
+// --- IsSourceHealthy health-state tests ---
+//
+// IsSourceHealthy wraps CheckMountpoint -> IsHealthyMountpoint (bounded by ctx),
+// so these tests exercise that whole chain and assert the tri-state result:
+//   (true, nil)  = healthy
+//   (false, nil) = definitely dead
+//   (false, err) = UNKNOWN (callers MUST NOT treat as dead)
+
+// mountpointDevice is the device name CheckMountpoint expects (mpmounter's fsName).
+const mountpointDevice = "mountpoint-s3"
+
+// fakeHealthMount is a minimal mountutils.Interface stub that lets tests control
+// what IsMountPoint and List return. Only these two methods are used by
+// CheckMountpoint; any other call would panic (embedded nil interface), which is
+// the intended guard.
+type fakeHealthMount struct {
+	mountutils.Interface
+
+	isMountPoint    bool
+	isMountPointErr error
+	listResult      []mountutils.MountPoint
+	listErr         error
+}
+
+func (f *fakeHealthMount) IsMountPoint(_ string) (bool, error) {
+	return f.isMountPoint, f.isMountPointErr
+}
+
+func (f *fakeHealthMount) List() ([]mountutils.MountPoint, error) {
+	return f.listResult, f.listErr
+}
+
+// healthPathErr wraps an errno the way filesystem calls do (*os.PathError), which
+// is what mount-utils' IsCorruptedMnt expects to unwrap.
+func healthPathErr(errno syscall.Errno) error {
+	return &os.PathError{Op: "open", Path: "/some/source", Err: errno}
+}
+
+// newHealthDM builds a DaemonsetMounter wired only with the given mount interface;
+// IsSourceHealthy touches nothing else.
+func newHealthDM(mount mountutils.Interface) *mounter.DaemonsetMounter {
+	return mounter.NewDaemonsetMounter(nil, "", mpmounter.NewWithMount(mount), nil, nil, nil, nil)
+}
+
+// healthSource returns a real, existing directory when exists is true (so statx
+// and os.Open succeed), or a path guaranteed not to exist otherwise.
+func healthSource(t *testing.T, exists bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	if exists {
+		return dir
+	}
+	return filepath.Join(dir, "does-not-exist")
+}
+
+func TestIsSourceHealthy_States(t *testing.T) {
+	tests := []struct {
+		name   string
+		exists bool // whether the source path exists on disk (drives statx/os.Open)
+		fake   *fakeHealthMount
+
+		wantHealthy bool
+		wantErr     bool // true => UNKNOWN
+	}{
+		{
+			name:        "missing source is dead",
+			exists:      false,
+			fake:        &fakeHealthMount{},
+			wantHealthy: false,
+			wantErr:     false,
+		},
+		{
+			name:        "not a mount is dead",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPoint: false},
+			wantHealthy: false,
+			wantErr:     false,
+		},
+		{
+			name:        "ENOTCONN is dead",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)},
+			wantHealthy: false,
+			wantErr:     false,
+		},
+		{
+			name:        "EINTR is unknown",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.EINTR)},
+			wantHealthy: false,
+			wantErr:     true,
+		},
+		{
+			name:   "different device is dead",
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: "ext4"}},
+			},
+			wantHealthy: false,
+			wantErr:     false,
+		},
+		{
+			name: "List failure is unknown",
+			// CheckMountpoint wraps the List error with %w, so it is no longer a
+			// bare *os.PathError; IsCorruptedMnt can't classify it, and it is
+			// (correctly) treated as UNKNOWN rather than dead.
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listErr:      healthPathErr(syscall.EIO),
+			},
+			wantHealthy: false,
+			wantErr:     true,
+		},
+		{
+			name:   "live Mountpoint is healthy",
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: mountpointDevice}},
+			},
+			wantHealthy: true,
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := healthSource(t, tt.exists)
+			// Fill in the real source path for list entries that reference it.
+			for i := range tt.fake.listResult {
+				if tt.fake.listResult[i].Path == "TARGET" {
+					tt.fake.listResult[i].Path = source
+				}
+			}
+
+			dm := newHealthDM(tt.fake)
+			healthy, err := dm.IsSourceHealthy(context.Background(), source)
+
+			assert.Equals(t, tt.wantHealthy, healthy)
+			assert.Equals(t, tt.wantErr, err != nil)
+		})
+	}
+}
+
+// blockingMount blocks in IsMountPoint until released, so we can drive the
+// ctx-timeout (UNKNOWN) branch of IsSourceHealthy deterministically.
+type blockingMount struct {
+	mountutils.Interface
+	release chan struct{}
+}
+
+func (b *blockingMount) IsMountPoint(_ string) (bool, error) {
+	<-b.release
+	return true, nil
+}
+
+// List is reached only after the probe is released on cleanup; returning an
+// empty table lets the background goroutine finish without a nil-interface panic.
+func (b *blockingMount) List() ([]mountutils.MountPoint, error) {
+	return nil, nil
+}
+
+func TestIsSourceHealthy_TimeoutIsUnknown(t *testing.T) {
+	release := make(chan struct{})
+	// Release the blocked probe on cleanup so the background goroutine (which
+	// sends to a buffered channel) exits without leaking.
+	t.Cleanup(func() { close(release) })
+
+	dm := newHealthDM(&blockingMount{release: release})
+	source := healthSource(t, true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	healthy, err := dm.IsSourceHealthy(ctx, source)
+
+	// A timed-out health check is UNKNOWN, not dead — must return an error.
+	assert.Equals(t, false, healthy)
+	assert.Equals(t, true, err != nil)
+}
