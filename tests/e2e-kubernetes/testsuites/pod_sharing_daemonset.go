@@ -665,7 +665,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			// mount-s3 process should be running while pod is mounted
 			ginkgo.By("Verifying mount-s3 process exists while pod is mounted")
 			dumpMountpointProcesses(ctx, f, targetNode, "while pod mounted")
-			framework.Gomega().Eventually(ctx, func(ctx context.Context) (int, error) {
+			gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
 				count := countMountpointProcessesForVolume(ctx, f, targetNode, bucketName)
 				return count, nil
 			}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal(1))
@@ -691,7 +691,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			// Verify mount-s3 process for this volume has terminated in the mounter pod
 			ginkgo.By("Verifying mount-s3 process terminated after last consumer unmounts")
 			dumpMountpointProcesses(ctx, f, targetNode, "after last consumer unmounts")
-			framework.Gomega().Eventually(ctx, func(ctx context.Context) (int, error) {
+			gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
 				count := countMountpointProcessesForVolume(ctx, f, targetNode, bucketName)
 				return count, nil
 			}).WithTimeout(60 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal(0))
@@ -950,7 +950,7 @@ func ptrInt64(v int64) *int64 {
 // assertPodFailsToMount waits for a pod to have a mount failure event containing the given substring.
 // The pod should be stuck in ContainerCreating due to volume mount failure.
 func assertPodFailsToMount(ctx context.Context, f *framework.Framework, pod *v1.Pod, errorSubstring string) {
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (bool, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		events, err := f.ClientSet.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{
 			FieldSelector: "involvedObject.name=" + pod.Name,
 		})
@@ -974,7 +974,7 @@ func assertPodFailsToMount(ctx context.Context, f *framework.Framework, pod *v1.
 // Retries on transient exec errors (container restarting, etc.) for up to 1 minute.
 func countFuseMountsForVolume(ctx context.Context, f *framework.Framework, nodeName, volumeID string) int {
 	var result int
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (int, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
 		// Find the CSI node pod on this node
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
@@ -1057,7 +1057,7 @@ func killCSINodePodOnNode(ctx context.Context, f *framework.Framework, nodeName 
 
 // waitForCSINodePodReady waits for the CSI node pod on the given node to be Running and Ready.
 func waitForCSINodePodReady(ctx context.Context, f *framework.Framework, nodeName string) {
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (bool, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1091,7 +1091,7 @@ func isPodReady(pod *v1.Pod) bool {
 // Only retries when exec fails; if exec succeeds and file is MISSING, that's a real result.
 func checkMetaFileExists(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
 	var result bool
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1138,7 +1138,7 @@ func killMounterPodOnNode(ctx context.Context, f *framework.Framework, nodeName 
 
 // waitForMounterPodReady waits for the mounter pod on the given node to be Running and Ready.
 func waitForMounterPodReady(ctx context.Context, f *framework.Framework, nodeName string) {
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (bool, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-daemonset-mounter",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1178,7 +1178,7 @@ func assertPodIOFails(ctx context.Context, f *framework.Framework, pod *v1.Pod, 
 // Retries on transient exec errors for up to 30 seconds.
 func readMetaFileContent(ctx context.Context, f *framework.Framework, nodeName, volumeID string) string {
 	var result string
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1210,7 +1210,7 @@ func readMetaFileContent(ctx context.Context, f *framework.Framework, nodeName, 
 // Retries on transient exec errors for up to 30 seconds.
 func checkDeviceIDAtSourcePath(ctx context.Context, f *framework.Framework, nodeName, volumeID, deviceID string) bool {
 	var result bool
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1242,7 +1242,7 @@ func checkDeviceIDAtSourcePath(ctx context.Context, f *framework.Framework, node
 // Retries on transient exec errors for up to 30 seconds.
 func getMetaFileMtime(ctx context.Context, f *framework.Framework, nodeName, volumeID string) string {
 	var result string
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1271,7 +1271,7 @@ func getMetaFileMtime(ctx context.Context, f *framework.Framework, nodeName, vol
 // Retries on transient exec errors for up to 30 seconds.
 func getFuseSourceDeviceID(ctx context.Context, f *framework.Framework, nodeName, volumeID string) string {
 	var result string
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1338,7 +1338,7 @@ func dumpMountTable(ctx context.Context, f *framework.Framework, nodeName, label
 // for at least 5 seconds. This prevents race conditions where we exec into a pod that
 // just started but hasn't fully initialized (e.g., RebuildMountMap + DiscoverCommDir).
 func waitForCSINodePodStable(ctx context.Context, f *framework.Framework, nodeName string) {
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (bool, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
@@ -1470,7 +1470,7 @@ func queryCredentialDirStatus(ctx context.Context, f *framework.Framework, nodeN
 // checkCredentialDirExists polls until the credential directory EXISTS in the mounter pod (up to 1 minute).
 func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
 	var result bool
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		status, err := queryCredentialDirStatus(ctx, f, nodeName, volumeID)
 		if err != nil {
 			framework.Logf("Failed to check credential dir (retrying): %v", err)
@@ -1488,7 +1488,7 @@ func checkCredentialDirExists(ctx context.Context, f *framework.Framework, nodeN
 // checkCredentialDirRemoved polls until the credential directory is MISSING from the mounter pod (up to 1 minute).
 func checkCredentialDirRemoved(ctx context.Context, f *framework.Framework, nodeName, volumeID string) bool {
 	var result bool
-	framework.Gomega().Eventually(ctx, func(ctx context.Context) (string, error) {
+	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
 		status, err := queryCredentialDirStatus(ctx, f, nodeName, volumeID)
 		if err != nil {
 			framework.Logf("Failed to check credential dir removal (retrying): %v", err)

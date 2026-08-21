@@ -224,10 +224,17 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// If source is mounted, check health first. Dead source = mark not mounted so we go
 	// through the fresh-mount path below. Only enforce compatibility on a healthy (living) source.
 	if entry.sourceMounted {
-		if !dm.IsSourceHealthy(ctx, entry.SourcePath) {
+		healthy, healthErr := dm.IsSourceHealthy(ctx, entry.SourcePath)
+		switch {
+		case healthErr != nil:
+			// Health could not be determined (transient error or timeout). Fail closed:
+			// do NOT tear down a possibly-live source out from under active consumers.
+			// Return an error so kubelet retries NodePublishVolume.
+			return fmt.Errorf("cannot determine health of existing source mount for volume %s, will retry: %w", volumeID, healthErr)
+		case !healthy:
 			klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, will clean up and re-mount", entry.SourcePath, volumeID)
 			entry.sourceMounted = false
-		} else {
+		default:
 			// Healthy source — enforce compatibility before any credential writes.
 			if err := entry.Params.ValidateCompatibility(&incomingParams); err != nil {
 				return fmt.Errorf("cannot share mount for volume %s: %w", volumeID, err)
@@ -539,15 +546,30 @@ func (dm *DaemonsetMounter) IsMountPoint(target string) (bool, error) {
 // IsSourceHealthy checks if the FUSE mount at sourcePath is alive and serving.
 // Runs the check in a goroutine bounded by ctx to avoid blocking forever if
 // the FUSE daemon is alive but not reading from the fd (frozen).
-func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath string) bool {
-	ch := make(chan bool, 1)
-	go func() { ch <- dm.mount.IsHealthyMountpoint(sourcePath) }()
+//
+// It mirrors [mpmounter.Mounter.IsHealthyMountpoint]'s three-way result:
+//   - (true, nil):  healthy.
+//   - (false, nil): definitely dead.
+//   - (false, err): UNKNOWN — health could not be determined (transient error or
+//     the check timed out). Callers MUST NOT treat this as dead.
+func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath string) (bool, error) {
+	type result struct {
+		healthy bool
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		healthy, err := dm.mount.IsHealthyMountpoint(sourcePath)
+		ch <- result{healthy: healthy, err: err}
+	}()
 	select {
-	case healthy := <-ch:
-		return healthy
+	case r := <-ch:
+		return r.healthy, r.err
 	case <-ctx.Done():
-		klog.V(2).Infof("DaemonsetMounter: IsSourceHealthy timed out for %s, treating as dead", sourcePath)
-		return false
+		// Timeout is itself "unknown" (e.g. a frozen daemon not reading the fd),
+		// not a definite "dead" — surface it as an error so callers fail closed.
+		klog.V(2).Infof("DaemonsetMounter: IsSourceHealthy timed out for %s, treating as unknown", sourcePath)
+		return false, ctx.Err()
 	}
 }
 
