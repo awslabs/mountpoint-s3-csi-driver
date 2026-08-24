@@ -171,6 +171,20 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return nil
 	}
 
+	// Classify the workload target before doing any mount work.
+	// IsTargetHealthy does an IO probe (same as source health check) with ctx timeout.
+	//   - (true, nil):  target is healthy or absent (fresh) — proceed.
+	//   - (false, nil): dead/corrupted — nothing to do; return nil.
+	//   - (false, err): unknown — let kubelet retry.
+	targetHealthy, targetErr := dm.IsTargetHealthy(ctx, target)
+	if targetErr != nil {
+		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
+	}
+	if !targetHealthy {
+		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a corrupted mount; not proceeding, pod re-creation %s required for recovery", target, credentialCtx.VolumeID, credentialCtx.WorkloadPodID)
+		return nil
+	}
+
 	// Extract PV name from target path to use as the volume identifier for sharing and filesystem paths.
 	// PV names are Kubernetes resource names — guaranteed DNS-safe (no '/', no '..', alphanumeric + '-' + '.').
 	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount
@@ -547,11 +561,14 @@ func (dm *DaemonsetMounter) IsMountPoint(target string) (bool, error) {
 // Runs the check in a goroutine bounded by ctx to avoid blocking forever if
 // the FUSE daemon is alive but not reading from the fd (frozen).
 //
-// It mirrors [mpmounter.Mounter.IsHealthyMountpoint]'s three-way result:
-//   - (true, nil):  healthy.
-//   - (false, nil): definitely dead.
-//   - (false, err): UNKNOWN — health could not be determined (transient error or
-//     the check timed out). Callers MUST NOT treat this as dead.
+// Uses [mpmounter.Mounter.IsHealthyMountpoint] which returns:
+//   - (true, nil):             healthy — live Mountpoint daemon confirmed via IO.
+//   - (false, ErrMountAbsent): path absent or not a Mountpoint mount.
+//   - (false, nil):            dead/corrupted daemon (ENOTCONN, ESTALE, EIO).
+//   - (false, err):            UNKNOWN — transient error; callers MUST NOT treat as dead.
+//
+// For the source, "absent" means the mount is dead — so ErrMountAbsent is folded into
+// (false, nil). Callers get the original three-way contract: healthy / dead / unknown.
 func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath string) (bool, error) {
 	type result struct {
 		healthy bool
@@ -560,15 +577,49 @@ func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath stri
 	ch := make(chan result, 1)
 	go func() {
 		healthy, err := dm.mount.IsHealthyMountpoint(sourcePath)
-		ch <- result{healthy: healthy, err: err}
+		if errors.Is(err, mpmounter.ErrMountAbsent) {
+			ch <- result{false, nil} // absent source = dead
+			return
+		}
+		ch <- result{healthy, err}
 	}()
 	select {
 	case r := <-ch:
 		return r.healthy, r.err
 	case <-ctx.Done():
-		// Timeout is itself "unknown" (e.g. a frozen daemon not reading the fd),
-		// not a definite "dead" — surface it as an error so callers fail closed.
 		klog.V(2).Infof("DaemonsetMounter: IsSourceHealthy timed out for %s, treating as unknown", sourcePath)
+		return false, ctx.Err()
+	}
+}
+
+// IsTargetHealthy checks if the workload's bind-mount target is a live Mountpoint mount.
+// Same pattern as [DaemonsetMounter.IsSourceHealthy] (goroutine + ctx timeout, same IO probe),
+// but returns (bool, error) with ErrMountAbsent passed through rather than folded into dead.
+//
+// Callers interpret:
+//   - (true, nil):             target is healthy (already mounted, republish/idempotent).
+//   - (false, ErrMountAbsent): target is absent/fresh — proceed with mount.
+//   - (false, nil):            target mount is dead/corrupted — do NOT proceed (return nil).
+//   - (false, err):            UNKNOWN — let kubelet retry.
+func (dm *DaemonsetMounter) IsTargetHealthy(ctx context.Context, target string) (bool, error) {
+	type result struct {
+		healthy bool
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		healthy, err := dm.mount.IsHealthyMountpoint(target)
+		if errors.Is(err, mpmounter.ErrMountAbsent) {
+			ch <- result{true, nil} // absent target = fresh mount, proceed
+			return
+		}
+		ch <- result{healthy, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.healthy, r.err
+	case <-ctx.Done():
+		klog.V(2).Infof("DaemonsetMounter: IsTargetHealthy timed out for %s, treating as unknown", target)
 		return false, ctx.Err()
 	}
 }

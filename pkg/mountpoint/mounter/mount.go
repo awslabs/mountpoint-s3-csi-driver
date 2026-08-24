@@ -143,10 +143,9 @@ func (m *Mounter) IsMountPoint(target Target) (bool, error) {
 func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 	isMounted, err := m.CheckMountpoint(target)
 	if err != nil {
-		// A missing target directory means there is no mount there at all —
-		// definitely not a live Mountpoint, so treat it as dead.
+		// A missing target directory means there is no mount there at all.
 		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
+			return false, ErrMountAbsent
 		}
 		// A corrupted mount is a definite "dead" signal.
 		if m.IsMountpointCorrupted(err) {
@@ -156,8 +155,8 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 		return false, fmt.Errorf("cannot determine mount health for %q: %w", target, err)
 	}
 	if !isMounted {
-		// Not our mount (or not a mount at all) — definitely not a live Mountpoint.
-		return false, nil
+		// Not our mount (or not a mount at all).
+		return false, ErrMountAbsent
 	}
 
 	// Mount entry exists in the table — verify the FUSE daemon is alive.
@@ -168,10 +167,12 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 	// causing false negatives during transient network issues.
 	f, err := os.Open(target)
 	if err != nil {
-		// Same classification as the CheckMountpoint probe above: a vanished target
-		// (ENOENT) or a corrupted/dead mount (ENOTCONN, ESTALE, EIO, ...) is a
-		// definite "dead" signal. IsMountpointCorrupted unwraps the *os.PathError.
-		if errors.Is(err, fs.ErrNotExist) || m.IsMountpointCorrupted(err) {
+		// A vanished target (ENOENT) — path went away between the checks.
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, ErrMountAbsent
+		}
+		// A corrupted/dead mount (ENOTCONN, ESTALE, EIO, ...) — definite dead.
+		if m.IsMountpointCorrupted(err) {
 			return false, nil
 		}
 		// Transient errors (EINTR, EMFILE/ENFILE, ENOMEM, ...) are UNKNOWN, not dead.
@@ -188,3 +189,9 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 func (m *Mounter) IsMountpointCorrupted(err error) bool {
 	return mountutils.IsCorruptedMnt(err)
 }
+
+// ErrMountAbsent indicates that the path does not exist or is not a Mountpoint mount.
+// Returned by IsHealthyMountpoint so callers that need to distinguish "absent/fresh"
+// from "dead/corrupted" can do so. Source callers fold this into (false, nil) = dead;
+// target callers treat it as "proceed with fresh mount".
+var ErrMountAbsent = errors.New("mounter: mount path does not exist or is not a Mountpoint mount")
