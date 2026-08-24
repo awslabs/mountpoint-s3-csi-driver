@@ -140,6 +140,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			klog.Fatalf("Failed to discover mounter pod: %v", err)
 		}
 		go dm.StartCommDirWatch(stopCh)
+		go dm.StartPeriodicCleanup(stopCh)
 
 		maxVolumesPerNode, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
 		if err != nil {

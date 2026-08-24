@@ -448,3 +448,20 @@ func TestMountMap_ConcurrentDeleteAndGetOrCreate(t *testing.T) {
 
 	// No panic = success. Final state may or may not have an entry depending on ordering.
 }
+
+// MountMap.Range iterates every tracked mount on the node — it's the primitive
+// the periodic cleanup job uses to walk the map and reconcile each entry. Here, we verify that early-stop is honored.
+func TestMountMap_Range_StopsEarlyOnFalse(t *testing.T) {
+	m := NewMountMap()
+	for _, id := range []string{"vol-1", "vol-2", "vol-3"} {
+		m.GetOrCreate(id)
+	}
+
+	count := 0
+	m.Range(func(volumeID string, entry *MountEntry) bool {
+		count++
+		return false
+	})
+
+	assert.Equals(t, 1, count)
+}

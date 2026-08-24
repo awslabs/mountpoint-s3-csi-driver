@@ -46,14 +46,22 @@ func newTestDMWithMountInfo(kubeletPath string, provider mountInfoProviderFunc) 
 // newTestDMWithMountInfoAndCredProvider creates a DaemonsetMounter with a no-op credential
 // provider and fake mounter, suitable for tests that exercise cleanupMount during rebuild.
 func newTestDMWithMountInfoAndCredProvider(kubeletPath string, provider mountInfoProviderFunc) *DaemonsetMounter {
+	dm, _ := newTestDMWithFakeMounter(kubeletPath, provider)
+	return dm
+}
+
+// newTestDMWithFakeMounter is like newTestDMWithMountInfoAndCredProvider but also returns
+// the underlying FakeMounter, so tests can register healthy mounts that CheckMountpoint sees.
+func newTestDMWithFakeMounter(kubeletPath string, provider mountInfoProviderFunc) (*DaemonsetMounter, *mountutils.FakeMounter) {
 	fakeMounter := mountutils.NewFakeMounter(nil)
-	return &DaemonsetMounter{
+	dm := &DaemonsetMounter{
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
 		mount:             mpmounter.NewWithMount(fakeMounter),
 		credProvider:      &noopCredProvider{},
 	}
+	return dm, fakeMounter
 }
 
 func TestWriteMeta_CreatesFile(t *testing.T) {
@@ -641,4 +649,195 @@ func TestRebuildMountMap_DeadSourceCleansCredentials(t *testing.T) {
 	if !os.IsNotExist(err) {
 		t.Fatal("expected meta file to be removed for dead source")
 	}
+}
+
+// seedEntry inserts a source-mounted entry into the map. i.e pretend a mount already exists
+func seedEntry(dm *DaemonsetMounter, volumeID, sourcePath, commDir string, targets []string) *MountEntry {
+	entry, _ := dm.mountMap.GetOrCreate(volumeID)
+	entry.SourcePath = sourcePath
+	entry.CommDir = commDir
+	entry.Params = MountParams{AuthenticationSource: "driver"}
+	entry.Targets = targets
+	entry.RefCount = len(targets)
+	entry.sourceMounted = true
+	return entry
+}
+
+// registerSourceMount registers the source as a mountpoint mount in the fake
+// mounter and creates its dir, so teardown's unmount path (cleanupMount ->
+// unmountIfMounted -> IsMountPoint/Unmount) has a real mount to act on.
+func registerSourceMount(t *testing.T, fakeMounter *mountutils.FakeMounter, sourcePath string) {
+	t.Helper()
+	assert.NoError(t, os.MkdirAll(sourcePath, 0750))
+	assert.NoError(t, fakeMounter.Mount("mountpoint-s3", sourcePath, "fuse", nil))
+}
+
+func statErr(path string) error {
+	_, err := os.Stat(path)
+	return err
+}
+
+// TestCleanupOrphans covers the periodic cleanup job's per-entry reconcile logic.
+func TestCleanupOrphans(t *testing.T) {
+	const volumeID = "vol-1"
+
+	tests := []struct {
+		name string
+		// setup seeds the map and on-host state for this case.
+		setup func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string)
+		// mountInfo is the fake kernel mount table for this case.
+		mountInfo func(sourcePath, targetA string) []mountutils.MountInfo
+
+		expectEntryGone bool // map entry removed
+		expectMetaGone  bool // meta file removed
+		expectRefCount  int  // asserted when the entry survives
+	}{
+		{
+			// Dead source (nothing in the mount table): source, creds, error file,
+			// meta, and map entry all removed.
+			name: "dead source torn down",
+			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
+				commDir := filepath.Join(kubeletPath, "comm")
+				assert.NoError(t, os.MkdirAll(filepath.Join(commDir, volumeID), 0750))
+				os.WriteFile(filepath.Join(commDir, volumeID+".error"), []byte("boom"), 0600)
+				entry := seedEntry(dm, volumeID, sourcePath, commDir, nil)
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
+			},
+			mountInfo:       func(_, _ string) []mountutils.MountInfo { return nil },
+			expectEntryGone: true,
+			expectMetaGone:  true,
+		},
+		{
+			// Healthy source: a tracked target the kernel no longer shows is dropped
+			// and the refcount fixed, but the source stays because another target is
+			// still live. (Also covers the "healthy mount left alone" path.)
+			name: "reconciles refcount",
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string) {
+				targetB := filepath.Join(kubeletPath, "pods", "wl-b", "mount")
+				registerSourceMount(t, fakeMounter, sourcePath)
+				seedEntry(dm, volumeID, sourcePath, "", []string{targetA, targetB})
+			},
+			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
+				return []mountutils.MountInfo{ // targetB is gone from the kernel
+					{MountPoint: sourcePath, Major: 0, Minor: 42},
+					{MountPoint: targetA, Major: 0, Minor: 42},
+				}
+			},
+			expectRefCount: 1,
+		},
+		{
+			// Teardown's cleanupMount fails (unmount errors): the entry and meta are
+			// KEPT so a later tick retries — we must not lose bookkeeping on failure.
+			name: "failed cleanup keeps entry and meta",
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
+				registerSourceMount(t, fakeMounter, sourcePath)
+				fakeMounter.UnmountFunc = func(string) error { return fmt.Errorf("unmount failed") }
+				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // no live targets -> teardown attempted
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
+			},
+			mountInfo: func(sourcePath, _ string) []mountutils.MountInfo {
+				return []mountutils.MountInfo{{MountPoint: sourcePath, Major: 0, Minor: 42}}
+			},
+			expectRefCount: 0, // entry survives (not torn down)
+		},
+		{
+			// Healthy source, no bind mounts left in the kernel: torn down.
+			name: "last consumer gone torn down",
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
+				registerSourceMount(t, fakeMounter, sourcePath)
+				entry := seedEntry(dm, volumeID, sourcePath, "", []string{filepath.Join(kubeletPath, "pods", "gone", "mount")})
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
+			},
+			mountInfo: func(sourcePath, _ string) []mountutils.MountInfo {
+				return []mountutils.MountInfo{{MountPoint: sourcePath, Major: 0, Minor: 42}}
+			},
+			expectEntryGone: true,
+			expectMetaGone:  true,
+		},
+		{
+			// The source is healthy and the kernel shows a live bind mount that we are not
+			// tracking. Cleanup adopts it, so the refcount becomes 1 and the source is kept.
+			name: "untracked live bind mount adopted not torn down",
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, _, sourcePath, _ string) {
+				registerSourceMount(t, fakeMounter, sourcePath) // source is healthy
+				seedEntry(dm, volumeID, sourcePath, "", nil)    // we track no targets
+			},
+			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
+				return []mountutils.MountInfo{
+					{MountPoint: sourcePath, Major: 0, Minor: 42},
+					{MountPoint: targetA, Major: 0, Minor: 42}, // untracked but live
+				}
+			},
+			expectRefCount: 1,
+		},
+		{
+			// A dead source still in the mount table with a live tracked target (mounter
+			// crashed, workload pod still running) is torn down: teardown is gated on
+			// source health, not on live targets. The stale target's mount is broken
+			// anyway (recreate the pod to recover); the meta/cred churn a republishing
+			// workload would otherwise cause is stopped in Mount, not here.
+			name: "dead source with live target torn down",
+			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string) {
+				// Source is not registered as healthy, so the health probe reports it dead.
+				entry := seedEntry(dm, volumeID, sourcePath, "", []string{targetA})
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
+			},
+			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
+				return []mountutils.MountInfo{
+					{MountPoint: sourcePath, Major: 0, Minor: 42},
+					{MountPoint: targetA, Major: 0, Minor: 42},
+				}
+			},
+			expectEntryGone: true,
+			expectMetaGone:  true,
+		},
+		{
+			// A mid-creation placeholder (empty SourcePath) is skipped, not deleted.
+			name: "skips placeholder",
+			setup: func(_ *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, _, _, _ string) {
+				dm.mountMap.GetOrCreate(volumeID)
+			},
+			mountInfo:      func(_, _ string) []mountutils.MountInfo { return nil },
+			expectRefCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kubeletPath := t.TempDir()
+			sourcePath := SourceMountPath(kubeletPath, volumeID)
+			targetA := filepath.Join(kubeletPath, "pods", "wl-a", "mount")
+
+			dm, fakeMounter := newTestDMWithFakeMounter(kubeletPath, fakeMountInfoProvider(tt.mountInfo(sourcePath, targetA)))
+			tt.setup(t, dm, fakeMounter, kubeletPath, sourcePath, targetA)
+
+			dm.CleanupOrphans()
+
+			entry := dm.mountMap.Get(volumeID)
+			if tt.expectEntryGone {
+				assert.Equals(t, true, entry == nil)
+			} else {
+				assert.Equals(t, true, entry != nil)
+				assert.Equals(t, tt.expectRefCount, entry.RefCount)
+			}
+			if tt.expectMetaGone {
+				assert.Equals(t, true, os.IsNotExist(statErr(MetaFileName(kubeletPath, volumeID))))
+			}
+		})
+	}
+}
+
+// TestCleanupOrphans_MountTableReadError verifies that if reading the mount table
+// fails, the entry is left untouched rather than acted on with a bad view.
+func TestCleanupOrphans_MountTableReadError(t *testing.T) {
+	kubeletPath := t.TempDir()
+	failingProvider := func() ([]mountutils.MountInfo, error) {
+		return nil, fmt.Errorf("read mountinfo failed")
+	}
+	dm, _ := newTestDMWithFakeMounter(kubeletPath, failingProvider)
+	seedEntry(dm, "vol-1", SourceMountPath(kubeletPath, "vol-1"), "", nil)
+
+	dm.CleanupOrphans()
+
+	assert.Equals(t, true, dm.mountMap.Get("vol-1") != nil)
 }

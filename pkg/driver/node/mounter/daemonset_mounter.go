@@ -64,6 +64,12 @@ const (
 	commDirStaleCheckInterval = 1 * time.Second
 	commDirDiscoveryTimeout   = 60 * time.Second
 	commDirRediscoveryTimeout = 15 * time.Second
+
+	// cleanupInterval is how often the periodic cleanup job runs.
+	cleanupInterval = 2 * time.Minute
+
+	// cleanupHealthCheckTimeout caps the source health probe so a frozen FUSE daemon can't stall cleanup.
+	cleanupHealthCheckTimeout = 10 * time.Second
 )
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
@@ -450,19 +456,28 @@ func (dm *DaemonsetMounter) Unmount(ctx context.Context, target string, credenti
 
 // releaseTarget handles the Unmount flow with MountMap refcounting.
 func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, credentialCtx credentialprovider.CleanupContext) error {
-	entry := dm.mountMap.Get(volumeID)
-	if entry == nil {
-		// No entry means this volume is not tracked (e.g., after CSI node restart without
-		// successful RebuildMountMap recovery). Best-effort unmount the target in case a
-		// stale bind mount still exists in the kernel mount table.
-		klog.V(4).Infof("DaemonsetMounter: no mount map entry for volume %s, best-effort unmount of %s", volumeID, target)
-		if err := dm.unmountIfMounted(target); err != nil {
-			klog.Errorf("DaemonsetMounter: best-effort unmount of untracked target %s failed: %v", target, err)
+	// The periodic cleanup job also deletes entries from the map, so between our
+	// Get and our Lock the entry could be deleted/replaced. Re-check after locking
+	// that we still hold the map's canonical entry; retry if not.
+	var entry *MountEntry
+	for {
+		entry = dm.mountMap.Get(volumeID)
+		if entry == nil {
+			// No entry means this volume is not tracked (e.g., after CSI node restart without
+			// successful RebuildMountMap recovery). Best-effort unmount the target in case a
+			// stale bind mount still exists in the kernel mount table.
+			klog.V(4).Infof("DaemonsetMounter: no mount map entry for volume %s, best-effort unmount of %s", volumeID, target)
+			if err := dm.unmountIfMounted(target); err != nil {
+				klog.Errorf("DaemonsetMounter: best-effort unmount of untracked target %s failed: %v", target, err)
+			}
+			return nil
 		}
-		return nil
+		entry.mu.Lock()
+		if dm.mountMap.Get(volumeID) == entry {
+			break
+		}
+		entry.mu.Unlock() // orphaned entry (deleted by concurrent unmount/cleanup), retry
 	}
-
-	entry.mu.Lock()
 	defer entry.mu.Unlock()
 
 	// Unmount the bind mount at target.
@@ -495,6 +510,113 @@ func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, creden
 
 	klog.V(4).Infof("DaemonsetMounter: volume %s unmounted from %s", volumeID, target)
 	return nil
+}
+
+// StartPeriodicCleanup runs CleanupOrphans on a ticker until stopCh is closed.
+//
+// It's a safety net for when inline cleanup and startup cleanup miss resources orphaned while the driver keeps running with no operation touching a volume
+// e.g. a cleanup that failed at refcount 0, or a source mount left dead after a mounter-pod crash.
+func (dm *DaemonsetMounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			dm.CleanupOrphans()
+		}
+	}
+}
+
+// For each entry, under the entry's lock:
+//   - if the source mount is unhealthy, tear it down;
+//   - otherwise reconcile the refcount against the live bind mounts, and if it drops
+//     to zero, tear it down.
+func (dm *DaemonsetMounter) CleanupOrphans() {
+	dm.mountMap.Range(func(volumeID string, entry *MountEntry) bool {
+		dm.cleanupEntry(volumeID, entry)
+		return true
+	})
+}
+
+// cleanupEntry reconciles and, if needed, tears down a single mount entry.
+func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// A concurrent unmount may have deleted this entry between the Range read and
+	// the lock. Confirm the map still points to this exact entry; if not, skip it.
+	if dm.mountMap.Get(volumeID) != entry {
+		return
+	}
+
+	// An empty SourcePath means GetOrCreate inserted a blank entry that has not been
+	// given a mount yet (mid-creation). Nothing to clean, so leave it.
+	if entry.SourcePath == "" {
+		return
+	}
+
+	mountInfos, err := dm.mountInfoProviderWithDefault()
+	if err != nil {
+		klog.Errorf("DaemonsetMounter: cleanup: failed to read mount table for volume %s: %v", volumeID, err)
+		return
+	}
+
+	sourceMI := findMountByPath(mountInfos, entry.SourcePath)
+	if sourceMI == nil {
+		// Source is gone from the mount table — no bind mounts can reference it, so
+		// it's a true orphan (e.g. a crash between writing meta and creating the mount).
+		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s not in mount table, cleaning up", entry.SourcePath, volumeID)
+		dm.teardownEntry(volumeID, entry)
+		return
+	}
+
+	// Being in the mount table doesn't mean the source still works — a crashed mounter leaves
+	// a dead FUSE mount that lingers but errors on every I/O. So we probe it (with a timeout so
+	// a frozen daemon can't stall the pass). If it's dead, tear it down and reclaim its resources;
+	// if we can't tell, leave it alone rather than risk destroying a source still serving a workload.
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupHealthCheckTimeout)
+	healthy, healthErr := dm.IsSourceHealthy(ctx, entry.SourcePath)
+	cancel()
+	switch {
+	case healthErr != nil:
+		klog.V(4).Infof("DaemonsetMounter: cleanup: source health unknown for volume %s (%v), leaving intact", volumeID, healthErr)
+		return
+	case !healthy:
+		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s is dead, cleaning up", entry.SourcePath, volumeID)
+		dm.teardownEntry(volumeID, entry)
+		return
+	}
+
+	liveTargets := findBindMountTargets(mountInfos, deviceID(sourceMI), entry.SourcePath)
+
+	// Sync targets and refcount to the kernel mount table (the source of truth for who is actually bind-mounted).
+	entry.Targets = liveTargets
+	entry.RefCount = len(liveTargets)
+
+	// If the kernel shows zero bind mounts on this source, nobody's using it — tear it down.
+	if len(liveTargets) == 0 {
+		klog.V(2).Infof("DaemonsetMounter: cleanup: volume %s has no remaining consumers, cleaning up", volumeID)
+		dm.teardownEntry(volumeID, entry)
+		return
+	}
+
+	// Source still in use — leave it. Logged (V4) so a healthy-volume pass is observable.
+	klog.V(4).Infof("DaemonsetMounter: cleanup: volume %s healthy with %d live consumer(s), leaving intact", volumeID, len(liveTargets))
+}
+
+// teardownEntry runs cleanupMount and, only on success, removes the in-memory
+// entry and then its meta file (entry before meta, matching the other teardown
+// paths). On failure both are kept so a later pass retries. Caller must hold entry.mu.
+func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry) {
+	cleanupCtx := credentialprovider.CleanupContext{VolumeID: volumeID}
+	if err := dm.cleanupMount(entry, cleanupCtx); err != nil {
+		klog.Errorf("DaemonsetMounter: cleanup: %v (will retry next tick)", err)
+		return
+	}
+	dm.mountMap.Delete(volumeID)
+	RemoveMeta(dm.kubeletPath, volumeID)
 }
 
 // GetErrorFileName returns the error file name for a given volume ID.
