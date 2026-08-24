@@ -85,7 +85,12 @@ func bindMount(source, target string) error {
 
 func statx(path string) error {
 	var stat unix.Statx_t
-	if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_FORCE_SYNC, 0, &stat); err != nil {
+	// The mask must request at least one attribute (STATX_TYPE here): with an
+	// empty mask the kernel can answer from the dentry cache without consulting
+	// the filesystem even with AT_STATX_FORCE_SYNC, so a FUSE mount whose
+	// Mountpoint process has died still reports success and the dead mount is
+	// never detected as corrupted.
+	if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_FORCE_SYNC, unix.STATX_TYPE, &stat); err != nil {
 		if err == unix.ENOSYS {
 			// statx() syscall is not supported, retry with regular os.Stat
 			_, err = os.Stat(path)
