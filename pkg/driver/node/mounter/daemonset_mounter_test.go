@@ -571,7 +571,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error on cancelled context")
 			}
-			assert.Contains(t, err.Error(), "failed to send mount options")
+			assert.Contains(t, err.Error(), "cannot determine health of target")
 
 			// Verify commDir was NOT nilled by the cancelled context
 			_, err = testCtx.dm.GetCommDir()
@@ -1072,4 +1072,208 @@ func TestIsSourceHealthy_TimeoutIsUnknown(t *testing.T) {
 	// A timed-out health check is UNKNOWN, not dead — must return an error.
 	assert.Equals(t, false, healthy)
 	assert.Equals(t, true, err != nil)
+}
+
+// --- IsTargetHealthy health-state tests ---
+//
+// IsTargetHealthy uses the same IsHealthyMountpoint probe as IsSourceHealthy, but the
+// interpretation differs: ErrMountAbsent maps to (true, nil) rather than (false, nil),
+// because a missing or not-yet-mounted target is the normal fresh-mount case.
+
+func TestIsTargetHealthy_States(t *testing.T) {
+	tests := []struct {
+		name   string
+		exists bool // whether the target path exists on disk (drives statx/os.Open)
+		fake   *fakeHealthMount
+
+		wantHealthy bool
+		wantErr     bool // true => UNKNOWN (caller retries)
+	}{
+		{
+			// Fresh mount: target directory does not exist yet. ErrMountAbsent → (true, nil).
+			name:        "missing target is healthy (absent = proceed)",
+			exists:      false,
+			fake:        &fakeHealthMount{},
+			wantHealthy: true,
+			wantErr:     false,
+		},
+		{
+			// Fresh mount: target exists but is not a mount. ErrMountAbsent → (true, nil).
+			name:        "not a mount is healthy (absent = proceed)",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPoint: false},
+			wantHealthy: true,
+			wantErr:     false,
+		},
+		{
+			// Corrupted/dead mount: ENOTCONN from IsMountPoint → (false, nil).
+			name:        "ENOTCONN is dead (corrupted)",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)},
+			wantHealthy: false,
+			wantErr:     false,
+		},
+		{
+			// Transient error: EINTR → UNKNOWN (false, err).
+			name:        "EINTR is unknown",
+			exists:      true,
+			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.EINTR)},
+			wantHealthy: false,
+			wantErr:     true,
+		},
+		{
+			// Different device in mount table → not a Mountpoint mount → ErrMountAbsent → (true, nil).
+			name:   "different device is healthy (absent = proceed)",
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: "ext4"}},
+			},
+			wantHealthy: true,
+			wantErr:     false,
+		},
+		{
+			// List failure → UNKNOWN (false, err).
+			name:   "List failure is unknown",
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listErr:      healthPathErr(syscall.EIO),
+			},
+			wantHealthy: false,
+			wantErr:     true,
+		},
+		{
+			// Live Mountpoint mount → os.Open succeeds → (true, nil).
+			name:   "live Mountpoint is healthy",
+			exists: true,
+			fake: &fakeHealthMount{
+				isMountPoint: true,
+				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: mountpointDevice}},
+			},
+			wantHealthy: true,
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := healthSource(t, tt.exists)
+			// Fill in the real target path for list entries that reference it.
+			for i := range tt.fake.listResult {
+				if tt.fake.listResult[i].Path == "TARGET" {
+					tt.fake.listResult[i].Path = target
+				}
+			}
+
+			dm := newHealthDM(tt.fake)
+			healthy, err := dm.IsTargetHealthy(context.Background(), target)
+
+			assert.Equals(t, tt.wantHealthy, healthy)
+			assert.Equals(t, tt.wantErr, err != nil)
+		})
+	}
+}
+
+func TestIsTargetHealthy_TimeoutIsUnknown(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	dm := newHealthDM(&blockingMount{release: release})
+	target := healthSource(t, true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	healthy, err := dm.IsTargetHealthy(ctx, target)
+
+	// A timed-out health check is UNKNOWN, not dead — must return an error.
+	assert.Equals(t, false, healthy)
+	assert.Equals(t, true, err != nil)
+}
+
+// TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that when Mount is called with a
+// corrupted target (ENOTCONN), it returns nil without creating a meta file. This is the
+// churn-prevention invariant: a corrupted target causes an early bail, leaving cleanup to
+// the periodic job rather than churning mount/creds every republish.
+func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
+	kubeletPath := t.TempDir()
+	const volumeID = "pv-corrupted-target"
+
+	// A target path that exists on disk (kubelet created it) but IsMountPoint returns
+	// a corrupted-mount error. We simulate this by making the fakeHealthMount return
+	// ENOTCONN when CheckMountpoint runs IsMountPoint on the target.
+	targetDir := filepath.Join(kubeletPath, "pods", "pod-uid-123", "volumes", "kubernetes.io~csi", volumeID, "mount")
+	assert.NoError(t, os.MkdirAll(targetDir, 0750))
+
+	// Wire a DaemonsetMounter whose mount.CheckMountpoint (via IsMountPoint) returns ENOTCONN
+	// for any path — simulating a corrupted bind mount at the target.
+	corruptedMount := &fakeHealthMount{
+		isMountPointErr: healthPathErr(syscall.ENOTCONN),
+	}
+	dm := mounter.NewDaemonsetMounter(
+		nil, "test-node",
+		mpmounter.NewWithMount(corruptedMount),
+		nil, nil, nil, nil,
+	)
+
+	ctx := context.Background()
+	credCtx := credentialprovider.ProvideContext{
+		VolumeID:      volumeID,
+		WorkloadPodID: "pod-uid-123",
+	}
+
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, mountpoint.Args{}, "", nil)
+
+	// Mount should return nil (nothing to do, corrupted target).
+	assert.NoError(t, err)
+
+	// No meta file should exist — Mount bailed before writing anything.
+	metaPath := mounter.MetaFileName(kubeletPath, volumeID)
+	_, statErr := os.Stat(metaPath)
+	assert.Equals(t, true, os.IsNotExist(statErr))
+}
+
+// TestMount_AbsentTarget_ProceedsToMount verifies that when Mount is called with a target
+// that does not exist (fs.ErrNotExist — the fresh-mount case), IsTargetHealthy returns
+// (true, nil) and Mount proceeds past the health check rather than bailing with nil.
+// It will eventually error downstream (e.g. commDir not discovered), but the point is it
+// does NOT return nil like a corrupted target — it tries to mount. This proves the
+// not-exist accommodation works: a missing target is "absent/fresh → proceed", not "dead".
+func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
+	kubeletPath := t.TempDir()
+	const volumeID = "pv-absent-target"
+
+	// Target path does NOT exist on disk — simulates a fresh first mount where kubelet
+	// hasn't created the dir yet (or it was cleaned up).
+	targetDir := filepath.Join(kubeletPath, "pods", "pod-uid-456", "volumes", "kubernetes.io~csi", volumeID, "mount")
+	// Intentionally NOT creating targetDir.
+
+	// Use a fakeHealthMount that has never been a mount — but statx will fail with ENOENT
+	// since the path doesn't exist. IsTargetHealthy should return (true, nil) and proceed.
+	dm := mounter.NewDaemonsetMounter(
+		nil, "test-node",
+		mpmounter.NewWithMount(&fakeHealthMount{}),
+		nil, nil, nil, nil,
+	)
+
+	ctx := context.Background()
+	credCtx := credentialprovider.ProvideContext{
+		VolumeID:      volumeID,
+		WorkloadPodID: "pod-uid-456",
+	}
+
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, mountpoint.Args{}, "", nil)
+
+	// Mount should NOT return nil — it should proceed past the health check and eventually
+	// error out downstream (e.g. "comm dir not yet discovered" since we didn't set up
+	// the mounter pod). The key assertion is that err != nil (it tried to mount) rather
+	// than err == nil (it bailed like a corrupted target).
+	assert.Equals(t, true, err != nil)
+
+	// No meta file should exist — Mount errored before reaching WriteMeta because commDir
+	// is not configured in this minimal test setup.
+	metaPath := mounter.MetaFileName(kubeletPath, volumeID)
+	_, statErr := os.Stat(metaPath)
+	assert.Equals(t, true, os.IsNotExist(statErr))
 }
