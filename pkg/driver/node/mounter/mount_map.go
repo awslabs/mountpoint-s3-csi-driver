@@ -149,6 +149,16 @@ func (m *MountMap) Delete(volumeID string) {
 	m.entries.Delete(volumeID)
 }
 
+// Range iterates every entry in the map, letting the cleanup job loop over every
+// tracked mount. Return false from fn to stop early.
+// Note: the entry pointer may change under a concurrent mount/unmount, so callers
+// must still lock it and re-check before acting.
+func (m *MountMap) Range(fn func(volumeID string, entry *MountEntry) bool) {
+	m.entries.Range(func(k, v any) bool {
+		return fn(k.(string), v.(*MountEntry))
+	})
+}
+
 // SourceMountPath returns the source mount directory for a given volume.
 // This path is stable across pod lifecycles — it's keyed by volume, not pod.
 func SourceMountPath(kubeletPath, volumeID string) string {

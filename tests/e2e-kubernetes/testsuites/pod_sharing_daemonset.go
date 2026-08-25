@@ -884,6 +884,15 @@ func createPodsOnSameNode(ctx context.Context, f *framework.Framework, n int, re
 	return targetNode, pods
 }
 
+// createPodOnNode creates a pod pinned to nodeName using resource's PVC and waits for it
+// to be running. Returns a slice to match createPodsOnSameNode and plug into deletePodsInOrder.
+func createPodOnNode(ctx context.Context, f *framework.Framework, nodeName string, resource *storageframework.VolumeResource) []*v1.Pod {
+	pod := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": nodeName}, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+	pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+	framework.ExpectNoError(err)
+	return []*v1.Pod{pod}
+}
+
 // deletePodsInOrder deletes pods sequentially in the order they appear in the slice.
 func deletePodsInOrder(ctx context.Context, f *framework.Framework, pods []*v1.Pod) {
 	for _, pod := range pods {
