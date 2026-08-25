@@ -688,9 +688,10 @@ func TestCleanupOrphans(t *testing.T) {
 		// mountInfo is the fake kernel mount table for this case.
 		mountInfo func(sourcePath, targetA string) []mountutils.MountInfo
 
-		expectEntryGone bool // map entry removed
-		expectMetaGone  bool // meta file removed
-		expectRefCount  int  // asserted when the entry survives
+		expectEntryGone   bool // map entry removed
+		expectMetaGone    bool // meta file removed
+		expectMetaPresent bool // meta file must remain — a surviving entry relies on it to rebuild the map after a CSI node restart
+		expectRefCount    int  // asserted when the entry survives
 	}{
 		{
 			// Dead source (nothing in the mount table): source, creds, error file,
@@ -715,7 +716,8 @@ func TestCleanupOrphans(t *testing.T) {
 			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string) {
 				targetB := filepath.Join(kubeletPath, "pods", "wl-b", "mount")
 				registerSourceMount(t, fakeMounter, sourcePath)
-				seedEntry(dm, volumeID, sourcePath, "", []string{targetA, targetB})
+				entry := seedEntry(dm, volumeID, sourcePath, "", []string{targetA, targetB})
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
 				return []mountutils.MountInfo{ // targetB is gone from the kernel
@@ -723,7 +725,8 @@ func TestCleanupOrphans(t *testing.T) {
 					{MountPoint: targetA, Major: 0, Minor: 42},
 				}
 			},
-			expectRefCount: 1,
+			expectRefCount:    1,
+			expectMetaPresent: true,
 		},
 		{
 			// Teardown's cleanupMount fails (unmount errors): the entry and meta are
@@ -738,7 +741,8 @@ func TestCleanupOrphans(t *testing.T) {
 			mountInfo: func(sourcePath, _ string) []mountutils.MountInfo {
 				return []mountutils.MountInfo{{MountPoint: sourcePath, Major: 0, Minor: 42}}
 			},
-			expectRefCount: 0, // entry survives (not torn down)
+			expectRefCount:    0, // entry survives (not torn down)
+			expectMetaPresent: true,
 		},
 		{
 			// Healthy source, no bind mounts left in the kernel: torn down.
@@ -758,9 +762,10 @@ func TestCleanupOrphans(t *testing.T) {
 			// The source is healthy and the kernel shows a live bind mount that we are not
 			// tracking. Cleanup adopts it, so the refcount becomes 1 and the source is kept.
 			name: "untracked live bind mount adopted not torn down",
-			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, _, sourcePath, _ string) {
-				registerSourceMount(t, fakeMounter, sourcePath) // source is healthy
-				seedEntry(dm, volumeID, sourcePath, "", nil)    // we track no targets
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
+				registerSourceMount(t, fakeMounter, sourcePath)       // source is healthy
+				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // we track no targets
+				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
 				return []mountutils.MountInfo{
@@ -768,7 +773,8 @@ func TestCleanupOrphans(t *testing.T) {
 					{MountPoint: targetA, Major: 0, Minor: 42}, // untracked but live
 				}
 			},
-			expectRefCount: 1,
+			expectRefCount:    1,
+			expectMetaPresent: true,
 		},
 		{
 			// A dead source still in the mount table with a live tracked target (mounter
@@ -822,6 +828,11 @@ func TestCleanupOrphans(t *testing.T) {
 			}
 			if tt.expectMetaGone {
 				assert.Equals(t, true, os.IsNotExist(statErr(MetaFileName(kubeletPath, volumeID))))
+			}
+			if tt.expectMetaPresent {
+				// A surviving entry must keep its meta file — RebuildMountMap relies on it
+				// to recover this mount after a CSI node restart.
+				assert.NoError(t, statErr(MetaFileName(kubeletPath, volumeID)))
 			}
 		})
 	}

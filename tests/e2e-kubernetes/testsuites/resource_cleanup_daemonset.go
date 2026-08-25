@@ -128,4 +128,30 @@ func (t *s3CSIResourceCleanupDaemonsetTestSuite) DefineTests(driver storageframe
 			"expected a fresh source mount for volume %s after remount on the reclaimed node", pvName)
 		checkReadFromPathSucceedEventually(ctx, f, pods2[0], "/mnt/volume1/remount.txt", toWrite, seed)
 	})
+
+	// Kill the mounter so the source goes dead, but keep the workload running so no inline
+	// unmount fires — that way only the periodic cleanup job can reclaim the source.
+	ginkgo.It("should reclaim a dead source after the mounter pod is killed", ginkgo.Serial, func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, resource)
+		pvName := resource.Pv.Name
+
+		targetNode, pods := createPodsOnSameNode(ctx, f, 1, resource)
+		defer deletePodsInOrder(ctx, f, pods)
+		toWrite := 1024
+		seed := time.Now().UTC().UnixNano()
+		checkWriteToPathSucceedEventually(ctx, f, pods[0], "/mnt/volume1/dead.txt", toWrite, seed)
+		gomega.Expect(countFuseMountsForVolume(ctx, f, targetNode, pvName)).To(gomega.Equal(1))
+
+		// mount-s3 dies with the mounter pod; the source goes dead (ENOTCONN) but stays listed.
+		ginkgo.By("Killing the mounter pod to make the source dead")
+		killMounterPodOnNode(ctx, f, targetNode)
+
+		// The workload is still running, so no inline unmount fires — only the periodic job
+		// can reap the dead source. Wait for it to be torn down.
+		ginkgo.By("Waiting for the cleanup job to reclaim the dead source")
+		gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
+			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
+		}).WithTimeout(cleanupObserveTimeout).WithPolling(cleanupObservePoll).Should(gomega.Equal(0))
+	})
 }

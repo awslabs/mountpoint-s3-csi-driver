@@ -581,7 +581,7 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	cancel()
 	switch {
 	case healthErr != nil:
-		klog.V(4).Infof("DaemonsetMounter: cleanup: source health unknown for volume %s (%v), leaving intact", volumeID, healthErr)
+		klog.Errorf("DaemonsetMounter: cleanup: source health unknown for volume %s (%v), leaving intact", volumeID, healthErr)
 		return
 	case !healthy:
 		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s is dead, cleaning up", entry.SourcePath, volumeID)
