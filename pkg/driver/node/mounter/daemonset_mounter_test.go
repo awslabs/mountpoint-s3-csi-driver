@@ -571,7 +571,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error on cancelled context")
 			}
-			assert.Contains(t, err.Error(), "cannot determine health of target")
+			assert.Contains(t, err.Error(), "failed to send mount options")
 
 			// Verify commDir was NOT nilled by the cancelled context
 			_, err = testCtx.dm.GetCommDir()
