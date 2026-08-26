@@ -159,8 +159,7 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
-	// Check target health and mount state in one call (avoids duplicate IsMountPoint checks).
-	// Dead/corrupted targets are caught immediately — prevents misclassification as V1 systemd.
+	// Check target health
 	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
 	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
 	//   - (TargetDead, nil):    target mount is dead/corrupted — return nil.
@@ -733,7 +732,6 @@ const (
 )
 
 // IsTargetHealthy checks if the workload's bind-mount target is a live Mountpoint mount.
-// Same pattern as [DaemonsetMounter.IsSourceHealthy] (goroutine + ctx timeout, same IO probe).
 //
 // Callers interpret:
 //   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
