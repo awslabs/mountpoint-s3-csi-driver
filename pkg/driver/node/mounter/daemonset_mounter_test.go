@@ -1078,9 +1078,9 @@ func TestIsSourceHealthy_TimeoutIsUnknown(t *testing.T) {
 	assert.Equals(t, true, err != nil)
 }
 
-// --- IsTargetHealthy health-state tests ---
+// --- CheckTargetState health-state tests ---
 //
-// IsTargetHealthy uses the same IsHealthyMountpoint probe as IsSourceHealthy, but the
+// CheckTargetState uses the same IsHealthyMountpoint probe as IsSourceHealthy, but the
 // interpretation differs: ErrMountAbsent maps to (true, nil) rather than (false, nil),
 // because a missing or not-yet-mounted target is the normal fresh-mount case.
 

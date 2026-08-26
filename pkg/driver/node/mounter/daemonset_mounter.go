@@ -164,7 +164,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
 	//   - (TargetDead, nil):    target mount is dead/corrupted — return nil.
 	//   - (_, err):             UNKNOWN — let kubelet retry.
-	targetState, targetErr := dm.IsTargetHealthy(ctx, target)
+	targetState, targetErr := dm.CheckTargetState(ctx, target)
 	if targetErr != nil {
 		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
 	}
@@ -707,23 +707,11 @@ func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath stri
 	}
 }
 
-// IsTargetHealthy checks if the workload's bind-mount target is a live Mountpoint mount.
-// Same pattern as [DaemonsetMounter.IsSourceHealthy] (goroutine + ctx timeout, same IO probe),
-// but returns (bool, error) with ErrMountAbsent passed through rather than folded into dead.
-//
-// Callers interpret:
-//   - (true, nil):             target is healthy (already mounted, republish/idempotent).
-//   - (false, ErrMountAbsent): target is absent/fresh — proceed with mount.
-//   - (false, nil):            target mount is dead/corrupted — do NOT proceed (return nil).
-//   - (false, err):            UNKNOWN — let kubelet retry.
-//
 // TargetState represents the health/mount state of a workload target path.
 type TargetState int
 
 const (
 	// TargetAbsent means the target is not mounted (fresh mount, proceed).
-	// iota is a Go constant generator that starts at 0 and increments by 1 for
-	// each subsequent const in the block. So TargetAbsent=0, TargetHealthy=1, TargetDead=2.
 	TargetAbsent TargetState = iota
 	// TargetHealthy means the target is mounted and the FUSE daemon is alive.
 	TargetHealthy
@@ -731,14 +719,14 @@ const (
 	TargetDead
 )
 
-// IsTargetHealthy checks if the workload's bind-mount target is a live Mountpoint mount.
+// CheckTargetState checks if the workload's bind-mount target is a live Mountpoint mount.
 //
 // Callers interpret:
 //   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
 //   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
 //   - (TargetDead, nil):    target mount is dead/corrupted — do NOT proceed (return nil).
 //   - (_, err):             UNKNOWN — let kubelet retry.
-func (dm *DaemonsetMounter) IsTargetHealthy(ctx context.Context, target string) (TargetState, error) {
+func (dm *DaemonsetMounter) CheckTargetState(ctx context.Context, target string) (TargetState, error) {
 	type result struct {
 		state TargetState
 		err   error
@@ -764,7 +752,7 @@ func (dm *DaemonsetMounter) IsTargetHealthy(ctx context.Context, target string) 
 	case r := <-ch:
 		return r.state, r.err
 	case <-ctx.Done():
-		klog.V(2).Infof("DaemonsetMounter: IsTargetHealthy timed out for %s, treating as unknown", target)
+		klog.V(2).Infof("DaemonsetMounter: CheckTargetState timed out for %s, treating as unknown", target)
 		return TargetDead, ctx.Err()
 	}
 }
