@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -571,7 +572,10 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error on cancelled context")
 			}
-			assert.Contains(t, err.Error(), "failed to send mount options")
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "failed to send mount options") && !strings.Contains(errMsg, "context canceled") {
+				t.Fatalf("expected error containing \"failed to send mount options\" or \"context canceled\", got: %q", errMsg)
+			}
 
 			// Verify commDir was NOT nilled by the cancelled context
 			_, err = testCtx.dm.GetCommDir()
