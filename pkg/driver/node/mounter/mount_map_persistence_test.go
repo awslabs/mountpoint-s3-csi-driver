@@ -810,7 +810,8 @@ func TestCleanupOrphans(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kubeletPath := t.TempDir()
+			kubeletPath, err := filepath.EvalSymlinks(t.TempDir())
+			assert.NoError(t, err)
 			sourcePath := SourceMountPath(kubeletPath, volumeID)
 			targetA := filepath.Join(kubeletPath, "pods", "wl-a", "mount")
 
