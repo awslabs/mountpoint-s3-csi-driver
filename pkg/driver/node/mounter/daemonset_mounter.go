@@ -720,7 +720,6 @@ const (
 )
 
 // CheckTargetState checks if the workload's bind-mount target is a live Mountpoint mount.
-//
 // Callers interpret:
 //   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
 //   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
