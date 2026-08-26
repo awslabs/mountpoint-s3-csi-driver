@@ -3,6 +3,7 @@ package s3client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -154,10 +155,18 @@ func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) Delete
 	bucketName := *input.Bucket
 
 	_, err := c.client.CreateBucket(ctx, input)
-	framework.ExpectNoError(err, "Failed to create S3 bucket %s", bucketName)
-	if err == nil {
-		framework.Logf("S3 Bucket %s created", bucketName)
+	// The S3 client is configured with retries (see NewWithRegion). Under transient
+	// failures the first attempt can succeed server-side while still returning an error,
+	// and a retry will then observe BucketAlreadyOwnedByYou. That response confirms
+	// this account already owns the bucket, so the create is effectively done — treat
+	// it as success. BucketAlreadyExists (owned by a *different* account) is NOT
+	// swallowed here and will still fail the test.
+	if _, ok := errors.AsType[*types.BucketAlreadyOwnedByYou](err); ok {
+		framework.Logf("S3 Bucket %s already owned by this account; treating as created", bucketName)
+	} else {
+		framework.ExpectNoError(err, "Failed to create S3 bucket %s", bucketName)
 	}
+	framework.Logf("S3 Bucket %s created", bucketName)
 
 	return func(ctx context.Context) error {
 		return c.delete(ctx, bucketName)
