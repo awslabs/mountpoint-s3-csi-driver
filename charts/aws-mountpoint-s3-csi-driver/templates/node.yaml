@@ -113,7 +113,7 @@ spec:
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
             - name: INSTALLATION_TYPE
-              value: {{ if .Values.isEKSAddon }}eks-addon{{ else }}helm{{ end }}
+              value: {{ if .Values.isEKSAddon }}eks-addon{{ else if .Values.isHelmRepo }}helm{{ else }}helm-dev{{ end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

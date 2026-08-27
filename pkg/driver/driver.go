@@ -107,6 +107,11 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	version := version.GetVersion()
 	klog.Infof("Driver version: %v, Git commit: %v, build date: %v, nodeID: %v, mount-s3 version: %v, kubernetes version: %v, variant: %s, install: %v",
 		version.DriverVersion, version.GitCommit, version.BuildDate, nodeID, mpVersion, kubernetesVersion, variant.String(), installMethod)
+	if installMethod == "helm-dev" {
+		klog.Warning("This is an unsupported development installation from a Git checkout. Do NOT use it for production workloads. " +
+			"The chart in this repository may reference container images that have not been published yet, or contain in-progress changes that are incompatible with the images it references. " +
+			"Please see supported installation methods in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md.")
+	}
 	// `credentialprovider.RegionFromIMDSOnce` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
 	go func() {

@@ -73,6 +73,12 @@ func TestUserAgent(t *testing.T) {
 			installationType:     "helm",
 			result:               "s3-csi-driver/ credential-source#driver k8s/v1.28.0 md/install#helm",
 		},
+		"helm dev installation method": {
+			k8sVersion:           "v1.36.0",
+			authenticationSource: credentialprovider.AuthenticationSourceDriver,
+			installationType:     "helm-dev",
+			result:               "s3-csi-driver/ credential-source#driver k8s/v1.36.0 md/install#helm-dev",
+		},
 		"openshift with helm": {
 			k8sVersion:           "v1.33.6",
 			authenticationSource: credentialprovider.AuthenticationSourcePod,
