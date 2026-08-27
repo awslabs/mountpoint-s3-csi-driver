@@ -268,6 +268,7 @@ $ pwd
 
 $ helm upgrade --install aws-mountpoint-s3-csi-driver \
     --namespace kube-system \
+    --set unsupportedDevInstall=true \
    ./charts/aws-mountpoint-s3-csi-driver
 ```
 
@@ -275,9 +276,12 @@ This would install the Helm chart with the default values. You can customise [de
 ```bash
 $ helm upgrade --install aws-mountpoint-s3-csi-driver \
     --namespace kube-system \
+    --set unsupportedDevInstall=true \
     --set controller.nodeSelector."kubernetes\.io/role"="control-plane" \
    ./charts/aws-mountpoint-s3-csi-driver
 ```
+
+Note that `--set unsupportedDevInstall=true` is required for development installs, because we made `helm install` from GitHub branches fail, as it may reference container images that have not been published yet or contain in-progress changes that are incompatible with the images it references.
 
 You can verify that the CSI Driver is installed by listing all Pods owned by the CSI Driver:
 ```bash

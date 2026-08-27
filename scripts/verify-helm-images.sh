@@ -122,7 +122,7 @@ verify_sidecar_images_in_chart() {
 }
 
 echo "== Verifying standard images =="
-verify_sidecar_images_in_chart "helm template $CHART_DIR"
+verify_sidecar_images_in_chart "helm template $CHART_DIR --set unsupportedDevInstall=true"
 
 if [[ ${PUBLIC_ONLY} -eq 0 ]]; then
   echo "== Verifying EKS Addon images =="

@@ -471,6 +471,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 // without image overrides so the chart's default image would be used.
 func buildHelmValuesBase() map[string]any {
 	return map[string]any{
+		"unsupportedDevInstall": true,
 		"node": map[string]any{
 			"podInfoOnMountCompat": map[string]any{
 				"enable": "true",

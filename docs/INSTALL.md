@@ -10,8 +10,12 @@
 
 ## Installation
 
+Supported installation methods:
+- [Amazon EKS managed add-on](#amazon-eks-managed-add-on): see [Amazon EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- [Helm repository](#helm): `https://awslabs.github.io/mountpoint-s3-csi-driver`
+
 > [!WARNING]
-> **Supported installation methods:** EKS Addon or the official Helm repository: `https://awslabs.github.io/mountpoint-s3-csi-driver`. Installing from a GitHub branch (`main`, `release-X.Y`, or any other; via `helm install ./charts/...`, or GitOps tools pointing at this repository) is not supported and may break without notice during releases.
+> Installing from a GitHub branch (`main`, `release-X.Y`, or any other; via `helm install ./charts/...`, or GitOps tools pointing at this repository) is not supported and is not installable. For more details, please see GitHub issue [Helm chart installation from main branch will stop working on September 1, 2026 #859](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859).
 
 ### Cluster setup (optional)
 
@@ -61,7 +65,7 @@ You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed a
 
 #### Amazon EKS managed add-on
 
-See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
+See [Amazon EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
 
 #### Helm
 
