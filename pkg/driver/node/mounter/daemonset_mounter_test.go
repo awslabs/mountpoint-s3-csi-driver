@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -571,7 +572,10 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error on cancelled context")
 			}
-			assert.Contains(t, err.Error(), "cannot determine health of target")
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "failed to send mount options") && !strings.Contains(errMsg, "context canceled") {
+				t.Fatalf("expected error containing \"failed to send mount options\" or \"context canceled\", got: %q", errMsg)
+			}
 
 			// Verify commDir was NOT nilled by the cancelled context
 			_, err = testCtx.dm.GetCommDir()
@@ -1074,85 +1078,85 @@ func TestIsSourceHealthy_TimeoutIsUnknown(t *testing.T) {
 	assert.Equals(t, true, err != nil)
 }
 
-// --- IsTargetHealthy health-state tests ---
+// --- CheckTargetState health-state tests ---
 //
-// IsTargetHealthy uses the same IsHealthyMountpoint probe as IsSourceHealthy, but the
+// CheckTargetState uses the same IsHealthyMountpoint probe as IsSourceHealthy, but the
 // interpretation differs: ErrMountAbsent maps to (true, nil) rather than (false, nil),
 // because a missing or not-yet-mounted target is the normal fresh-mount case.
 
-func TestIsTargetHealthy_States(t *testing.T) {
+func TestCheckTargetState_States(t *testing.T) {
 	tests := []struct {
 		name   string
 		exists bool // whether the target path exists on disk (drives statx/os.Open)
 		fake   *fakeHealthMount
 
-		wantHealthy bool
-		wantErr     bool // true => UNKNOWN (caller retries)
+		wantState mounter.TargetState
+		wantErr   bool // true => UNKNOWN (caller retries)
 	}{
 		{
-			// Fresh mount: target directory does not exist yet. ErrMountAbsent → (true, nil).
-			name:        "missing target is healthy (absent = proceed)",
-			exists:      false,
-			fake:        &fakeHealthMount{},
-			wantHealthy: true,
-			wantErr:     false,
+			// Fresh mount: target directory does not exist yet. ErrMountAbsent → TargetAbsent.
+			name:      "missing target is absent (proceed)",
+			exists:    false,
+			fake:      &fakeHealthMount{},
+			wantState: mounter.TargetAbsent,
+			wantErr:   false,
 		},
 		{
-			// Fresh mount: target exists but is not a mount. ErrMountAbsent → (true, nil).
-			name:        "not a mount is healthy (absent = proceed)",
-			exists:      true,
-			fake:        &fakeHealthMount{isMountPoint: false},
-			wantHealthy: true,
-			wantErr:     false,
+			// Fresh mount: target exists but is not a mount. ErrMountAbsent → TargetAbsent.
+			name:      "not a mount is absent (proceed)",
+			exists:    true,
+			fake:      &fakeHealthMount{isMountPoint: false},
+			wantState: mounter.TargetAbsent,
+			wantErr:   false,
 		},
 		{
-			// Corrupted/dead mount: ENOTCONN from IsMountPoint → (false, nil).
-			name:        "ENOTCONN is dead (corrupted)",
-			exists:      true,
-			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)},
-			wantHealthy: false,
-			wantErr:     false,
+			// Corrupted/dead mount: ENOTCONN from IsMountPoint → TargetDead.
+			name:      "ENOTCONN is dead (corrupted)",
+			exists:    true,
+			fake:      &fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)},
+			wantState: mounter.TargetDead,
+			wantErr:   false,
 		},
 		{
-			// Transient error: EINTR → UNKNOWN (false, err).
-			name:        "EINTR is unknown",
-			exists:      true,
-			fake:        &fakeHealthMount{isMountPointErr: healthPathErr(syscall.EINTR)},
-			wantHealthy: false,
-			wantErr:     true,
+			// Transient error: EINTR → UNKNOWN (TargetDead + err).
+			name:      "EINTR is unknown",
+			exists:    true,
+			fake:      &fakeHealthMount{isMountPointErr: healthPathErr(syscall.EINTR)},
+			wantState: mounter.TargetDead,
+			wantErr:   true,
 		},
 		{
-			// Different device in mount table → not a Mountpoint mount → ErrMountAbsent → (true, nil).
-			name:   "different device is healthy (absent = proceed)",
+			// Different device in mount table → not a Mountpoint mount → ErrMountAbsent → TargetAbsent.
+			name:   "different device is absent (proceed)",
 			exists: true,
 			fake: &fakeHealthMount{
 				isMountPoint: true,
 				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: "ext4"}},
 			},
-			wantHealthy: true,
-			wantErr:     false,
+			wantState: mounter.TargetAbsent,
+			wantErr:   false,
 		},
 		{
-			// List failure → UNKNOWN (false, err).
+			// List failure → UNKNOWN (TargetDead + err).
 			name:   "List failure is unknown",
 			exists: true,
 			fake: &fakeHealthMount{
 				isMountPoint: true,
 				listErr:      healthPathErr(syscall.EIO),
 			},
-			wantHealthy: false,
-			wantErr:     true,
+			wantState: mounter.TargetDead,
+			wantErr:   true,
 		},
 		{
-			// Live Mountpoint mount → os.Open succeeds → (true, nil).
+			// Live Mountpoint mount → os.Open succeeds → TargetHealthy.
 			name:   "live Mountpoint is healthy",
 			exists: true,
 			fake: &fakeHealthMount{
 				isMountPoint: true,
 				listResult:   []mountutils.MountPoint{{Path: "TARGET", Device: mountpointDevice}},
 			},
-			wantHealthy: true,
-			wantErr:     false,
+			wantState: mounter.TargetHealthy,
+			wantErr:   false,
 		},
 	}
 
@@ -1167,15 +1171,15 @@ func TestIsTargetHealthy_States(t *testing.T) {
 			}
 
 			dm := newHealthDM(tt.fake)
-			healthy, err := dm.IsTargetHealthy(context.Background(), target)
+			state, err := dm.CheckTargetState(context.Background(), target)
 
-			assert.Equals(t, tt.wantHealthy, healthy)
+			assert.Equals(t, tt.wantState, state)
 			assert.Equals(t, tt.wantErr, err != nil)
 		})
 	}
 }
 
-func TestIsTargetHealthy_TimeoutIsUnknown(t *testing.T) {
+func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
@@ -1185,10 +1189,10 @@ func TestIsTargetHealthy_TimeoutIsUnknown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	healthy, err := dm.IsTargetHealthy(ctx, target)
+	state, err := dm.CheckTargetState(ctx, target)
 
 	// A timed-out health check is UNKNOWN, not dead — must return an error.
-	assert.Equals(t, false, healthy)
+	assert.Equals(t, mounter.TargetDead, state)
 	assert.Equals(t, true, err != nil)
 }
 

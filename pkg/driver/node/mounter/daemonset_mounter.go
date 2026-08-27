@@ -159,36 +159,35 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
-	// Handle V1 (systemd) legacy mounts before anything else.
-	// V1 mounts have the FUSE mount directly at the target path (no source + bind-mount indirection).
-	// V3 never puts a FUSE mount at the target — it mounts FUSE at a source path and bind-mounts to target.
-	// Detection: target is already a mountpoint with zero bind-mount references.
-	isMounted, err := dm.IsMountPoint(target)
-	if err == nil && isMounted && dm.isSystemDMountpoint(target) {
-		klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, will only refresh credentials", target, credentialCtx.VolumeID)
-		credentialCtx.SetAsSystemDMountpoint()
-		credentialsPath := hostPluginDirWithDefault()
-		credentialCtx.SetWriteAndEnvPath(credentialsPath, credentialsPath)
-
-		if _, _, err := dm.credProvider.Provide(ctx, credentialCtx); err != nil {
-			klog.Errorf("DaemonsetMounter: failed to refresh V1 (systemd) credentials for %q: %v", target, err)
-			return fmt.Errorf("Failed to provide systemd credentials: %w", err)
-		}
-		return nil
-	}
-
-	// Classify the workload target before doing any mount work.
-	// IsTargetHealthy does an IO probe (same as source health check) with ctx timeout.
-	//   - (true, nil):  target is healthy or absent (fresh) — proceed.
-	//   - (false, nil): dead/corrupted — nothing to do; return nil.
-	//   - (false, err): unknown — let kubelet retry.
-	targetHealthy, targetErr := dm.IsTargetHealthy(ctx, target)
+	// Check target health
+	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
+	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
+	//   - (TargetDead, nil):    target mount is dead/corrupted — return nil.
+	//   - (_, err):             UNKNOWN — let kubelet retry.
+	targetState, targetErr := dm.CheckTargetState(ctx, target)
 	if targetErr != nil {
 		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
 	}
-	if !targetHealthy {
+	if targetState == TargetDead {
 		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a corrupted mount; not proceeding, pod re-creation %s required for recovery", target, credentialCtx.VolumeID, credentialCtx.WorkloadPodID)
 		return nil
+	}
+
+	// Handle legacy mounts — only for healthy mounted targets.
+	if targetState == TargetHealthy {
+		// V1 (systemd) check: target is mounted with zero bind-mount references.
+		if dm.isSystemDMountpoint(target) {
+			klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, will only refresh credentials", target, credentialCtx.VolumeID)
+			credentialCtx.SetAsSystemDMountpoint()
+			credentialsPath := hostPluginDirWithDefault()
+			credentialCtx.SetWriteAndEnvPath(credentialsPath, credentialsPath)
+
+			if _, _, err := dm.credProvider.Provide(ctx, credentialCtx); err != nil {
+				klog.Errorf("DaemonsetMounter: failed to refresh V1 (systemd) credentials for %q: %v", target, err)
+				return fmt.Errorf("Failed to provide systemd credentials: %w", err)
+			}
+			return nil
+		}
 	}
 
 	// Extract PV name from target path to use as the volume identifier for sharing and filesystem paths.
@@ -211,12 +210,12 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, commDir, credentialCtx, args, fsGroup, userEnv)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
+	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
 	// Get or create the per-volume entry, then lock it.
 	// Retry loop ensures we hold the canonical entry — not one orphaned by a concurrent unmount/delete.
@@ -287,13 +286,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
-	isMounted, err := dm.IsMountPoint(target)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("failed to check if target %q is a mount point (mount target is possibly"+
-			" corrupted, manual pod re-creation %s might be required for mount recovery): %w",
-			target, credentialCtx.WorkloadPodID, err)
-	}
-	if isMounted {
+	if targetIsMounted {
 		klog.V(4).Infof("DaemonsetMounter: target %s is already mounted, credentials refreshed", target)
 		return nil
 	}
@@ -714,35 +707,52 @@ func (dm *DaemonsetMounter) IsSourceHealthy(ctx context.Context, sourcePath stri
 	}
 }
 
-// IsTargetHealthy checks if the workload's bind-mount target is a live Mountpoint mount.
-// Same pattern as [DaemonsetMounter.IsSourceHealthy] (goroutine + ctx timeout, same IO probe),
-// but returns (bool, error) with ErrMountAbsent passed through rather than folded into dead.
-//
+// TargetState represents the health/mount state of a workload target path.
+type TargetState int
+
+const (
+	// TargetAbsent means the target is not mounted (fresh mount, proceed).
+	TargetAbsent TargetState = iota
+	// TargetHealthy means the target is mounted and the FUSE daemon is alive.
+	TargetHealthy
+	// TargetDead means the target is mounted but the FUSE daemon is dead/corrupted.
+	TargetDead
+)
+
+// CheckTargetState checks if the workload's bind-mount target is a live Mountpoint mount.
 // Callers interpret:
-//   - (true, nil):             target is healthy (already mounted, republish/idempotent).
-//   - (false, ErrMountAbsent): target is absent/fresh — proceed with mount.
-//   - (false, nil):            target mount is dead/corrupted — do NOT proceed (return nil).
-//   - (false, err):            UNKNOWN — let kubelet retry.
-func (dm *DaemonsetMounter) IsTargetHealthy(ctx context.Context, target string) (bool, error) {
+//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
+//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
+//   - (TargetDead, nil):    target mount is dead/corrupted — do NOT proceed (return nil).
+//   - (_, err):             UNKNOWN — let kubelet retry.
+func (dm *DaemonsetMounter) CheckTargetState(ctx context.Context, target string) (TargetState, error) {
 	type result struct {
-		healthy bool
-		err     error
+		state TargetState
+		err   error
 	}
 	ch := make(chan result, 1)
 	go func() {
 		healthy, err := dm.mount.IsHealthyMountpoint(target)
 		if errors.Is(err, mpmounter.ErrMountAbsent) {
-			ch <- result{true, nil} // absent target = fresh mount, proceed
+			ch <- result{TargetAbsent, nil}
 			return
 		}
-		ch <- result{healthy, err}
+		if err != nil {
+			ch <- result{TargetDead, err} // transient/unknown error
+			return
+		}
+		if healthy {
+			ch <- result{TargetHealthy, nil}
+		} else {
+			ch <- result{TargetDead, nil}
+		}
 	}()
 	select {
 	case r := <-ch:
-		return r.healthy, r.err
+		return r.state, r.err
 	case <-ctx.Done():
-		klog.V(2).Infof("DaemonsetMounter: IsTargetHealthy timed out for %s, treating as unknown", target)
-		return false, ctx.Err()
+		klog.V(2).Infof("DaemonsetMounter: CheckTargetState timed out for %s, treating as unknown", target)
+		return TargetDead, ctx.Err()
 	}
 }
 
