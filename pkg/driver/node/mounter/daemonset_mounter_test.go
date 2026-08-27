@@ -1084,7 +1084,7 @@ func TestIsSourceHealthy_TimeoutIsUnknown(t *testing.T) {
 // interpretation differs: ErrMountAbsent maps to (true, nil) rather than (false, nil),
 // because a missing or not-yet-mounted target is the normal fresh-mount case.
 
-func TestIsTargetHealthy_States(t *testing.T) {
+func TestCheckTargetState_States(t *testing.T) {
 	tests := []struct {
 		name   string
 		exists bool // whether the target path exists on disk (drives statx/os.Open)
@@ -1171,7 +1171,7 @@ func TestIsTargetHealthy_States(t *testing.T) {
 			}
 
 			dm := newHealthDM(tt.fake)
-			state, err := dm.IsTargetHealthy(context.Background(), target)
+			state, err := dm.CheckTargetState(context.Background(), target)
 
 			assert.Equals(t, tt.wantState, state)
 			assert.Equals(t, tt.wantErr, err != nil)
@@ -1179,7 +1179,7 @@ func TestIsTargetHealthy_States(t *testing.T) {
 	}
 }
 
-func TestIsTargetHealthy_TimeoutIsUnknown(t *testing.T) {
+func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 
@@ -1189,7 +1189,7 @@ func TestIsTargetHealthy_TimeoutIsUnknown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	state, err := dm.IsTargetHealthy(ctx, target)
+	state, err := dm.CheckTargetState(ctx, target)
 
 	// A timed-out health check is UNKNOWN, not dead — must return an error.
 	assert.Equals(t, mounter.TargetDead, state)
