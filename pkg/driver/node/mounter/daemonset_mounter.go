@@ -102,8 +102,6 @@ type DaemonsetMounter struct {
 	mount        *mpmounter.Mounter
 	credProvider credentialprovider.ProviderInterface
 
-	// kubernetesVersion and variant identify the cluster; used to build the Mountpoint
-	// user-agent so S3-side telemetry sees which cluster the request came from.
 	kubernetesVersion string
 	variant           cluster.Variant
 
@@ -290,7 +288,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, &credentialCtx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
 
 	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
@@ -346,7 +344,6 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 // fuseMount performs the FUSE mount + FD send + wait cycle at the given path.
 // Credentials are already provisioned by the caller (Mount).
 // commDir is passed from the caller to ensure a single GetCommDir() per NodePublishVolume.
-// authSource is the resolved AuthenticationSource returned by the credential provider
 func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mountPath string,
 	volumeID string, commDir string, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
 
@@ -372,7 +369,7 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 
 	args.Remove(mountpoint.ArgReadOnly)
 
-	// We set the user-agent here so it doesn't get captured into the pod-sharing key or persisted meta.
+	// Set after the pod-sharing key is taken from args above, so it stays out of that key and the saved meta.
 	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authSource, dm.kubernetesVersion, dm.variant))
 
 	env := envprovider.Environment{}
@@ -848,7 +845,7 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 
 	env, authSource, err := dm.credProvider.Provide(ctx, *credentialCtx)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to provide credentials for mount %s: %w", volumeID, err)
+		return nil, "", err
 	}
 	return env, authSource, nil
 }

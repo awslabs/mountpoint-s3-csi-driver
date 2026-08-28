@@ -506,7 +506,8 @@ func TestDaemonsetMounter(t *testing.T) {
 				},
 				nil,
 				nil,
-				"", cluster.DefaultKubernetes,
+				"",
+				cluster.DefaultKubernetes,
 			)
 
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
