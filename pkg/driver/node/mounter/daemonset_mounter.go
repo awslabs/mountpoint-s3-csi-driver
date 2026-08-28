@@ -39,6 +39,7 @@ import (
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
@@ -101,6 +102,9 @@ type DaemonsetMounter struct {
 	mount        *mpmounter.Mounter
 	credProvider credentialprovider.ProviderInterface
 
+	kubernetesVersion string
+	variant           cluster.Variant
+
 	// Comm dir discovery: commDir caches the path (nil = stale),
 	// rediscoverCh wakes the background watcher to re-discover immediately.
 	commDir      atomic.Pointer[string]
@@ -120,13 +124,15 @@ type DaemonsetMounter struct {
 // mountSyscall, bindMountSyscall, and mountInfoProvider may be nil,
 // in which case the default implementations are used.
 func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *mpmounter.Mounter,
-	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc) *DaemonsetMounter {
+	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc, kubernetesVersion string, variant cluster.Variant) *DaemonsetMounter {
 	return &DaemonsetMounter{
 		clientset:         clientset,
 		nodeID:            nodeID,
 		kubeletPath:       util.ContainerKubeletPath(),
 		mount:             mount,
 		credProvider:      credProvider,
+		kubernetesVersion: kubernetesVersion,
+		variant:           variant,
 		rediscoverCh:      make(chan struct{}, 1),
 		mountSyscall:      mountSyscall,
 		bindMountSyscall:  bindMountSyscall,
@@ -280,9 +286,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// Provision credentials under the lock. We always use entry.CommDir which is set above
 	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
 	// This ensures credentials are written to the same location that cleanup will look at.
-	credsEnv, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, &credentialCtx)
+	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, &credentialCtx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
 
 	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
@@ -305,7 +311,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 
 	// New mount: FUSE mount at source, then bind to target.
 
-	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, args, userEnv, credsEnv); err != nil {
+	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, args, userEnv, credsEnv, authSource); err != nil {
 		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
 			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failure for volume %s: %v", volumeID, cleanErr)
 			return err
@@ -339,7 +345,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 // Credentials are already provisioned by the caller (Mount).
 // commDir is passed from the caller to ensure a single GetCommDir() per NodePublishVolume.
 func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mountPath string,
-	volumeID string, commDir string, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment) error {
+	volumeID string, commDir string, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
 
 	if err := os.MkdirAll(mountPath, targetDirPerm); err != nil {
 		return fmt.Errorf("failed to create mount directory %q: %w", mountPath, err)
@@ -362,6 +368,9 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 	}()
 
 	args.Remove(mountpoint.ArgReadOnly)
+
+	// Set after the pod-sharing key is taken from args above, so it stays out of that key and the saved meta.
+	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authSource, dm.kubernetesVersion, dm.variant))
 
 	env := envprovider.Environment{}
 	env.Merge(userEnv)
@@ -825,20 +834,20 @@ func (dm *DaemonsetMounter) isSystemDMountpoint(target string) bool {
 }
 
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.
-func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, error) {
+func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
 	mountCredDir := filepath.Join(commDir, volumeID)
 	if err := os.MkdirAll(mountCredDir, credentialprovider.CredentialDirPerm); err != nil {
-		return nil, fmt.Errorf("failed to create credential directory %q: %w", mountCredDir, err)
+		return nil, "", fmt.Errorf("failed to create credential directory %q: %w", mountCredDir, err)
 	}
 	credentialCtx.WritePath = mountCredDir
 	credentialCtx.EnvPath = filepath.Join("/comm", volumeID)
 	credentialCtx.MountKind = credentialprovider.MountKindDaemonset
 
-	env, _, err := dm.credProvider.Provide(ctx, *credentialCtx)
+	env, authSource, err := dm.credProvider.Provide(ctx, *credentialCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to provide credentials for mount %s: %w", volumeID, err)
+		return nil, "", err
 	}
-	return env, nil
+	return env, authSource, nil
 }
 
 // cleanupCredentials removes the per-mount credential directory.

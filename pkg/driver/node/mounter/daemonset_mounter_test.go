@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	mountutils "k8s.io/mount-utils"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -144,7 +145,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 			infos = append(infos, mountutils.MountInfo{MountPoint: mp.Path})
 		}
 		return infos, nil
-	})
+	}, testK8sVersion, cluster.DefaultKubernetes)
 	err = dm.DiscoverCommDir(ctx)
 	assert.NoError(t, err)
 
@@ -196,9 +197,11 @@ func TestDaemonsetMounter(t *testing.T) {
 			got.Fd = 0
 
 			env := envprovider.Default()
+			// The mount must carry the user-agent, built from the same inputs setupDM used.
+			expectedUserAgent := "--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes)
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
-				Args:       []string{"--prefix=data/"},
+				Args:       []string{"--prefix=data/", expectedUserAgent},
 				Env:        env.List(),
 				VolumeId:   testCtx.volumeID,
 			}, got)
@@ -230,7 +233,7 @@ func TestDaemonsetMounter(t *testing.T) {
 					return 0, nil
 				}, func(source, target string) error {
 					return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
-				}, nil)
+				}, nil, "", cluster.DefaultKubernetes)
 			err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 			assert.NoError(t, err)
 
@@ -288,7 +291,7 @@ func TestDaemonsetMounter(t *testing.T) {
 					return 0, mountErr
 				}, func(source, target string) error {
 					return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
-				}, nil)
+				}, nil, "", cluster.DefaultKubernetes)
 			err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 			assert.NoError(t, err)
 
@@ -451,7 +454,7 @@ func TestDaemonsetMounter(t *testing.T) {
 					t.Setenv("CONTAINER_KUBELET_PATH", t.TempDir())
 
 					client := fake.NewSimpleClientset(tt.pods...)
-					dm := mounter.NewDaemonsetMounter(client, "test-node", mpmounter.NewWithMount(mountutils.NewFakeMounter(nil)), nil, nil, nil, nil)
+					dm := mounter.NewDaemonsetMounter(client, "test-node", mpmounter.NewWithMount(mountutils.NewFakeMounter(nil)), nil, nil, nil, nil, "", cluster.DefaultKubernetes)
 
 					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 					defer cancel()
@@ -503,6 +506,8 @@ func TestDaemonsetMounter(t *testing.T) {
 				},
 				nil,
 				nil,
+				"",
+				cluster.DefaultKubernetes,
 			)
 
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
@@ -661,7 +666,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 			mpmounter.NewWithMount(testCtx.mount), mockCredProvider,
 			testCtx.mountSyscall, func(source, target string) error {
 				return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
-			}, nil)
+			}, nil, "", cluster.DefaultKubernetes)
 		err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 		assert.NoError(t, err)
 
@@ -936,7 +941,7 @@ func healthPathErr(errno syscall.Errno) error {
 // newHealthDM builds a DaemonsetMounter wired only with the given mount interface;
 // IsSourceHealthy touches nothing else.
 func newHealthDM(mount mountutils.Interface) *mounter.DaemonsetMounter {
-	return mounter.NewDaemonsetMounter(nil, "", mpmounter.NewWithMount(mount), nil, nil, nil, nil)
+	return mounter.NewDaemonsetMounter(nil, "", mpmounter.NewWithMount(mount), nil, nil, nil, nil, "", cluster.DefaultKubernetes)
 }
 
 // healthSource returns a real, existing directory when exists is true (so statx
@@ -1219,6 +1224,7 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 		nil, "test-node",
 		mpmounter.NewWithMount(corruptedMount),
 		nil, nil, nil, nil,
+		"", cluster.DefaultKubernetes,
 	)
 
 	ctx := context.Background()
@@ -1259,6 +1265,7 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 		nil, "test-node",
 		mpmounter.NewWithMount(&fakeHealthMount{}),
 		nil, nil, nil, nil,
+		"", cluster.DefaultKubernetes,
 	)
 
 	ctx := context.Background()
