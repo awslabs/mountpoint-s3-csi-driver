@@ -10,12 +10,12 @@
 
 ## Installation
 
-Supported installation methods:
-- [Amazon EKS managed add-on](#amazon-eks-managed-add-on): see [Amazon EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
-- [Helm repository](#helm): `https://awslabs.github.io/mountpoint-s3-csi-driver`
+The S3 CSI Driver is distributed through the following supported channels:
+- [**EKS Addon**](#amazon-eks-managed-add-on) (recommended for EKS clusters) — see [Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- [**Helm repository**](#helm) — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
 
 > [!WARNING]
-> Installing from a GitHub branch (`main`, `release-X.Y`, or any other; via `helm install ./charts/...`, or GitOps tools pointing at this repository) is not supported and is not installable. For more details, please see GitHub issue [Helm chart installation from main branch will stop working on September 1, 2026 #859](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859).
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries. Please migrate to the Helm repository or EKS Addon installation methods. For more details, please see [GitHub issue #859](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859).
 
 ### Cluster setup (optional)
 
@@ -65,7 +65,7 @@ You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed a
 
 #### Amazon EKS managed add-on
 
-See [Amazon EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
+See [the Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html) for more details on installing the Amazon EKS managed add-on of Mountpoint for Amazon S3 CSI Driver.
 
 #### Helm
 

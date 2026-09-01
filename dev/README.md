@@ -396,6 +396,7 @@ $ pwd
 # "image.pullPolicy=Always" disables this caching behaviour and ensures Kubernetes would always pull the latest image each time it starts the CSI Driver's containers.
 $ helm upgrade --install aws-mountpoint-s3-csi-driver \
     --namespace kube-system \
+    --set unsupportedDevInstall=true \
     --set image.repository="111122223333.dkr.ecr.eu-north-1.amazonaws.com/mp-dev" \
     --set image.pullPolicy=Always \
     --set image.tag=latest \
