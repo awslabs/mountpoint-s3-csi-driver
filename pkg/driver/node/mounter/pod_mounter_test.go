@@ -236,6 +236,7 @@ func TestPodMounter(t *testing.T) {
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
 				Args: []string{
+					mountpoint.ArgReadOnly,
 					"--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes),
 				},
 				Env: env.List(),
