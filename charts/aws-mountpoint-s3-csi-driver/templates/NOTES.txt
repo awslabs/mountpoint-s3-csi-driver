@@ -1,14 +1,12 @@
 Thank you for using Mountpoint for Amazon S3 CSI Driver v{{ .Chart.Version }}.
 
 Learn more about the file system operations Mountpoint supports: https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md
-{{- if and (not .Values.isHelmRepo) (not .Values.isEKSAddon) }}
+{{- if .Values.unsupportedDevInstall }}
 
-WARNING: You are installing from a GitHub branch.
-This installation method will stop working after September 1, 2026.
-Please migrate to a supported installation method:
-  - Helm repo: helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver
-  - EKS Addon: See https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html
-For more details, see: https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md
+WARNING: This is an unsupported development installation from a Git checkout. Do NOT use it for production workloads.
+The chart in this repository may reference container images that have not been published yet,
+or contain in-progress changes that are incompatible with the images it references.
+Please see supported installation methods in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md.
 {{- end }}
 {{- if .Release.IsUpgrade }}
 

@@ -135,6 +135,7 @@ deploy_helm_chart() {
     echo "deploying Helm chart..."
     helm upgrade --install aws-mountpoint-s3-csi-driver \
         --namespace kube-system \
+        --set unsupportedDevInstall=true \
         --set image.repository="${ecr_repository_url}" \
         --set image.pullPolicy=Always \
         --set image.tag=latest \
