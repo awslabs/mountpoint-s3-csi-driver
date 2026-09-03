@@ -209,6 +209,10 @@ func (u *PodUnmounter) unmountAndRemoveMountpointSource(source string) (bool, er
 	// Now we know there is no Mountpoint at `source`, and it should be a regular directory.
 	// Let's remove it
 	if err := os.Remove(source); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			klog.V(5).Infof("Source directory %q already removed", source)
+			return isMountpoint, nil
+		}
 		return isMountpoint, fmt.Errorf("failed to remove source directory of orphan Mountpoint %q: %w", source, err)
 	}
 
@@ -253,6 +257,10 @@ func (u *PodUnmounter) waitUntilMountpointIsUnused(source string) error {
 	err := wait.PollUntilContextCancel(ctx, waitUntilMountpointIsUnusedInterval, true, func(ctx context.Context) (done bool, err error) {
 		references, err := u.mount.FindReferencesToMountpoint(source)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				klog.V(5).Infof("Mountpoint %q no longer exists, treating as unused", source)
+				return true, nil
+			}
 			return false, err
 		}
 
@@ -278,6 +286,10 @@ func (u *PodUnmounter) waitUntilMountpointIsUnmounted(source string) error {
 	return wait.PollUntilContextCancel(ctx, waitUntilMountpointIsUnmountedInterval, true, func(ctx context.Context) (done bool, err error) {
 		isMountpoint, err := u.mount.CheckMountpoint(source)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				klog.V(5).Infof("Mountpoint %q no longer exists, treating as unmounted", source)
+				return true, nil
+			}
 			return false, err
 		}
 
