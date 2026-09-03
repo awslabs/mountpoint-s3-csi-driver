@@ -18,7 +18,7 @@ require (
 	github.com/onsi/gomega v1.34.2
 	github.com/shirou/gopsutil/v4 v4.26.4
 	golang.org/x/sys v0.47.0
-	google.golang.org/grpc v1.83.0
+	google.golang.org/grpc v1.83.1
 	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.31.3
 	k8s.io/apiextensions-apiserver v0.31.0
