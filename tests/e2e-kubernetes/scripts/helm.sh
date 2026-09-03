@@ -36,6 +36,19 @@ function helm_uninstall_driver() {
   else
     echo "driver does not seem to be installed"
   fi
+  # Clean up the mount-s3 namespace before reinstalling. A previous run may
+  # have left Mountpoint pods in mount-s3 that are still running, and
+  # Kubernetes rejects new resource creation in a namespace that is being terminated.
+  if $KUBECTL_BIN get namespace mount-s3 --kubeconfig $KUBECONFIG &>/dev/null; then
+    echo "Deleting leftover mount-s3 namespace..."
+    # Mountpoint pods ignore SIGTERM and have a 10-minute termination grace period - bypass it.
+    $KUBECTL_BIN delete pods --all --namespace mount-s3 --grace-period=0 --force --ignore-not-found --kubeconfig $KUBECONFIG || true
+    $KUBECTL_BIN delete namespace mount-s3 --kubeconfig $KUBECONFIG --ignore-not-found
+    if ! $KUBECTL_BIN wait --for=delete namespace/mount-s3 --timeout=120s --kubeconfig $KUBECONFIG; then
+      echo "WARNING: mount-s3 namespace did not finish terminating within 120s"
+      $KUBECTL_BIN get namespace mount-s3 -o yaml --kubeconfig $KUBECONFIG || true
+    fi
+  fi
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get CSIDriver --kubeconfig $KUBECONFIG
 }
