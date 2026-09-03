@@ -93,6 +93,21 @@ There are some possible workarounds:
 
 There is also [a feature request on Mountpoint](https://github.com/awslabs/mountpoint-s3/issues/1055) to improve this behaviour, and if the provided workarounds wouldn't work for you, we'd recommend adding +1 (via 👍 emoji on the original post) to help us to track interest on this feature.
 
+## `subPath` directory creation fails with `file exists` error
+
+When multiple Pods using the same S3 volume with the same `subPath` are scheduled to the same node simultaneously, you may see:
+
+```
+CreateContainerConfigError: failed to create subPath directory for volumeMount "data" of container "app":
+cannot create directory /var/lib/kubelet/pods/.../mount/subdir: file exists
+```
+
+This is a [known kubelet bug](https://github.com/kubernetes/kubernetes/issues/94198) where concurrent `subPath` directory creation races. It is more likely with the CSI driver v2 because multiple Pods [share a single Mountpoint instance](./MOUNTPOINT_POD_SHARING.md). A [fix](https://github.com/kubernetes/kubernetes/pull/134540) is pending upstream.
+
+**Workarounds:**
+- Use the `--prefix` mount option instead of Kubernetes `subPath` (see above).
+- See the [upstream issue](https://github.com/kubernetes/kubernetes/issues/94198) for other workarounds.
+
 ## I'm using an S3 Outposts bucket and am getting 'The bucket does not exist' errors
 
 When using S3 Outposts, it is required to include the full ARN for your Outpost bucket in the `bucketName` field.
