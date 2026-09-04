@@ -362,6 +362,44 @@ func waitForKubernetesObjectToDisappear[T any](ctx context.Context, get framewor
 	})).WithTimeout(timeout).WithPolling(interval).Should(gomega.BeNil())
 }
 
+// countMountpointPods returns the number of Mountpoint Pods currently in the Mountpoint namespace.
+// Headroom Pods (name prefix "hr-") are excluded — they are not Mountpoint Pods.
+func countMountpointPods(ctx context.Context, cs clientset.Interface) (int, []string, error) {
+	pods, err := cs.CoreV1().Pods(mountpointNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to list pods in %s namespace: %w", mountpointNamespace, err)
+	}
+	var names []string
+	for i := range pods.Items {
+		if strings.HasPrefix(pods.Items[i].Name, "hr-") {
+			continue
+		}
+		names = append(names, pods.Items[i].Name)
+	}
+	return len(names), names, nil
+}
+
+// waitForMountpointPodsDeleted waits until the number of Mountpoint Pods in the Mountpoint namespace
+// drops to expectedRemaining, or fails after timeout. Use this after terminating workloads to assert
+// that their corresponding Mountpoint Pods actually drain out (annotated needs-unmount -> unmounted ->
+// Succeeded -> deleted). Drain in daemonset mode is periodic (cleanup interval + staleness threshold),
+// so the timeout must be generous.
+func waitForMountpointPodsDeleted(ctx context.Context, f *framework.Framework, expectedRemaining int, timeout time.Duration) {
+	framework.Logf("Waiting for Mountpoint Pods in %s to drain down to %d (timeout %s)...", mountpointNamespace, expectedRemaining, timeout)
+	gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
+		count, names, err := countMountpointPods(ctx, f.ClientSet)
+		if err != nil {
+			return -1, err
+		}
+		if count != expectedRemaining {
+			framework.Logf("Still waiting: %d Mountpoint Pod(s) present (want %d): %v", count, expectedRemaining, names)
+		}
+		return count, nil
+	}).WithTimeout(timeout).WithPolling(15*time.Second).Should(gomega.Equal(expectedRemaining),
+		"Mountpoint Pods for terminated workloads were not deleted in time")
+	framework.Logf("Mountpoint Pods drained down to %d as expected", expectedRemaining)
+}
+
 // findMountpointPods locates all Mountpoint pods for a specific volume on a node
 func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName string) ([]*v1.Pod, error) {
 	pods, err := cs.CoreV1().Pods(mountpointNamespace).List(ctx, metav1.ListOptions{})

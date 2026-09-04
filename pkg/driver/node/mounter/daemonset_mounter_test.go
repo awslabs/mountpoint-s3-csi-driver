@@ -329,7 +329,7 @@ func TestDaemonsetMounter(t *testing.T) {
 
 			// In sharing mode, FUSE mount goes to source path, not target.
 			// After failure, source should be unmounted and cleaned up (directory removed).
-			sourcePath := filepath.Join(testCtx.kubeletPath, "plugins", "s3.csi.aws.com", "mnt", testCtx.volumeID)
+			sourcePath := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
 			mounted, err := testCtx.dm.IsMountPoint(sourcePath)
 			// ErrNotExist is expected: cleanupMount removes the source directory after unmounting.
 			if err != nil && !os.IsNotExist(err) {
@@ -383,7 +383,7 @@ func TestDaemonsetMounter(t *testing.T) {
 
 			// Can't use IsMountpoint/CheckMountpoint (didn't register mount), so we
 			// verify Unmount was called on source path via FakeMounter log.
-			sourcePath := filepath.Join(testCtx.kubeletPath, "plugins", "s3.csi.aws.com", "mnt", testCtx.volumeID)
+			sourcePath := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
 			testCtx.assertUnmounted(sourcePath)
 		})
 	})
