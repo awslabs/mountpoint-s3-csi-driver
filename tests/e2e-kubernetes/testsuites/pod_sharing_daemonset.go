@@ -112,7 +112,7 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			checkCrossReadWriteDaemonset(ctx, f, pods[0], pods[1])
 
 			// Assert only one FUSE mount exists for this volume by checking mount table
-			// The source mount path is /var/lib/kubelet/plugins/s3.csi.aws.com/mnt/<pvName>
+			// The V3 source mount path is /var/lib/kubelet/plugins/s3.csi.aws.com/v3mnt/<volumeID>
 			ginkgo.By("Verifying only one FUSE source mount exists in the mount table")
 			pvName := resource.Pv.Name
 			dumpMountTable(ctx, f, targetNode, "single mount-s3 check")
@@ -978,7 +978,7 @@ func assertPodFailsToMount(ctx context.Context, f *framework.Framework, pod *v1.
 
 // countFuseMountsForVolume execs into the CSI node pod on the given node and checks
 // /proc/self/mountinfo for FUSE mounts matching the volume ID's source path.
-// The source mount path is: /var/lib/kubelet/plugins/s3.csi.aws.com/mnt/<volumeID>
+// The V3 source mount path is: /var/lib/kubelet/plugins/s3.csi.aws.com/v3mnt/<volumeID>
 // Returns the count of FUSE source mounts for that volume (should be exactly 1 for shared volumes).
 // Retries on transient exec errors (container restarting, etc.) for up to 1 minute.
 func countFuseMountsForVolume(ctx context.Context, f *framework.Framework, nodeName, volumeID string) int {
@@ -997,7 +997,7 @@ func countFuseMountsForVolume(ctx context.Context, f *framework.Framework, nodeN
 		csiPod := &pods.Items[0]
 
 		// Count FUSE source mounts for this specific volume
-		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/mnt/%s' | grep fuse | wc -l", volumeID)
+		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/v3mnt/%s' | grep fuse | wc -l", volumeID)
 		stdout, stderr, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
 		if err != nil {
 			framework.Logf("Failed to exec in CSI node pod (retrying) (stdout=%s, stderr=%s): %v", stdout, stderr, err)
@@ -1230,7 +1230,7 @@ func checkDeviceIDAtSourcePath(ctx context.Context, f *framework.Framework, node
 
 		csiPod := &pods.Items[0]
 		// Get the topmost (last) mount entry at the source path and check its device ID
-		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/mnt/%s ' | grep fuse | tail -1 | awk '{print $3}'", volumeID)
+		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/v3mnt/%s ' | grep fuse | tail -1 | awk '{print $3}'", volumeID)
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
 		if err != nil {
 			framework.Logf("Failed to check device ID at source path (retrying): %v", err)
@@ -1290,7 +1290,7 @@ func getFuseSourceDeviceID(ctx context.Context, f *framework.Framework, nodeName
 		}
 
 		csiPod := &pods.Items[0]
-		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/mnt/%s ' | grep fuse | awk '{print $3}' | tail -1", volumeID)
+		cmd := fmt.Sprintf("cat /proc/self/mountinfo | grep 's3.csi.aws.com/v3mnt/%s ' | grep fuse | awk '{print $3}' | tail -1", volumeID)
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
 		if err != nil {
 			framework.Logf("Failed to get FUSE source device ID (retrying): %v", err)
