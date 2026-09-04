@@ -74,6 +74,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	// In daemonset (V3) mounter mode the controller runs in drain-only mode: a single periodic
+	// cleaner drains the lifecycle of existing V2 Mountpoint Pods (prunes stale S3PA attachments,
+	// deletes completed Mountpoint Pods, removes leftover Headroom Pods) but never spawns new ones.
+	// This path needs only an API client — no Mountpoint Pod config (images, priority classes, etc.).
+	if isDrainOnlyMode() {
+		log.Info("Running controller in drain-only mode (daemonset mounter)")
+
+		cleaner := csicontroller.NewDrainStaleAttachmentCleaner(mgr.GetClient(), *mountpointNamespace)
+		if err := cleaner.SetupWithManager(mgr); err != nil {
+			log.Error(err, "Failed to add drain-only stale attachment cleaner to manager")
+			os.Exit(1)
+		}
+
+		if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
+			log.Error(err, "Failed to start manager")
+			os.Exit(1)
+		}
+		return
+	}
+
 	podLabels := util.ParseLabels(*mountpointPodLabels, log)
 	headroomPodLabels := util.ParseLabels(*mountpointHeadroomPodLabels, log)
 
@@ -109,4 +129,12 @@ func main() {
 		log.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+}
+
+// isDrainOnlyMode returns true when the controller is running in daemonset (V3) mounter mode.
+// In this mode the controller runs only the DrainStaleAttachmentCleaner: it periodically cleans up
+// S3PodAttachments for pods that no longer exist and deletes completed Mountpoint Pods and leftover
+// Headroom Pods — it never spawns Pods.
+func isDrainOnlyMode() bool {
+	return os.Getenv("MOUNTER_MODE") == "daemonset"
 }

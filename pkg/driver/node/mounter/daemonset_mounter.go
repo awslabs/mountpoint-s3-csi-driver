@@ -38,7 +38,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -46,6 +48,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
@@ -118,6 +121,11 @@ type DaemonsetMounter struct {
 	// mountMap tracks shared source mounts for pod-sharing.
 	// Mount/Unmount use reference-counted sharing via this map.
 	mountMap *MountMap
+
+	// s3paCache is the controller-runtime informer cache for MountpointS3PodAttachment CRs.
+	// Used during the V2->V3 upgrade to resolve the committed IAM role ARN for a legacy
+	// V2 Mountpoint Pod. May be nil when legacy V2 support is disabled.
+	s3paCache client.Reader
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
@@ -139,6 +147,13 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 		mountInfoProvider: mountInfoProvider,
 		mountMap:          NewMountMap(),
 	}
+}
+
+// SetS3PACache sets the MountpointS3PodAttachment informer cache used for V2 legacy
+// mount credential refresh (resolving the committed IAM role ARN). Called at startup
+// only when SUPPORT_LEGACY_POD_MOUNTS is enabled.
+func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
+	dm.s3paCache = cache
 }
 
 // Mount mounts the given S3 bucket at the target path with pod-sharing support.
@@ -179,8 +194,18 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return nil
 	}
 
-	// Handle legacy mounts — only for healthy mounted targets.
-	if targetState == TargetHealthy {
+	// Extract PV name from target path
+	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount.
+	parsedTarget, err := targetpath.Parse(target)
+	if err != nil {
+		return fmt.Errorf("failed to parse target path %q: %w", target, err)
+	}
+	volumeID := parsedTarget.VolumeID // This is the PV name
+
+	// Handle legacy mounts — only for healthy mounted targets that are NOT already tracked
+	// as V3 mounts. A target tracked in the V3 MountMap is a V3 republish and must skip the
+	// V1/V2 legacy detection entirely.
+	if targetState == TargetHealthy && !dm.isV3TrackedTarget(target) {
 		// V1 (systemd) check: target is mounted with zero bind-mount references.
 		if dm.isSystemDMountpoint(target) {
 			klog.Infof("DaemonsetMounter: target %s is a legacy V1 (systemd) mount for volume %s, will only refresh credentials", target, credentialCtx.VolumeID)
@@ -194,16 +219,19 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 			}
 			return nil
 		}
-	}
 
-	// Extract PV name from target path to use as the volume identifier for sharing and filesystem paths.
-	// PV names are Kubernetes resource names — guaranteed DNS-safe (no '/', no '..', alphanumeric + '-' + '.').
-	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount
-	parsedTarget, err := targetpath.Parse(target)
-	if err != nil {
-		return fmt.Errorf("failed to parse target path %q: %w", target, err)
+		// V2 (pod-mounter) check: the target's FUSE source lives under the V2 source dir ("mnt"),
+		// whereas V3 sources live under "v3mnt". If the target bind-mounts from a source under the
+		// V2 dir, it's a legacy V2 mount and we refresh its credentials via the V2 path.
+		isV2, err := dm.isLegacyV2Mount(target)
+		if err != nil {
+			return fmt.Errorf("failed to determine if target %q is a legacy V2 mount for volume %s, will retry: %w", target, credentialCtx.VolumeID, err)
+		}
+		if isV2 {
+			klog.Infof("DaemonsetMounter: target %s is a legacy V2 (pod-mounter) mount for volume %s, will refresh credentials", target, credentialCtx.VolumeID)
+			return dm.handleLegacyV2Refresh(ctx, volumeID, credentialCtx, fsGroup)
+		}
 	}
-	volumeID := parsedTarget.VolumeID // This is the PV name
 
 	// Resolve commDir once per NodePublishVolume to ensure credentials and mount options
 	// are sent to the same mounter instance. Prevents the race where mounter pod restarts
@@ -831,6 +859,172 @@ func (dm *DaemonsetMounter) isSystemDMountpoint(target string) bool {
 	}
 
 	return len(references) == 0
+}
+
+// isV3TrackedTarget reports whether the target is already tracked as a V3 mount in the MountMap
+// (within any entry's Targets list). V3 republishes must skip legacy (V1/V2) detection.
+func (dm *DaemonsetMounter) isV3TrackedTarget(target string) bool {
+	tracked := false
+	dm.mountMap.Range(func(_ string, entry *MountEntry) bool {
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		for _, t := range entry.Targets {
+			if t == target {
+				tracked = true
+				return false // stop iteration
+			}
+		}
+		return true
+	})
+	return tracked
+}
+
+// isLegacyV2Mount checks whether the target is a legacy V2 (pod-mounter) mount by inspecting
+// the kernel mount table. Detection is directory-based and definitive:
+//   - V2 sources live under the V2 source dir ("mnt").
+//   - V3 sources live under a separate dir ("v3mnt").
+//
+// It returns true when the target bind-mounts (same device ID) from a source under the V2 dir.
+// Requires SUPPORT_LEGACY_POD_MOUNTS to be enabled.
+//
+// A non-nil error indicates the mount table could not be read — callers should propagate it so
+// kubelet retries, rather than treating it as "not a V2 mount" (which would risk a wrong V3 mount
+// attempt over an existing V2 mount).
+func (dm *DaemonsetMounter) isLegacyV2Mount(target string) (bool, error) {
+	if !util.SupportLegacyPodMounts() {
+		return false, nil
+	}
+
+	mountInfos, err := dm.mountInfoProviderWithDefault()
+	if err != nil {
+		return false, fmt.Errorf("failed to read mount table for V2 detection of %s: %w", target, err)
+	}
+
+	targetMI := findMountByPath(mountInfos, target)
+	if targetMI == nil {
+		return false, nil
+	}
+
+	targetDevID := deviceID(targetMI)
+	// V2 sources live under the legacy "mnt" dir; V3 sources live under the sibling "v3mnt" dir.
+	v2SourceMountDir := SourceMountDir(dm.kubeletPath)
+
+	for i := range mountInfos {
+		mi := &mountInfos[i]
+		if deviceID(mi) != targetDevID || mi.MountPoint == target {
+			continue
+		}
+		if strings.HasPrefix(mi.MountPoint, v2SourceMountDir) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// handleLegacyV2Refresh refreshes credentials for a legacy V2 (pod-mounter) mount.
+// pvName is the PersistentVolume name parsed from the target path by the caller.
+// It looks up the MountpointS3PodAttachment CR (using the same filter logic as the V2 pod-mounter)
+// to find the Mountpoint Pod name and the committed IAM role ARN, then writes refreshed credentials
+// to the pod's comm directory.
+func (dm *DaemonsetMounter) handleLegacyV2Refresh(ctx context.Context, pvName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) error {
+	s3pa, mpPodName, err := dm.findV2S3PodAttachment(ctx, pvName, credentialCtx, fsGroup)
+	if err != nil {
+		// Transient cache/list failure — return an error so kubelet retries NodePublishVolume,
+		// rather than falling through and risking a wrong V3 mount over an existing V2 mount.
+		return fmt.Errorf("failed to look up S3PA for V2 mount %s, will retry: %w", credentialCtx.VolumeID, err)
+	}
+	if s3pa == nil {
+		klog.V(2).Infof("DaemonsetMounter: no matching S3PA found for V2 mount %s (workload %s), mount may be draining", credentialCtx.VolumeID, credentialCtx.WorkloadPodID)
+		return nil
+	}
+
+	mpPod, err := dm.clientset.CoreV1().Pods(mountpointPodNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
+	if err != nil {
+		klog.V(2).Infof("DaemonsetMounter: V2 Mountpoint Pod %q not found, mount may be draining: %v", mpPodName, err)
+		return nil
+	}
+
+	if mpPod.Status.Phase != corev1.PodRunning {
+		klog.V(2).Infof("DaemonsetMounter: V2 Mountpoint Pod %q not running (phase=%s), skipping refresh", mpPodName, mpPod.Status.Phase)
+		return nil
+	}
+
+	// For pod-level auth, use the committed IAM role ARN from the S3PA CR. The S3PA stores the
+	// ARN the pod was started with, which stays consistent for the pod's lifetime even if the
+	// ServiceAccount annotation changes.
+	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod && s3pa.Spec.WorkloadServiceAccountIAMRoleARN != "" {
+		credentialCtx.SetServiceAccountEKSRoleARN(s3pa.Spec.WorkloadServiceAccountIAMRoleARN)
+	}
+
+	// Acquire per-pod lock to serialize credential writes to the same Mountpoint Pod.
+	unlock := lockMountpointPod(mpPodName)
+	defer unlock()
+
+	podPath := filepath.Join(dm.kubeletPath, "pods", string(mpPod.UID))
+	credsDir := mppod.PathOnHost(podPath, mppod.KnownPathCredentials)
+	if err := os.Mkdir(credsDir, credentialprovider.CredentialDirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("failed to ensure V2 credential directory %q: %w", credsDir, err)
+	}
+
+	credentialCtx.SetAsPodMountpoint()
+	credentialCtx.SetMountpointPodID(string(mpPod.UID))
+	credentialCtx.SetWriteAndEnvPath(credsDir, mppod.PathInsideMountpointPod(mppod.KnownPathCredentials))
+
+	if _, _, err := dm.credProvider.Provide(ctx, credentialCtx); err != nil {
+		return fmt.Errorf("failed to refresh V2 credentials for pod %s: %w", mpPodName, err)
+	}
+
+	klog.Infof("DaemonsetMounter: refreshed V2 credentials for Mountpoint Pod %s (volume %s)", mpPodName, credentialCtx.VolumeID)
+	return nil
+}
+
+// findV2S3PodAttachment locates the MountpointS3PodAttachment CR for this workload using the same
+// field-filter logic as the V2 pod-mounter, then matches by workload pod UID. It returns the S3PA,
+// the Mountpoint Pod name, and whether a match was found.
+//
+// A non-nil error indicates a transient failure listing the S3PA cache — callers should propagate it
+// so kubelet retries, rather than treating it as "no V2 mount" (which would risk a wrong V3 mount
+// attempt over an existing V2 mount).
+// A nil S3PA with a nil error means no matching S3PA was found (mount may be draining).
+func (dm *DaemonsetMounter) findV2S3PodAttachment(ctx context.Context, pvName string, credentialCtx credentialprovider.ProvideContext, fsGroup string) (*crdv2.MountpointS3PodAttachment, string, error) {
+	if dm.s3paCache == nil {
+		return nil, "", nil
+	}
+
+	// Same filters as the V2 pod-mounter's getS3PodAttachmentWithRetry. FieldMountOptions is
+	// intentionally excluded (mutable); the workload pod UID match below disambiguates.
+	// Note: FieldPersistentVolumeName is the PV name (from the target path), while FieldVolumeID
+	// is the CSI volume handle (credentialCtx.VolumeID) — these are distinct.
+	fieldFilters := client.MatchingFields{
+		crdv2.FieldNodeName:             dm.nodeID,
+		crdv2.FieldPersistentVolumeName: pvName,
+		crdv2.FieldVolumeID:             credentialCtx.VolumeID,
+		crdv2.FieldWorkloadFSGroup:      fsGroup,
+		crdv2.FieldAuthenticationSource: credentialCtx.AuthenticationSource,
+	}
+	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		fieldFilters[crdv2.FieldWorkloadNamespace] = credentialCtx.PodNamespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = credentialCtx.ServiceAccountName
+	}
+
+	s3paList := &crdv2.MountpointS3PodAttachmentList{}
+	if err := dm.s3paCache.List(ctx, s3paList, fieldFilters); err != nil {
+		return nil, "", fmt.Errorf("failed to list S3PAs for V2 mount %s: %w", credentialCtx.VolumeID, err)
+	}
+
+	for i := range s3paList.Items {
+		s3pa := &s3paList.Items[i]
+		for mpPodName, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+			for _, attachment := range attachments {
+				if attachment.WorkloadPodUID == credentialCtx.WorkloadPodID {
+					return s3pa, mpPodName, nil
+				}
+			}
+		}
+	}
+
+	return nil, "", nil
 }
 
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.
