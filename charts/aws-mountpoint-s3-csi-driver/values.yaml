@@ -135,6 +135,11 @@ eksPodIdentityAgent:
 # TODO: Remove this in v3 as systemd mount support will be discontinued
 supportLegacySystemDMounts: true
 
+# Set to true to enable credential refresh for legacy V2 (pod-mounter) mounts
+# after upgrading to V3 (daemonset mounter). This ensures V2 Mountpoint Pods
+# receive refreshed credentials during the transition period.
+supportLegacyPodMounts: true
+
 experimental:
   # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/HEADROOM_FOR_MPPOD.md for more details.
