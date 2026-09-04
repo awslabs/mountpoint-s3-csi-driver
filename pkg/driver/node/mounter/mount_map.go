@@ -159,8 +159,20 @@ func (m *MountMap) Range(fn func(volumeID string, entry *MountEntry) bool) {
 	})
 }
 
-// SourceMountPath returns the source mount directory for a given volume.
+// V3SourceMountDirName is the name of the V3 (daemonset-mounter) source mount directory.
+// V3 uses "v3mnt" to keep its source mounts separate from V2 (pod-mounter) mounts which
+// live under "mnt". This separation lets the V2->V3 upgrade path definitively distinguish
+// legacy V2 mounts (under "mnt", leaf = mounter pod name) from V3 mounts (under "v3mnt",
+// leaf = volumeID) purely by directory, with no naming heuristic.
+const V3SourceMountDirName = "v3mnt"
+
+// V3SourceMountDir returns the V3 source mount base directory (".../plugins/s3.csi.aws.com/v3mnt").
+func V3SourceMountDir(kubeletPath string) string {
+	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", V3SourceMountDirName)
+}
+
+// SourceMountPath returns the V3 source mount directory for a given volume.
 // This path is stable across pod lifecycles — it's keyed by volume, not pod.
 func SourceMountPath(kubeletPath, volumeID string) string {
-	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt", volumeID)
+	return filepath.Join(V3SourceMountDir(kubeletPath), volumeID)
 }

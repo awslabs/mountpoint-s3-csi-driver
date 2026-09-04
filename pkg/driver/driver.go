@@ -142,6 +142,24 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		go dm.StartCommDirWatch(stopCh)
 		go dm.StartPeriodicCleanup(stopCh)
 
+		// V2 legacy support: start PodUnmounter to handle source teardown for V2 Mountpoint Pods
+		// when the controller annotates them with needs-unmount. Also set up the S3PA informer
+		// cache used to resolve the committed IAM role ARN during V2 credential refresh.
+		if util.SupportLegacyPodMounts() {
+			klog.Info("V2 legacy pod mount support enabled — starting PodUnmounter and S3PA cache")
+			podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
+			if err := podWatcher.Start(stopCh); err != nil {
+				klog.Fatalf("Failed to start Pod watcher for V2 legacy support: %v", err)
+			}
+			unmounter := mounter.NewPodUnmounter(nodeID, mpmounter.New(), podWatcher, credProvider)
+			podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
+			go unmounter.StartPeriodicCleanup(stopCh)
+
+			// Set up S3PA informer cache for V2 credential refresh (resolves mp pod name + IAM role ARN).
+			s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
+			dm.SetS3PACache(s3paCache)
+		}
+
 		maxVolumesPerNode, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
 		if err != nil {
 			return nil, err
