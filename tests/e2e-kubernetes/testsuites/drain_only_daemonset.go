@@ -2,6 +2,7 @@ package custom_testsuites
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 	"k8s.io/utils/ptr"
@@ -118,6 +120,32 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 				_ = f.ClientSet.CoreV1().Pods(mountpointNamespace).Delete(ctx, mpPodName, metav1.DeleteOptions{})
 			})
 
+			// On spec failure, dump diagnostics so CI (esp. ROSA/OpenShift where SCC/admission differs)
+			// tells us *why* the cleaner didn't act: the Mountpoint Pod's phase/conditions/events and
+			// the drain-only controller's logs.
+			ginkgo.DeferCleanup(func(ctx context.Context) {
+				if !ginkgo.CurrentSpecReport().Failed() {
+					return
+				}
+				dumpMountpointPodDiagnostics(ctx, f, mpPodName)
+				dumpDrainControllerLogs(ctx, f)
+			})
+
+			// Wait for the synthetic Mountpoint Pod to actually reach Running, and log its phase along
+			// the way. On OpenShift/ROSA, SCC may reject or rewrite the pod's securityContext (it
+			// assigns UIDs from a namespace range and disallows a hardcoded runAsUser), so a pod that
+			// creates fine may still never schedule/run. Surfacing that here distinguishes "pod never
+			// ran" from "cleaner didn't act".
+			gomega.Eventually(ctx, func(ctx context.Context) (v1.PodPhase, error) {
+				pod, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				framework.Logf("Synthetic Mountpoint Pod %q phase=%s", mpPodName, pod.Status.Phase)
+				return pod.Status.Phase, nil
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(gomega.Equal(v1.PodRunning),
+				"synthetic Mountpoint Pod never reached Running (check SCC/admission on OpenShift)")
+
 			// 2. Create a stale S3PA that references the dummy Mountpoint Pod and a workload UID that
 			//    does not exist. AttachmentTime is stamped in the past so it is immediately past the
 			//    staleness threshold.
@@ -144,22 +172,10 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 			framework.Logf("Created synthetic stale S3PA %q -> MP pod %q (workload UID %q). Waiting for drain-only cleaner...",
 				s3paName, mpPodName, staleWorkloadUID)
 
-			// 3. The cleaner should annotate the Mountpoint Pod with needs-unmount as it empties the
-			//    attachment map. (Best-effort observation; the terminal assertion below is S3PA deletion.)
-			gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
-				pod, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
-				if apierrors.IsNotFound(err) {
-					// Pod already cleaned up — annotation step definitely happened.
-					return true, nil
-				}
-				if err != nil {
-					return false, err
-				}
-				return pod.Annotations[mppod.AnnotationNeedsUnmount] == "true", nil
-			}).WithTimeout(drainAssertionTimeout).WithPolling(drainAssertionPolling).Should(gomega.BeTrue(),
-				"expected drain-only cleaner to annotate Mountpoint Pod with needs-unmount (or delete it)")
-
-			// 4. Terminal assertion: the emptied S3PA is deleted by the cleaner.
+			// Terminal assertion: the cleaner prunes the stale workload, empties the S3PA, and deletes
+			// it. We assert only on S3PA deletion — the intermediate needs-unmount annotation on the
+			// Mountpoint Pod is transient (the cleaner deletes the pod on a later pass once it exits),
+			// so observing it is racy; the S3PA being gone is the definitive end state.
 			gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 				_, err := f.DynamicClient.Resource(s3paGVR).Get(ctx, s3paName, metav1.GetOptions{})
 				if apierrors.IsNotFound(err) {
@@ -254,4 +270,57 @@ func createS3PodAttachment(ctx context.Context, f *framework.Framework, s3pa *cr
 	framework.ExpectNoError(err, "converting S3PA to unstructured")
 	_, err = f.DynamicClient.Resource(s3paGVR).Create(ctx, &unstructured.Unstructured{Object: obj}, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "creating S3PA")
+}
+
+// dumpMountpointPodDiagnostics logs the phase, conditions, container statuses and recent events for
+// the synthetic Mountpoint Pod, to distinguish "pod never ran" (e.g. OpenShift SCC admission) from
+// "cleaner didn't act". Best-effort: never fails the spec.
+func dumpMountpointPodDiagnostics(ctx context.Context, f *framework.Framework, mpPodName string) {
+	pod, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPodName, metav1.GetOptions{})
+	if err != nil {
+		framework.Logf("[diagnostics] could not get Mountpoint Pod %q: %v", mpPodName, err)
+		return
+	}
+	framework.Logf("[diagnostics] Mountpoint Pod %q: phase=%s reason=%q message=%q",
+		mpPodName, pod.Status.Phase, pod.Status.Reason, pod.Status.Message)
+	for _, c := range pod.Status.Conditions {
+		framework.Logf("[diagnostics]   condition type=%s status=%s reason=%q message=%q", c.Type, c.Status, c.Reason, c.Message)
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		framework.Logf("[diagnostics]   container %q ready=%t state=%+v", cs.Name, cs.Ready, cs.State)
+	}
+
+	events, err := f.ClientSet.CoreV1().Events(mountpointNamespace).List(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("involvedObject.name=%s", mpPodName),
+	})
+	if err != nil {
+		framework.Logf("[diagnostics] could not list events for %q: %v", mpPodName, err)
+		return
+	}
+	for i := range events.Items {
+		e := &events.Items[i]
+		framework.Logf("[diagnostics]   event type=%s reason=%s message=%q", e.Type, e.Reason, e.Message)
+	}
+}
+
+// dumpDrainControllerLogs logs the drain-only controller's recent logs so we can see whether the
+// cleaner ran, saw the S3PA, and what (if anything) errored. Best-effort: never fails the spec.
+func dumpDrainControllerLogs(ctx context.Context, f *framework.Framework) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=s3-csi-controller",
+	})
+	if err != nil || len(pods.Items) == 0 {
+		framework.Logf("[diagnostics] could not find s3-csi-controller pod (err=%v, found=%d)", err, len(pods.Items))
+		return
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		framework.Logf("[diagnostics] controller pod %q phase=%s", p.Name, p.Status.Phase)
+		logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, csiDriverDaemonSetNamespace, p.Name, p.Spec.Containers[0].Name)
+		if err != nil {
+			framework.Logf("[diagnostics] could not get logs for controller pod %q: %v", p.Name, err)
+			continue
+		}
+		framework.Logf("[diagnostics] --- logs for controller pod %q ---\n%s", p.Name, logs)
+	}
 }
