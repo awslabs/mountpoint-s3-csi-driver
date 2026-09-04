@@ -95,14 +95,8 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 					Labels:    map[string]string{"app": "mp-drain-e2e"},
 				},
 				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyNever,
-					// The Mountpoint namespace enforces the "restricted" Pod Security Standard,
-					// so the dummy pod must set a compliant security context.
-					SecurityContext: &v1.PodSecurityContext{
-						RunAsNonRoot:   ptr.To(true),
-						RunAsUser:      ptr.To(int64(1000)),
-						SeccompProfile: &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault},
-					},
+					RestartPolicy:   v1.RestartPolicyNever,
+					SecurityContext: mountpointPodSecurityContext(),
 					Containers: []v1.Container{{
 						Name:    "pause",
 						Image:   "public.ecr.aws/docker/library/busybox:stable-musl",
@@ -211,12 +205,8 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 					},
 				},
 				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyNever,
-					SecurityContext: &v1.PodSecurityContext{
-						RunAsNonRoot:   ptr.To(true),
-						RunAsUser:      ptr.To(int64(1000)),
-						SeccompProfile: &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault},
-					},
+					RestartPolicy:   v1.RestartPolicyNever,
+					SecurityContext: mountpointPodSecurityContext(),
 					Containers: []v1.Container{{
 						Name:    "pause",
 						Image:   "public.ecr.aws/docker/library/busybox:stable-musl",
@@ -252,6 +242,31 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 			framework.Logf("Drain-only cleaner successfully deleted orphaned Headroom Pod %q", hrPodName)
 		})
 	})
+}
+
+// mountpointPodSecurityContext returns a pod security context that is accepted by the Mountpoint
+// namespace's admission policy on BOTH vanilla Kubernetes and OpenShift.
+//
+// The Mountpoint namespace enforces the "restricted" Pod Security Standard, so the synthetic pod
+// must set runAsNonRoot, a seccomp profile, and (in the container) drop ALL capabilities.
+//
+// OpenShift is special: its SecurityContextConstraints assign a non-root UID from a per-namespace
+// range and REJECT a hardcoded runAsUser outside that range — not just at create time, but on every
+// update. The drain-only cleaner updates the Mountpoint Pod (to add the needs-unmount annotation)
+// while draining, so a hardcoded runAsUser=1000 makes that update fail with an SCC error, the S3PA
+// is never emptied, and the test times out. Production V2 Mountpoint Pods avoid this by leaving
+// RunAsUser nil on OpenShift (see pkg/cluster/cluster.go MountpointPodUserID), letting SCC pick the
+// UID; we mirror that here.
+func mountpointPodSecurityContext() *v1.PodSecurityContext {
+	sc := &v1.PodSecurityContext{
+		RunAsNonRoot:   ptr.To(true),
+		SeccompProfile: &v1.SeccompProfile{Type: v1.SeccompProfileTypeRuntimeDefault},
+	}
+	if ClusterType != "openshift" {
+		// On vanilla Kubernetes there is no SCC UID range, so pin a concrete non-root UID.
+		sc.RunAsUser = ptr.To(int64(1000))
+	}
+	return sc
 }
 
 // anyNodeName returns the name of any node in the cluster (fails the test if none exist).
