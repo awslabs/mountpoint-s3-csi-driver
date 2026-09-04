@@ -77,6 +77,13 @@ spec:
             drop: ["ALL"]
           seccompProfile:
             type: RuntimeDefault
+          {{- with .Values.node.seLinuxOptions }}
+          seLinuxOptions:
+            user: {{ .user }}
+            type: {{ .type }}
+            role: {{ .role }}
+            level: {{ .level }}
+          {{- end }}
         volumeMounts:
           - name: comm
             mountPath: /comm
