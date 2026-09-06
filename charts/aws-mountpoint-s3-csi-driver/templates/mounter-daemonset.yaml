@@ -77,6 +77,15 @@ spec:
             drop: ["ALL"]
           seccompProfile:
             type: RuntimeDefault
+          {{- if eq (include "aws-mountpoint-s3-csi-driver.isOpenShift" .) "false" }}
+          {{- with .Values.node.seLinuxOptions }}
+          seLinuxOptions:
+            user: {{ .user }}
+            type: {{ .type }}
+            role: {{ .role }}
+            level: {{ .level }}
+          {{- end }}
+          {{- end }}
         volumeMounts:
           - name: comm
             mountPath: /comm
