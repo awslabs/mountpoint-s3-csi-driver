@@ -292,3 +292,5 @@ replace k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.36.3
 replace k8s.io/sample-controller => k8s.io/sample-controller v0.36.3
 
 replace k8s.io/streaming => k8s.io/streaming v0.36.3
+
+replace github.com/google/cel-go => github.com/cel-expr/cel-go v0.29.0
