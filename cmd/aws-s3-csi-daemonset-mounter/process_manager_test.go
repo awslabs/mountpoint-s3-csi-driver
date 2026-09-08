@@ -138,7 +138,11 @@ func TestHandleConnection_RejectsProtocolVersionMismatch(t *testing.T) {
 	dev := mountertest.OpenDevNull(t)
 	const mountId = "pod123-vol456"
 
+	// Wait for the Send goroutine to finish before returning so its dev.Fd() read
+	// doesn't race with OpenDevNull's t.Cleanup closing the file.
+	sendDone := make(chan struct{})
 	go func() {
+		defer close(sendDone)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		mountoptions.Send(ctx, sockPath, mountoptions.Options{
@@ -153,6 +157,7 @@ func TestHandleConnection_RejectsProtocolVersionMismatch(t *testing.T) {
 	assert.NoError(t, err)
 
 	handleConnection(conn.(*net.UnixConn), "/opt/mount-s3", pm, 5*time.Second)
+	<-sendDone
 
 	// No Mountpoint process should have been spawned.
 	fr.mu.Lock()
@@ -356,9 +361,10 @@ func TestHandleConnection_NoFdLeak(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Fd:         int(dev.Fd()),
-				BucketName: "bucket",
-				VolumeId:   volumeId,
+				Fd:              int(dev.Fd()),
+				ProtocolVersion: mountoptions.ProtocolVersion,
+				BucketName:      "bucket",
+				VolumeId:        volumeId,
 			})
 			dev.Close()
 			close(sendDone)
@@ -424,9 +430,10 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Fd:         int(dev.Fd()),
-				BucketName: "bucket",
-				VolumeId:   id,
+				Fd:              int(dev.Fd()),
+				ProtocolVersion: mountoptions.ProtocolVersion,
+				BucketName:      "bucket",
+				VolumeId:        id,
 			})
 			close(sendDone)
 		}()
