@@ -28,7 +28,6 @@ import (
 // drainStaleAttachmentThreshold. We stamp the synthetic attachment well in the past so it is
 // immediately eligible, then wait out (interval + threshold + slack).
 const (
-	drainCleanerInterval  = 2 * time.Minute
 	drainStaleThreshold   = 2 * time.Minute
 	drainAssertionTimeout = 8 * time.Minute
 	drainAssertionPolling = 15 * time.Second
@@ -250,13 +249,12 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 // The Mountpoint namespace enforces the "restricted" Pod Security Standard, so the synthetic pod
 // must set runAsNonRoot, a seccomp profile, and (in the container) drop ALL capabilities.
 //
-// OpenShift is special: its SecurityContextConstraints assign a non-root UID from a per-namespace
-// range and REJECT a hardcoded runAsUser outside that range — not just at create time, but on every
-// update. The drain-only cleaner updates the Mountpoint Pod (to add the needs-unmount annotation)
-// while draining, so a hardcoded runAsUser=1000 makes that update fail with an SCC error, the S3PA
-// is never emptied, and the test times out. Production V2 Mountpoint Pods avoid this by leaving
-// RunAsUser nil on OpenShift (see pkg/cluster/cluster.go MountpointPodUserID), letting SCC pick the
-// UID; we mirror that here.
+// On OpenShift, SecurityContextConstraints assign a non-root UID from a per-namespace range. We
+// observed that a hardcoded runAsUser=1000 on the synthetic pod caused the drain-only cleaner's
+// update of that pod (adding the needs-unmount annotation) to be rejected by SCC, so the S3PA was
+// never emptied and the test timed out. To avoid pinning an out-of-range UID, we leave RunAsUser
+// nil on OpenShift and let SCC assign it — mirroring how production Mountpoint Pods handle it (see
+// pkg/cluster/cluster.go MountpointPodUserID).
 func mountpointPodSecurityContext() *v1.PodSecurityContext {
 	sc := &v1.PodSecurityContext{
 		RunAsNonRoot:   ptr.To(true),
