@@ -56,6 +56,11 @@ func TestInstallationMethod(t *testing.T) {
 			expected: "eks-addon",
 		},
 		{
+			name:     "helm-dev should be recognized",
+			input:    "helm-dev",
+			expected: "helm-dev",
+		},
+		{
 			name:     "value should be sanitized and lowercased",
 			input:    "  HELM  ",
 			expected: "helm",

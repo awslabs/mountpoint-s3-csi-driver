@@ -75,7 +75,11 @@ jobs:
 
           This is an automated bi-weekly merge of \`main\` into \`feature/daemonset-architecture\`.
 
-          No conflicts detected. Please review and merge.
+          No conflicts detected. Please review and merge via 'Create a merge commit' option.
+
+          > [!WARNING]
+          > This PR must be merged via 'Create a merge commit', not 'Squash and merge'.
+          > This preserves the history of the main branch commits.
 
           > **Note:** Please delete the \`${MERGE_BRANCH}\` branch after merging this PR.
 

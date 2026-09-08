@@ -9,11 +9,18 @@
   * Change memory pool metrics in logs. `pool.reserved_bytes` is replaced by `pool.acquired_bytes` and `pool.bytes_in_use`, `pool.allocated_bytes` and `pool.allocate_latency_us` are new, and the `size` dimension on `pool.allocated_pages`, `pool.empty_pages`, `pool.slack_bytes` and `pool.trim_pages` is renamed to `buffer_size`. ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
   * Fix cgroup memory limit detection for inherited limits from parent slices. ([#1933](https://github.com/awslabs/mountpoint-s3/pull/1933))
 
-# Unreleased
+# v2.8.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.8.0/README.md)
 
 ### Notable changes
 * Removed support for AL2, and Ubuntu 22.04.
 * Drop support for Kubernetes 1.30.
+* Add an OS selector to Mountpoint pods ([#895](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/895))
+* Grant event permissions for leader election ([#893](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/893))
+* Do not delete S3 Pod Attachments when workloads are running and terminating ([#842](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/842))
+* Update Go to 1.26.6 ([#909](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/909))
+* Update sidecar images to csi-node-driver-registrar:v2.17.0-eksbuild.5 & livenessprobe:v2.19.0-eksbuild.5 ([#910](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/910))
 * Support Mountpoint [version 1.23.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.23.0) ([#868](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/868))
   * Add support for CRC64NVME full-object checksums on uploads. The `--upload-checksums` argument now accepts `crc64nvme` in addition to the existing `crc32c` and `off` values. ([#1838](https://github.com/awslabs/mountpoint-s3/pull/1838))
   * Add `--infer-content-type` flag to infer the `Content-Type` of new objects based on their file extension instead of using the default `binary/octet-stream`. ([#1790](https://github.com/awslabs/mountpoint-s3/pull/1790))

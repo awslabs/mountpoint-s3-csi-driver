@@ -10,8 +10,12 @@
 
 ## Installation
 
+The S3 CSI Driver is distributed through the following supported channels:
+- [**EKS Addon**](#amazon-eks-managed-add-on) (recommended for EKS clusters) — see [Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- [**Helm repository**](#helm) — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
+
 > [!WARNING]
-> **Supported installation methods:** EKS Addon or the official Helm repository: `https://awslabs.github.io/mountpoint-s3-csi-driver`. Installing from a GitHub branch (`main`, `release-X.Y`, or any other; via `helm install ./charts/...`, or GitOps tools pointing at this repository) is not supported and may break without notice during releases.
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries. Please migrate to the Helm repository or EKS Addon installation methods. For more details, please see [GitHub issue #859](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859).
 
 ### Cluster setup (optional)
 
