@@ -168,7 +168,6 @@ daemonsetMounters:
         cpu: "500m"
     logLevel: 4
     podLabels: {}
-    nodeSelector: {}
     tolerateAllTaints: true
     defaultTolerations: true
     tolerations: []
