@@ -29,25 +29,18 @@ const (
 // workloads terminate — otherwise they would hang indefinitely. Rather than an event-driven
 // reconciler, drain-only mode runs a single periodic sweep that:
 //
-//   - Removes stale workload UIDs (whose pods no longer exist) from each MountpointS3PodAttachment,
-//     annotates emptied Mountpoint Pods with `needs-unmount`, and deletes emptied S3PAs.
+//   - Removes stale workload UIDs (whose pods no longer exist) from each MountpointS3PodAttachment
+//     (S3PA). When a Mountpoint Pod is left with no workloads, it annotates that pod with
+//     `needs-unmount` (so the node unmounts it) and drops it from the S3PA; when an S3PA is left with
+//     no Mountpoint Pods, it deletes the S3PA.
 //   - Deletes completed (Succeeded) V2 Mountpoint Pods.
 //   - Deletes leftover V2 Headroom Pods once their workload is gone or past scheduling.
-//
-// It never spawns new Mountpoint Pods, creates/updates S3PAs for active workloads, or creates
-// Headroom Pods — those responsibilities belong to V3's DaemonsetMounter, not the controller.
-//
-// This type is intentionally SELF-CONTAINED: it depends only on the API client, so the V2
-// spawn/create controller (reconciler.go) and its cleaner (stale_attachment_cleaner.go) can both be
-// deleted without touching drain-only mode.
 type DrainStaleAttachmentCleaner struct {
 	client.Client
 	mountpointNamespace string
 }
 
-// NewDrainStaleAttachmentCleaner creates a DrainStaleAttachmentCleaner. It needs the API client and
-// the Mountpoint namespace (used to identify Mountpoint/Headroom Pods); drain-only mode never spawns
-// pods so it needs no image/priority-class config.
+// NewDrainStaleAttachmentCleaner creates a DrainStaleAttachmentCleaner.
 func NewDrainStaleAttachmentCleaner(c client.Client, mountpointNamespace string) *DrainStaleAttachmentCleaner {
 	return &DrainStaleAttachmentCleaner{Client: c, mountpointNamespace: mountpointNamespace}
 }
@@ -88,8 +81,7 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 		existingPods[string(pod.UID)] = &pod
 	}
 
-	// Always attempt Headroom Pod cleanup — in drain-only mode there is no feature-flag gate; any
-	// leftover V2 Headroom Pods must be removed once their workload is gone or past scheduling.
+	// Delete leftover V2 Headroom Pods once their workload is gone or past scheduling.
 	if err := cm.cleanupStaleHeadroomPods(ctx, existingPods); err != nil {
 		log.Error(err, "Error cleaning up stale Headroom Pods")
 	}
@@ -114,9 +106,19 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 	return nil
 }
 
-// cleanupStaleWorkloads removes workload references whose pod no longer exists (and whose attachment
-// is older than drainStaleAttachmentThreshold, to avoid racing a fresh mount). Emptied Mountpoint
-// Pods are annotated with needs-unmount and dropped; an emptied S3PA is deleted.
+// cleanupStaleWorkloads prunes dead workload references from a S3PA.
+//
+// An S3PA maps each Mountpoint Pod to the list of workloads it serves. A workload reference is
+// considered stale when BOTH:
+//   - its workload pod no longer exists in the cluster, and
+//   - the attachment is older than drainStaleAttachmentThreshold
+//
+// The cleanup then cascades:
+//   - Stale references are dropped from the Mountpoint Pod's workload list.
+//   - If that leaves a Mountpoint Pod with zero workloads, it is annotated needs-unmount (so the
+//     node unmounts it) and removed from the S3PA.
+//   - If that leaves the S3PA with zero Mountpoint Pods, the whole S3PA is deleted; otherwise the
+//     S3PA is updated in place.
 func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
 	modified := false
@@ -228,7 +230,7 @@ func (cm *DrainStaleAttachmentCleaner) addNeedsUnmountAnnotation(ctx context.Con
 	mpPod.Annotations[mppod.AnnotationNeedsUnmount] = "true"
 
 	// Update the pod
-	err = cm.Update(ctx, mpPod) // TODO: This probably needs to be a patch as we might've get a stale Mountpoint Pod.
+	err = cm.Update(ctx, mpPod)
 	if err != nil {
 		log.Error(err, "Failed to update Mountpoint Pod")
 		return err

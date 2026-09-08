@@ -129,13 +129,25 @@ func TestDrainStaleAttachmentCleaner(t *testing.T) {
 			}
 		})
 
-		t.Run("does not delete Running Mountpoint Pod", func(t *testing.T) {
-			mpPod := newMountpointPod("mp-running", corev1.PodRunning)
-			c, cleaner := newDrainCleaner(t, mpPod)
-			assert.NoError(t, cleaner.RunCleanup(ctx))
+		// Only Succeeded Mountpoint Pods are deleted. Running/Pending pods are still doing (or about
+		// to do) work, and Failed pods are kept so their state is preserved for debugging rather than
+		// silently reaped.
+		for _, tc := range []struct {
+			name  string
+			phase corev1.PodPhase
+		}{
+			{"does not delete Running Mountpoint Pod", corev1.PodRunning},
+			{"does not delete Pending Mountpoint Pod", corev1.PodPending},
+			{"does not delete Failed Mountpoint Pod", corev1.PodFailed},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				mpPod := newMountpointPod("mp-"+string(tc.phase), tc.phase)
+				c, cleaner := newDrainCleaner(t, mpPod)
+				assert.NoError(t, cleaner.RunCleanup(ctx))
 
-			assert.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: mountpointNamespace, Name: mpPod.Name}, &corev1.Pod{}))
-		})
+				assert.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: mountpointNamespace, Name: mpPod.Name}, &corev1.Pod{}))
+			})
+		}
 	})
 
 	t.Run("Headroom Pod cleanup", func(t *testing.T) {
