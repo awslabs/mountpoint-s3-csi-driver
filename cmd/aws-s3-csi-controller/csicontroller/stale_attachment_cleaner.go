@@ -12,20 +12,39 @@ import (
 )
 
 const (
-	cleanupInterval          = 2 * time.Minute
+	defaultCleanupInterval   = 2 * time.Minute
 	staleAttachmentThreshold = 2 * time.Minute
 )
 
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
 type StaleAttachmentCleaner struct {
-	reconciler *Reconciler
+	reconciler      *Reconciler
+	cleanupInterval time.Duration
+}
+
+type StaleAttachmentCleanerOption func(*StaleAttachmentCleaner)
+
+func WithCleanupInterval(interval time.Duration) StaleAttachmentCleanerOption {
+	return func(cm *StaleAttachmentCleaner) {
+		cm.cleanupInterval = interval
+	}
 }
 
 // NewStaleAttachmentCleaner creates a new StaleAttachmentCleaner
-func NewStaleAttachmentCleaner(reconciler *Reconciler) *StaleAttachmentCleaner {
-	return &StaleAttachmentCleaner{
-		reconciler: reconciler,
+func NewStaleAttachmentCleaner(reconciler *Reconciler, opts ...StaleAttachmentCleanerOption) *StaleAttachmentCleaner {
+	cm := &StaleAttachmentCleaner{
+		reconciler:      reconciler,
+		cleanupInterval: defaultCleanupInterval,
 	}
+	for _, opt := range opts {
+		opt(cm)
+	}
+	return cm
+}
+
+// Cleaner should only be running one instance at a time, so needs to opt into leader election.
+func (cm *StaleAttachmentCleaner) NeedLeaderElection() bool {
+	return true
 }
 
 // Start begins the periodic cleanup process
@@ -33,7 +52,7 @@ func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
 	log := logf.FromContext(ctx)
 	log.Info("Starting stale attachment cleaner")
 
-	ticker := time.NewTicker(cleanupInterval)
+	ticker := time.NewTicker(cm.cleanupInterval)
 	defer ticker.Stop()
 
 	for {
