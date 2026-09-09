@@ -30,7 +30,7 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-        {{- with $mounter.nodeSelector }}
+        {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       priorityClassName: system-node-critical
