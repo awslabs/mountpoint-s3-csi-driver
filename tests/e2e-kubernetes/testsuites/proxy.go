@@ -3,6 +3,7 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -135,11 +136,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			},
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
-					{
-						Name:  "proxy",
-						Image: "public.ecr.aws/ubuntu/squid:latest",
-						Ports: []v1.ContainerPort{{ContainerPort: proxyPort}},
-					},
+					squidProxyContainer(proxyPort),
 				},
 			},
 		}
@@ -205,4 +202,20 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			"mountpointEnv.FOO": "BAR",
 		}), "environment variable not allowed")
 	})
+}
+
+func squidProxyContainer(port int32) v1.Container {
+	container := v1.Container{
+		Name:  "proxy",
+		Image: "public.ecr.aws/ubuntu/squid:latest",
+		Ports: []v1.ContainerPort{{ContainerPort: port}},
+	}
+
+	// If we're running with a test image override, use it instead of ecr public.
+	if img := os.Getenv("TEST_POD_IMAGE"); img != "" {
+		container.Image = img
+		container.Command = []string{"/squid-entrypoint.sh"}
+	}
+
+	return container
 }
