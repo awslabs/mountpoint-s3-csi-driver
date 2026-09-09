@@ -391,11 +391,12 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 	defer sendCancel()
 
 	err = mountoptions.Send(sendCtx, sockPath, mountoptions.Options{
-		Fd:         fd,
-		BucketName: bucketName,
-		Args:       args.SortedList(),
-		Env:        env.List(),
-		VolumeId:   volumeID,
+		Fd:              fd,
+		ProtocolVersion: mountoptions.ProtocolVersion,
+		BucketName:      bucketName,
+		Args:            args.SortedList(),
+		Env:             env.List(),
+		VolumeId:        volumeID,
 	})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) || errors.Is(err, context.DeadlineExceeded) {
