@@ -583,6 +583,31 @@ func TestPodMounter(t *testing.T) {
 				t.Errorf("it should unmount the target path if Mountpoint fails to start")
 			}
 		})
+
+		t.Run("Returns success when target is already mounted but Mountpoint Pod is gone", func(t *testing.T) {
+			testCtx := setup(t)
+
+			// Create target directory and simulate a previously successful mount at target
+			err := os.MkdirAll(testCtx.targetPath, 0750)
+			assert.NoError(t, err)
+			testCtx.mount.Mount("mountpoint-s3", testCtx.targetPath, "fuse", []string{"bind"})
+
+			// Do NOT create the Mountpoint Pod — it has been deleted.
+			// The S3PA still references it, but the pod no longer exists in the cluster.
+
+			err = testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+				VolumeID:      testCtx.volumeID,
+				WorkloadPodID: testCtx.podUID,
+			}, mountpoint.ParseArgs(nil), testCtx.fsGroup, envprovider.Environment{})
+			assert.NoError(t, err)
+
+			// Target should still be mounted (not unmounted by the driver)
+			ok, err := testCtx.mount.IsMountPoint(testCtx.targetPath)
+			assert.NoError(t, err)
+			if !ok {
+				t.Errorf("target should remain mounted when returning success for deleted Mountpoint Pod")
+			}
+		})
 	})
 
 	t.Run("Checking if target is a mount point", func(t *testing.T) {
