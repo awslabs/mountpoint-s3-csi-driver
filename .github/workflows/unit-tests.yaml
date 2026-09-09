@@ -40,6 +40,15 @@ jobs:
     - name: Test
       run: make test
 
+    - name: Install Helm
+      run: |
+        source tests/e2e-kubernetes/scripts/helm.sh
+        helm_install "$(pwd)/bin"
+        echo "$(pwd)/bin" >> "$GITHUB_PATH"
+
+    - name: Helm chart template tests
+      run: make test/helm-template
+
     - name: Check test coverage
       run: make cover
 
