@@ -97,6 +97,7 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
 	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
 	if cm.reconciler.s3paExpectations.isPending(fieldFilters) {
+		// The S3PA is already visible in the informer cache, so its creation expectation is satisfied before cleanup.
 		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
 		cm.reconciler.s3paExpectations.clear(fieldFilters)
 	}
