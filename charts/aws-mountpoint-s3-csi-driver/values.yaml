@@ -168,8 +168,5 @@ daemonsetMounters:
         cpu: "500m"
     logLevel: 4
     podLabels: {}
-    tolerateAllTaints: true
-    defaultTolerations: true
-    tolerations: []
-    affinity: {}
+    # nodeSelector, affinity, and tolerations are inherited from the node DaemonSet
     imagePullSecrets: []
