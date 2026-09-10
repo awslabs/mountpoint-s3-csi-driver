@@ -99,6 +99,8 @@ controller:
     name: s3-csi-driver-controller-sa
 
 mountpointPod:
+  # NOTE: `namespace` is still required in daemonset (V3) mode — the drain-only controller uses it to
+  # identify leftover V2 Mountpoint/Headroom Pods to clean up.
   namespace: mount-s3
   # If creating the namespace yourself, review the namespace definition in this Helm chart to follow the best practices.
   # For example, this chart enforces that pods in the namespace are bound by the 'restricted' pod security standard.
@@ -128,12 +130,16 @@ awsAccessSecret:
 eksPodIdentityAgent:
   containerCredentialsFullURI: "http://169.254.170.23/v1/credentials"
 
-# CSI Driver v2 only: If enabled, the driver will continue supporting S3 volumes that were mounted by v1 (SystemD mounts),
+# If enabled, the driver will continue supporting S3 volumes that were mounted by v1 (SystemD mounts),
 # including credential refresh, cleanup, and unmounting these legacy volumes.
 # You can set this feature to false for fresh clusters with no v1 volumes,
 # or if you've migrated all workloads using S3 volumes after upgrading to v2.
-# TODO: Remove this in v3 as systemd mount support will be discontinued
 supportLegacySystemDMounts: true
+
+# Set to true to enable credential refresh for legacy V2 (pod-mounter) mounts
+# after upgrading to V3 (daemonset mounter). This ensures V2 Mountpoint Pods
+# receive refreshed credentials during the transition period.
+supportLegacyPodMounts: true
 
 experimental:
   # Enables support for `s3.csi.aws.com/reserve-headroom-for-mppod` scheduling gate on the Workload Pods.

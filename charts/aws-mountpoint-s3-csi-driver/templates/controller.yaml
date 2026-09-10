@@ -1,4 +1,3 @@
-{{- if ne .Values.experimental.mounterMode "daemonset" -}}
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -74,6 +73,10 @@ spec:
               value: {{ .Values.mountpointPod.priorityClassName }}
             - name: MOUNTPOINT_POD_LABELS
               value: {{ toJson .Values.mountpointPod.podLabels | quote }}
+            {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            - name: MOUNTER_MODE
+              value: "daemonset"
+            {{- end }}
             {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
             - name: MOUNTPOINT_HEADROOM_POD_LABELS
               value: {{ toJson .Values.experimental.headroomPodLabels | quote }}
@@ -84,4 +87,3 @@ spec:
             - name: MOUNTPOINT_HEADROOM_IMAGE
               value: {{ .Values.experimental.headroomPodImage }}
             {{- end }}
-{{- end }}
