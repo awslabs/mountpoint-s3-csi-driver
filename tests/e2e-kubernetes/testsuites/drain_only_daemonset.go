@@ -87,27 +87,16 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 			// 1. Create a dummy Mountpoint Pod in the Mountpoint namespace. The cleaner annotates this
 			//    with needs-unmount when its attachment list empties, then deletes it once Succeeded.
 			//    We use a long-sleeping container so the pod stays Running until the driver acts on it.
-			mpPod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      mpPodName,
-					Namespace: mountpointNamespace,
-					Labels:    map[string]string{"app": "mp-drain-e2e"},
-				},
-				Spec: v1.PodSpec{
-					RestartPolicy:   v1.RestartPolicyNever,
-					SecurityContext: mountpointPodSecurityContext(),
-					Containers: []v1.Container{{
-						Name:    "pause",
-						Image:   "public.ecr.aws/docker/library/busybox:stable-musl",
-						Command: []string{"/bin/sh", "-c", "sleep 3600"},
-						SecurityContext: &v1.SecurityContext{
-							AllowPrivilegeEscalation: ptr.To(false),
-							Capabilities:             &v1.Capabilities{Drop: []v1.Capability{"ALL"}},
-						},
-					}},
-				},
+			mpPod := e2epod.MakePod(mountpointNamespace, nil, nil, admissionapi.LevelBaseline, "sleep 3600")
+			mpPod.Name = mpPodName
+			mpPod.Labels = map[string]string{"app": "mp-drain-e2e"}
+			mpPod.Spec.RestartPolicy = v1.RestartPolicyNever
+			mpPod.Spec.SecurityContext = mountpointPodSecurityContext()
+			mpPod.Spec.Containers[0].SecurityContext = &v1.SecurityContext{
+				AllowPrivilegeEscalation: ptr.To(false),
+				Capabilities:             &v1.Capabilities{Drop: []v1.Capability{"ALL"}},
 			}
-			_, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Create(ctx, mpPod, metav1.CreateOptions{})
+			_, err := createPodWithoutWaiting(ctx, f.ClientSet, mountpointNamespace, mpPod)
 			framework.ExpectNoError(err, "creating synthetic Mountpoint Pod")
 			ginkgo.DeferCleanup(func(ctx context.Context) {
 				_ = f.ClientSet.CoreV1().Pods(mountpointNamespace).Delete(ctx, mpPodName, metav1.DeleteOptions{})
@@ -194,30 +183,25 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 			hrPodName := "hr-drain-e2e-" + suffix
 			nonExistentWorkloadUID := "workload-does-not-exist-" + suffix
 
-			hrPod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      hrPodName,
-					Namespace: mountpointNamespace,
-					Labels: map[string]string{
-						// The cleaner reads this label to find the referenced workload.
-						mppod.LabelHeadroomForPod: nonExistentWorkloadUID,
-					},
-				},
-				Spec: v1.PodSpec{
-					RestartPolicy:   v1.RestartPolicyNever,
-					SecurityContext: mountpointPodSecurityContext(),
-					Containers: []v1.Container{{
-						Name:    "pause",
-						Image:   "public.ecr.aws/docker/library/busybox:stable-musl",
-						Command: []string{"/bin/sh", "-c", "sleep 3600"},
-						SecurityContext: &v1.SecurityContext{
-							AllowPrivilegeEscalation: ptr.To(false),
-							Capabilities:             &v1.Capabilities{Drop: []v1.Capability{"ALL"}},
-						},
-					}},
-				},
+			// Build the pod via the shared e2e mechanism so the container image comes from the
+			// test framework (imageutils/TEST_POD_IMAGE) rather than a hardcoded public registry,
+			// then overlay the Headroom-specific bits.
+			hrPod := e2epod.MakePod(mountpointNamespace, nil, nil, admissionapi.LevelBaseline, "sleep 3600")
+			hrPod.Name = hrPodName
+			hrPod.Labels = map[string]string{
+				// The cleaner reads this label to find the referenced workload.
+				mppod.LabelHeadroomForPod: nonExistentWorkloadUID,
 			}
-			_, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Create(ctx, hrPod, metav1.CreateOptions{})
+			hrPod.Spec.RestartPolicy = v1.RestartPolicyNever
+			hrPod.Spec.SecurityContext = mountpointPodSecurityContext()
+			hrPod.Spec.Containers[0].SecurityContext = &v1.SecurityContext{
+				AllowPrivilegeEscalation: ptr.To(false),
+				Capabilities:             &v1.Capabilities{Drop: []v1.Capability{"ALL"}},
+			}
+
+			// Create without waiting for Running: the test only needs the pod to exist so the
+			// drain-only cleaner can delete it (the cleaner may reap it before it ever runs).
+			_, err := createPodWithoutWaiting(ctx, f.ClientSet, mountpointNamespace, hrPod)
 			framework.ExpectNoError(err, "creating synthetic Headroom Pod")
 			ginkgo.DeferCleanup(func(ctx context.Context) {
 				_ = f.ClientSet.CoreV1().Pods(mountpointNamespace).Delete(ctx, hrPodName, metav1.DeleteOptions{})

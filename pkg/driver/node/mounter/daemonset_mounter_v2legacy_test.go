@@ -70,9 +70,9 @@ func TestV3SourceMountDir(t *testing.T) {
 		v3 := V3SourceMountDir(kubeletPath)
 
 		assert.Equals(t, filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt"), v2)
-		assert.Equals(t, filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "v3mnt"), v3)
+		assert.Equals(t, filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "v3_mnt"), v3)
 
-		// "mnt" must not be a path prefix of "v3mnt" (they are siblings).
+		// "mnt" must not be a path prefix of "v3_mnt" (they are siblings).
 		if len(v3) > len(v2) && v3[:len(v2)+1] == v2+string(filepath.Separator) {
 			t.Fatalf("V3 source dir %q must not be nested under V2 source dir %q", v3, v2)
 		}
@@ -81,7 +81,7 @@ func TestV3SourceMountDir(t *testing.T) {
 	t.Run("SourceMountPath uses V3 dir", func(t *testing.T) {
 		kubeletPath := "/var/lib/kubelet"
 		got := SourceMountPath(kubeletPath, "pv-123")
-		want := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "v3mnt", "pv-123")
+		want := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "v3_mnt", "pv-123")
 		assert.Equals(t, want, got)
 	})
 }

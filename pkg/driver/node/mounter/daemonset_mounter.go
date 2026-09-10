@@ -221,7 +221,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		}
 
 		// V2 (pod-mounter) check: the target's FUSE source lives under the V2 source dir ("mnt"),
-		// whereas V3 sources live under "v3mnt". If the target bind-mounts from a source under the
+		// whereas V3 sources live under "v3_mnt". If the target bind-mounts from a source under the
 		// V2 dir, it's a legacy V2 mount and we refresh its credentials via the V2 path.
 		isV2, err := dm.isLegacyV2Mount(target)
 		if err != nil {
@@ -882,7 +882,7 @@ func (dm *DaemonsetMounter) isV3TrackedTarget(target string) bool {
 // isLegacyV2Mount checks whether the target is a legacy V2 (pod-mounter) mount by inspecting
 // the kernel mount table. Detection is directory-based and definitive:
 //   - V2 sources live under the V2 source dir ("mnt").
-//   - V3 sources live under a separate dir ("v3mnt").
+//   - V3 sources live under a separate dir ("v3_mnt").
 //
 // It returns true when the target bind-mounts (same device ID) from a source under the V2 dir.
 // Requires SUPPORT_LEGACY_POD_MOUNTS to be enabled.
@@ -906,7 +906,7 @@ func (dm *DaemonsetMounter) isLegacyV2Mount(target string) (bool, error) {
 	}
 
 	targetDevID := deviceID(targetMI)
-	// V2 sources live under the legacy "mnt" dir; V3 sources live under the sibling "v3mnt" dir.
+	// V2 sources live under the legacy "mnt" dir; V3 sources live under the sibling "v3_mnt" dir.
 	v2SourceMountDir := SourceMountDir(dm.kubeletPath)
 
 	for i := range mountInfos {
