@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -17,12 +18,13 @@ import (
 
 func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved(t *testing.T) {
 	testCases := []struct {
-		name         string
-		authSource   string
-		workloadRole string
-		workloadSA   string
-		workloadNS   string
-		volumeAttrs  map[string]string
+		name           string
+		authSource     string
+		workloadRole   string
+		workloadSA     string
+		workloadNS     string
+		volumeAttrs    map[string]string
+		workloadExists bool
 	}{
 		{
 			name:       "driver authentication",
@@ -38,6 +40,23 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			volumeAttrs: map[string]string{
 				volumecontext.AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 			},
+		},
+		{
+			name:           "driver authentication with valid workload",
+			authSource:     credentialprovider.AuthenticationSourceDriver,
+			workloadNS:     "default",
+			workloadExists: true,
+		},
+		{
+			name:         "pod authentication with valid workload",
+			authSource:   credentialprovider.AuthenticationSourcePod,
+			workloadRole: "arn:aws:iam::123456789012:role/workload",
+			workloadSA:   "workload-sa",
+			workloadNS:   "workload-namespace",
+			volumeAttrs: map[string]string{
+				volumecontext.AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+			},
+			workloadExists: true,
 		},
 	}
 
@@ -60,7 +79,11 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 				},
 			}
 			workloadPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Namespace: testCase.workloadNS},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "workload",
+					Namespace: testCase.workloadNS,
+					UID:       "workload-uid",
+				},
 				Spec: corev1.PodSpec{
 					NodeName:           testNodeName,
 					ServiceAccountName: testCase.workloadSA,
@@ -69,7 +92,7 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			}
 			s3pa := newS3PA("s3pa-stale", map[string][]crdv2.WorkloadAttachment{
 				mountpointPodName: {{
-					WorkloadPodUID: "deleted-workload-uid",
+					WorkloadPodUID: string(workloadPod.UID),
 					AttachmentTime: metav1.NewTime(time.Now().UTC().Add(-staleAttachmentThreshold - time.Second)),
 				}},
 			})
@@ -86,7 +109,11 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 				},
 			}
 
-			client, reconciler := newReconcilerWithObjects(t, s3pa, mountpointPod)
+			objects := []client.Object{s3pa, mountpointPod}
+			if testCase.workloadExists {
+				objects = append(objects, workloadPod)
+			}
+			c, reconciler := newReconcilerWithObjects(t, objects...)
 			fieldFilters := reconciler.buildFieldFilters(workloadPod, pv, testCase.workloadRole)
 			reconciler.s3paExpectations.setPending(fieldFilters)
 
@@ -94,7 +121,17 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			err := cleaner.RunCleanup(context.Background())
 			assert.NoError(t, err)
 
-			assertS3PADeleted(t, client, s3pa.Name)
+			if testCase.workloadExists {
+				current := &crdv2.MountpointS3PodAttachment{}
+				err := c.Get(context.Background(), client.ObjectKeyFromObject(s3pa), current)
+				assert.NoError(t, err)
+				attachments := current.Spec.MountpointS3PodAttachments[mountpointPodName]
+				if len(attachments) != 1 || attachments[0].WorkloadPodUID != string(workloadPod.UID) {
+					t.Errorf("expected valid workload attachment to remain, got %v", attachments)
+				}
+			} else {
+				assertS3PADeleted(t, c, s3pa.Name)
+			}
 			if reconciler.s3paExpectations.isPending(fieldFilters) {
 				t.Error("expected creation expectation to be cleared after the stale cleaner observed the S3PA")
 			}
