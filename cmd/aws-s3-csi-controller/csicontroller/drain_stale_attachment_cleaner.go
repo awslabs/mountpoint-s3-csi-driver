@@ -81,16 +81,14 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 		existingPods[string(pod.UID)] = &pod
 	}
 
-	// Delete leftover V2 Headroom Pods once their workload is gone or past scheduling.
-	if err := cm.cleanupStaleHeadroomPods(ctx, existingPods); err != nil {
-		log.Error(err, "Error cleaning up stale Headroom Pods")
-	}
+	// Delete leftover V2 Headroom Pods once their workload is gone or past scheduling. Best-effort:
+	// per-pod failures are logged inside and don't abort the sweep.
+	cm.cleanupStaleHeadroomPods(ctx, existingPods)
 
 	// Delete completed (Succeeded) V2 Mountpoint Pods. These never get a new workload in drain-only
 	// mode, so once they've cleanly unmounted and exited there is nothing left to keep them around.
-	if err := cm.cleanupSucceededMountpointPods(ctx, existingPods); err != nil {
-		log.Error(err, "Error cleaning up succeeded Mountpoint Pods")
-	}
+	// Best-effort: per-pod failures are logged inside and don't abort the sweep.
+	cm.cleanupSucceededMountpointPods(ctx, existingPods)
 
 	s3paList := &crdv2.MountpointS3PodAttachmentList{}
 	if err := cm.List(ctx, s3paList); err != nil {
@@ -159,7 +157,8 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 }
 
 // cleanupSucceededMountpointPods deletes V2 Mountpoint Pods that have completed (Succeeded).
-func (cm *DrainStaleAttachmentCleaner) cleanupSucceededMountpointPods(ctx context.Context, existingPods map[string]*corev1.Pod) error {
+// Best-effort: per-pod delete failures are logged and skipped, so it returns nothing.
+func (cm *DrainStaleAttachmentCleaner) cleanupSucceededMountpointPods(ctx context.Context, existingPods map[string]*corev1.Pod) {
 	log := logf.FromContext(ctx)
 
 	for _, pod := range existingPods {
@@ -178,12 +177,11 @@ func (cm *DrainStaleAttachmentCleaner) cleanupSucceededMountpointPods(ctx contex
 		}
 		log.Info("Deleted succeeded Mountpoint Pod", "mountpointPod", pod.Name)
 	}
-	return nil
 }
 
 // cleanupStaleHeadroomPods deletes leftover V2 Headroom Pods whose referenced workload no longer
 // exists or is past scheduling.
-func (cm *DrainStaleAttachmentCleaner) cleanupStaleHeadroomPods(ctx context.Context, existingPods map[string]*corev1.Pod) error {
+func (cm *DrainStaleAttachmentCleaner) cleanupStaleHeadroomPods(ctx context.Context, existingPods map[string]*corev1.Pod) {
 	log := logf.FromContext(ctx)
 
 	for _, pod := range existingPods {
@@ -206,7 +204,6 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleHeadroomPods(ctx context.Cont
 			}
 		}
 	}
-	return nil
 }
 
 // addNeedsUnmountAnnotation annotates the Mountpoint Pod with `needs-unmount`, triggering the CSI
