@@ -470,6 +470,65 @@ There are potential race conditions on node startup (especially when a node is f
 
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
+## Configure node host network and health check port
+
+The node DaemonSet exposes the following Helm values to control its pod networking and the port used by its health check (`livenessProbe`):
+
+| Helm value         | Default | Description                                                                 |
+| ------------------ | ------- | --------------------------------------------------------------------------- |
+| `node.hostNetwork` | `false` | When `true`, runs the node pods in the host's network namespace (`hostNetwork: true`). |
+| `node.healthzPort` | `9808`  | The container port used by the liveness probe and the `livenessprobe` sidecar's `--health-port`. |
+
+### When to enable `hostNetwork`
+
+By default each node pod gets its own pod IP from the cluster CNI. On clusters where pod IP address space is constrained (for example, the [AWS VPC CNI](https://github.com/aws/amazon-vpc-cni-k8s) allocates IPs from the VPC subnet and the per-node IP budget is limited by the instance type), running the node DaemonSet with `hostNetwork: true` lets the pods share the node's network namespace instead of consuming a dedicated pod IP on every node. This frees those IPs for your application workloads.
+
+```yaml
+node:
+  hostNetwork: true
+```
+
+> [!WARNING]
+> Enabling `hostNetwork` also changes the pod's access to the [Instance Metadata Service (IMDS)](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html).
+> A common hardening measure is to set the IMDS `HttpPutResponseHopLimit` to `1` so that ordinary (non-host-network) pods, whose traffic is routed through an extra network hop, cannot reach IMDS and assume the node's IAM role. Because a `hostNetwork: true` pod shares the node's network namespace, its traffic does **not** traverse that extra hop, so it can always reach IMDS and assume the node's instance profile role regardless of the hop limit. Only enable `hostNetwork` if you are comfortable with the node DaemonSet having this level of access, and prefer scoping S3 permissions via [EKS Pod Identity or IRSA](#aws-credentials) rather than relying on a broad node instance profile.
+
+### When to change `healthzPort`
+
+When `hostNetwork` is enabled, the liveness probe port is opened directly on the **host's** network namespace rather than an isolated pod namespace, so it must be free on every node the DaemonSet runs on. If the default port `9808` conflicts with another host process or DaemonSet, set `node.healthzPort` to a free port. The value is applied consistently to both the driver container's health check port and the `livenessprobe` sidecar.
+
+> [!WARNING]
+> Make sure the chosen port is free on every node before rolling out. If the port is already in use, the `livenessprobe` sidecar cannot bind it, so the driver container's liveness probe never becomes healthy and the kubelet restarts the node pod repeatedly (a `CrashLoopBackOff`). Because the DaemonSet binds the host port directly under `hostNetwork`, this failure surfaces at rollout on any node where the port is taken — so confirm it is free rather than assuming the default is safe.
+
+This matters most when other CSI drivers or node-level DaemonSets share the same nodes, since several of them run on the host network and default to ports in the same range. In particular, the default `9808` collides head-on with the AWS EBS CSI driver's node liveness probe. The table below lists the defaults of components commonly co-located on EKS nodes (ports are only a real conflict for a component that actually binds them on the host network — see the last column):
+
+| Component | Port(s) | Binds on the host network? |
+| --------- | ------- | -------------------------- |
+| AWS EBS CSI driver — node liveness probe (`ebs-plugin` `healthz`) | `9808` | Only if `node.hostNetwork` is enabled (default `false`) |
+| AWS EBS CSI driver — node `node-driver-registrar` (`healthz-ndr`) | `9809` | Same as above |
+| AWS EFS CSI driver — node liveness probe (`healthz`) | `9809` | **Yes, by default** (`hostNetwork: true`) |
+| AWS EFS CSI driver — controller liveness probe | `9909` | No (runs as a Deployment) |
+| AWS FSx for Lustre CSI driver — node (`node-driver-registrar` `9809`, `fsx-plugin` liveness `9810`) | `9809`, `9810` | No (pod network by default) |
+| Prometheus `node-exporter` | `9100` | **Yes, by default** (`hostNetwork: true`) |
+| VPC CNI (`aws-node`) | `61678` (metrics), `61679` (introspection), `50051` (ipamd gRPC) | Yes (host process) |
+| kubelet | `10250`, `10255` (read-only), `10248` (healthz) | Yes (host process) |
+| kube-proxy | `10256` (healthz), `10249` (metrics) | Yes (host process) |
+
+> [!NOTE]
+> `9809` is not a safe alternative to `9808`: the AWS EFS CSI driver node DaemonSet runs with `hostNetwork: true` by default and binds it, and both the AWS EBS and FSx node registrars default to it as well. Pick a distinct port not used by any co-located component.
+
+When choosing a port, pick a fixed, unused one and, in addition to the host-network ports above, also avoid:
+
+- the **NodePort range** (`30000`–`32767` by default), which the API server may allocate to Services
+- the **ephemeral port range** (`32768`–`60999` on most Linux nodes) — the kernel draws source ports for outbound connections from this range, so a listener bound here can intermittently conflict unless you also reserve it via `net.ipv4.ip_local_reserved_ports`
+
+A good choice is therefore a fixed port below `30000` that isn't one of the well-known ports above (for example `10310`), reserving the change for a genuine conflict.
+
+```yaml
+node:
+  hostNetwork: true
+  healthzPort: 10310
+```
+
 ## Cross-account bucket access
 Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
