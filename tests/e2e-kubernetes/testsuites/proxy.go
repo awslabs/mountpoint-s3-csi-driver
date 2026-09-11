@@ -3,6 +3,7 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -185,13 +186,44 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		checkWriteToPathSucceed(ctx, f, pod, fileInVol, toWrite, seed)
 
 		ginkgo.By("Checking mountpoint actually operate behind proxy")
-		// Find the Mountpoint pods associated with our volume
-		mpPods, err := findMountpointPods(ctx, f.ClientSet, resource.Pv.Name)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to find Mountpoint pods")
+		proxyLogLine := fmt.Sprintf("through a tunnel via proxy \"%s\"", proxyUrl)
 
-		logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, mpPods[0].Namespace, mpPods[0].Name, mpPods[0].Spec.Containers[0].Name)
-		framework.ExpectNoError(err)
-		gomega.Expect(logs).To(gomega.ContainSubstring(fmt.Sprintf("through a tunnel via proxy \"%s\"", proxyUrl)))
+		if isDaemonsetMounterMode(ctx, f) {
+			// In daemonset mode mount-s3 runs in the shared mounter DaemonSet, which prefixes
+			// each log line with the mount id (the PV name). Match a line that is both for this
+			// volume ("[<pv-name>]") and shows the proxy tunnel, so we don't match other volumes.
+			mounterPods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+				LabelSelector: "app=s3-csi-daemonset-mounter",
+			})
+			framework.ExpectNoError(err)
+
+			volumePrefix := fmt.Sprintf("[%s]", resource.Pv.Name)
+			foundForVolume := false
+			for i := range mounterPods.Items {
+				p := &mounterPods.Items[i]
+				logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, p.Namespace, p.Name, p.Spec.Containers[0].Name)
+				framework.ExpectNoError(err)
+				for _, line := range strings.Split(logs, "\n") {
+					if strings.Contains(line, volumePrefix) && strings.Contains(line, proxyLogLine) {
+						foundForVolume = true
+						break
+					}
+				}
+				if foundForVolume {
+					break
+				}
+			}
+			gomega.Expect(foundForVolume).To(gomega.BeTrue(),
+				"expected a mounter daemonset log line for volume %s containing %q", resource.Pv.Name, proxyLogLine)
+		} else {
+			// v2 pod mode: a per-volume Mountpoint pod runs mount-s3.
+			mpPods, err := findMountpointPods(ctx, f.ClientSet, resource.Pv.Name)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to find Mountpoint pods")
+
+			logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, mpPods[0].Namespace, mpPods[0].Name, mpPods[0].Spec.Containers[0].Name)
+			framework.ExpectNoError(err)
+			gomega.Expect(logs).To(gomega.ContainSubstring(proxyLogLine))
+		}
 	})
 
 	ginkgo.It("should fail when mountpointEnv.HTTPS_PROXY set to a non-existent proxy", func(ctx context.Context) {
