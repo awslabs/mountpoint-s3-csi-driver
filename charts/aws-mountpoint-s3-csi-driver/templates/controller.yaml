@@ -73,6 +73,8 @@ spec:
               value: {{ .Values.mountpointPod.priorityClassName }}
             - name: MOUNTPOINT_POD_LABELS
               value: {{ toJson .Values.mountpointPod.podLabels | quote }}
+            - name: MOUNTPOINT_POD_ANNOTATIONS
+              value: {{ toJson .Values.mountpointPod.podAnnotations | quote }}
             {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
             - name: MOUNTPOINT_HEADROOM_POD_LABELS
               value: {{ toJson .Values.experimental.headroomPodLabels | quote }}
