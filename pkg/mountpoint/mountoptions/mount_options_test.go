@@ -199,6 +199,35 @@ func mustMarshal(t *testing.T, v any) []byte {
 	return data
 }
 
+func TestRecvExitsOnContextCancel(t *testing.T) {
+	basePath := t.TempDir()
+	t.Chdir(basePath)
+	mountSock := filepath.Join(basePath, "m")
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mountoptions.Recv(ctx, mountSock)
+		errCh <- err
+	}()
+
+	// Give Recv time to start listening.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the context — Recv should return promptly.
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Recv did not return after context cancellation")
+	}
+}
+
 const defaultTimeout = 10 * time.Second
 
 func defaultContext(t *testing.T) context.Context {
