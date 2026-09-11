@@ -1412,7 +1412,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(hrPod.Pod)
 		})
 
-		It("should not ungate pod when any PVC is unbound", func() {
+		It("should not ungate pod when any S3 PVC is unbound", func() {
 			vol1 := createVolume()
 			vol1.bind()
 			vol2 := createVolume() // Created but NOT bound
@@ -1423,7 +1423,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
 			verifyHeadroomPodFor(pod, vol1, hrPod1)
 
-			// Pod should NOT be ungated because vol2 is not bound yet
+			// Pod should NOT be ungated because vol2 (S3 PVC) is not bound yet
 			// Verify both that the gate remains and only one headroom pod exists
 			Consistently(func(g Gomega) {
 				var p corev1.Pod
@@ -1441,7 +1441,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
 		})
 
-		It("should ungate pod after all PVCs become bound", func() {
+		It("should ungate pod after all S3 PVCs become bound", func() {
 			vol1 := createVolume()
 			vol1.bind()
 			vol2 := createVolume() // Created but NOT bound initially
@@ -1468,6 +1468,103 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol2, pod)
 			waitForObjectToDisappear(hrPod1.Pod)
 			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should ungate pod when non-S3 PVC is unbound (WaitForFirstConsumer)", func() {
+			// Simulates a workload pod with both S3 PVCs (bound) and an EBS PVC
+			// that uses WaitForFirstConsumer (unbound until pod is scheduled).
+			// The pod should be ungated after headroom pods are created for S3 PVCs,
+			// without waiting for the non-S3 PVC to bind.
+			s3Vol := createVolume()
+			s3Vol.bind()
+
+			// Create EBS volume but do NOT bind it — simulates WaitForFirstConsumer.
+			// Here the PVC does reference its PV, so the PV's CSI driver identifies it as non-S3.
+			ebsVol := createVolume(withCSIDriver(ebsCSIDriver))
+
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsVol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			// Headroom pod should be created for the S3 volume
+			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
+			verifyHeadroomPodFor(pod, s3Vol, hrPod)
+
+			// Pod should be ungated — the unbound EBS PVC should NOT block ungating
+			pod.waitUntilSchedulingUngated()
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, s3Vol, pod)
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should ungate pod when a dynamically provisioned non-S3 PVC is unbound (WaitForFirstConsumer)", func() {
+			// Same deadlock as above, but with what a real `WaitForFirstConsumer` PVC actually looks
+			// like before its Workload Pod is scheduled: `Pending`, with an empty `spec.volumeName`
+			// and no PV at all. Waiting for it to bind would deadlock the pod, since it can only
+			// bind once the pod is scheduled, which requires the gate to be removed first.
+			s3Vol := createVolume()
+			s3Vol.bind()
+
+			ebsPVC := createDynamicallyProvisionedPVC("ebs-gp3-wait-for-first-consumer")
+
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
+			verifyHeadroomPodFor(pod, s3Vol, hrPod)
+
+			// Pod should be ungated — the unbound, PV-less EBS PVC should NOT block ungating
+			pod.waitUntilSchedulingUngated()
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, s3Vol, pod)
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should not ungate pod while a statically provisioned S3 PVC is still binding", func() {
+			// A statically provisioned S3 PVC that's pre-bound from the PV side: `pv.spec.claimRef`
+			// points at the PVC, but the PV controller hasn't populated `pvc.spec.volumeName` yet,
+			// so the PVC is still `Pending`. We must keep the pod gated until it binds, otherwise we'd
+			// lose the requeue and never spawn a Mountpoint Pod for this volume.
+			vol1 := createVolume()
+			vol1.bind()
+
+			bindingPVC := createDynamicallyProvisionedPVC("")
+			createS3PVClaiming(bindingPVC)
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(bindingPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			// Pod should NOT be ungated — the still-binding S3 PVC must hold the gate
+			Consistently(func(g Gomega) {
+				var p corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
+				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
+					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
+				))
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+	})
+
+	Context("Partially bound PVCs", func() {
+		It("should still spawn Mountpoint Pods for bound volumes if another S3 PVC reports Bound without a volumeName", func() {
+			// A PVC can be observed as `Bound` before `spec.volumeName` has been populated. That must be
+			// treated as "still binding" and retried, rather than as a hard error - a hard error aborts
+			// the whole reconcile, stalling the volumes that are already ready.
+			vol1 := createVolume()
+			vol1.bind()
+
+			stillBinding := createDynamicallyProvisionedPVC("")
+			createS3PVClaiming(stillBinding)
+			stillBinding.Status.Phase = corev1.ClaimBound
+			Expect(k8sClient.Status().Update(ctx, stillBinding)).To(Succeed())
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(stillBinding))
+			pod.schedule(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
 		})
 	})
 
@@ -1718,8 +1815,13 @@ func (v *testVolume) bind() {
 	v.pv.Status.Phase = corev1.VolumeBound
 	Expect(k8sClient.Status().Update(ctx, v.pv)).To(Succeed())
 
-	v.pvc.Spec.VolumeName = v.pv.Name
-	Expect(k8sClient.Update(ctx, v.pvc)).To(Succeed())
+	// `createVolume` already points the PVC at the PV via `spec.volumeName`, but PVCs created
+	// directly by tests might not - and there's no PV controller in envtest to populate it for us.
+	if v.pvc.Spec.VolumeName == "" {
+		v.pvc.Spec.VolumeName = v.pv.Name
+		Expect(k8sClient.Update(ctx, v.pvc)).To(Succeed())
+	}
+
 	v.pvc.Status.Phase = corev1.ClaimBound
 	Expect(k8sClient.Status().Update(ctx, v.pvc)).To(Succeed())
 
@@ -1729,6 +1831,8 @@ func (v *testVolume) bind() {
 
 	waitForObject(v.pvc, func(g Gomega, pvc *corev1.PersistentVolumeClaim) {
 		g.Expect(pvc.Status.Phase).To(Equal(corev1.ClaimBound))
+		// A bound PVC always references its PV - the reconciler relies on this to resolve the PV.
+		g.Expect(pvc.Spec.VolumeName).To(Equal(v.pv.Name))
 	})
 }
 
@@ -1761,6 +1865,57 @@ func withVolumeHandle(volumeHandle string) volumeModifier {
 	return func(v *testVolume) {
 		v.pv.Spec.PersistentVolumeSource.CSI.VolumeHandle = volumeHandle
 	}
+}
+
+// createDynamicallyProvisionedPVC creates a PVC that mimics a dynamically provisioned volume waiting
+// on its provisioner: it has no `spec.volumeName`, no PV, and stays `Pending`. This is what a
+// `WaitForFirstConsumer` PVC looks like before its Workload Pod is scheduled.
+func createDynamicallyProvisionedPVC(storageClassName string) *corev1.PersistentVolumeClaim {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-dynamic-pvc",
+			Namespace:    defaultNamespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &storageClassName,
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create dynamically provisioned PVC")
+	waitForObject(pvc)
+	return pvc
+}
+
+// createS3PVClaiming creates an S3-backed PV whose `spec.claimRef` points at `pvc`, without touching
+// the PVC. This mimics a statically provisioned volume pre-bound from the PV side, before the PV
+// controller has populated `pvc.spec.volumeName`.
+func createS3PVClaiming(pvc *corev1.PersistentVolumeClaim) *corev1.PersistentVolume {
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-pv",
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			// Needs to be empty for static provisioning
+			StorageClassName: "",
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			Capacity:         corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:       s3CSIDriver,
+					VolumeHandle: "test-csi-volume",
+				},
+			},
+			ClaimRef: &corev1.ObjectReference{Name: pvc.Name, Namespace: pvc.Namespace},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "Failed to create PV")
+	waitForObject(pv, func(g Gomega, pv *corev1.PersistentVolume) {
+		g.Expect(pv.Spec.ClaimRef).NotTo(BeNil())
+	})
+	return pv
 }
 
 // createVolume creates a new pair of unbounded PV and PVC.
@@ -1807,6 +1962,11 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "Failed to create PV")
+
+	// For static provisioning, PVC references the PV via spec.volumeName from creation.
+	// This must be set after PV creation (so pv.Name is populated) but before PVC creation.
+	pvc.Spec.VolumeName = pv.Name
+
 	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create PVC")
 
 	waitForObject(pv)
