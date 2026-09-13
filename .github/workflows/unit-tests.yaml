@@ -17,6 +17,11 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    - name: Verify Helm controller replicas
+      run: |
+        helm template standard charts/aws-mountpoint-s3-csi-driver --set controller.replicaCount=3 --show-only templates/controller.yaml | grep -q '^  replicas: 3$'
+        helm template addon charts/aws-mountpoint-s3-csi-driver --set isEKSAddon=true --set controller.replicaCount=3 --show-only templates/controller.yaml | grep -q '^  replicas: 3$'
+
     - name: Set up Go
       uses: actions/setup-go@v7
       with:

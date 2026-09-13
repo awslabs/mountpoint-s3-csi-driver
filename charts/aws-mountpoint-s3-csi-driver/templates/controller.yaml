@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.controller.replicaCount }}
   selector:
     matchLabels:
       app: s3-csi-controller
