@@ -3,6 +3,13 @@ name: "E2E Tests (Untrusted)"
 on:
   pull_request_target:
 
+concurrency:
+  # Group by pull request number, since on `pull_request_target` events `github.ref`
+  # is the *base* branch, which would put every open pull request in the same group.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded runs on `pull_request_target` events.
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
 permissions:
   id-token: write
   contents: read
