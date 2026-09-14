@@ -217,11 +217,11 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		path := filepath.Join(e2epod.VolumeMountPath1, filename)
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPathSucceedEventually(ctx, f, pod, path, testWriteSize, seed)
-		checkReadFromPathSucceedEventually(ctx, f, pod, path, testWriteSize, seed)
-		checkListingPathWithEntriesEventually(ctx, f, pod, e2epod.VolumeMountPath1, []string{filename, "test.txt"})
+		checkWriteToPathSucceed(ctx, f, pod, path, testWriteSize, seed)
+		checkReadFromPathSucceed(ctx, f, pod, path, testWriteSize, seed)
+		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{filename, "test.txt"})
 		checkDeletingPathSucceed(ctx, f, pod, path)
-		checkListingPathWithEntriesEventually(ctx, f, pod, e2epod.VolumeMountPath1, []string{"test.txt"})
+		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{"test.txt"})
 	}
 
 	updateCSIDriversServiceAccountRole := func(ctx context.Context, oidcProvider, policyName string) {
@@ -273,8 +273,8 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		testWriteSize = 1024
 		testFile = filepath.Join(e2epod.VolumeMountPath1, "test.txt")
 		for _, pod := range pods {
-			checkWriteToPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
-			checkReadFromPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
+			checkWriteToPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 		return
 	}
@@ -282,8 +282,8 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyReadOnlyAccess verifies pods can list but not write
 	verifyReadOnlyAccess := func(ctx context.Context, pods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range pods {
-			checkListingPathSucceedEventually(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFailsEventually(ctx, f, pod, testFile, testWriteSize, seed)
+			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
 
@@ -301,12 +301,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyWorkloadHealth checks if pods can perform expected operations
 	verifyWorkloadHealth := func(ctx context.Context, fullAccessPods, readOnlyPods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range fullAccessPods {
-			checkReadFromPathSucceedEventually(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
 			checkBasicFileOperations(ctx, pod)
 		}
 		for _, pod := range readOnlyPods {
-			checkListingPathSucceedEventually(ctx, f, pod, e2epod.VolumeMountPath1)
-			checkWriteToPathFailsEventually(ctx, f, pod, testFile, testWriteSize, seed)
+			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
 

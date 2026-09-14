@@ -8,6 +8,13 @@ The chart in this repository may reference container images that have not been p
 or contain in-progress changes that are incompatible with the images it references.
 Please see supported installation methods in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md.
 {{- end }}
+{{- if ne .Values.experimental.mounterMode "daemonset" }}
+
+WARNING: `supportLegacyPodMounts` is set to `{{ .Values.supportLegacyPodMounts }}`, but `experimental.mounterMode` is not "daemonset".
+This setting only applies in daemonset mode (it controls draining/refreshing of legacy V2 pod mounts
+during a V2 -> V3 upgrade) and is ignored otherwise. No action is required; the value has no effect
+in the current mode. If you did not intend to run outside daemonset mode, set `experimental.mounterMode=daemonset`.
+{{- end }}
 {{- if eq .Values.experimental.mounterMode "daemonset"}}
 
 IMPORTANT: After helm upgrade, mounter pods continue running the previous version (OnDelete strategy) to avoid disrupting active mounts.
