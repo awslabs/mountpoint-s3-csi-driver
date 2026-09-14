@@ -100,3 +100,24 @@ Determine if running on OpenShift (incl. ROSA)
 {{- end -}}
 {{- $isOpenShift -}}
 {{- end -}}
+
+{{/*
+Best-effort parse of a Kubernetes memory quantity (e.g. "2Gi", "500M", "1.5Gi") into a byte count.
+Returns "" for forms it does not understand, so callers can skip rather than misjudge.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" -}}
+{{- $value := toString . -}}
+{{- if regexMatch `^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$` $value -}}
+{{- $suffix := regexFind `[A-Za-z]+$` $value -}}
+{{- $number := trimSuffix $suffix $value | float64 -}}
+{{- $multiplier := 1.0 -}}
+{{- if $suffix -}}
+{{- $multiplier = get (dict
+      "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0
+      "Ti" 1099511627776.0 "Pi" 1125899906842624.0 "Ei" 1152921504606846976.0
+      "k" 1000.0 "M" 1000000.0 "G" 1000000000.0
+      "T" 1000000000000.0 "P" 1000000000000000.0 "E" 1000000000000000000.0) $suffix -}}
+{{- end -}}
+{{- printf "%.0f" (mulf $number $multiplier) -}}
+{{- end -}}
+{{- end -}}

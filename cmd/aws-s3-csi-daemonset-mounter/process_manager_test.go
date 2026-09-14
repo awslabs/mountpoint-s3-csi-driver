@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -78,7 +79,7 @@ func (r *fakeProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -124,7 +125,7 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 func TestProcessManager_Launch_HappyPath(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 	dev := mountertest.OpenDevNull(t)
 
 	err := pm.Launch("mount-123", "/usr/bin/mount-s3", mountoptions.Options{
@@ -159,10 +160,117 @@ func TestProcessManager_Launch_HappyPath(t *testing.T) {
 	assert.Equals(t, true, os.IsNotExist(err))
 }
 
+func TestProcessManager_Launch_MemoryTarget(t *testing.T) {
+	testCases := []struct {
+		name            string
+		memoryTargetMiB int64
+		args            []string
+		wantArgs        []string
+	}{
+		{
+			name:            "injects --memory-target",
+			memoryTargetMiB: 512,
+			wantArgs:        []string{"--foreground", "--memory-target=512"},
+		},
+		{
+			name:     "no target means no --memory-target",
+			wantArgs: []string{"--foreground"},
+		},
+		{
+			name:            "does not override --memory-target from PV mountOptions",
+			memoryTargetMiB: 512,
+			args:            []string{"--memory-target=256"},
+			wantArgs:        []string{"--foreground", "--memory-target=256"},
+		},
+		{
+			name:            "leaves other mount options alone",
+			memoryTargetMiB: 1024,
+			args:            []string{"--prefix=data/"},
+			wantArgs:        []string{"--foreground", "--memory-target=1024", "--prefix=data/"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeProcessRunner{}
+			pm := NewProcessManager(t.TempDir(), fr, memoryTarget{miB: tc.memoryTargetMiB})
+			dev := mountertest.OpenDevNull(t)
+
+			options := mountoptions.Options{
+				Fd:         int(dev.Fd()),
+				BucketName: "my-bucket",
+				Args:       tc.args,
+			}
+			assert.NoError(t, pm.Launch("mount-123", "/usr/bin/mount-s3", options))
+
+			// cmd.Args is [binary, bucket, /dev/fd/3, ...sorted args].
+			assert.Equals(t, tc.wantArgs, fr.handles[0].cmd.Args[3:])
+
+			// The wire slice is the driver's mount-sharing key and is persisted to meta, so a target
+			// leaking into it would make running mounts look incompatible with themselves after a resize.
+			assert.Equals(t, tc.args, options.Args)
+
+			fr.handles[0].Exit(0, "")
+			pm.Shutdown()
+		})
+	}
+}
+
+func TestProcessManager_Launch_RefusesInvalidMemorySizing(t *testing.T) {
+	commDir := t.TempDir()
+	fr := &fakeProcessRunner{}
+	sizingErr := resolveMemoryTarget(2*gib, "limits.memory", 10).err // 204 MiB per volume, below Mountpoint's minimum
+	if sizingErr == nil {
+		t.Fatal("expected a sizing error to test with")
+	}
+	pm := NewProcessManager(commDir, fr, memoryTarget{err: sizingErr})
+
+	t.Run("refuses a mount without its own --memory-target", func(t *testing.T) {
+		dev := mountertest.OpenDevNull(t)
+		err := pm.Launch("mount-refused", "/usr/bin/mount-s3", mountoptions.Options{
+			Fd:         int(dev.Fd()),
+			BucketName: "bucket",
+		})
+		if !errors.Is(err, sizingErr) {
+			t.Fatalf("expected Launch to refuse with the sizing error, got: %v", err)
+		}
+
+		fr.mu.Lock()
+		assert.Equals(t, 0, len(fr.handles))
+		fr.mu.Unlock()
+		pm.mu.Lock()
+		assert.Equals(t, 0, len(pm.processes))
+		pm.mu.Unlock()
+
+		// Reported the way a crashed Mountpoint would be, so the driver relays it as the mount failure.
+		errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-refused.error"))
+		assert.NoError(t, err)
+		assert.Equals(t, sizingErr.Error(), string(errBytes))
+	})
+
+	t.Run("still starts a mount whose PV sets --memory-target", func(t *testing.T) {
+		dev := mountertest.OpenDevNull(t)
+		err := pm.Launch("mount-sized", "/usr/bin/mount-s3", mountoptions.Options{
+			Fd:         int(dev.Fd()),
+			BucketName: "bucket",
+			Args:       []string{"--memory-target=1024"},
+		})
+		assert.NoError(t, err)
+
+		assert.Equals(t, []string{"--foreground", "--memory-target=1024"}, fr.handles[0].cmd.Args[3:])
+
+		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
+
+		_, err = os.ReadFile(filepath.Join(commDir, "mount-sized.error"))
+		assert.Equals(t, true, os.IsNotExist(err))
+	})
+}
+
 func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	for i, id := range []string{"mount-a", "mount-b", "mount-c"} {
 		dev := mountertest.OpenDevNull(t)
@@ -217,7 +325,7 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	dev1 := mountertest.OpenDevNull(t)
 	err := pm.Launch("same-mount", "/usr/bin/mount-s3", mountoptions.Options{
@@ -259,7 +367,7 @@ func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 func TestProcessManager_Shutdown_SendsSIGTERM(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	dev := mountertest.OpenDevNull(t)
 	err := pm.Launch("m1", "/usr/bin/mount-s3", mountoptions.Options{
@@ -289,7 +397,7 @@ func TestProcessManager_Shutdown_SendsSIGTERM(t *testing.T) {
 func TestHandleConnection_NoFdLeak(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -362,7 +470,7 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -416,7 +524,7 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, fr)
+	pm := NewProcessManager(commDir, fr, memoryTarget{})
 
 	dev := mountertest.OpenDevNull(t)
 	err := pm.Launch("mount-abc", "/usr/bin/mount-s3", mountoptions.Options{

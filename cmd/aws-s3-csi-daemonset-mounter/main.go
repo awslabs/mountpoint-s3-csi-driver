@@ -40,10 +40,11 @@ import (
 )
 
 var (
-	commDir          = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
-	mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
-	recvTimeout      = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
-	stderrCapacity   = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
+	commDir           = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
+	mountpointBinDir  = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
+	recvTimeout       = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
+	stderrCapacity    = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
+	maxVolumesPerNode = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
 )
 
 const (
@@ -69,7 +70,10 @@ func main() {
 
 	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
 
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity})
+	memoryBudgetBytes, memoryBudgetField := containerMemoryBudgetBytes()
+
+	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity},
+		resolveMemoryTarget(memoryBudgetBytes, memoryBudgetField, *maxVolumesPerNode))
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	sigCh := make(chan os.Signal, 1)
