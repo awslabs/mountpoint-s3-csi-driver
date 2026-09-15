@@ -162,12 +162,17 @@ daemonsetMounters:
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
     # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
     # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
-    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to 
+    # 0 also leaves --memory-target unset.
+    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to
     # track volume usage.
   - maxVolumesPerNode: 4
-    # Total resource requests and limits for the mounter DaemonSet pod.
-    # requests.memory should be sized to maxVolumesPerNode × per-mount memory
-    # (e.g., 4 mounts × 512Mi = 2Gi, or 10 mounts × 4Gi = 40Gi).
+    # Resource requests and limits for the mounter container.
+    #
+    # The mounter divides this container's memory budget — limits.memory if set, otherwise
+    # requests.memory — by maxVolumesPerNode to give each Mountpoint process a --memory-target.
+    # Size the field as maxVolumesPerNode × per-mount memory (e.g. 4 × 512Mi = 2Gi, or 10 × 4Gi =
+    # 40Gi); each share must be >= 512Mi, Mountpoint's minimum. With neither set, every Mountpoint
+    # targets 95% of the memory it detects, and together they can exhaust the node.
     resources:
       requests:
         memory: "2Gi"

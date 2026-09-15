@@ -3,6 +3,29 @@
 {{- fail "daemonsetMounters must have exactly one entry" }}
 {{- end }}
 {{- $mounter := index .Values.daemonsetMounters 0 }}
+{{- $resources := $mounter.resources | default dict }}
+{{- $limits := $resources.limits | default dict }}
+{{- $requests := $resources.requests | default dict }}
+{{- /* The mounter divides its container's memory budget — limits.memory if set, else requests.memory —
+       by maxVolumesPerNode to give each Mountpoint a --memory-target. Fail early on a sizing that is
+       visibly undersized. Best-effort only: an unparseable quantity skips the check, and the mounter
+       refuses such mounts at runtime anyway. */}}
+{{- $budget := $limits.memory }}
+{{- $budgetField := "limits.memory" }}
+{{- if not $budget }}
+{{- $budget = $requests.memory }}
+{{- $budgetField = "requests.memory" }}
+{{- end }}
+{{- $maxVolumes := int $mounter.maxVolumesPerNode }}
+{{- if and $budget (gt $maxVolumes 0) }}
+{{- $budgetBytes := include "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" $budget }}
+{{- if $budgetBytes }}
+{{- $shareMiB := divf (divf (float64 $budgetBytes) $maxVolumes) 1048576.0 }}
+{{- if lt $shareMiB 512.0 }}
+{{- fail (printf "daemonsetMounters[]: resources.%s (%v) split across maxVolumesPerNode=%d gives %.0f MiB per Mountpoint process, below Mountpoint's minimum --memory-target of 512 MiB: the mounter would refuse every mount that does not set --memory-target in its PV mountOptions. Raise resources.%s or lower maxVolumesPerNode." $budgetField $budget $maxVolumes (floor $shareMiB) $budgetField) }}
+{{- end }}
+{{- end }}
+{{- end }}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -73,7 +96,27 @@ spec:
         args:
           - --comm-dir=/comm
           - --mountpoint-bin-dir=/mountpoint-s3/bin
+          - --max-volumes-per-node={{ $mounter.maxVolumesPerNode }}
           - --v={{ $mounter.logLevel }}
+        {{- if or $limits.memory $requests.memory }}
+        env:
+          {{- if $limits.memory }}
+          - name: MOUNTER_MEMORY_LIMIT_BYTES
+            valueFrom:
+              resourceFieldRef:
+                containerName: mounter
+                resource: limits.memory
+                divisor: "1"
+          {{- end }}
+          {{- if $requests.memory }}
+          - name: MOUNTER_MEMORY_REQUEST_BYTES
+            valueFrom:
+              resourceFieldRef:
+                containerName: mounter
+                resource: requests.memory
+                divisor: "1"
+          {{- end }}
+        {{- end }}
         securityContext:
           runAsUser: 1000
           runAsNonRoot: true
