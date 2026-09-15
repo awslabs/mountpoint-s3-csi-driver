@@ -449,6 +449,47 @@ func TestMountMap_ConcurrentDeleteAndGetOrCreate(t *testing.T) {
 	// No panic = success. Final state may or may not have an entry depending on ordering.
 }
 
+func TestMountMap_ClaimHandle_SamePVIsIdempotent(t *testing.T) {
+	m := NewMountMap()
+	if err := m.ClaimHandle("handle-1", "pv-a"); err != nil {
+		t.Fatalf("first claim failed: %v", err)
+	}
+	// Same PV re-claiming (republish / pod-sharing) must succeed.
+	if err := m.ClaimHandle("handle-1", "pv-a"); err != nil {
+		t.Fatalf("re-claim by same PV failed: %v", err)
+	}
+}
+
+func TestMountMap_ClaimHandle_DifferentPVSameHandleRejected(t *testing.T) {
+	m := NewMountMap()
+	assert.Equals(t, nil, m.ClaimHandle("handle-1", "pv-a"))
+
+	err := m.ClaimHandle("handle-1", "pv-b")
+	if err == nil {
+		t.Fatal("expected rejection for a different PV reusing the handle, got nil")
+	}
+	assert.Contains(t, err.Error(), "already used on this node")
+}
+
+func TestMountMap_ClaimHandle_DifferentHandlesCoexist(t *testing.T) {
+	m := NewMountMap()
+	assert.Equals(t, nil, m.ClaimHandle("handle-1", "pv-a"))
+	if err := m.ClaimHandle("handle-2", "pv-b"); err != nil {
+		t.Fatalf("distinct handle should be allowed, got: %v", err)
+	}
+}
+
+func TestMountMap_Delete_ReleasesHandle(t *testing.T) {
+	m := NewMountMap()
+	assert.Equals(t, nil, m.ClaimHandle("handle-1", "pv-a"))
+
+	// Deleting pv-a frees the handle for a different PV.
+	m.Delete("pv-a")
+	if err := m.ClaimHandle("handle-1", "pv-b"); err != nil {
+		t.Fatalf("handle should be reusable after the owner is deleted, got: %v", err)
+	}
+}
+
 // MountMap.Range iterates every tracked mount on the node — it's the primitive
 // the periodic cleanup job uses to walk the map and reconcile each entry. Here, we verify that early-stop is honored.
 func TestMountMap_Range_StopsEarlyOnFalse(t *testing.T) {

@@ -272,6 +272,12 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
 		PodNamespace:             credentialCtx.PodNamespace,
 		FSGroup:                  fsGroup,
+		VolumeHandle:             credentialCtx.VolumeID,
+	}
+
+	// credentialCtx.VolumeID is the CSI volumeHandle; volumeID is the PV name.
+	if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+		return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
 	}
 
 	// If source is mounted, check health first. Dead source = mark not mounted so we go
@@ -1169,6 +1175,7 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 		ServiceAccountEKSRoleARN: meta.ServiceAccountEKSRoleARN,
 		PodNamespace:             meta.PodNamespace,
 		FSGroup:                  meta.FSGroup,
+		VolumeHandle:             meta.VolumeHandle,
 	}
 	entry.RefCount = len(targets)
 	entry.Targets = targets
@@ -1246,6 +1253,14 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		targets := findBindMountTargets(mountInfos, deviceID(sourceMI), sourcePath)
 
 		dm.populateEntryFromMeta(meta, sourcePath, true, targets)
+
+		// Re-claim the handle so the index is rebuilt. Legacy meta files predate this field
+		// and have no handle — skip those.
+		if meta.VolumeHandle != "" {
+			if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
+				klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
+			}
+		}
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))
 	}
