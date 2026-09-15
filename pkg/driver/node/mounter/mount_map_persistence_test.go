@@ -478,6 +478,37 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	assert.Equals(t, "--allow-other", recovered.Params.MountOptions[0])
 }
 
+func TestRebuildMountMap_ReclaimsVolumeHandle(t *testing.T) {
+	kubeletPath := t.TempDir()
+	sourcePath := SourceMountPath(kubeletPath, "pv-live")
+
+	entry := &MountEntry{
+		VolumeID:   "pv-live",
+		SourcePath: sourcePath,
+		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "handle-1"},
+	}
+	assert.NoError(t, WriteMeta(kubeletPath, entry))
+
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourcePath, Major: 0, Minor: 42},
+	}))
+	assert.NoError(t, dm.RebuildMountMap())
+
+	// Handle restored on the recovered entry.
+	recovered := dm.mountMap.Get("pv-live")
+	if recovered == nil {
+		t.Fatal("expected recovered entry for pv-live")
+	}
+	assert.Equals(t, "handle-1", recovered.Params.VolumeHandle)
+
+	// Index rebuilt from meta: a different PV reusing the handle is now rejected.
+	err := dm.mountMap.ClaimHandle("handle-1", "pv-other")
+	if err == nil {
+		t.Fatal("expected duplicate handle to be rejected after rebuild")
+	}
+	assert.Contains(t, err.Error(), "already used on this node")
+}
+
 func TestRebuildMountMap_SourceWithNoBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-orphan")
