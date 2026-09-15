@@ -96,10 +96,9 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
 	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
-	if cm.reconciler.s3paExpectations.isPending(fieldFilters) {
-		// The S3PA is already visible in the informer cache, so its creation expectation is satisfied before cleanup.
+	// The matching UID in the informer cache satisfies this expectation; a stale snapshot cannot clear a replacement's expectation.
+	if cm.reconciler.s3paExpectations.clearIfObserved(fieldFilters, s3pa.UID) {
 		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
-		cm.reconciler.s3paExpectations.clear(fieldFilters)
 	}
 	modified := false
 

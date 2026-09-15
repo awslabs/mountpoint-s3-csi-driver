@@ -6,13 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -96,6 +100,7 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 					AttachmentTime: metav1.NewTime(time.Now().UTC().Add(-staleAttachmentThreshold - time.Second)),
 				}},
 			})
+			s3pa.UID = "s3pa-uid"
 			s3pa.Spec.MountOptions = strings.Join(pv.Spec.MountOptions, ",")
 			s3pa.Spec.AuthenticationSource = testCase.authSource
 			s3pa.Spec.WorkloadFSGroup = "1000"
@@ -115,7 +120,7 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			}
 			c, reconciler := newReconcilerWithObjects(t, objects...)
 			fieldFilters := reconciler.buildFieldFilters(workloadPod, pv, testCase.workloadRole)
-			reconciler.s3paExpectations.setPending(fieldFilters)
+			reconciler.s3paExpectations.setPending(fieldFilters, s3pa.UID)
 
 			cleaner := NewStaleAttachmentCleaner(reconciler)
 			err := cleaner.RunCleanup(context.Background())
@@ -137,4 +142,87 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			}
 		})
 	}
+}
+
+func TestStaleAttachmentCleanerPreservesReplacementExpectation(t *testing.T) {
+	for _, replacementName := range []string{"s3pa-replacement", "s3pa-stale"} {
+		t.Run(replacementName, func(t *testing.T) {
+			// The cleaner retains a snapshot of an attachment that reconciliation already replaced.
+			stale := newS3PA("s3pa-stale", nil)
+			stale.UID = "stale-uid"
+			replacement := newS3PA(replacementName, nil)
+			replacement.UID = "replacement-uid"
+			_, reconciler := newReconcilerWithObjects(t, replacement)
+			fieldFilters := fieldFiltersForS3PodAttachment(replacement)
+			reconciler.s3paExpectations.setPending(fieldFilters, replacement.UID)
+
+			cleaner := NewStaleAttachmentCleaner(reconciler)
+			err := cleaner.cleanupStaleWorkloads(context.Background(), stale, nil)
+			assert.NoError(t, err)
+			if !reconciler.s3paExpectations.isPending(fieldFilters) {
+				t.Fatal("the stale snapshot cleared the replacement's creation expectation")
+			}
+
+			err = cleaner.cleanupStaleWorkloads(context.Background(), replacement, nil)
+			assert.NoError(t, err)
+			if reconciler.s3paExpectations.isPending(fieldFilters) {
+				t.Error("the replacement's creation expectation remains after observation")
+			}
+		})
+	}
+}
+
+func TestStaleAttachmentCleanerDoesNotAllowCreationAfterEmptyCacheRead(t *testing.T) {
+	workloadPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
+		Spec:       corev1.PodSpec{NodeName: testNodeName, SecurityContext: &corev1.PodSecurityContext{}},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: testPVName},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{Driver: mountpointCSIDriverName, VolumeHandle: testVolumeID},
+			},
+		},
+	}
+	s3pa := newS3PA("s3pa-pending", nil)
+	s3pa.UID = "pending-uid"
+	s3pa.Spec.AuthenticationSource = credentialprovider.AuthenticationSourceDriver
+	serviceAccount := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: defaultServiceAccount, Namespace: workloadPod.Namespace},
+	}
+
+	var reconciler *Reconciler
+	createCalls := 0
+	observed := false
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme()).
+		WithObjects(serviceAccount).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*crdv2.MountpointS3PodAttachmentList); ok {
+					// The read returns empty, but the cleaner observes the attachment before List returns.
+					observed = true
+					return NewStaleAttachmentCleaner(reconciler).cleanupStaleWorkloads(ctx, s3pa, nil)
+				}
+				return c.List(ctx, list, opts...)
+			},
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				createCalls++
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	reconciler = NewReconciler(c, testPodConfig(), logr.Discard())
+	fieldFilters := reconciler.buildFieldFilters(workloadPod, pv, "")
+	reconciler.s3paExpectations.setPending(fieldFilters, s3pa.UID)
+
+	requeue, err := reconciler.spawnOrDeleteMountpointPodIfNeeded(
+		context.Background(), workloadPod, &corev1.PersistentVolumeClaim{}, pv, mppod.DefaultPriorityClass)
+	assert.NoError(t, err)
+	assert.Equals(t, Requeue, requeue)
+	assert.Equals(t, true, observed)
+	assert.Equals(t, 0, createCalls)
+	assert.Equals(t, false, reconciler.s3paExpectations.isPending(fieldFilters))
 }
