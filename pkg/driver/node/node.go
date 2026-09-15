@@ -21,6 +21,7 @@ import (
 	"maps"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -66,6 +67,12 @@ type S3NodeServer struct {
 	NodeID            string
 	Mounter           mounter.Mounter
 	MaxVolumesPerNode int64
+
+	// volumeHandleOwner maps a volumeHandle to the PV name that first used it on this node.
+	// Kubernetes identifies volumes by handle, so a different PV reusing one is a misconfiguration.
+	// warnedHandleReuse records PVs we already warned about, so we don't warn on every republish.
+	volumeHandleOwner sync.Map // volumeHandle -> pvName
+	warnedHandleReuse sync.Map // pvName -> struct{}
 }
 
 func NewS3NodeServer(nodeID string, mounter mounter.Mounter, maxVolumesPerNode int64) *S3NodeServer {
@@ -98,6 +105,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	targetHost := req.GetTargetPath()
 	if len(targetHost) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Target path not provided")
+	}
+
+	// Warn if a different PV is reusing this volumeHandle on the node.
+	if parsed, perr := targetpath.Parse(targetHost); perr == nil {
+		if owner, claimed := ns.volumeHandleOwner.LoadOrStore(volumeID, parsed.VolumeID); claimed && owner.(string) != parsed.VolumeID {
+			if _, warned := ns.warnedHandleReuse.LoadOrStore(parsed.VolumeID, struct{}{}); !warned {
+				klog.Warningf("volumeHandle %q is already used on this node by PersistentVolume %q; PersistentVolume %q reuses it. volumeHandles must be unique per PV.", volumeID, owner, parsed.VolumeID)
+			}
+		}
 	}
 
 	// Translate target path from host format to container format if needed.
@@ -232,6 +248,12 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 	targetContainer, err := util.KubeletHostPathToContainerPath(targetHost)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to translate target path %q: %v", targetHost, err)
+	}
+
+	// Release this PV's claim on its volumeHandle.
+	if parsed, perr := targetpath.Parse(targetHost); perr == nil {
+		ns.volumeHandleOwner.CompareAndDelete(volumeID, parsed.VolumeID)
+		ns.warnedHandleReuse.Delete(parsed.VolumeID)
 	}
 
 	mounted, err := ns.Mounter.IsMountPoint(targetContainer)
