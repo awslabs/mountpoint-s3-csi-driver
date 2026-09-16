@@ -92,11 +92,12 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		mountoptions.Send(ctx, sockPath, mountoptions.Options{
-			Fd:         int(dev.Fd()),
-			BucketName: "test-bucket",
-			Args:       []string{"--region", "us-west-2"},
-			Env:        []string{"AWS_REGION=us-west-2"},
-			VolumeId:   "pod123-vol456",
+			Fd:              int(dev.Fd()),
+			ProtocolVersion: mountoptions.ProtocolVersion,
+			BucketName:      "test-bucket",
+			Args:            []string{"--region", "us-west-2"},
+			Env:             []string{"AWS_REGION=us-west-2"},
+			VolumeId:        "pod123-vol456",
 		})
 	}()
 
@@ -119,6 +120,56 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 	// Cleanup
 	fr.handles[0].Exit(0, "")
 	pm.Shutdown()
+}
+
+// TestHandleConnection_RejectsProtocolVersionMismatch verifies that a mount request from a
+// version-skewed CSI Driver Node is rejected before any Mountpoint process is spawned, and that a
+// clear error is written to <mountId>.error for the driver to surface.
+func TestHandleConnection_RejectsProtocolVersionMismatch(t *testing.T) {
+	commDir := t.TempDir()
+	fr := &fakeProcessRunner{}
+	pm := NewProcessManager(commDir, fr)
+
+	sockPath := filepath.Join(commDir, "test.sock")
+	listener, err := net.Listen("unix", sockPath)
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	dev := mountertest.OpenDevNull(t)
+	const mountId = "pod123-vol456"
+
+	// Wait for the Send goroutine to finish before returning so its dev.Fd() read
+	// doesn't race with OpenDevNull's t.Cleanup closing the file.
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		mountoptions.Send(ctx, sockPath, mountoptions.Options{
+			Fd:              int(dev.Fd()),
+			ProtocolVersion: mountoptions.ProtocolVersion + "-incompatible",
+			BucketName:      "test-bucket",
+			VolumeId:        mountId,
+		})
+	}()
+
+	conn, err := listener.Accept()
+	assert.NoError(t, err)
+
+	handleConnection(conn.(*net.UnixConn), "/opt/mount-s3", pm, 5*time.Second)
+	<-sendDone
+
+	// No Mountpoint process should have been spawned.
+	fr.mu.Lock()
+	assert.Equals(t, 0, len(fr.handles))
+	fr.mu.Unlock()
+
+	// A clear error must be written to the mount's .error file for the driver to surface.
+	content, err := os.ReadFile(filepath.Join(commDir, mountId+errorFileExt))
+	assert.NoError(t, err)
+	if len(content) == 0 {
+		t.Fatal("expected a non-empty error file on protocol version mismatch")
+	}
 }
 
 func TestProcessManager_Launch_HappyPath(t *testing.T) {
@@ -310,9 +361,10 @@ func TestHandleConnection_NoFdLeak(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Fd:         int(dev.Fd()),
-				BucketName: "bucket",
-				VolumeId:   volumeId,
+				Fd:              int(dev.Fd()),
+				ProtocolVersion: mountoptions.ProtocolVersion,
+				BucketName:      "bucket",
+				VolumeId:        volumeId,
 			})
 			dev.Close()
 			close(sendDone)
@@ -378,9 +430,10 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Fd:         int(dev.Fd()),
-				BucketName: "bucket",
-				VolumeId:   id,
+				Fd:              int(dev.Fd()),
+				ProtocolVersion: mountoptions.ProtocolVersion,
+				BucketName:      "bucket",
+				VolumeId:        id,
 			})
 			close(sendDone)
 		}()
