@@ -275,11 +275,6 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		VolumeHandle:             credentialCtx.VolumeID,
 	}
 
-	// credentialCtx.VolumeID is the CSI volumeHandle; volumeID is the PV name.
-	if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
-		return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
-	}
-
 	// If source is mounted, check health first. Dead source = mark not mounted so we go
 	// through the fresh-mount path below. Only enforce compatibility on a healthy (living) source.
 	if entry.sourceMounted {
@@ -302,6 +297,13 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	if !entry.sourceMounted {
+		// First mount for this PV on the node — enforce per-node volumeHandle uniqueness here so
+		// the check runs once per entry, not on every republish/share. credentialCtx.VolumeID is
+		// the CSI volumeHandle; volumeID is the PV name. Released in MountMap.Delete on teardown.
+		if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+			return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
+		}
+
 		// Fresh mount: ensure no associated resources (credentials, error file, FUSE mount,
 		// source directory) are left behind from a previous attempt or dead source before
 		// creating new ones. cleanupMount is idempotent — safe when resources don't exist.
