@@ -490,6 +490,23 @@ func TestMountMap_Delete_ReleasesHandle(t *testing.T) {
 	}
 }
 
+func TestMountMap_ClaimHandle_SamePVReclaimsAfterDeadSource(t *testing.T) {
+	// A dead source is re-mounted by the SAME PV, which re-claims its own handle. That must
+	// not be treated as a duplicate, and uniqueness must still hold for a different PV.
+	m := NewMountMap()
+	assert.Equals(t, nil, m.ClaimHandle("handle-1", "pv-a"))
+
+	// Dead-source re-mount: same PV re-claims the same handle — must succeed.
+	if err := m.ClaimHandle("handle-1", "pv-a"); err != nil {
+		t.Fatalf("same-PV re-claim after dead-source remount should succeed, got: %v", err)
+	}
+
+	// A different PV reusing the handle is still rejected.
+	if err := m.ClaimHandle("handle-1", "pv-b"); err == nil {
+		t.Fatal("expected a different PV to still be rejected after re-claim")
+	}
+}
+
 // MountMap.Range iterates every tracked mount on the node — it's the primitive
 // the periodic cleanup job uses to walk the map and reconcile each entry. Here, we verify that early-stop is honored.
 func TestMountMap_Range_StopsEarlyOnFalse(t *testing.T) {

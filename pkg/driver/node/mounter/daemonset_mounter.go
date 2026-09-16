@@ -301,6 +301,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		// the check runs once per entry, not on every republish/share. credentialCtx.VolumeID is
 		// the CSI volumeHandle; volumeID is the PV name. Released in MountMap.Delete on teardown.
 		if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+			// Drop the blank entry GetOrCreate inserted for this PV; otherwise it lingers,
+			// since periodic cleanup skips entries with an empty SourcePath.
+			dm.mountMap.Delete(volumeID)
 			return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
 		}
 
@@ -1256,12 +1259,13 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 
 		dm.populateEntryFromMeta(meta, sourcePath, true, targets)
 
-		// Re-claim the handle so the index is rebuilt. Legacy meta files predate this field
-		// and have no handle — skip those.
-		if meta.VolumeHandle != "" {
-			if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
-				klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
-			}
+		// Re-claim the handle so uniqueness survives a restart. volumeHandle is a required PV
+		// field, so a recovered mount should always have one — an empty handle means the meta is
+		// corrupt/incomplete, so surface it rather than skip silently.
+		if meta.VolumeHandle == "" {
+			klog.Errorf("MountMap: recovered volume %s has no volumeHandle in meta; skipping uniqueness re-claim", meta.VolumeID)
+		} else if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
+			klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
 		}
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))
