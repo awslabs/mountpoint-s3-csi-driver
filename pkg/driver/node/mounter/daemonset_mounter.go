@@ -1187,6 +1187,20 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 	entry.sourceMounted = sourceMounted
 }
 
+// reclaimHandle re-registers a recovered volume's handle in the uniqueness index on restart,
+// so duplicates stay rejected. volumeHandle is a required PV field, so an empty one means the
+// meta is corrupt/incomplete — surface it rather than skip silently; a conflict (two recovered
+// volumes claiming the same handle) is logged too.
+func (dm *DaemonsetMounter) reclaimHandle(meta *MountMeta) {
+	if meta.VolumeHandle == "" {
+		klog.Errorf("MountMap: recovered volume %s has no volumeHandle in meta; skipping uniqueness re-claim", meta.VolumeID)
+		return
+	}
+	if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
+		klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
+	}
+}
+
 // RebuildMountMap reconstructs the MountMap from disk on driver startup.
 // It scans the meta directory for .meta.json files, verifies each source mount
 // is still alive via /proc/self/mountinfo, and counts bind mounts (targets) by
@@ -1248,6 +1262,9 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				// Store entry in the map so future NodePublish or periodic cleanup can
 				// retry cleanup using the original commDir where credentials were written.
 				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
+				// Reserve the handle even for this dead-but-kept entry, so a different PV can't
+				// take it and lock this volume out when it recovers (same rule as a live mount).
+				dm.reclaimHandle(meta)
 				continue
 			}
 			os.Remove(metaPath)
@@ -1258,15 +1275,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		targets := findBindMountTargets(mountInfos, deviceID(sourceMI), sourcePath)
 
 		dm.populateEntryFromMeta(meta, sourcePath, true, targets)
-
-		// Re-claim the handle so uniqueness survives a restart. volumeHandle is a required PV
-		// field, so a recovered mount should always have one — an empty handle means the meta is
-		// corrupt/incomplete, so surface it rather than skip silently.
-		if meta.VolumeHandle == "" {
-			klog.Errorf("MountMap: recovered volume %s has no volumeHandle in meta; skipping uniqueness re-claim", meta.VolumeID)
-		} else if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
-			klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
-		}
+		dm.reclaimHandle(meta)
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))
 	}
