@@ -272,6 +272,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
 		PodNamespace:             credentialCtx.PodNamespace,
 		FSGroup:                  fsGroup,
+		VolumeHandle:             credentialCtx.VolumeID,
 	}
 
 	// If source is mounted, check health first. Dead source = mark not mounted so we go
@@ -296,6 +297,16 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	if !entry.sourceMounted {
+		// First mount for this PV on the node — enforce per-node volumeHandle uniqueness here so
+		// the check runs once per entry, not on every republish/share. credentialCtx.VolumeID is
+		// the CSI volumeHandle; volumeID is the PV name. Released in MountMap.Delete on teardown.
+		if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+			// Drop the blank entry GetOrCreate inserted for this PV; otherwise it lingers,
+			// since periodic cleanup skips entries with an empty SourcePath.
+			dm.mountMap.Delete(volumeID)
+			return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
+		}
+
 		// Fresh mount: ensure no associated resources (credentials, error file, FUSE mount,
 		// source directory) are left behind from a previous attempt or dead source before
 		// creating new ones. cleanupMount is idempotent — safe when resources don't exist.
@@ -1169,10 +1180,25 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 		ServiceAccountEKSRoleARN: meta.ServiceAccountEKSRoleARN,
 		PodNamespace:             meta.PodNamespace,
 		FSGroup:                  meta.FSGroup,
+		VolumeHandle:             meta.VolumeHandle,
 	}
 	entry.RefCount = len(targets)
 	entry.Targets = targets
 	entry.sourceMounted = sourceMounted
+}
+
+// reclaimHandle re-registers a recovered volume's handle in the uniqueness index on restart,
+// so duplicates stay rejected. volumeHandle is a required PV field, so an empty one means the
+// meta is corrupt/incomplete — surface it rather than skip silently; a conflict (two recovered
+// volumes claiming the same handle) is logged too.
+func (dm *DaemonsetMounter) reclaimHandle(meta *MountMeta) {
+	if meta.VolumeHandle == "" {
+		klog.Errorf("MountMap: recovered volume %s has no volumeHandle in meta; skipping uniqueness re-claim", meta.VolumeID)
+		return
+	}
+	if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
+		klog.Warningf("MountMap: volumeHandle conflict recovering volume %s: %v", meta.VolumeID, err)
+	}
 }
 
 // RebuildMountMap reconstructs the MountMap from disk on driver startup.
@@ -1236,6 +1262,9 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				// Store entry in the map so future NodePublish or periodic cleanup can
 				// retry cleanup using the original commDir where credentials were written.
 				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
+				// Reserve the handle even for this dead-but-kept entry, so a different PV can't
+				// take it and lock this volume out when it recovers (same rule as a live mount).
+				dm.reclaimHandle(meta)
 				continue
 			}
 			os.Remove(metaPath)
@@ -1246,6 +1275,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		targets := findBindMountTargets(mountInfos, deviceID(sourceMI), sourcePath)
 
 		dm.populateEntryFromMeta(meta, sourcePath, true, targets)
+		dm.reclaimHandle(meta)
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))
 	}

@@ -30,6 +30,7 @@ type MountMeta struct {
 	ServiceAccountEKSRoleARN string   `json:"serviceAccountEKSRoleARN"`
 	PodNamespace             string   `json:"podNamespace"`
 	FSGroup                  string   `json:"fsGroup"`
+	VolumeHandle             string   `json:"volumeHandle"`
 }
 
 // WriteMeta atomically writes the .meta.json file for the given volume.
@@ -44,6 +45,7 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 		ServiceAccountEKSRoleARN: entry.Params.ServiceAccountEKSRoleARN,
 		PodNamespace:             entry.Params.PodNamespace,
 		FSGroup:                  entry.Params.FSGroup,
+		VolumeHandle:             entry.Params.VolumeHandle,
 	}
 
 	data, err := json.Marshal(meta)
