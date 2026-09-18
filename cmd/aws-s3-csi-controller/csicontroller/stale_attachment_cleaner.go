@@ -95,6 +95,11 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
+	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
+	// The matching UID in the informer cache satisfies this expectation; a stale snapshot cannot clear a replacement's expectation.
+	if cm.reconciler.s3paExpectations.clearIfObserved(fieldFilters, s3pa.UID) {
+		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
+	}
 	modified := false
 
 	now := time.Now().UTC()
