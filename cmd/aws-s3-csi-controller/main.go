@@ -38,6 +38,7 @@ var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 var mountpointPodLabels = flag.String("mountpoint-pod-labels", os.Getenv("MOUNTPOINT_POD_LABELS"), "Pod labels to apply to Mountpoint Pods (JSON format).")
+var mountpointPodAnnotations = flag.String("mountpoint-pod-annotations", os.Getenv("MOUNTPOINT_POD_ANNOTATIONS"), "Pod annotations to apply to Mountpoint Pods (JSON format).")
 var mountpointHeadroomPodLabels = flag.String("mountpoint-headroom-pod-labels", os.Getenv("MOUNTPOINT_HEADROOM_POD_LABELS"), "Pod labels to apply to Headroom Pods (JSON format).")
 
 var (
@@ -75,6 +76,7 @@ func main() {
 	}
 
 	podLabels := util.ParseLabels(*mountpointPodLabels, log)
+	podAnnotations := util.ParseAnnotations(*mountpointPodAnnotations, log)
 	headroomPodLabels := util.ParseLabels(*mountpointHeadroomPodLabels, log)
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
@@ -92,6 +94,7 @@ func main() {
 		CSIDriverVersion:  version.GetVersion().DriverVersion,
 		ClusterVariant:    cluster.DetectVariant(conf, log),
 		PodLabels:         podLabels,
+		PodAnnotations:    podAnnotations,
 		HeadroomPodLabels: headroomPodLabels,
 	}, log)
 

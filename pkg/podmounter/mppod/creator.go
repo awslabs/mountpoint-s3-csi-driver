@@ -86,6 +86,7 @@ type Config struct {
 	Container                   ContainerConfig
 	CSIDriverVersion            string
 	PodLabels                   map[string]string
+	PodAnnotations              map[string]string
 	HeadroomPodLabels           map[string]string
 }
 
@@ -112,17 +113,20 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 	labels := maps.Clone(c.config.PodLabels)
 	labels[LabelMountpointVersion] = c.config.MountpointVersion
 	labels[LabelCSIDriverVersion] = c.config.CSIDriverVersion
+	annotations := maps.Clone(c.config.PodAnnotations)
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[AnnotationVolumeName] = pv.Name
+	annotations[AnnotationVolumeId] = pv.Spec.CSI.VolumeHandle
+	annotations[AnnotationClusterAutoscalerDaemonsetPod] = "true"
 
 	mpPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "mp-",
 			Namespace:    c.config.Namespace,
 			Labels:       labels,
-			Annotations: map[string]string{
-				AnnotationVolumeName:                    pv.Name,
-				AnnotationVolumeId:                      pv.Spec.CSI.VolumeHandle,
-				AnnotationClusterAutoscalerDaemonsetPod: "true",
-			},
+			Annotations:  annotations,
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
