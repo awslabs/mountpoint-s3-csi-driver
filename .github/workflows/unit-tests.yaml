@@ -7,6 +7,11 @@ on:
   merge_group:
     types: [ "checks_requested" ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only cancel superseded runs on pull requests, never on `main` or in a merge queue.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
