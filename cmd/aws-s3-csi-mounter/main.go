@@ -23,7 +23,6 @@ import (
 	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
-var mountSockRecvTimeout = flag.Duration("mount-sock-recv-timeout", 2*time.Minute, "Timeout for receiving mount options from passed Unix socket.")
 var mountpointBinDir = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary.")
 
 var mountSockPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountSock)
@@ -31,6 +30,8 @@ var mountExitPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountExit)
 var mountErrorPath = mppod.PathInsideMountpointPod(mppod.KnownPathMountError)
 
 const mountpointBin = "mount-s3"
+
+const exitFilePollInterval = 5 * time.Second
 
 func main() {
 	utillog.InitKlog()
@@ -70,9 +71,27 @@ func main() {
 }
 
 func recvMountOptions() (mountoptions.Options, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), *mountSockRecvTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	klog.Infof("Trying to receive mount options from %s", mountSockPath)
+
+	// Poll for exit file in the background — if the CSI node signals us to stop
+	// (e.g., workload was removed), cancel the context so we don't wait forever.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(exitFilePollInterval):
+				if csimounter.ShouldExitWithSuccessCode(mountExitPath) {
+					klog.Info("Detected `mount.exit` file while waiting for mount options, canceling")
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	klog.Infof("Trying to receive mount options from %s (no timeout, waiting for options or exit file)", mountSockPath)
 	options, err := mountoptions.Recv(ctx, mountSockPath)
 	if err != nil {
 		return mountoptions.Options{}, err
