@@ -108,6 +108,13 @@ spec:
               value: {{ .Values.node.kubeletPath }}
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
+            {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            # SUPPORT_LEGACY_POD_MOUNTS only affects the daemonset (V3) code path (draining/refreshing
+            # existing V2 pod mounts during a V2 -> V3 upgrade). It is never read in pod mode, so we
+            # only emit it in daemonset mode.
+            - name: SUPPORT_LEGACY_POD_MOUNTS
+              value: "{{ .Values.supportLegacyPodMounts }}"
+            {{- end }}
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI

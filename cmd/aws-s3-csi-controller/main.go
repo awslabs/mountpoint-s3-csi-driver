@@ -29,6 +29,7 @@ import (
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
+var mounterMode = flag.String("mounter-mode", os.Getenv("MOUNTER_MODE"), `Mounter mode. When "daemonset" (V3), the controller runs in drain-only mode and never spawns Pods.`)
 var mountpointVersion = flag.String("mountpoint-version", os.Getenv("MOUNTPOINT_VERSION"), "Version of Mountpoint within the given Mountpoint image.")
 var mountpointPriorityClassName = flag.String("mountpoint-priority-class-name", os.Getenv("MOUNTPOINT_PRIORITY_CLASS_NAME"), "Priority class name of the Mountpoint Pods.")
 var mountpointPreemptingPriorityClassName = flag.String("mountpoint-preempting-priority-class-name", os.Getenv("MOUNTPOINT_PREEMPTING_PRIORITY_CLASS_NAME"), "Preempting priority class name of the Mountpoint Pods.")
@@ -72,6 +73,26 @@ func main() {
 	if err := crdv2.SetupManagerIndices(mgr); err != nil {
 		log.Error(err, "Failed to setup field indexers")
 		os.Exit(1)
+	}
+
+	// In daemonset (V3) mounter mode the controller runs in drain-only mode: a single periodic
+	// cleaner drains the lifecycle of existing V2 Mountpoint Pods (prunes stale S3PA attachments,
+	// deletes completed Mountpoint Pods, removes leftover Headroom Pods) but never spawns new ones.
+	// This path needs only an API client — no Mountpoint Pod config (images, priority classes, etc.).
+	if *mounterMode == "daemonset" {
+		log.Info("Running controller in drain-only mode (daemonset mounter)")
+
+		cleaner := csicontroller.NewDrainStaleAttachmentCleaner(mgr.GetClient(), *mountpointNamespace)
+		if err := cleaner.SetupWithManager(mgr); err != nil {
+			log.Error(err, "Failed to add drain-only stale attachment cleaner to manager")
+			os.Exit(1)
+		}
+
+		if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
+			log.Error(err, "Failed to start manager")
+			os.Exit(1)
+		}
+		return
 	}
 
 	podLabels := util.ParseLabels(*mountpointPodLabels, log)

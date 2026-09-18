@@ -10,6 +10,10 @@ func SupportLegacySystemdMounts() bool {
 	return os.Getenv("SUPPORT_LEGACY_SYSTEMD_MOUNTS") == "true"
 }
 
+func SupportLegacyPodMounts() bool {
+	return os.Getenv("SUPPORT_LEGACY_POD_MOUNTS") == "true"
+}
+
 // GetEnvAsInt returns the env variable parsed as an integer.
 // Returns an error if the variable is not set or not a valid integer.
 func GetEnvAsInt(key string) (int, error) {
