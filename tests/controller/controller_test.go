@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -2037,10 +2038,15 @@ func verifyHeadroomPodFor(pod *testPod, vol *testVolume, headroomPod *testPod) {
 // waitForObject waits until `obj` appears in the control plane.
 func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
 	GinkgoHelper()
+	waitForObjectWithClient(ctx, k8sClient, obj, verifiers...)
+}
+
+func waitForObjectWithClient[Obj client.Object](ctx context.Context, client client.Client, obj Obj, verifiers ...func(Gomega, Obj)) {
+	GinkgoHelper()
 
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
-		g.Expect(k8sClient.Get(ctx, key, obj)).To(Succeed())
+		g.Expect(client.Get(ctx, key, obj)).To(Succeed())
 		for _, verifier := range verifiers {
 			verifier(g, obj)
 		}
@@ -2125,9 +2131,14 @@ func defaultExpectedFields(nodeName string, pv *corev1.PersistentVolume) map[str
 
 // waitForObjectToDisappear waits until `obj` disappears in the control plane.
 func waitForObjectToDisappear(obj client.Object) {
+	waitForObjectToDisappearWithClient(ctx, k8sClient, obj)
+}
+
+func waitForObjectToDisappearWithClient(ctx context.Context, client client.Client, obj client.Object) {
+	GinkgoHelper()
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, key, obj)
+		err := client.Get(ctx, key, obj)
 		if err == nil {
 			g.Expect(obj.GetDeletionTimestamp()).ToNot(BeNil(), "Expected deletion timestamp to be non-nil: %#v", obj)
 		} else {

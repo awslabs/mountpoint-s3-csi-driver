@@ -15,6 +15,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
@@ -27,6 +28,15 @@ const (
 
 	testNode = "test-node"
 )
+
+// StaleAttachmentCleaner must be classified as a leader-election runnable so it only
+// runs on the leader. This compile-time assertion fails to build if the contract is dropped.
+var _ manager.LeaderElectionRunnable = (*csicontroller.StaleAttachmentCleaner)(nil)
+
+func TestStaleAttachmentCleanerNeedLeaderElection(t *testing.T) {
+	cleaner := csicontroller.NewStaleAttachmentCleaner(nil)
+	assert.Equals(t, true, cleaner.NeedLeaderElection())
+}
 
 func TestStaleAttachmentCleaner(t *testing.T) {
 	t.Run("Headroom Pod Cleanup", func(t *testing.T) {

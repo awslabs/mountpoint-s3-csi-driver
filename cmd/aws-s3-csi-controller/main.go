@@ -10,6 +10,12 @@ import (
 	"flag"
 	"os"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
+	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -19,13 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
-
-	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 var mountpointNamespace = flag.String("mountpoint-namespace", os.Getenv("MOUNTPOINT_NAMESPACE"), "Namespace to spawn Mountpoint Pods in.")
@@ -57,13 +56,10 @@ func main() {
 	log := logf.Log.WithName(csicontroller.Name)
 	conf := config.GetConfigOrDie()
 
-	mgr, err := manager.New(conf, manager.Options{
-		Scheme:                        scheme,
-		LeaderElection:                true,
-		LeaderElectionID:              "aws-s3-csi-controller",
-		LeaderElectionResourceLock:    "leases",
-		LeaderElectionReleaseOnCancel: true,
-	})
+	mgrOpts := manager.Options{Scheme: scheme}
+	csicontroller.ConfigureLeaderElection(&mgrOpts)
+
+	mgr, err := manager.New(conf, mgrOpts)
 	if err != nil {
 		log.Error(err, "Failed to create a new manager")
 		os.Exit(1)

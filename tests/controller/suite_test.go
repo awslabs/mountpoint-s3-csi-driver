@@ -7,11 +7,12 @@ import (
 	"time"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,8 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-controller/csicontroller"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 )
 
 const s3CSIDriver = "s3.csi.aws.com"
@@ -71,21 +70,7 @@ var _ = BeforeSuite(func() {
 	By("Bootstrapping test environment")
 
 	crdv2.AddToScheme(scheme.Scheme)
-	testEnv = &envtest.Environment{
-		CRDInstallOptions: envtest.CRDInstallOptions{
-			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
-		},
-		ErrorIfCRDPathMissing: true,
-	}
-
-	var err error
-	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
-
-	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
+	testEnv, cfg, k8sClient = createClient()
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
@@ -94,7 +79,89 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	err = csicontroller.NewReconciler(k8sManager.GetClient(), mppod.Config{
+	reconciler := csicontroller.NewReconciler(k8sManager.GetClient(), reconcilerConfig(), logf.Log)
+	err = reconciler.SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
+
+	go func() {
+		defer GinkgoRecover()
+		err = k8sManager.Start(ctx)
+		Expect(err).ToNot(HaveOccurred(), "Failed to run manager")
+	}()
+
+	bootstrapCluster(ctx, k8sClient)
+})
+
+var _ = AfterSuite(func() {
+	By("Tearing down the test environment")
+	cancel()
+	err := testEnv.Stop()
+	Expect(err).NotTo(HaveOccurred())
+})
+
+func createClient() (*envtest.Environment, *rest.Config, client.Client) {
+	env := &envtest.Environment{
+		CRDInstallOptions: envtest.CRDInstallOptions{
+			Paths: []string{"../crd/mountpoints3podattachments-crd.yaml"},
+		},
+		ErrorIfCRDPathMissing: true,
+	}
+
+	var err error
+	restCfg, err := env.Start()
+	Expect(err).NotTo(HaveOccurred())
+	Expect(restCfg).NotTo(BeNil())
+
+	apiClient, err := client.New(restCfg, client.Options{Scheme: scheme.Scheme})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(apiClient).NotTo(BeNil())
+	return env, restCfg, apiClient
+}
+
+func bootstrapCluster(ctx context.Context, client client.Client) {
+	GinkgoHelper()
+
+	createMountpointNamespace(ctx, client)
+	createDefaultServiceAccount(ctx, client)
+	createMountpointPriorityClasses(ctx, client)
+}
+
+// createMountpointNamespace creates Mountpoint namespace in the control plane.
+func createMountpointNamespace(ctx context.Context, client client.Client) {
+	By(fmt.Sprintf("Creating Mountpoint namespace %q", mountpointNamespace))
+	namespace := &corev1.Namespace{Name: mountpointNamespace}
+	Expect(client.Create(ctx, namespace)).To(Succeed())
+	waitForObjectWithClient(ctx, client, namespace)
+}
+
+// createDefaultServiceAccount creates default service account in the control plane.
+func createDefaultServiceAccount(ctx context.Context, client client.Client) {
+	sa := &corev1.ServiceAccount{
+		Name:      "default",
+		Namespace: defaultNamespace,
+	}
+
+	By(fmt.Sprintf("Creating default service account in %q", mountpointNamespace))
+	Expect(client.Create(ctx, sa)).To(Succeed())
+	waitForObjectWithClient(ctx, client, sa)
+}
+
+// createMountpointPriorityClasses creates priority classes for Mountpoint/Headroom Pods.
+func createMountpointPriorityClasses(ctx context.Context, client client.Client) {
+	for _, name := range []string{
+		mountpointPriorityClassName,
+		preemptingPodPriorityClassName,
+		headroomPodPriorityClassName,
+	} {
+		By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", name))
+		priorityClass := &schedulingv1.PriorityClass{Name: name, Value: 1000000}
+		Expect(client.Create(ctx, priorityClass)).To(Succeed())
+		waitForObjectWithClient(ctx, client, priorityClass)
+	}
+}
+
+func reconcilerConfig() mppod.Config {
+	return mppod.Config{
 		Namespace:                   mountpointNamespace,
 		MountpointVersion:           mountpointVersion,
 		PriorityClassName:           mountpointPriorityClassName,
@@ -109,62 +176,5 @@ var _ = BeforeSuite(func() {
 		CSIDriverVersion:  version.GetVersion().DriverVersion,
 		PodLabels:         map[string]string{"test-label": "test-value", "env": "test"},
 		HeadroomPodLabels: map[string]string{"headroom-label": "headroom-value", "tier": "headroom"},
-	}, logf.Log).SetupWithManager(k8sManager)
-	Expect(err).ToNot(HaveOccurred())
-
-	go func() {
-		defer GinkgoRecover()
-		err = k8sManager.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "Failed to run manager")
-	}()
-
-	createMountpointNamespace()
-	createDefaultServiceAccount()
-	createMountpointPriorityClasses()
-})
-
-var _ = AfterSuite(func() {
-	By("Tearing down the test environment")
-	cancel()
-	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
-})
-
-// createMountpointNamespace creates Mountpoint namespace in the control plane.
-func createMountpointNamespace() {
-	By(fmt.Sprintf("Creating Mountpoint namespace %q", mountpointNamespace))
-	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mountpointNamespace}}
-	Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
-	waitForObject(namespace)
-}
-
-// createDefaultServiceAccount creates default service account in the control plane.
-func createDefaultServiceAccount() {
-	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "default",
-			Namespace: defaultNamespace,
-		},
-	}
-
-	By(fmt.Sprintf("Creating default service account in %q", mountpointNamespace))
-	Expect(k8sClient.Create(ctx, sa)).To(Succeed())
-	waitForObject(sa)
-}
-
-// createMountpointPriorityClasses creates priority classes for Mountpoint/Headroom Pods.
-func createMountpointPriorityClasses() {
-	for _, name := range []string{
-		mountpointPriorityClassName,
-		preemptingPodPriorityClassName,
-		headroomPodPriorityClassName,
-	} {
-		By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", name))
-		priorityClass := &schedulingv1.PriorityClass{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Value:      1000000,
-		}
-		Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
-		waitForObject(priorityClass)
 	}
 }
