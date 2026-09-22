@@ -1213,8 +1213,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		metaPath := filepath.Join(metaDir, dirEntry.Name())
 		meta, err := readMeta(metaPath)
 		if err != nil {
-			klog.Warningf("MountMap: failed to read meta file %s, skipping: %v", metaPath, err)
-			continue
+			return fmt.Errorf("failed to read mount meta %s; remove or quarantine this file to allow the node to start: %w", metaPath, err)
 		}
 
 		// Derive SourcePath from VolumeID (not persisted, always computable)
