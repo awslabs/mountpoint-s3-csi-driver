@@ -376,18 +376,27 @@ func TestRebuildMountMap_SkipsNonMetaFiles(t *testing.T) {
 	}
 }
 
-func TestRebuildMountMap_SkipsInvalidMetaJSON(t *testing.T) {
+func TestRebuildMountMap_FailsOnInvalidMetaJSON(t *testing.T) {
 	kubeletPath := t.TempDir()
 	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	err := os.MkdirAll(metaDir, 0750)
 	assert.NoError(t, err)
 
 	// Invalid meta file
-	os.WriteFile(filepath.Join(metaDir, "vol-bad.meta.json"), []byte("not-json"), 0640)
+	metaPath := filepath.Join(metaDir, "vol-bad.meta.json")
+	os.WriteFile(metaPath, []byte("not-json"), 0640)
 
 	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider(nil))
 	err = dm.RebuildMountMap()
-	assert.NoError(t, err) // should not error, just skip
+
+	// Fail closed: an unreadable/corrupt meta must abort rebuild (driver.go turns this into
+	// a fatal), not be silently skipped — skipping would leak the volume's commDir/credentials
+	// with no recovery path.
+	if err == nil {
+		t.Fatal("expected RebuildMountMap to fail on corrupt meta, got nil")
+	}
+	// Error must name the offending file so an operator can quarantine/remove it.
+	assert.Contains(t, err.Error(), metaPath)
 
 	if dm.mountMap.Get("vol-bad") != nil {
 		t.Fatal("should not create entry for invalid meta")
