@@ -64,6 +64,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	cmd.Stdout = newPrefixWriter(os.Stdout, mountId)
 	cmd.Stderr = newPrefixWriter(os.Stderr, mountId)
 
+	// Give the child the per-mount credentials csi-node determined, so the kernel isolates it from
+	// every other Mountpoint on this node. Supplementary groups are cleared: the mounter runs as
+	// root, and inheriting its groups would hand the child access to every other mount's files.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    options.Uid,
+			Gid:    options.Gid,
+			Groups: []uint32{},
+		},
+	}
+
 	// Hold lock across duplicate check and process start to prevent races.
 	pm.mu.Lock()
 	if _, exists := pm.processes[mountId]; exists {

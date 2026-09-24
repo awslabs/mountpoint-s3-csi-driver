@@ -19,15 +19,16 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
-// CredentialFilePerm is the default permissions to be used for credential files.
-// It's only readable and writeable by the owner and group.
-// Group access is needed as Mountpoint Pod is run as non-root user
+// Permissions for a Mountpoint Pod's credentials, which csi-node writes as root and never chowns.
+// Group access is required: the pod runs as a non-root user with primary GID 0, and gets an
+// arbitrary UID on OpenShift, so the group bits are its only way in.
 const CredentialFilePerm = fs.FileMode(0640)
-
-// CredentialDirPerm is the default permissions to be used for credential directories.
-// It's only readable, listable (execute bit), and writeable by the owner and group.
-// Group access is needed as Mountpoint Pod is run as non-root user
 const CredentialDirPerm = fs.FileMode(0750)
+
+// Permissions for one daemonset-mounter mount's credentials, which csi-node chowns to that mount's
+// allocated UID. Owner-only: group access would expose them to every other Mountpoint on the node.
+const IsolatedCredentialFilePerm = fs.FileMode(0400)
+const IsolatedCredentialDirPerm = fs.FileMode(0700)
 
 const (
 	webIdentityServiceAccountTokenName    = "token"
