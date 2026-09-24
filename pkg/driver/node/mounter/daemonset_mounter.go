@@ -371,9 +371,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failure for volume %s: %v", volumeID, cleanErr)
 			return err
 		}
-		dm.mountMap.Delete(volumeID)
-		RemoveMeta(dm.kubeletPath, volumeID)
-		dm.uidAllocator.Release(entry.Uid)
+		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
@@ -383,9 +381,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 			klog.Errorf("DaemonsetMounter: cleanup after BindMount failure for volume %s: %v", volumeID, cleanErr)
 			return err
 		}
-		dm.mountMap.Delete(volumeID)
-		RemoveMeta(dm.kubeletPath, volumeID)
-		dm.uidAllocator.Release(entry.Uid)
+		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
@@ -564,9 +560,7 @@ func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, creden
 			// Don't remove meta or map entry — leave for retry/background cleanup.
 		} else {
 			// All resources confirmed cleaned — safe to remove bookkeeping and hand the UID back.
-			dm.mountMap.Delete(volumeID)
-			RemoveMeta(dm.kubeletPath, volumeID)
-			dm.uidAllocator.Release(entry.Uid)
+			dm.forgetMount(volumeID, entry)
 		}
 	}
 
@@ -668,18 +662,30 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	klog.V(4).Infof("DaemonsetMounter: cleanup: volume %s healthy with %d live consumer(s), leaving intact", volumeID, len(liveTargets))
 }
 
-// teardownEntry runs cleanupMount and, only on success, removes the in-memory
-// entry and then its meta file (entry before meta, matching the other teardown
-// paths). On failure both are kept so a later pass retries. Caller must hold entry.mu.
+// teardownEntry runs cleanupMount and, only on success, drops the mount's bookkeeping. On failure
+// everything is kept so a later pass retries. Caller must hold entry.mu.
 func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry) {
 	cleanupCtx := credentialprovider.CleanupContext{VolumeID: volumeID}
 	if err := dm.cleanupMount(entry, cleanupCtx); err != nil {
 		klog.Errorf("DaemonsetMounter: cleanup: %v (will retry next tick)", err)
 		return
 	}
-	dm.mountMap.Delete(volumeID)
-	RemoveMeta(dm.kubeletPath, volumeID)
+	dm.forgetMount(volumeID, entry)
+}
+
+// forgetMount discards a mount's records once [DaemonsetMounter.cleanupMount] has confirmed its
+// resources are gone: the meta file, then the UID, then the in-memory entry.
+//
+// The meta file goes first because it is the only durable record of the UID. A failed removal keeps
+// both the UID and the entry, so the periodic cleanup retries. Caller must hold entry.mu.
+func (dm *DaemonsetMounter) forgetMount(volumeID string, entry *MountEntry) {
+	if err := RemoveMeta(dm.kubeletPath, volumeID); err != nil {
+		klog.Errorf("DaemonsetMounter: %v for volume %s, keeping in-memory tracking (will retry next cleanup)",
+			err, volumeID)
+		return
+	}
 	dm.uidAllocator.Release(entry.Uid)
+	dm.mountMap.Delete(volumeID)
 }
 
 // GetErrorFileName returns the error file name for a given volume ID.

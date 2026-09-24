@@ -72,13 +72,13 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 	return nil
 }
 
-// RemoveMeta removes the .meta.json file for the given volume.
-// Called when the last consumer disconnects and the source mount is torn down.
-func RemoveMeta(kubeletPath, volumeID string) {
+// RemoveMeta removes the volume's .meta.json, treating an already-absent file as success.
+func RemoveMeta(kubeletPath, volumeID string) error {
 	metaPath := MetaFileName(kubeletPath, volumeID)
 	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
-		klog.Warningf("MountMap: failed to remove meta file %s: %v", metaPath, err)
+		return fmt.Errorf("failed to remove meta file %s: %w", metaPath, err)
 	}
+	return nil
 }
 
 // readMeta reads and parses a .meta.json file.
