@@ -40,6 +40,7 @@ func newTestDMWithMountInfo(kubeletPath string, provider mountInfoProviderFunc) 
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
+		uidAllocator:      NewUIDAllocator(),
 	}
 }
 
@@ -58,6 +59,7 @@ func newTestDMWithFakeMounter(kubeletPath string, provider mountInfoProviderFunc
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
+		uidAllocator:      NewUIDAllocator(),
 		mount:             mpmounter.NewWithMount(fakeMounter),
 		credProvider:      &noopCredProvider{},
 	}
@@ -423,6 +425,69 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	if !os.IsNotExist(err) {
 		t.Fatal("expected meta file to be removed for dead source")
 	}
+}
+
+func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
+	t.Run("Reserves the UID of every recovered mount", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		sourcePath := SourceMountPath(kubeletPath, "vol-live")
+		const recoveredUID = uint32(UIDRangeStart + 7)
+
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-live",
+			SourcePath: sourcePath,
+			Uid:        recoveredUID,
+		})
+		assert.NoError(t, err)
+
+		dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+			{MountPoint: sourcePath, Major: 0, Minor: 42},
+		}))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		// The UID must be both restored onto the entry and withheld from future allocations,
+		// otherwise a new mount could be handed a UID that still owns this mount's files.
+		assert.Equals(t, recoveredUID, dm.mountMap.Get("vol-live").Uid)
+		assert.Equals(t, true, dm.uidAllocator.InUse(recoveredUID))
+	})
+
+	t.Run("Frees the UID of a dead mount once its cleanup succeeds", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		const deadUID = uint32(UIDRangeStart + 11)
+
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-dead",
+			SourcePath: SourceMountPath(kubeletPath, "vol-dead"),
+			Uid:        deadUID,
+		})
+		assert.NoError(t, err)
+
+		// No mount table entry for the source, so the mount is dead and gets cleaned up.
+		dm := newTestDMWithMountInfoAndCredProvider(kubeletPath, fakeMountInfoProvider(nil))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		assert.Equals(t, false, dm.uidAllocator.InUse(deadUID))
+	})
+
+	t.Run("Does not reserve a UID when the meta file records none", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		sourcePath := SourceMountPath(kubeletPath, "vol-legacy")
+
+		// A meta file with no uid field reads back as zero, which is not a valid allocation.
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-legacy",
+			SourcePath: sourcePath,
+		})
+		assert.NoError(t, err)
+
+		dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+			{MountPoint: sourcePath, Major: 0, Minor: 42},
+		}))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		assert.Equals(t, uint32(0), dm.mountMap.Get("vol-legacy").Uid)
+		assert.Equals(t, false, dm.uidAllocator.InUse(0))
+	})
 }
 
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
