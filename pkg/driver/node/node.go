@@ -207,7 +207,7 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Errorf(codes.InvalidArgument, "Could not parse user environment: %v", err)
 	}
 
-	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, args, fsGroup, userEnv); err != nil {
+	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, volumeCtx, args, fsGroup, userEnv); err != nil {
 		os.Remove(targetContainer)
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
