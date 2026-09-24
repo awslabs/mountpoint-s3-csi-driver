@@ -185,6 +185,43 @@ func bucketNameFromVolumeResource(vol *storageframework.VolumeResource) string {
 	return pvc.CSI.VolumeHandle
 }
 
+// createPVReusingHandle creates a second PV/PVC that reuses src's CSI source — the same
+// volumeHandle (bucket) under a new PV name. It creates no new bucket, so src must outlive it.
+// Used to exercise per-node volumeHandle uniqueness with two distinct PVs sharing one handle.
+func createPVReusingHandle(ctx context.Context, f *framework.Framework, src *storageframework.VolumeResource) (*v1.PersistentVolume, *v1.PersistentVolumeClaim) {
+	pvName := "s3-e2e-pv-" + uuid.New().String()
+	pvcName := "s3-e2e-pvc-" + uuid.New().String()
+	emptyStorageClass := ""
+
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: pvName},
+		Spec: v1.PersistentVolumeSpec{
+			PersistentVolumeSource: src.Pv.Spec.PersistentVolumeSource, // same volumeHandle as src
+			StorageClassName:       "",
+			MountOptions:           src.Pv.Spec.MountOptions,
+			AccessModes:            src.Pv.Spec.AccessModes,
+			Capacity:               v1.ResourceList{v1.ResourceStorage: resource.MustParse("1200Gi")},
+			ClaimRef:               &v1.ObjectReference{Name: pvcName, Namespace: f.Namespace.Name},
+		},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: pvcName, Namespace: f.Namespace.Name},
+		Spec: v1.PersistentVolumeClaimSpec{
+			StorageClassName: &emptyStorageClass,
+			VolumeName:       pvName,
+			AccessModes:      src.Pv.Spec.AccessModes,
+			Resources:        v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1200Gi")}},
+		},
+	}
+
+	pv, err := f.ClientSet.CoreV1().PersistentVolumes().Create(ctx, pv, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "failed to create duplicate-handle PV")
+	pvc, err = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Create(ctx, pvc, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "failed to create duplicate-handle PVC")
+	framework.ExpectNoError(e2epv.WaitOnPVandPVC(ctx, f.ClientSet, f.Timeouts, f.Namespace.Name, pv, pvc), "duplicate-handle PV/PVC failed to bind")
+	return pv, pvc
+}
+
 func createPodWithoutWaiting(ctx context.Context, client clientset.Interface, namespace string, pod *v1.Pod) (*v1.Pod, error) {
 	serviceAccount := pod.Spec.ServiceAccountName
 	if serviceAccount == "" {

@@ -30,6 +30,10 @@ type MountParams struct {
 
 	// FSGroup is the volume mount group (security context).
 	FSGroup string
+
+	// VolumeHandle is the PV's spec.csi.volumeHandle, persisted so the handle index
+	// can be rebuilt after a csi-node restart.
+	VolumeHandle string
 }
 
 // ValidateCompatibility checks whether the new request's params are compatible with the
@@ -119,11 +123,29 @@ type MountEntry struct {
 // Per-PV locking is achieved by locking entry.mu on the MountEntry itself.
 type MountMap struct {
 	entries sync.Map // map[volumeID]*MountEntry
+
+	// handles indexes volumeHandle -> volumeID (PV name). Guarded by mu; a whole-map
+	// lock is fine as NodePublishVolume is infrequent.
+	mu      sync.Mutex
+	handles map[string]string
 }
 
 // NewMountMap creates a new empty MountMap.
 func NewMountMap() *MountMap {
-	return &MountMap{}
+	return &MountMap{handles: make(map[string]string)}
+}
+
+// ClaimHandle records that volumeID (a PV name) uses volumeHandle on this node, erroring if a
+// different PV already holds it. Kubernetes identifies a CSI volume by its handle, so two PVs
+// sharing one on a node collide. Idempotent for the same PV (republish / pod-sharing).
+func (m *MountMap) ClaimHandle(volumeHandle, volumeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if owner, ok := m.handles[volumeHandle]; ok && owner != volumeID {
+		return fmt.Errorf("volumeHandle %q is already used on this node by PersistentVolume %q; volumeHandles must be unique per PV", volumeHandle, owner)
+	}
+	m.handles[volumeHandle] = volumeID
+	return nil
 }
 
 // GetOrCreate returns the existing entry for volumeID, or creates a new unmounted one.
@@ -147,6 +169,15 @@ func (m *MountMap) Get(volumeID string) *MountEntry {
 // Delete removes the entry for the given volume ID from the map.
 func (m *MountMap) Delete(volumeID string) {
 	m.entries.Delete(volumeID)
+
+	// Release any volumeHandle this volume claimed so it can be reused once the mount is gone.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for handle, owner := range m.handles {
+		if owner == volumeID {
+			delete(m.handles, handle)
+		}
+	}
 }
 
 // Range iterates every entry in the map, letting the cleanup job loop over every
