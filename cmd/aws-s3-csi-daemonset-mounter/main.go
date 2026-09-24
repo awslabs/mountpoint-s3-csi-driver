@@ -40,11 +40,14 @@ import (
 )
 
 var (
-	commDir           = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
-	mountpointBinDir  = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
-	recvTimeout       = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
-	stderrCapacity    = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
-	maxVolumesPerNode = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
+	commDir                 = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
+	mountpointBinDir        = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
+	recvTimeout             = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
+	stderrCapacity          = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
+	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
+	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitNone),
+		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
+			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
 )
 
 const (
@@ -55,6 +58,16 @@ const (
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
+
+	memoryLimitStrategy, err := parseMemoryLimitStrategy(*memoryLimitStrategyFlag)
+	if err != nil {
+		klog.Fatalf("Invalid --memory-limit-strategy: %v", err)
+	}
+
+	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, containerMemoryRequestBytes(), *maxVolumesPerNode)
+	if err != nil {
+		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
+	}
 
 	sockPath := filepath.Join(*commDir, mountSockName)
 	mountpointPath := filepath.Join(*mountpointBinDir, mountpointBin)
@@ -70,10 +83,7 @@ func main() {
 
 	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
 
-	memoryBudgetBytes, memoryBudgetField := containerMemoryBudgetBytes()
-
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity},
-		resolveMemoryTarget(memoryBudgetBytes, memoryBudgetField, *maxVolumesPerNode))
+	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	sigCh := make(chan os.Signal, 1)

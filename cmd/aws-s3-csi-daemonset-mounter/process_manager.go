@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -25,21 +26,21 @@ const errorFileExt = ".error"
 
 // ProcessManager tracks and manages Mountpoint child processes.
 type ProcessManager struct {
-	commDir      string
-	runner       ProcessRunner // interface for spawning processes; substituted in tests
-	memoryTarget memoryTarget
+	commDir string
+	runner  ProcessRunner // interface for spawning processes; substituted in tests
+	memory  memoryLimit
 
 	mu        sync.Mutex
 	processes map[string]ProcessHandle // mountId -> process handle
 	wg        sync.WaitGroup           // tracks waiter goroutines
 }
 
-func NewProcessManager(commDir string, runner ProcessRunner, memoryTarget memoryTarget) *ProcessManager {
+func NewProcessManager(commDir string, runner ProcessRunner, memory memoryLimit) *ProcessManager {
 	return &ProcessManager{
-		commDir:      commDir,
-		runner:       runner,
-		memoryTarget: memoryTarget,
-		processes:    make(map[string]ProcessHandle),
+		commDir:   commDir,
+		runner:    runner,
+		memory:    memory,
+		processes: make(map[string]ProcessHandle),
 	}
 }
 
@@ -55,19 +56,8 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	args := mountpoint.ParseArgs(options.Args)
 	args.Set(mountpoint.ArgForeground, mountpoint.ArgNoValue)
 
-	if !args.Has(mountpoint.ArgMemoryTarget) {
-		memoryTarget, err := pm.memoryTarget.arg()
-		switch {
-		case err != nil:
-			// Mountpoint's CLI would reject the undersized share with a usage error naming a flag the
-			// user never wrote, so refuse before spawning and report the sizing itself instead.
-			fuseDev.Close()
-			pm.writeErrorFile(mountId, []byte(err.Error()))
-			return fmt.Errorf("mount %s needs a %s this container cannot provide: %w",
-				mountId, mountpoint.ArgMemoryTarget, err)
-		case memoryTarget != "":
-			args.Set(mountpoint.ArgMemoryTarget, memoryTarget)
-		}
+	if targetMiB := pm.memory.targetFor(mountId, args); targetMiB > 0 {
+		args.Set(mountpoint.ArgMemoryTarget, strconv.FormatInt(targetMiB, 10))
 	}
 
 	cmdArgs := append([]string{
@@ -192,7 +182,8 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 		actual := countChildProcesses()
 		openFDs := countOpenFDs()
 		goroutines := runtime.NumGoroutine()
-		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d mounts=%v", tracked, actual, openFDs, goroutines, mountIds)
+		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d mounts=%v",
+			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB, mountIds)
 	}
 }
 

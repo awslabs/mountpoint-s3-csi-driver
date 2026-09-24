@@ -104,6 +104,7 @@ Determine if running on OpenShift (incl. ROSA)
 {{/*
 Best-effort parse of a Kubernetes memory quantity (e.g. "2Gi", "500M", "1.5Gi") into a byte count.
 Returns "" for forms it does not understand, so callers can skip rather than misjudge.
+Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" -}}
 {{- $value := toString . -}}
