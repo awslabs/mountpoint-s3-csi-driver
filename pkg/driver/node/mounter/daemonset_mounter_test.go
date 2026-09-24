@@ -175,7 +175,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 					WorkloadPodID: testCtx.podUID,
 					VolumeID:      testCtx.volumeID,
-				}, args, "", nil)
+				}, nil, args, "", nil)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -250,7 +250,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err = testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			assert.NoError(t, err)
 
 			if mountSyscallCalled {
@@ -298,7 +298,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err = testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			if err == nil {
 				t.Fatal("mount should fail")
 			}
@@ -321,7 +321,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err = testCtx.dm.Mount(shortCtx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			if err == nil {
 				t.Fatal("mount should fail if mounter does not receive the mount options")
 			}
@@ -363,7 +363,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 					WorkloadPodID: testCtx.podUID,
 					VolumeID:      testCtx.volumeID,
-				}, mountpoint.ParseArgs(nil), "", nil)
+				}, nil, mountpoint.ParseArgs(nil), "", nil)
 			}()
 
 			testCtx.receiveMountOptions()
@@ -398,7 +398,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 					WorkloadPodID: testCtx.podUID,
 					VolumeID:      testCtx.volumeID,
-				}, mountpoint.ParseArgs(nil), "", nil)
+				}, nil, mountpoint.ParseArgs(nil), "", nil)
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
@@ -513,7 +513,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			if err == nil {
 				t.Fatal("expected error when commDir is not discovered")
 			}
@@ -542,7 +542,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err := testCtx.dm.Mount(ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: "pod-timeout",
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			if err == nil {
 				t.Fatal("expected error on send timeout")
 			}
@@ -573,7 +573,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			err := testCtx.dm.Mount(ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: "pod-cancel",
 				VolumeID:      testCtx.volumeID,
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 			if err == nil {
 				t.Fatal("expected error on cancelled context")
 			}
@@ -613,7 +613,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "driver",
 				ServiceAccountName:   "default",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		// Receive and complete the first mount
@@ -632,7 +632,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 			AuthenticationSource: "driver",
 			ServiceAccountName:   "default",
 			PodNamespace:         "default",
-		}, mountpoint.ParseArgs(nil), "", nil)
+		}, nil, mountpoint.ParseArgs(nil), "", nil)
 		assert.NoError(t, err)
 
 		// FUSE mount should NOT have been called again — only bind mount
@@ -679,7 +679,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "pod",
 				ServiceAccountName:   "sa-a",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		testCtx.receiveMountOptions()
@@ -697,7 +697,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 			AuthenticationSource: "pod",
 			ServiceAccountName:   "sa-b",
 			PodNamespace:         "default",
-		}, mountpoint.ParseArgs(nil), "", nil)
+		}, nil, mountpoint.ParseArgs(nil), "", nil)
 		if err == nil {
 			t.Fatal("expected error for mismatched service account with pod auth")
 		}
@@ -727,7 +727,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "driver",
 				ServiceAccountName:   "sa-a",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		testCtx.receiveMountOptions()
@@ -744,7 +744,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 			AuthenticationSource: "driver",
 			ServiceAccountName:   "sa-b",
 			PodNamespace:         "default",
-		}, mountpoint.ParseArgs(nil), "", nil)
+		}, nil, mountpoint.ParseArgs(nil), "", nil)
 		assert.NoError(t, err)
 
 		// Only 1 FUSE mount — second pod shared via bind mount
@@ -772,7 +772,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "driver",
 				ServiceAccountName:   "sa-a",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		testCtx.receiveMountOptions()
@@ -797,7 +797,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "driver",
 				ServiceAccountName:   "sa-b",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		testCtx.receiveMountOptions()
@@ -829,7 +829,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 				AuthenticationSource: "driver",
 				ServiceAccountName:   "default",
 				PodNamespace:         "default",
-			}, mountpoint.ParseArgs(nil), "", nil)
+			}, nil, mountpoint.ParseArgs(nil), "", nil)
 		}()
 
 		testCtx.receiveMountOptions()
@@ -854,7 +854,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 					AuthenticationSource: "driver",
 					ServiceAccountName:   "default",
 					PodNamespace:         "default",
-				}, mountpoint.ParseArgs(nil), "", nil)
+				}, nil, mountpoint.ParseArgs(nil), "", nil)
 			}(i)
 		}
 		wg.Wait()
@@ -1233,7 +1233,7 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 		WorkloadPodID: "pod-uid-123",
 	}
 
-	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, mountpoint.Args{}, "", nil)
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
 
 	// Mount should return nil (nothing to do, corrupted target).
 	assert.NoError(t, err)
@@ -1274,7 +1274,7 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 		WorkloadPodID: "pod-uid-456",
 	}
 
-	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, mountpoint.Args{}, "", nil)
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
 
 	// Mount should NOT return nil — it should proceed past the health check and eventually
 	// error out downstream (e.g. "comm dir not yet discovered" since we didn't set up

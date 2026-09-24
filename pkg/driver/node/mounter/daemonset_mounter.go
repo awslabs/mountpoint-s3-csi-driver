@@ -178,7 +178,7 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //     fails, the entry and meta are preserved so the next retry enters step 3 and
 //     retries cleanup before proceeding.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
-	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
+	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
 	// Check target health
 	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
@@ -244,12 +244,12 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, commDir, credentialCtx, volumeCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
+	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
 	// Get or create the per-volume entry, then lock it.
 	// Retry loop ensures we hold the canonical entry — not one orphaned by a concurrent unmount/delete.
