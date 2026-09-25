@@ -102,6 +102,11 @@ type MountEntry struct {
 	// Params records the mount parameters for validation of subsequent share requests.
 	Params MountParams
 
+	// Uid is the UID and GID this mount's Mountpoint process runs as, isolating it from every other
+	// mount on the node. Allocated on a fresh mount and released only once all of the mount's
+	// resources are confirmed gone.
+	Uid uint32
+
 	// RefCount is the number of pods currently using this mount via bind mounts.
 	// Invariant: RefCount == len(Targets) when entry.mu is not held.
 	RefCount int

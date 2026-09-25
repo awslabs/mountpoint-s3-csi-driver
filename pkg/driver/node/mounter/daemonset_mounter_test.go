@@ -3,6 +3,7 @@ package mounter_test
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -49,6 +50,26 @@ type dmTestCtx struct {
 	mounterPodUID string
 	kubeletPath   string
 	commDir       string
+
+	// ownership records every chown/chmod the mounter applied, keyed by path, so tests can assert
+	// what the isolation logic did without needing root.
+	ownershipMu sync.Mutex
+	owners      map[string][2]int
+	modes       map[string]fs.FileMode
+}
+
+// ownerOf returns the uid/gid the mounter applied to `path`.
+func (testCtx *dmTestCtx) ownerOf(path string) [2]int {
+	testCtx.ownershipMu.Lock()
+	defer testCtx.ownershipMu.Unlock()
+	return testCtx.owners[path]
+}
+
+// modeOf returns the mode the mounter applied to `path`.
+func (testCtx *dmTestCtx) modeOf(path string) fs.FileMode {
+	testCtx.ownershipMu.Lock()
+	defer testCtx.ownershipMu.Unlock()
+	return testCtx.modes[path]
 }
 
 // targetPath returns a valid kubelet-style target path that targetpath.Parse can parse.
@@ -116,6 +137,8 @@ func setupDM(t *testing.T) *dmTestCtx {
 		mounterPodUID: mounterPodUID,
 		kubeletPath:   kubeletPath,
 		commDir:       commDir,
+		owners:        map[string][2]int{},
+		modes:         map[string]fs.FileMode{},
 	}
 
 	mountSyscall := func(target string, opts mpmounter.MountOptions) (int, error) {
@@ -146,11 +169,32 @@ func setupDM(t *testing.T) *dmTestCtx {
 		}
 		return infos, nil
 	}, testK8sVersion, cluster.DefaultKubernetes)
+	testCtx.dm = dm
+	testCtx.installOwnershipRecorders()
+
 	err = dm.DiscoverCommDir(ctx)
 	assert.NoError(t, err)
 
-	testCtx.dm = dm
 	return testCtx
+}
+
+// installOwnershipRecorders makes the mounter record chown/chmod instead of performing them, so
+// tests exercise the per-mount ownership logic without running as root.
+func (testCtx *dmTestCtx) installOwnershipRecorders() {
+	testCtx.dm.SetPathOwnership(
+		func(path string, uid, gid int) error {
+			testCtx.ownershipMu.Lock()
+			defer testCtx.ownershipMu.Unlock()
+			testCtx.owners[path] = [2]int{uid, gid}
+			return nil
+		},
+		func(path string, mode fs.FileMode) error {
+			testCtx.ownershipMu.Lock()
+			defer testCtx.ownershipMu.Unlock()
+			testCtx.modes[path] = mode
+			return nil
+		},
+	)
 }
 
 func TestDaemonsetMounter(t *testing.T) {
@@ -204,6 +248,9 @@ func TestDaemonsetMounter(t *testing.T) {
 				Args:       []string{"--prefix=data/", expectedUserAgent},
 				Env:        env.List(),
 				VolumeId:   testCtx.volumeID,
+				// The first mount on a fresh allocator takes the bottom of the range.
+				Uid: mounter.UIDRangeStart,
+				Gid: mounter.UIDRangeStart,
 			}, got)
 		})
 
@@ -234,6 +281,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				}, func(source, target string) error {
 					return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
 				}, nil, "", cluster.DefaultKubernetes)
+			testCtx.installOwnershipRecorders()
 			err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 			assert.NoError(t, err)
 
@@ -292,6 +340,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				}, func(source, target string) error {
 					return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
 				}, nil, "", cluster.DefaultKubernetes)
+			testCtx.installOwnershipRecorders()
 			err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 			assert.NoError(t, err)
 
@@ -509,6 +558,7 @@ func TestDaemonsetMounter(t *testing.T) {
 				"",
 				cluster.DefaultKubernetes,
 			)
+			testCtx.installOwnershipRecorders()
 
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
@@ -586,6 +636,147 @@ func TestDaemonsetMounter(t *testing.T) {
 			_, err = testCtx.dm.GetCommDir()
 			assert.NoError(t, err)
 		})
+	})
+}
+
+func TestDaemonsetMounter_PathOwnership(t *testing.T) {
+	// Mount a volume and return the recorded ownership, so each case below asserts on one mount.
+	mountOnce := func(t *testing.T) (*dmTestCtx, mountoptions.Options) {
+		t.Helper()
+		testCtx := setupDM(t)
+		target := testCtx.targetPath(testCtx.podUID)
+
+		mountRes := make(chan error, 1)
+		go func() {
+			mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+		}()
+
+		got := testCtx.receiveMountOptions()
+		testCtx.mount.Mount("mountpoint-s3", mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID), "fuse", nil)
+		assert.NoError(t, <-mountRes)
+		return testCtx, got
+	}
+
+	t.Run("Keeps the shared comm directory and socket root-owned", func(t *testing.T) {
+		testCtx, _ := mountOnce(t)
+
+		// Root-owned and not writable by any Mountpoint, so none can plant a file for a later mount.
+		assert.Equals(t, [2]int{0, 0}, testCtx.ownerOf(testCtx.commDir))
+		assert.Equals(t, fs.FileMode(0711), testCtx.modeOf(testCtx.commDir))
+
+		sock := filepath.Join(testCtx.commDir, mounter.MountSockName)
+		assert.Equals(t, [2]int{0, 0}, testCtx.ownerOf(sock))
+		assert.Equals(t, fs.FileMode(0600), testCtx.modeOf(sock))
+	})
+
+	t.Run("Reuses the same UID when a failed mount is retried", func(t *testing.T) {
+		mockCtl := gomock.NewController(t)
+		mockCredProvider := mock_credentialprovider.NewMockProviderInterface(mockCtl)
+
+		testCtx := setupDM(t)
+		target := testCtx.targetPath(testCtx.podUID)
+
+		// Fail in provideCredentials, which returns *without* deleting the map entry — unlike a
+		// fuseMount failure, which tears the entry down and legitimately starts over. This is the
+		// shape of failure that kubelet retries against a surviving entry.
+		mockCredProvider.EXPECT().Provide(gomock.Any(), gomock.Any()).
+			Return(nil, credentialprovider.AuthenticationSourceUnspecified, fmt.Errorf("simulated credential failure")).AnyTimes()
+		mockCredProvider.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+
+		testCtx.dm = mounter.NewDaemonsetMounter(testCtx.client, testCtx.nodeName,
+			mpmounter.NewWithMount(testCtx.mount), mockCredProvider,
+			func(tgt string, opts mpmounter.MountOptions) (int, error) { return 0, nil },
+			func(source, target string) error { return nil }, nil, "", cluster.DefaultKubernetes)
+		testCtx.installOwnershipRecorders()
+		assert.NoError(t, testCtx.dm.DiscoverCommDir(testCtx.ctx))
+
+		// Each attempt leaves the entry behind for the next one. If a retry allocated a fresh UID
+		// instead of reusing the entry's, the previous UID would be orphaned in the allocator with
+		// nothing referencing it and nothing ever releasing it — one leaked per retry.
+		credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
+		var uids []int
+		for range 2 {
+			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+			assert.Equals(t, true, err != nil)
+
+			// The UID handed to the credential directory is the one this attempt claimed.
+			uids = append(uids, testCtx.ownerOf(credDir)[0])
+		}
+
+		assert.Equals(t, uids[0], uids[1])
+	})
+
+	t.Run("Hands the credential directory and its files to the mount's own UID", func(t *testing.T) {
+		mockCtl := gomock.NewController(t)
+		mockCredProvider := mock_credentialprovider.NewMockProviderInterface(mockCtl)
+
+		testCtx := setupDM(t)
+		target := testCtx.targetPath(testCtx.podUID)
+
+		// A credential provider that actually writes a token, so the walk over the directory's
+		// contents has something to act on. Without a file here, a missing chown of the contents
+		// looks identical to a correct one.
+		tokenPath := filepath.Join(testCtx.commDir, testCtx.volumeID, "token")
+		mockCredProvider.EXPECT().Provide(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, provideCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+				err := os.WriteFile(filepath.Join(provideCtx.WritePath, "token"), []byte("a-token"), 0600)
+				assert.NoError(t, err)
+				return envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil
+			})
+		mockCredProvider.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+
+		devNull := mountertest.OpenDevNull(t)
+		testCtx.dm = mounter.NewDaemonsetMounter(testCtx.client, testCtx.nodeName,
+			mpmounter.NewWithMount(testCtx.mount), mockCredProvider,
+			func(tgt string, opts mpmounter.MountOptions) (int, error) {
+				testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
+				fd, err := syscall.Dup(int(devNull.Fd()))
+				assert.NoError(t, err)
+				return fd, nil
+			},
+			func(source, target string) error {
+				return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
+			}, func() ([]mountutils.MountInfo, error) {
+				var infos []mountutils.MountInfo
+				for _, mp := range testCtx.mount.MountPoints {
+					infos = append(infos, mountutils.MountInfo{MountPoint: mp.Path})
+				}
+				return infos, nil
+			}, "", cluster.DefaultKubernetes)
+		testCtx.installOwnershipRecorders()
+		assert.NoError(t, testCtx.dm.DiscoverCommDir(testCtx.ctx))
+
+		mountRes := make(chan error, 1)
+		go func() {
+			mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+		}()
+
+		got := testCtx.receiveMountOptions()
+		testCtx.mount.Mount("mountpoint-s3", mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID), "fuse", nil)
+		assert.NoError(t, <-mountRes)
+
+		// Mountpoint runs as got.Uid, so anything it cannot read means the mount cannot authenticate.
+		uid := int(got.Uid)
+		assert.Equals(t, got.Uid, got.Gid)
+		if uid < mounter.UIDRangeStart || uid > mounter.UIDRangeEnd {
+			t.Fatalf("expected an allocated UID in [%d, %d], got %d", mounter.UIDRangeStart, mounter.UIDRangeEnd, uid)
+		}
+
+		credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
+		assert.Equals(t, [2]int{uid, uid}, testCtx.ownerOf(credDir))
+		assert.Equals(t, credentialprovider.IsolatedCredentialDirPerm, testCtx.modeOf(credDir))
+
+		assert.Equals(t, [2]int{uid, uid}, testCtx.ownerOf(tokenPath))
+		assert.Equals(t, credentialprovider.IsolatedCredentialFilePerm, testCtx.modeOf(tokenPath))
 	})
 }
 
@@ -667,6 +858,7 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 			testCtx.mountSyscall, func(source, target string) error {
 				return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
 			}, nil, "", cluster.DefaultKubernetes)
+		testCtx.installOwnershipRecorders()
 		err := testCtx.dm.DiscoverCommDir(testCtx.ctx)
 		assert.NoError(t, err)
 

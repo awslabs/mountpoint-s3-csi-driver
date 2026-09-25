@@ -75,12 +75,18 @@ spec:
           - --mountpoint-bin-dir=/mountpoint-s3/bin
           - --v={{ $mounter.logLevel }}
         securityContext:
-          runAsUser: 1000
-          runAsNonRoot: true
+          # Root is required so the kernel clears the spawned Mountpoint process's capabilities on
+          # the UID 0 -> non-0 transition
+          runAsUser: 0
+          runAsNonRoot: false
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+            add:
+              - SETUID # set the UID of each spawned Mountpoint process
+              - SETGID # set its GID and clear its supplementary groups
+              - KILL   # signal the children on shutdown, now that they no longer share our UID
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
