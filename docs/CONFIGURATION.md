@@ -465,6 +465,10 @@ Alternatively, the CSI Driver will detect the `--region` argument specified in t
 Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all nodes, add
 policies to `Value.node.tolerations` to configure customized toleration for nodes.
 
+The mounter DaemonSet inherits these same `node.*` settings, so you configure tolerations once for both driver pods.
+
+Whatever tolerations you give the driver, make sure your workloads are never more tolerant of a `NoExecute` taint than the driver is. Because the driver serves your mounts, a workload that out-tolerates it keeps running after the driver is evicted, on a mount that no longer works.
+
 ## Configure node startup taint
 There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
 
