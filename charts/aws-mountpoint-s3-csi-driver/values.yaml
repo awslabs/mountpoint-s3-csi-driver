@@ -174,8 +174,7 @@ daemonsetMounters:
         cpu: "500m"
     logLevel: 4
     podLabels: {}
-    tolerateAllTaints: true
-    defaultTolerations: true
-    tolerations: []
+    # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /
+    # node.defaultTolerations / node.tolerations); it has no toleration field of its own.
     affinity: {}
     imagePullSecrets: []

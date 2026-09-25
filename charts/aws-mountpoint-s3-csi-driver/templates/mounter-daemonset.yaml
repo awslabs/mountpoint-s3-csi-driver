@@ -44,9 +44,9 @@ spec:
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
-        {{- if $mounter.tolerateAllTaints | default .Values.node.tolerateAllTaints }}
+        {{- if .Values.node.tolerateAllTaints }}
         - operator: Exists
-        {{- else if $mounter.defaultTolerations | default .Values.node.defaultTolerations }}
+        {{- else if .Values.node.defaultTolerations }}
         - key: CriticalAddonsOnly
           operator: Exists
         - key: s3.csi.aws.com/agent-not-ready
@@ -55,7 +55,7 @@ spec:
           effect: NoExecute
           tolerationSeconds: 300
         {{- end }}
-        {{- with $mounter.tolerations }}
+        {{- with .Values.node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with $mounter.imagePullSecrets }}
