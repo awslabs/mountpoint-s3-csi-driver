@@ -3,12 +3,15 @@ package node_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
@@ -30,9 +33,13 @@ type nodeServerTestEnv struct {
 }
 
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
+	return initNodeServerTestEnvWithMounterMode(t, true)
+}
+
+func initNodeServerTestEnvWithMounterMode(t *testing.T, daemonsetMounterMode bool) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	server := node.NewS3NodeServer(testNodeID, mockMounter, 0)
+	server := node.NewS3NodeServer(testNodeID, mockMounter, 0, daemonsetMounterMode)
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,
@@ -488,7 +495,7 @@ func TestNodePublishVolume(t *testing.T) {
 	}
 }
 
-func TestNodePublishVolumeForPodMounter(t *testing.T) {
+func TestNodePublishVolumeFSGroupFlags(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
@@ -721,7 +728,61 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 	}
 }
 
+func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
+	const (
+		volumeID   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/var/lib/kubelet/pods/pod-uid/volumes/kubernetes.io~csi/test-pv-name/mount"
+	)
+
+	testCases := []struct {
+		name     string
+		mountErr error
+		wantCode codes.Code
+	}{
+		{
+			name:     "a mounter's own rejection reaches the kubelet with its code",
+			mountErr: status.Error(codes.InvalidArgument, "requests a tmpfs cache, but this node provides emptyDir"),
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name:     "a plain mount failure is Internal, so the kubelet retries it",
+			mountErr: errors.New("failed to send mount options"),
+			wantCode: codes.Internal,
+		},
+		{
+			name:     "a rejection wrapped on the way out keeps its code",
+			mountErr: fmt.Errorf("cannot share mount for volume %s: %w", volumeID, status.Error(codes.InvalidArgument, "requests a tmpfs cache")),
+			wantCode: codes.InvalidArgument,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			defer nodeTestEnv.mockCtl.Finish()
+
+			nodeTestEnv.mockMounter.EXPECT().
+				Mount(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(testCase.mountErr)
+
+			_, err := nodeTestEnv.server.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+				VolumeId: volumeID,
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
+					AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER},
+				},
+				TargetPath:    targetPath,
+				VolumeContext: map[string]string{volumecontext.BucketName: bucketName},
+			})
+			assert.Equals(t, testCase.wantCode, status.Code(err))
+		})
+	}
+}
+
+// TODO: Remove v2 max-cache-size injection code when we remove all pod mode code.
 func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
+	// Pod mode only: node.go injects max-cache-size only when DaemonsetMounterMode is off.
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
@@ -864,7 +925,7 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			nodeTestEnv := initNodeServerTestEnv(t)
+			nodeTestEnv := initNodeServerTestEnvWithMounterMode(t, false)
 			ctx := context.Background()
 
 			volCap := &csi.VolumeCapability{
