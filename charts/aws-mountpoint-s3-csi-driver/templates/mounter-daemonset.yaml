@@ -40,6 +40,14 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       priorityClassName: system-node-critical
+      {{- if $mounter.cache }}
+      securityContext:
+        # An unprivileged container needs a group owning the volume the kubelet provisions for it,
+        # or a `cache.type: ephemeral` volume arrives `root:root 0755` and Mountpoint cannot write.
+        # TODO: Check if we need to disable on ROSA like in v2. (Remove TODO after e2e test on CI
+        # Or if it's covered by process isolation task).
+        fsGroup: 1000
+      {{- end }}
       {{- with $mounter.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -86,6 +94,10 @@ spec:
         volumeMounts:
           - name: comm
             mountPath: /comm
+          {{- if $mounter.cache }}
+          - name: cache
+            mountPath: /cache
+          {{- end }}
         {{- with $mounter.resources }}
         resources:
           {{- toYaml . | nindent 12 }}
@@ -93,4 +105,33 @@ spec:
       volumes:
       - name: comm
         emptyDir: {}
+      {{- if $mounter.cache }}
+      - name: cache
+        {{- $cacheType := required "daemonsetMounters[0].cache.type is required when a cache block is set: \"emptyDir\" or \"ephemeral\"" $mounter.cache.type }}
+        {{- if eq $cacheType "emptyDir" }}
+        {{- $emptyDir := default (dict) $mounter.cache.emptyDir }}
+        {{- if and $emptyDir.medium (ne $emptyDir.medium "Memory") }}
+        {{- fail (printf "daemonsetMounters[0].cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $emptyDir.medium) }}
+        {{- end }}
+        emptyDir:
+          medium: {{ $emptyDir.medium | default "" | quote }}
+          sizeLimit: {{ required "daemonsetMounters[0].cache.emptyDir.sizeLimit is required when cache.type is \"emptyDir\"" $emptyDir.sizeLimit }}
+        {{- else if eq $cacheType "ephemeral" }}
+        {{- $ephemeral := default (dict) $mounter.cache.ephemeral }}
+        ephemeral:
+          volumeClaimTemplate:
+            metadata:
+              labels:
+                s3.csi.aws.com/type: local-ephemeral-cache
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              volumeMode: Filesystem
+              storageClassName: {{ required "daemonsetMounters[0].cache.ephemeral.storageClassName is required when cache.type is \"ephemeral\"" $ephemeral.storageClassName | quote }}
+              resources:
+                requests:
+                  storage: {{ required "daemonsetMounters[0].cache.ephemeral.size is required when cache.type is \"ephemeral\"" $ephemeral.size }}
+        {{- else }}
+        {{- fail (printf "daemonsetMounters[0].cache.type must be \"emptyDir\" or \"ephemeral\", got %q" $cacheType) }}
+        {{- end }}
+      {{- end }}
 {{- end }}

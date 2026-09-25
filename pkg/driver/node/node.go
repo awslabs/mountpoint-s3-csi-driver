@@ -63,13 +63,19 @@ const (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID            string
-	Mounter           mounter.Mounter
-	MaxVolumesPerNode int64
+	NodeID               string
+	Mounter              mounter.Mounter
+	MaxVolumesPerNode    int64
+	DaemonsetMounterMode bool // if true, does not configure cache in node.go.
 }
 
-func NewS3NodeServer(nodeID string, mounter mounter.Mounter, maxVolumesPerNode int64) *S3NodeServer {
-	return &S3NodeServer{NodeID: nodeID, Mounter: mounter, MaxVolumesPerNode: maxVolumesPerNode}
+func NewS3NodeServer(nodeID string, mounter mounter.Mounter, maxVolumesPerNode int64, daemonsetMounterMode bool) *S3NodeServer {
+	return &S3NodeServer{
+		NodeID:               nodeID,
+		Mounter:              mounter,
+		MaxVolumesPerNode:    maxVolumesPerNode,
+		DaemonsetMounterMode: daemonsetMounterMode,
+	}
 }
 
 func (ns *S3NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -156,45 +162,49 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	// If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
-	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir {
-		quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
-		}
-		emptyDirSizeLimitMiB := quantity.Value() / (1024 * 1024)
-
-		// Safety factor to account for Mountpoint overshooting its cache target by around 1-2%.
-		const safetyFactor = 0.95
-		safeMaxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
-
-		if maxCacheSize, ok := args.Value(mountpoint.ArgMaxCacheSize); ok {
-			maxCacheSizeMiB, err := strconv.ParseInt(maxCacheSize, 10, 64)
+	// Pod Mode: If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
+	// Daemonset mode configures the cache in DaemonsetMounter.Mount, which reads the node's cache type
+	// off the running mounter pod's spec.
+	if !ns.DaemonsetMounterMode {
+		if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir {
+			quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
 			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", mountpoint.ArgMaxCacheSize, maxCacheSize, err)
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
 			}
-			if maxCacheSizeMiB > emptyDirSizeLimitMiB {
-				return nil, status.Errorf(codes.InvalidArgument,
-					"%s (%d MiB) exceeds %s (%s = %d MiB). Reduce %s or increase %s.",
-					mountpoint.ArgMaxCacheSize, maxCacheSizeMiB,
-					volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, emptyDirSizeLimitMiB,
-					mountpoint.ArgMaxCacheSize, volumecontext.CacheEmptyDirSizeLimit)
-			}
-			// For disk-backed (default) medium, remove user's explicit --max-cache-size if it exceeds
-			// the safe threshold, allowing the safe default to be injected below via SetIfAbsent.
-			if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) && maxCacheSizeMiB > safeMaxCacheSizeMiB {
-				args.Remove(mountpoint.ArgMaxCacheSize)
-			}
-		}
+			emptyDirSizeLimitMiB := quantity.Value() / (1024 * 1024)
 
-		// For disk-backed (default) medium, statvfs on the cache directory reports the node's root filesystem
-		// stats rather than the emptyDir's sizeLimit, so Mountpoint cannot self-limit correctly.
-		// Inject --max-cache-size at 95% of the limit to ensure Mountpoint evicts before Kubernetes does.
-		// The 5% margin accounts for Mountpoint overshooting its target by around 1-2%.
-		// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
-		// can self-limit without this injection.
-		if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
-			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(safeMaxCacheSizeMiB, 10))
+			// Safety factor to account for Mountpoint overshooting its cache target by around 1-2%.
+			const safetyFactor = 0.95
+			safeMaxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
+
+			if maxCacheSize, ok := args.Value(mountpoint.ArgMaxCacheSize); ok {
+				maxCacheSizeMiB, err := strconv.ParseInt(maxCacheSize, 10, 64)
+				if err != nil {
+					return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", mountpoint.ArgMaxCacheSize, maxCacheSize, err)
+				}
+				if maxCacheSizeMiB > emptyDirSizeLimitMiB {
+					return nil, status.Errorf(codes.InvalidArgument,
+						"%s (%d MiB) exceeds %s (%s = %d MiB). Reduce %s or increase %s.",
+						mountpoint.ArgMaxCacheSize, maxCacheSizeMiB,
+						volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, emptyDirSizeLimitMiB,
+						mountpoint.ArgMaxCacheSize, volumecontext.CacheEmptyDirSizeLimit)
+				}
+				// For disk-backed (default) medium, remove user's explicit --max-cache-size if it exceeds
+				// the safe threshold, allowing the safe default to be injected below via SetIfAbsent.
+				if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) && maxCacheSizeMiB > safeMaxCacheSizeMiB {
+					args.Remove(mountpoint.ArgMaxCacheSize)
+				}
+			}
+
+			// For disk-backed (default) medium, statvfs on the cache directory reports the node's root filesystem
+			// stats rather than the emptyDir's sizeLimit, so Mountpoint cannot self-limit correctly.
+			// Inject --max-cache-size at 95% of the limit to ensure Mountpoint evicts before Kubernetes does.
+			// The 5% margin accounts for Mountpoint overshooting its target by around 1-2%.
+			// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
+			// can self-limit without this injection.
+			if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
+				args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(safeMaxCacheSizeMiB, 10))
+			}
 		}
 	}
 
@@ -209,6 +219,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, volumeCtx, args, fsGroup, userEnv); err != nil {
 		os.Remove(targetContainer)
+		// Mounters who rejected the request could choose their own code
+		if _, ok := status.FromError(err); ok && status.Code(err) != codes.Unknown {
+			return nil, err
+		}
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
 	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)

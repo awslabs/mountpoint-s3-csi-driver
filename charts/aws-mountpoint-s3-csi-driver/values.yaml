@@ -172,6 +172,21 @@ daemonsetMounters:
       requests:
         memory: "2Gi"
         cpu: "500m"
+    # Local cache for Mountpoint. Uncomment the `cache` block to give this node a shared
+    # cache volume, with a subdirectory per volume. A PV then opts in with the `cache` 
+    # volumeAttribute and limits its own usage with `max-cache-size` in mountOptions.
+    # cache:
+    #   # "emptyDir" or "ephemeral"; please uncomment the relevant section for the chosen type.
+    #   type: emptyDir        
+    #   emptyDir:
+    #     sizeLimit: "2Gi" 
+    #     # "" for the node's disk, or "Memory" for a tmpfs. For "Memory", please refer to 
+    #     # CACHING.md for requesting the appropriate amount of memory for the mounter pod to 
+    #     # prevent OOMKilled errors.
+    #     medium: ""
+    #   ephemeral:
+    #     storageClassName: gp3
+    #     size: 10Gi
     logLevel: 4
     podLabels: {}
     tolerateAllTaints: true
