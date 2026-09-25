@@ -3,6 +3,37 @@
 {{- fail "daemonsetMounters must have exactly one entry" }}
 {{- end }}
 {{- $mounter := index .Values.daemonsetMounters 0 }}
+{{- $resources := $mounter.resources | default dict }}
+{{- $requests := $resources.requests | default dict }}
+{{- $maxVolumes := int $mounter.maxVolumesPerNode }}
+{{- $strategies := list "equalSplit" "none" }}
+{{- $strategy := $mounter.memoryLimitStrategy | default "" }}
+{{- if not (has $strategy $strategies) }}
+{{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $strategy) }}
+{{- end }}
+{{- if eq $strategy "equalSplit" }}
+{{- /* equalSplit reserves 64 MiB of the container's memory request for the mounter's own process, then
+       divides the rest by maxVolumesPerNode, so both inputs are required. */}}
+{{- if not $requests.memory }}
+{{- fail "daemonsetMounters[]: resources.requests.memory is required when memoryLimitStrategy=equalSplit, which divides it between the maxVolumesPerNode Mountpoint processes the mounter hosts to give each a --memory-target. Set memoryLimitStrategy=none to leave --memory-target to each PV's mountOptions." }}
+{{- end }}
+{{- if le $maxVolumes 0 }}
+{{- fail (printf "daemonsetMounters[]: maxVolumesPerNode is required and must be greater than 0 when memoryLimitStrategy=equalSplit, got %d: it is the divisor for resources.requests.memory. Set memoryLimitStrategy=none to leave --memory-target to each PV's mountOptions." $maxVolumes) }}
+{{- end }}
+{{- /* Fail early on a request that cannot work. Best-effort only: a quantity this chart cannot parse
+       skips these checks, and the mounter re-checks at runtime regardless. */}}
+{{- $budgetBytes := include "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" $requests.memory }}
+{{- if $budgetBytes }}
+{{- $budgetMiB := sub (divf (float64 $budgetBytes) 1048576.0 | floor | int64) 64 }}
+{{- if le (int64 $budgetMiB) 0 }}
+{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) is at or below the 64 MiB the mounter reserves for its own process, leaving nothing for Mountpoint. Raise resources.requests.memory." $requests.memory) }}
+{{- end }}
+{{- $shareMiB := div (int64 $budgetMiB) $maxVolumes }}
+{{- if lt (int64 $shareMiB) 512 }}
+{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) leaves %d MiB after the 64 MiB reserved for the mounter process, which split across maxVolumesPerNode=%d gives %d MiB per Mountpoint process, below Mountpoint's minimum --memory-target of 512 MiB. Raise resources.requests.memory or lower maxVolumesPerNode." $requests.memory $budgetMiB $maxVolumes $shareMiB) }}
+{{- end }}
+{{- end }}
+{{- end }}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -73,7 +104,18 @@ spec:
         args:
           - --comm-dir=/comm
           - --mountpoint-bin-dir=/mountpoint-s3/bin
+          - --max-volumes-per-node={{ $maxVolumes }}
+          - --memory-limit-strategy={{ $strategy }}
           - --v={{ $mounter.logLevel }}
+        {{- if $requests.memory }}
+        env:
+          - name: MOUNTER_MEMORY_REQUEST_BYTES
+            valueFrom:
+              resourceFieldRef:
+                containerName: mounter
+                resource: requests.memory
+                divisor: "1"
+        {{- end }}
         securityContext:
           runAsUser: 1000
           runAsNonRoot: true
