@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"regexp"
 	"syscall"
@@ -32,6 +33,22 @@ func handleConnection(conn *net.UnixConn, mountpointPath string, pm *ProcessMana
 	if mountId == "" || !validMountId.MatchString(mountId) {
 		syscall.Close(options.Fd)
 		klog.Errorf("Received mount request with invalid mountId: %q", mountId)
+		return
+	}
+
+	// Reject a version-skewed CSI Driver Node before spawning anything: the mounter uses an OnDelete
+	// update strategy, so after a Helm upgrade a new driver may talk to this (still-old) mounter until
+	// the node is recycled. On mismatch we do NOT mount — we close the FUSE fd and surface a clear
+	// error via the .error file (which the driver's waitForMount polls), so NodePublishVolume fails
+	// fast instead of producing a silent/partial mount.
+	if options.ProtocolVersion != mountoptions.ProtocolVersion {
+		syscall.Close(options.Fd)
+		msg := fmt.Sprintf("protocol version mismatch: mounter=%q driver=%q. "+
+			"The s3-csi-daemonset-mounter pod is running a version incompatible with the CSI Driver Node; "+
+			"recycle the node or delete the mounter pod so it is recreated at the matching version.",
+			mountoptions.ProtocolVersion, options.ProtocolVersion)
+		klog.Error(msg)
+		pm.WriteErrorFile(mountId, []byte(msg))
 		return
 	}
 

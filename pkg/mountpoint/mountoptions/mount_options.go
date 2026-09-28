@@ -18,13 +18,25 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// ProtocolVersion is the version of the driver<->mounter communication protocol (the Options/Env/Args
+// contract and FUSE-fd passing). The CSI Driver Node stamps it on every mount request and the mounter
+// rejects requests whose version does not match its own.
+//
+// Because the mounter DaemonSet uses an OnDelete update strategy, after a Helm upgrade the (new)
+// CSI Driver Node can talk to a (still-old) mounter pod until the node is recycled. Bumping this
+// constant on any breaking protocol change turns that skew into a clear, fail-fast error instead of a
+// silent wrong/partial mount.
+const ProtocolVersion = "1"
+
 // An Options struct represents mount options to use while invoking Mountpoint.
 type Options struct {
 	// Fd will be passed over Unix socket using `SCM_RIGHTS`, not as part of the serialized JSON.
-	Fd         int      `json:"-"`
-	BucketName string   `json:"bucketName"`
-	Args       []string `json:"args"`
-	Env        []string `json:"env"`
+	Fd int `json:"-"`
+	// ProtocolVersion is the driver<->mounter protocol version; see [ProtocolVersion].
+	ProtocolVersion string   `json:"protocolVersion"`
+	BucketName      string   `json:"bucketName"`
+	Args            []string `json:"args"`
+	Env             []string `json:"env"`
 	// VolumeId is a unique mount identifier used by the daemonset mounter for child process
 	// tracking and error file naming. In daemonset mode this is "<podUID>-<volumeId>".
 	// With pod sharing it'll be "volumeID" (PersistentVolume: metadata.name).

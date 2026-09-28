@@ -97,11 +97,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		pm.mu.Unlock()
 
 		if exitCode != 0 {
-			errPath := filepath.Join(pm.commDir, mountId+errorFileExt)
-			// TODO(vlaad): write error file atomically (open,write,rename)
-			if writeErr := os.WriteFile(errPath, stderr, errorFilePerm); writeErr != nil {
-				klog.Errorf("Failed to write error file for mount %s: %v", mountId, writeErr)
-			}
+			pm.WriteErrorFile(mountId, stderr)
 			klog.Errorf("Mountpoint for mount %s exited with code %d", mountId, exitCode)
 		} else {
 			klog.Infof("Mountpoint for mount %s exited cleanly", mountId)
@@ -109,6 +105,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	}()
 
 	return nil
+}
+
+// WriteErrorFile writes `content` to <comm-dir>/<mountId>.error, the file the CSI Driver Node polls
+// (via waitForMount) to surface a mount failure. Used both when a Mountpoint process exits non-zero
+// and when a mount request is rejected before spawning (e.g. protocol version mismatch).
+func (pm *ProcessManager) WriteErrorFile(mountId string, content []byte) {
+	errPath := filepath.Join(pm.commDir, mountId+errorFileExt)
+	// TODO(vlaad): write error file atomically (open,write,rename)
+	if writeErr := os.WriteFile(errPath, content, errorFilePerm); writeErr != nil {
+		klog.Errorf("Failed to write error file for mount %s: %v", mountId, writeErr)
+	}
 }
 
 // Shutdown sends SIGTERM to all processes and waits for them to exit.

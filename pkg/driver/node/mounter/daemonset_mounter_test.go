@@ -200,10 +200,11 @@ func TestDaemonsetMounter(t *testing.T) {
 			// The mount must carry the user-agent, built from the same inputs setupDM used.
 			expectedUserAgent := "--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes)
 			assert.Equals(t, mountoptions.Options{
-				BucketName: testCtx.bucketName,
-				Args:       []string{"--prefix=data/", expectedUserAgent},
-				Env:        env.List(),
-				VolumeId:   testCtx.volumeID,
+				ProtocolVersion: mountoptions.ProtocolVersion,
+				BucketName:      testCtx.bucketName,
+				Args:            []string{"--prefix=data/", expectedUserAgent},
+				Env:             env.List(),
+				VolumeId:        testCtx.volumeID,
 			}, got)
 		})
 
