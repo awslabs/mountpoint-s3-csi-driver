@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -382,4 +383,62 @@ func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName 
 	}
 
 	return matchingPods, nil
+}
+
+func dumpMountpointAndDriverInfoOnFailure(f *framework.Framework) {
+	ginkgo.JustAfterEach(func(ctx context.Context) {
+		if ginkgo.CurrentSpecReport().Failed() && framework.TestContext.DumpLogsOnFailure {
+			dumpMountpointAndDriverInfo(ctx, f)
+		}
+	})
+}
+
+func dumpMountpointAndDriverInfo(ctx context.Context, f *framework.Framework) {
+	framework.Logf("Dumping CSI node pods")
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).
+		List(ctx, metav1.ListOptions{LabelSelector: "app=" + csiDriverDaemonSetName})
+	if err != nil {
+		framework.Logf("failed to list %s pods: %v", csiDriverDaemonSetName, err)
+		return
+	}
+	for i := range pods.Items {
+		dumpLogsForPod(ctx, f, &pods.Items[i])
+	}
+
+	framework.Logf("Dumping Mountpoint pods")
+	pods, err = f.ClientSet.CoreV1().Pods(mountpointNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		framework.Logf("failed to list %s pods: %v", mountpointNamespace, err)
+		return
+	}
+	for i := range pods.Items {
+		dumpLogsForPod(ctx, f, &pods.Items[i])
+	}
+
+}
+
+func dumpLogsForPod(ctx context.Context, f *framework.Framework, pod *v1.Pod) {
+	for _, c := range pod.Spec.Containers { // s3-plugin, node-driver-registrar, liveness-probe
+		logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, pod.Namespace, pod.Name, c.Name)
+		if err != nil {
+			framework.Logf("logs %s/%s[%s]: %v", pod.Namespace, pod.Name, c.Name, err)
+		} else {
+			framework.Logf("=== %s/%s[%s] ===\n%s", pod.Namespace, pod.Name, c.Name, filterForcingResyncLogs(logs))
+		}
+	}
+}
+
+// filterForcingResyncLogs drops lines ending with the client-go shared informer
+// Reflector's "forcing resync" message. That line is emitted at V(4) every time
+// an informer's resync period elapses and only adds noise to the failure dump.
+func filterForcingResyncLogs(logs string) string {
+	lines := strings.Split(logs, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.HasSuffix(line, ": forcing resync") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
