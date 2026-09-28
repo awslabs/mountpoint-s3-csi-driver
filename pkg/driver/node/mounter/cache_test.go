@@ -1,10 +1,12 @@
 package mounter
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -13,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
@@ -122,10 +125,12 @@ func TestConfigureCache(t *testing.T) {
 		mountOptions []string
 		volumeCtx    map[string]string
 		// mounterCacheType is the cache type the mounter pod has.
-		mounterCacheType    CacheType
-		expectedArgs        []string
-		expectError         bool
-		expectedErrContains string
+		mounterCacheType       CacheType
+		expectedArgs           []string
+		expectError            bool
+		expectedErrContains    string
+		expectedWarnContains   string
+		unexpectedWarnContains string
 	}{
 		// Happy Cases + edge cases
 		{
@@ -150,14 +155,14 @@ func TestConfigureCache(t *testing.T) {
 			expectedArgs:     []string{cacheArg},
 		},
 		{
-			// Note: We also give a warning for this case.
 			name: "ignores the medium when the type is ephemeral",
 			volumeCtx: map[string]string{
 				volumecontext.Cache:               volumecontext.CacheTypeEphemeral,
 				volumecontext.CacheEmptyDirMedium: "Memory",
 			},
-			mounterCacheType: CacheEphemeral,
-			expectedArgs:     []string{cacheArg},
+			mounterCacheType:     CacheEphemeral,
+			expectedArgs:         []string{cacheArg},
+			expectedWarnContains: "the medium selects an emptyDir backing only",
 		},
 		{
 			name:             "does not enable the cache when only the medium is set",
@@ -276,7 +281,6 @@ func TestConfigureCache(t *testing.T) {
 			name: "accepts the v2-only cache and container resource attributes without leaking them into args",
 			volumeCtx: map[string]string{
 				volumecontext.Cache:                                      volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit:                     "2Gi",
 				volumecontext.CacheEphemeralStorageClassName:             "gp3",
 				volumecontext.CacheEphemeralStorageResourceRequest:       "10Gi",
 				volumecontext.MountpointContainerResourcesRequestsCpu:    "100m",
@@ -294,11 +298,98 @@ func TestConfigureCache(t *testing.T) {
 			mounterCacheType: CacheEmptyDirDisk,
 			expectedArgs:     []string{cacheArg, "--region=us-west-2"},
 		},
+		// 95% of cacheEmptyDirSizeLimit / cacheEphemeralStorageResourceRequest is injected to max-cache-size to match v2 behaviour as fallback.
+		{
+			name: "bounds a disk emptyDir from the PV's deprecated size limit",
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+			},
+			mounterCacheType: CacheEmptyDirDisk,
+			expectedArgs:     []string{cacheArg, "--max-cache-size=1945"}, // 2048 less a 5% margin
+			// The v2 warning loop must stop calling this attribute ineffective once we read it.
+			expectedWarnContains:   "injects 1945 MiB",
+			unexpectedWarnContains: "has no effect in v3",
+		},
+		{
+			// v2 rejected this pair; v3 does not reject it and prioritizes max-cache-size instead.
+			name:         "keeps a max-cache-size even if above the deprecated size limit, and does not reject it",
+			mountOptions: []string{"max-cache-size 5000"},
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+			},
+			mounterCacheType: CacheEmptyDirDisk,
+			expectedArgs:     []string{cacheArg, "--max-cache-size=5000"},
+		},
+		{
+			name: "bounds a tmpfs from the PV's deprecated size limit",
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirMedium:    "Memory",
+				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+			},
+			mounterCacheType: CacheEmptyDirMemory,
+			expectedArgs:     []string{cacheArg, "--max-cache-size=1945"},
+		},
+		{
+			name: "bounds an ephemeral cache from the PV's deprecated storage request",
+			volumeCtx: map[string]string{
+				volumecontext.Cache: volumecontext.CacheTypeEphemeral,
+				volumecontext.CacheEphemeralStorageResourceRequest: "10Gi",
+			},
+			mounterCacheType:       CacheEphemeral,
+			expectedArgs:           []string{cacheArg, "--max-cache-size=9728"}, // 10240 * 95%
+			expectedWarnContains:   `95% of the deprecated "cacheEphemeralStorageResourceRequest"`,
+			unexpectedWarnContains: "has no effect in v3",
+		},
+		{
+			// Note not multiplying before dividing fails this test case, as all division floors.
+			// e.g.: boundMiB := quantity.Value() / bytesPerMiB * cacheSizeMarginPercent / 100
+			name: "a size limit of 1500Ki injects 1",
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "1500Ki",
+			},
+			mounterCacheType: CacheEmptyDirDisk,
+			expectedArgs:     []string{cacheArg, "--max-cache-size=1"},
+		},
+		{
+			name: "a size limit at 1 MiB injects 0, which silently disables the cache",
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "1Mi",
+			},
+			mounterCacheType:     CacheEmptyDirDisk,
+			expectedArgs:         []string{cacheArg, "--max-cache-size=0"},
+			expectedWarnContains: "driver injects 0 MiB",
+		},
+		{
+			name: "does not fail on a deprecated size limit that is not a quantity",
+			volumeCtx: map[string]string{
+				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+				volumecontext.CacheEmptyDirSizeLimit: "2 gigabytes",
+			},
+			mounterCacheType:     CacheEmptyDirDisk,
+			expectedArgs:         []string{cacheArg},
+			expectedWarnContains: "is not a Kubernetes quantity",
+		},
+		{
+			name: "does not fail on a deprecated ephemeral storage request that is not a quantity",
+			volumeCtx: map[string]string{
+				volumecontext.Cache: volumecontext.CacheTypeEphemeral,
+				volumecontext.CacheEphemeralStorageResourceRequest: "10 gigabytes",
+			},
+			mounterCacheType:     CacheEphemeral,
+			expectedArgs:         []string{cacheArg},
+			expectedWarnContains: `sets the "cacheEphemeralStorageResourceRequest" volume attribute`,
+		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			args := mountpoint.ParseArgs(testCase.mountOptions)
+			logs := captureKlog(t)
 
 			err := configureCache(&args, testCase.volumeCtx, volumeID, testCase.mounterCacheType)
 
@@ -314,6 +405,12 @@ func TestConfigureCache(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equals(t, testCase.expectedArgs, args.SortedList())
+			if testCase.expectedWarnContains != "" {
+				assert.Contains(t, logs.String(), testCase.expectedWarnContains)
+			}
+			if testCase.unexpectedWarnContains != "" && strings.Contains(logs.String(), testCase.unexpectedWarnContains) {
+				t.Errorf("warning %q must not fire here:\n%s", testCase.unexpectedWarnContains, logs.String())
+			}
 		})
 	}
 }
@@ -522,4 +619,19 @@ func TestRemoveCacheDir(t *testing.T) {
 			})
 		}
 	})
+}
+
+// captureKlog redirects klog's output into the returned buffer for the rest of t. SetOutput alone
+// captures nothing: logtostderr defaults true and klog short-circuits to os.Stderr before the sink.
+// The sink is process-global, so no test that uses this may call t.Parallel.
+func captureKlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	klog.LogToStderr(false)
+	klog.SetOutput(&buf)
+	t.Cleanup(func() {
+		klog.SetOutput(nil)
+		klog.LogToStderr(true)
+	})
+	return &buf
 }

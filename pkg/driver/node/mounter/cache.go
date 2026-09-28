@@ -7,11 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -36,9 +38,7 @@ const (
 
 // V2 Per-mount cache attributes that have NO EFFECT in daemonset mode (only warning).
 var otherCacheVolumeAttributes = []string{
-	volumecontext.CacheEmptyDirSizeLimit,
 	volumecontext.CacheEphemeralStorageClassName,
-	volumecontext.CacheEphemeralStorageResourceRequest,
 }
 
 // CacheType is the mounter pod's cache type, also shown in errors and logs. It distinguishes between:
@@ -50,6 +50,11 @@ const (
 	CacheEmptyDirDisk   CacheType = "emptyDir"
 	CacheEmptyDirMemory CacheType = "emptyDir (medium Memory)"
 	CacheEphemeral      CacheType = "ephemeral"
+)
+
+const (
+	bytesPerMiB            = 1024 * 1024
+	cacheSizeMarginPercent = 95 // Mountpoint evicts cache only after cache write, so we leave some headroom
 )
 
 // resolveCacheTypeAndDir returns the cache type the mounter pod's spec declares and where that
@@ -156,22 +161,9 @@ func configureCache(args *mountpoint.Args, volumeCtx map[string]string, volumeID
 		}
 	}
 
-	// TODO: For emptyDir disk case, find approach to limit max cache size with/without sizeLimit to prevent
-	// resource exhaustion (e.g. --max-cache-size). Currently Mountpoint stops writing cache once cache filesystem
-	// has less than 5% free, which works correctly for emptyDir:Memory (tmpfs) and ephemeral. But emptyDir disk case
-	// Mountpoint's statvfs reads the node's root filesystem stats instead, so we cannot rely on this check.
-	// Temp: warn user if cache is enabled but no max cache size is set (remove when TODO addressed).
-	if !args.Has(mountpoint.ArgMaxCacheSize) {
-		klog.Warningf("NodePublishVolume: volume %s enables the cache without %s, so it may use the"+
-			" whole cache volume of s3-csi-daemonset-mounter.", volumeID, mountpoint.ArgMaxCacheSize)
-	}
+	setMaxCacheSizeFromDeprecatedPVSizes(args, volumeCtx, volumeID, mounterCacheType)
 
 	return nil
-}
-
-// MountOptionCacheDir returns a mount's cache directory as Mountpoint sees it, passed to `--cache`.
-func MountOptionCacheDir(volumeID string) string {
-	return filepath.Join("/", CacheVolumeName, volumeID)
 }
 
 // checkCacheTypeMatches rejects a PV whose requested cache type is not the one this node has.
@@ -192,6 +184,51 @@ func checkCacheTypeMatches(volumeCtx map[string]string, volumeID string, mounter
 			volumeID, requested, mounterCacheType, volumecontext.Cache)
 	}
 	return nil
+}
+
+// MountOptionCacheDir returns a mount's cache directory as Mountpoint sees it, passed to `--cache`.
+func MountOptionCacheDir(volumeID string) string {
+	return filepath.Join("/", CacheVolumeName, volumeID)
+}
+
+// setMaxCacheSizeFromDeprecatedPVSizes bounds the cache if max-cache-size mountOptions is not
+// provided, as a final fallback to match v2 behaviour.
+func setMaxCacheSizeFromDeprecatedPVSizes(args *mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterCacheType CacheType) {
+	var sizeAttr string
+	switch mounterCacheType {
+	case CacheEmptyDirDisk, CacheEmptyDirMemory:
+		sizeAttr = volumecontext.CacheEmptyDirSizeLimit
+	case CacheEphemeral:
+		sizeAttr = volumecontext.CacheEphemeralStorageResourceRequest
+	default: // CacheNone only, which configureCache rejected before calling.
+		return
+	}
+
+	pvSize := volumeCtx[sizeAttr]
+	// mountOptions max-cache-size flag has priority, and if unset we also skip.
+	if pvSize == "" || args.Has(mountpoint.ArgMaxCacheSize) {
+		return
+	}
+
+	quantity, err := resource.ParseQuantity(pvSize)
+	if err != nil {
+		klog.Warningf("NodePublishVolume: volume %s sets the %q volume attribute to %q, which is not a"+
+			" Kubernetes quantity, so driver does not inject max-cache-size based on this value: %v."+
+			" Set %s in its mountOptions instead.",
+			volumeID, sizeAttr, pvSize, err, mountpoint.ArgMaxCacheSize)
+		return
+	}
+
+	// MultiplyeBEFORE dividing as every integer division floors
+	boundMiB := quantity.Value() * cacheSizeMarginPercent / 100 / bytesPerMiB
+
+	args.Set(mountpoint.ArgMaxCacheSize, strconv.FormatInt(boundMiB, 10))
+	// Says what the driver injected, not what bounds the mount: under cacheLimitStrategy=equalSplit
+	// s3-csi-daemonset-mounter replaces this value, and this node does not know the strategy.
+	klog.Warningf("NodePublishVolume: volume %s sets no %s in its mountOptions, so driver injects %d MiB,"+
+		" %d%% of the deprecated %q volume attribute of %q. Set %s in its mountOptions to bound it yourself.",
+		volumeID, mountpoint.ArgMaxCacheSize, boundMiB, cacheSizeMarginPercent,
+		sizeAttr, pvSize, mountpoint.ArgMaxCacheSize)
 }
 
 // cacheTypeFromPV returns the cache type a PV's `cache` and `cacheEmptyDirMedium` attributes name.
