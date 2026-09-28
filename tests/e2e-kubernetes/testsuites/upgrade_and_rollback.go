@@ -521,16 +521,17 @@ func buildHelmValuesForUpgrade() map[string]any {
 	// on a single node. Must provide full array element because Helm replaces arrays
 	// entirely (doesn't merge individual fields into array items).
 	values["daemonsetMounters"] = []map[string]any{{
-		"maxVolumesPerNode":  0,
-		"resources":          map[string]any{"requests": map[string]any{"cpu": "500m", "memory": "2Gi"}},
-		"logLevel":           4,
-		"podLabels":          map[string]any{},
-		"nodeSelector":       map[string]any{},
-		"tolerateAllTaints":  true,
-		"defaultTolerations": true,
-		"tolerations":        []any{},
-		"affinity":           map[string]any{},
-		"imagePullSecrets":   []any{},
+		"maxVolumesPerNode":   0,
+		"memoryLimitStrategy": "none",
+		"resources":           map[string]any{"requests": map[string]any{"cpu": "500m", "memory": "2Gi"}},
+		"logLevel":            4,
+		"podLabels":           map[string]any{},
+		"nodeSelector":        map[string]any{},
+		"tolerateAllTaints":   true,
+		"defaultTolerations":  true,
+		"tolerations":         []any{},
+		"affinity":            map[string]any{},
+		"imagePullSecrets":    []any{},
 	}}
 	return values
 }

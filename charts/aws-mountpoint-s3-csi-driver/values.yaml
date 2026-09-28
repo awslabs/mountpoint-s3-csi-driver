@@ -162,15 +162,29 @@ daemonsetMounters:
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
     # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
     # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
-    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to 
+    # 0 is only allowed with memoryLimitStrategy "none".
+    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to
     # track volume usage.
   - maxVolumesPerNode: 4
-    # Total resource requests and limits for the mounter DaemonSet pod.
-    # requests.memory should be sized to maxVolumesPerNode × per-mount memory
-    # (e.g., 4 mounts × 512Mi = 2Gi, or 10 mounts × 4Gi = 40Gi).
+    # How each Mountpoint process gets its --memory-target, which bounds how much memory it uses.
+    # All Mountpoint processes on a node share the mounter container's memory, so an unbounded one
+    # can OOM-kill every mount on the node.
+    #
+    #   "equalSplit" — the mounter reserves 64Mi of resources.requests.memory for its own process and
+    #                  divides the rest equally by maxVolumesPerNode, so the defaults below give each
+    #                  of 4 Mountpoint processes (4Gi - 64Mi) / 4 = 1008Mi. resources.requests.memory
+    #                  and a non-zero maxVolumesPerNode are both required, and each share must be
+    #                  >= 512Mi (Mountpoint's minimum), so size resources.requests.memory as roughly
+    #                  maxVolumesPerNode × per-mount memory (e.g. 4 × 512Mi + 64Mi, or 10 × 4Gi + 64Mi).
+    #                  A --memory-target in a PV's mountOptions is ignored, with a warning.
+    #   "none"       — --memory-target is left entirely to each PV's mountOptions. A PV that sets none
+    #                  gets a Mountpoint targeting 95% of the memory it detects, logged as a warning.
+    memoryLimitStrategy: equalSplit
+    # Resource requests and limits for the mounter container.
+    # requests.memory is required when memoryLimitStrategy is "equalSplit".
     resources:
       requests:
-        memory: "2Gi"
+        memory: "4Gi"
         cpu: "500m"
     logLevel: 4
     podLabels: {}
