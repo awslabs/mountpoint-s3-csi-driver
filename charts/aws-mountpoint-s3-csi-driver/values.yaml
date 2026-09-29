@@ -186,6 +186,28 @@ daemonsetMounters:
       requests:
         memory: "4Gi"
         cpu: "500m"
+    # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
+    # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: "true"`
+    # in its volumeAttributes, and limits its own usage with `max-cache-size` in mountOptions.
+    # Set either emptyDir or ephemeral cache type.
+
+    # A cache on the node's disk:
+    # cache:
+    #   emptyDir:
+    #     sizeLimit: "2Gi"
+
+    # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
+    # raise resources.requests.memory by sizeLimit.
+    # cache:
+    #   emptyDir:
+    #     sizeLimit: "1Gi"
+    #     medium: "Memory"
+
+    # A cache in an EBS volume:
+    # cache:
+    #   ephemeral:
+    #     storageClassName: gp3
+    #     resourceRequests: 10Gi
     logLevel: 4
     podLabels: {}
     # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /

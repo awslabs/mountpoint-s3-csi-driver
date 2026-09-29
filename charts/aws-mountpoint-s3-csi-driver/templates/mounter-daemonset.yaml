@@ -7,6 +7,16 @@
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
 {{- $strategies := list "equalSplit" "none" }}
+{{- $cacheEnabled := hasKey $mounter "cache" }}
+{{- $cache := $mounter.cache | default dict }}
+{{- $cacheEmptyDir := $cache.emptyDir | default dict }}
+{{- $cacheEphemeral := $cache.ephemeral | default dict }}
+{{- $cacheMedium := $cacheEmptyDir.medium | default "" }}
+{{- if $cacheEnabled }}
+{{- if eq (hasKey $cache "emptyDir") (hasKey $cache "ephemeral") }}
+{{- fail "daemonsetMounters[]: cache must set exactly one of emptyDir or ephemeral." }}
+{{- end }}
+{{- end }}
 {{- $strategy := $mounter.memoryLimitStrategy | default "" }}
 {{- if not (has $strategy $strategies) }}
 {{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $strategy) }}
@@ -71,6 +81,14 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       priorityClassName: system-node-critical
+      {{- if $cacheEnabled }}
+      securityContext:
+        # An unprivileged container needs a group owning the volume the kubelet provisions for it,
+        # or an ephemeral cache volume arrives `root:root 0755` and Mountpoint cannot write.
+        # TODO: Check if we need to disable on ROSA like in v2. (Remove TODO after e2e test on CI
+        # Or if it's covered by process isolation PR).
+        fsGroup: 1000
+      {{- end }}
       {{- with $mounter.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -134,6 +152,10 @@ spec:
         volumeMounts:
           - name: comm
             mountPath: /comm
+          {{- if $cacheEnabled }}
+          - name: cache
+            mountPath: /cache
+          {{- end }}
         {{- with $mounter.resources }}
         resources:
           {{- toYaml . | nindent 12 }}
@@ -141,4 +163,28 @@ spec:
       volumes:
       - name: comm
         emptyDir: {}
+      {{- if $cacheEnabled }}
+      - name: cache
+        {{- if hasKey $cache "emptyDir" }}
+        {{- if and $cacheMedium (ne $cacheMedium "Memory") }}
+        {{- fail (printf "daemonsetMounters[0].cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
+        {{- end }}
+        emptyDir:
+          medium: {{ $cacheMedium | quote }}
+          sizeLimit: {{ required "daemonsetMounters[0].cache.emptyDir.sizeLimit is required when the cache block sets emptyDir" $cacheEmptyDir.sizeLimit }}
+        {{- else }}
+        ephemeral:
+          volumeClaimTemplate:
+            metadata:
+              labels:
+                s3.csi.aws.com/type: local-ephemeral-cache
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              volumeMode: Filesystem
+              storageClassName: {{ required "daemonsetMounters[0].cache.ephemeral.storageClassName is required when the cache block sets ephemeral" $cacheEphemeral.storageClassName | quote }}
+              resources:
+                requests:
+                  storage: {{ required "daemonsetMounters[0].cache.ephemeral.resourceRequests is required when the cache block sets ephemeral" $cacheEphemeral.resourceRequests }}
+        {{- end }}
+      {{- end }}
 {{- end }}
