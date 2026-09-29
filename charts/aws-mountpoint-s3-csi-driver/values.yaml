@@ -186,21 +186,42 @@ daemonsetMounters:
       requests:
         memory: "4Gi"
         cpu: "500m"
-    # Local cache for Mountpoint. Uncomment the `cache` block to give this node a shared
-    # cache volume, with a subdirectory per volume. A PV then opts in with the `cache` 
-    # volumeAttribute and limits its own usage with `max-cache-size` in mountOptions.
+    # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
+    # shared cache volume, with a subdirectory per volume. A PV then opts in with `cache: "true"`
+    # in its volumeAttributes, and cacheLimitStrategy decides how much of the volume it gets.
+    # Set either emptyDir or ephemeral, never both.
+    #
+    # cacheLimitStrategy decides how each Mountpoint process gets its --max-cache-size, which
+    # bounds how much of the cache volume it may fill. All of them share that one volume.
+    #
+    #   "equalSplit" - the mounter divides 95% of the cache volume equally by maxVolumesPerNode, so
+    #                  a 4Gi volume gives each of 4 Mountpoint processes 972Mi. The volume's size is
+    #                  required, as is a non-zero maxVolumesPerNode, and a `max-cache-size` in a
+    #                  PV's mountOptions is ignored with a warning.
+    #   "none"       - --max-cache-size is left to each PV's mountOptions. A PV that sets none is
+    #                  unbounded on the default (disk) emptyDir medium, because the mounter is
+    #                  system-node-critical so the kubelet will not evict it to enforce sizeLimit.
+
+    # A cache on the node's disk:
     # cache:
-    #   # "emptyDir" or "ephemeral"; please uncomment the relevant section for the chosen type.
-    #   type: emptyDir        
     #   emptyDir:
-    #     sizeLimit: "2Gi" 
-    #     # "" for the node's disk, or "Memory" for a tmpfs. For "Memory", please refer to 
-    #     # CACHING.md for requesting the appropriate amount of memory for the mounter pod to 
-    #     # prevent OOMKilled errors.
-    #     medium: ""
+    #     sizeLimit: "2Gi"
+    #   cacheLimitStrategy: equalSplit
+
+    # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
+    # memoryLimitStrategy=equalSplit divides only what it leaves: raise resources.requests.memory by sizeLimit.
+    # cache:
+    #   emptyDir:
+    #     sizeLimit: "1Gi"
+    #     medium: "Memory"
+    #   cacheLimitStrategy: equalSplit
+
+    #  A cache in an EBS volume:
+    # cache:
     #   ephemeral:
     #     storageClassName: gp3
-    #     size: 10Gi
+    #     resourceRequests: 10Gi
+    #   cacheLimitStrategy: equalSplit
     logLevel: 4
     podLabels: {}
     # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /
