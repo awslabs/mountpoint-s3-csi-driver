@@ -672,7 +672,7 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		assert.Equals(t, fs.FileMode(0600), testCtx.modeOf(sock))
 	})
 
-	t.Run("Reuses the same UID when a failed mount is retried", func(t *testing.T) {
+	t.Run("Does not accumulate UIDs when a failed mount is retried", func(t *testing.T) {
 		mockCtl := gomock.NewController(t)
 		mockCredProvider := mock_credentialprovider.NewMockProviderInterface(mockCtl)
 
@@ -693,12 +693,11 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		testCtx.installOwnershipRecorders()
 		assert.NoError(t, testCtx.dm.DiscoverCommDir(testCtx.ctx))
 
-		// Each attempt leaves the entry behind for the next one. If a retry allocated a fresh UID
-		// instead of reusing the entry's, the previous UID would be orphaned in the allocator with
-		// nothing referencing it and nothing ever releasing it — one leaked per retry.
+		// Each attempt leaves the entry behind, so the next one claims another UID after releasing the
+		// previous. A repeated UID would mean the release did not happen.
 		credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
-		var uids []int
-		for range 2 {
+		seen := map[int]bool{}
+		for range 3 {
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
 				WorkloadPodID: testCtx.podUID,
 				VolumeID:      testCtx.volumeID,
@@ -706,10 +705,12 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 			assert.Equals(t, true, err != nil)
 
 			// The UID handed to the credential directory is the one this attempt claimed.
-			uids = append(uids, testCtx.ownerOf(credDir)[0])
+			uid := testCtx.ownerOf(credDir)[0]
+			if seen[uid] {
+				t.Fatalf("attempt reclaimed UID %d, which the allocator still held", uid)
+			}
+			seen[uid] = true
 		}
-
-		assert.Equals(t, uids[0], uids[1])
 	})
 
 	t.Run("Hands the credential directory and its files to the mount's own UID", func(t *testing.T) {

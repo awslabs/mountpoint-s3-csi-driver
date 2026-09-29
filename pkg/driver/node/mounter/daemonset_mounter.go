@@ -314,18 +314,14 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
 		entry.CommDir = commDir
 
-		// Claim the UID this mount's Mountpoint will run as, unless this entry already holds one.
-		//
-		// The allocator only returns values inside the range, so a UID outside it means none has been
-		// assigned yet.
-		hasUID := entry.Uid >= UIDRangeStart && entry.Uid <= UIDRangeEnd
-		if !hasUID {
-			uid, err := dm.uidAllocator.Allocate()
-			if err != nil {
-				return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
-			}
-			entry.Uid = uid
+		// Claim the UID this mount's Mountpoint will run as. Releasing first so that an entry that
+		// already failed once does not leak the UID it claimed then; a no-op for a new entry.
+		dm.uidAllocator.Release(entry.Uid)
+		uid, err := dm.uidAllocator.Allocate()
+		if err != nil {
+			return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
 		}
+		entry.Uid = uid
 
 		if err := WriteMeta(dm.kubeletPath, entry); err != nil {
 			return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
