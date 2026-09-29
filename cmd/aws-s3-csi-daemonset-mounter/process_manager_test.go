@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
@@ -457,4 +458,36 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-abc.error"))
 	assert.NoError(t, err)
 	assert.Equals(t, "credential error", string(errBytes))
+}
+
+func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		uid, gid uint32
+	}{
+		{"zero, the unset value", 0, 0},
+		{"below the range", mounter.UIDRangeStart - 1, mounter.UIDRangeStart - 1},
+		{"above the range", mounter.UIDRangeEnd + 1, mounter.UIDRangeEnd + 1},
+		{"GID not matching UID", mounter.UIDRangeStart, mounter.UIDRangeStart + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeProcessRunner{}
+			pm := NewProcessManager(t.TempDir(), fr)
+			dev := mountertest.OpenDevNull(t)
+
+			err := pm.Launch("vol-bad-creds", "/usr/bin/mount-s3", mountoptions.Options{
+				Uid:        tc.uid,
+				Gid:        tc.gid,
+				Fd:         int(dev.Fd()),
+				BucketName: "bucket",
+			})
+			if err == nil {
+				t.Fatalf("expected Launch to refuse uid %d gid %d", tc.uid, tc.gid)
+			}
+
+			fr.mu.Lock()
+			defer fr.mu.Unlock()
+			assert.Equals(t, 0, len(fr.handles))
+		})
+	}
 }

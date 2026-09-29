@@ -86,7 +86,7 @@ spec:
             add:
               - SETUID # set the UID of each spawned Mountpoint process
               - SETGID # set its GID and clear its supplementary groups
-              - KILL   # signal the children on shutdown, now that they no longer share our UID
+              - KILL   # signal the children on shutdown, which do not share our UID
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
