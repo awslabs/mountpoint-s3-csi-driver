@@ -48,6 +48,11 @@ var (
 	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitNone),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
 			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
+	cacheLimitStrategyFlag = flag.String("cache-limit-strategy", string(cacheLimitNone),
+		"How to size each Mountpoint's --max-cache-size: \"equalSplit\" to divide this container's cache "+
+			"volume between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
+	cacheMediumFlag = flag.String("cache-medium", "",
+		"The cache volume's emptyDir medium; \"Memory\" makes it a tmpfs charged to this container's memory")
 )
 
 const (
@@ -64,9 +69,29 @@ func main() {
 		klog.Fatalf("Invalid --memory-limit-strategy: %v", err)
 	}
 
-	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, containerMemoryRequestBytes(), *maxVolumesPerNode)
+	memoryRequest, err := containerMemoryRequestBytes()
+	if err != nil {
+		klog.Fatalf("Invalid memory request: %v", err)
+	}
+	cacheCapacity, err := cacheCapacityBytes()
+	if err != nil {
+		klog.Fatalf("Invalid cache volume size: %v", err)
+	}
+
+	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, memoryRequest,
+		tmpfsCacheBytes(*cacheMediumFlag, cacheCapacity), *maxVolumesPerNode)
 	if err != nil {
 		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
+	}
+
+	cacheLimitStrategy, err := parseCacheLimitStrategy(*cacheLimitStrategyFlag)
+	if err != nil {
+		klog.Fatalf("Invalid --cache-limit-strategy: %v", err)
+	}
+
+	cacheLimit, err := newCacheLimit(cacheLimitStrategy, cacheCapacity, *maxVolumesPerNode)
+	if err != nil {
+		klog.Fatalf("Invalid Mountpoint cache configuration: %v", err)
 	}
 
 	sockPath := filepath.Join(*commDir, mountSockName)
@@ -83,7 +108,7 @@ func main() {
 
 	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
 
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
+	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit, cacheLimit)
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	sigCh := make(chan os.Signal, 1)

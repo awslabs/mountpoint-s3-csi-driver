@@ -30,17 +30,19 @@ type ProcessManager struct {
 	commDir string
 	runner  ProcessRunner // interface for spawning processes; substituted in tests
 	memory  memoryLimit
+	cache   cacheLimit
 
 	mu        sync.Mutex
 	processes map[string]ProcessHandle // mountId -> process handle
 	wg        sync.WaitGroup           // tracks waiter goroutines
 }
 
-func NewProcessManager(commDir string, runner ProcessRunner, memory memoryLimit) *ProcessManager {
+func NewProcessManager(commDir string, runner ProcessRunner, memory memoryLimit, cache cacheLimit) *ProcessManager {
 	return &ProcessManager{
 		commDir:   commDir,
 		runner:    runner,
 		memory:    memory,
+		cache:     cache,
 		processes: make(map[string]ProcessHandle),
 	}
 }
@@ -68,6 +70,9 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	if targetMiB := pm.memory.targetFor(mountId, args); targetMiB > 0 {
 		args.Set(mountpoint.ArgMemoryTarget, strconv.FormatInt(targetMiB, 10))
+	}
+	if sizeMiB, ok := pm.cache.maxCacheSizeFor(mountId, args); ok {
+		args.Set(mountpoint.ArgMaxCacheSize, strconv.FormatInt(sizeMiB, 10))
 	}
 
 	cmdArgs := append([]string{
@@ -203,8 +208,9 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 		actual := countChildProcesses()
 		openFDs := countOpenFDs()
 		goroutines := runtime.NumGoroutine()
-		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d mounts=%v",
-			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB, mountIds)
+		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d cache_limit_strategy=%s cache_share_mib=%d mounts=%v",
+			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB,
+			pm.cache.strategy, pm.cache.shareMiB, mountIds)
 	}
 }
 
