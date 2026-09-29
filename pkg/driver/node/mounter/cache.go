@@ -36,9 +36,12 @@ const (
 	cacheDirPerm = fs.FileMode(0770)
 )
 
-// V2 Per-mount cache attributes that have NO EFFECT in daemonset mode (only warning).
-var otherCacheVolumeAttributes = []string{
+// deprecatedCacheVolumeAttributes are v2's per-PV cache volume settings.
+var deprecatedCacheVolumeAttributes = []string{
+	volumecontext.CacheEmptyDirMedium,
+	volumecontext.CacheEmptyDirSizeLimit,
 	volumecontext.CacheEphemeralStorageClassName,
+	volumecontext.CacheEphemeralStorageResourceRequest,
 }
 
 // CacheType is the mounter pod's cache type, also shown in errors and logs. It distinguishes between:
@@ -100,90 +103,88 @@ func resolveCacheTypeAndDir(ctx context.Context, clientset kubernetes.Interface,
 	return CacheNone, "", nil
 }
 
-// configureCache decides whether this mount caches, and rejects a PV whose requested
-// cache type is not the one the mounter pod has, and sets mount option Args for the cache directory.
+// configureCache decides whether this mount caches, and rejects a PV whose requested cache settings the mounter pod cannot
+// serve, and sets mount option Args for the cache directory. It warns for every deprecated v1 or v2 cache setting the PV uses.
 func configureCache(args *mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterCacheType CacheType) error {
-	cacheType := volumeCtx[volumecontext.Cache]
-	cacheEnabledViaOptions := args.Has(mountpoint.ArgCache)
+	// Deferred so it prints after the other warnings.
+	defer warnDeprecatedCacheVolumeAttributes(volumeCtx, volumeID)
 
-	// Reject if cache configured with both mountOptions / volumeAttributes (match v2).
-	if cacheEnabledViaOptions && cacheType != "" {
+	pvCache := volumeCtx[volumecontext.Cache]
+	cacheViaMountOptions := args.Has(mountpoint.ArgCache)
+
+	// Reject a cache in both mountOptions and volumeAttributes, even `cache: false`, to match v2.
+	if cacheViaMountOptions && pvCache != "" {
 		return status.Error(codes.InvalidArgument,
 			"Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
 	}
 
-	// Mountpoint rejects `--max-cache-size` without `--cache` - strip max-cache-size with warning.
-	if !cacheEnabledViaOptions && cacheType == "" {
-		if _, ok := args.Remove(mountpoint.ArgMaxCacheSize); ok {
-			klog.Warningf("NodePublishVolume: volume %s sets %s but does not enable the cache, ignoring it."+
-				" Set the %q volume attribute to enable the cache.",
-				volumeID, mountpoint.ArgMaxCacheSize, volumecontext.Cache)
+	v2PvCacheType, err := cacheTypeFromPV(pvCache, volumeCtx[volumecontext.CacheEmptyDirMedium])
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "Volume %s has an invalid cache setting: %v", volumeID, err)
+	}
+	cacheViaV3 := pvCache == volumecontext.CacheEnabled
+	cacheViaV2 := v2PvCacheType != CacheNone
+
+	// Cache not enabled, exit early.
+	if !cacheViaMountOptions && !cacheViaV3 && !cacheViaV2 {
+		// Mountpoint refuses `--max-cache-size` without `--cache`, so reject to match v2.
+		if args.Has(mountpoint.ArgMaxCacheSize) {
+			return status.Errorf(codes.InvalidArgument,
+				"Volume %s sets %s in its mountOptions but does not enable the cache. Set the %q volume"+
+					" attribute to %q, or remove %s.",
+				volumeID, mountpoint.ArgMaxCacheSize, volumecontext.Cache, volumecontext.CacheEnabled, mountpoint.ArgMaxCacheSize)
 		}
 		return nil
 	}
 
-	// After 'not both' and 'not neither' are eliminated, cache is set by either mountOptions / volume attributes.
-	// Return error if mounter pod has no cache volumes.
+	// Now we know cache is requested by PV - reject if the mounter pod cannot serve it.
 	if mounterCacheType == CacheNone {
 		return status.Errorf(codes.InvalidArgument,
 			"Volume %s requests a local cache, but s3-csi-daemonset-mounter has no cache volume."+
-				" Add a daemonsetMounters[0].cache block and restart its pods", volumeID)
+				" Add a daemonsetMounters[0].cache block to the Helm values and restart its pods.", volumeID)
+	}
+	// TODO: Also reject a cacheEphemeralStorageClassName that differs from the mounter's cache PVC storage class.
+	// (low probability of user encountering this user case but not 0; we might not want to incur this complexity)
+	if cacheViaV2 && v2PvCacheType != mounterCacheType {
+		return status.Errorf(codes.InvalidArgument,
+			"Volume %s requests an %s cache, but s3-csi-daemonset-mounter on this node provides %s."+
+				" Set %q to %q to use this node's cache, or schedule the pod onto a node whose"+
+				" cache type matches.",
+			volumeID, v2PvCacheType, mounterCacheType, volumecontext.Cache, volumecontext.CacheEnabled)
 	}
 
-	// If enabled via mountOptions, warn + use mounter pod's cache directory
-	if cacheEnabledViaOptions {
-		klog.Warningf("NodePublishVolume: volume %s configures the cache via the deprecated `cache`"+
-			" mount option, so it accepts the node's %s cache. Use the %q volume attribute instead,"+
-			" set to the mounter's enabled cache type.",
-			volumeID, mounterCacheType, volumecontext.Cache)
-	} else if err := checkCacheTypeMatches(volumeCtx, volumeID, mounterCacheType); err != nil {
-		// if enabled via volumeAttributes, reject if cache type doesn't match mounter pod's cache type.
-		return err
+	if cacheViaMountOptions {
+		klog.Warningf("NodePublishVolume: volume %s enables the cache via the deprecated `cache` mount option,"+
+			" so its path is ignored and the volume uses this node's %s cache. Remove it from mountOptions and"+
+			" set the %q volume attribute to %q instead.",
+			volumeID, mounterCacheType, volumecontext.Cache, volumecontext.CacheEnabled)
+	}
+	if cacheViaV2 {
+		klog.Warningf("NodePublishVolume: volume %s names its cache type with the deprecated %q value %q,"+
+			" which must match this node's cache. Set %q to %q to use whichever cache this node has.",
+			volumeID, volumecontext.Cache, pvCache, volumecontext.Cache, volumecontext.CacheEnabled)
 	}
 
 	// Discard PV supplied path and cache dir path.
 	args.Set(mountpoint.ArgCache, MountOptionCacheDir(volumeID))
 
-	// Warn if cache type is ephemeral but emptyDir medium is set
-	if cacheType == volumecontext.CacheTypeEphemeral && volumeCtx[volumecontext.CacheEmptyDirMedium] != "" {
-		klog.Warningf("NodePublishVolume: volume %s sets %q with %q, which has no effect -"+
-			" the medium selects an emptyDir backing only.",
-			volumeID, volumecontext.CacheEmptyDirMedium, volumecontext.CacheTypeEphemeral)
-	}
-
-	// For unused volumeAttributes (v2 only) - warn user and prompt updating to v3 PVs.
-	for _, attr := range otherCacheVolumeAttributes {
-		if volumeCtx[attr] != "" {
-			klog.Warningf("NodePublishVolume: volume %s sets %q, which has no effect in v3."+
-				" The cache volume is shared by every mount on the node and is configured with the"+
-				" daemonsetMounters[0].cache Helm value.",
-				volumeID, attr)
-		}
-	}
-
 	setMaxCacheSizeFromDeprecatedPVSizes(args, volumeCtx, volumeID, mounterCacheType)
-
 	return nil
 }
 
-// checkCacheTypeMatches rejects a PV whose requested cache type is not the one this node has.
-func checkCacheTypeMatches(volumeCtx map[string]string, volumeID string, mounterCacheType CacheType) error {
-	requested, err := cacheTypeFromPV(volumeCtx[volumecontext.Cache], volumeCtx[volumecontext.CacheEmptyDirMedium])
-	if err != nil {
-		return status.Errorf(codes.InvalidArgument,
-			"Volume %s sets %q: %v. It must also match the mounter pod's cache, which is %s",
-			volumeID, volumecontext.Cache, err, mounterCacheType)
+// warnDeprecatedCacheVolumeAttributes warns once, naming every v2 cache volume attribute the PV sets.
+func warnDeprecatedCacheVolumeAttributes(volumeCtx map[string]string, volumeID string) {
+	var deprecated []string
+	for _, attr := range deprecatedCacheVolumeAttributes {
+		if volumeCtx[attr] != "" {
+			deprecated = append(deprecated, attr)
+		}
 	}
-
-	if requested != mounterCacheType {
-		// Both remediations, since only the operator knows which of the two applies.
-		return status.Errorf(codes.InvalidArgument,
-			"Volume %s requests a %s cache, but s3-csi-daemonset-mounter on this node provides %s."+
-				" Set the volume's %q attribute to match this node, or schedule it onto a node whose"+
-				" cache type matches.",
-			volumeID, requested, mounterCacheType, volumecontext.Cache)
+	if len(deprecated) > 0 {
+		klog.Warningf("NodePublishVolume: volume %s sets the deprecated volume attributes %q. Remove them:"+
+			" the daemonsetMounters[0].cache Helm value now configures the cache, and a PV opts in with %q set to %q.",
+			volumeID, deprecated, volumecontext.Cache, volumecontext.CacheEnabled)
 	}
-	return nil
 }
 
 // MountOptionCacheDir returns a mount's cache directory as Mountpoint sees it, passed to `--cache`.
@@ -195,10 +196,19 @@ func MountOptionCacheDir(volumeID string) string {
 // provided, as a final fallback to match v2 behaviour.
 func setMaxCacheSizeFromDeprecatedPVSizes(args *mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterCacheType CacheType) {
 	var sizeAttr string
+
+	// We inject ONLY the attribute for the mounter pod's cache type (emptyDir vs ephemeral, and its medium), the other is ignored.
+	// TODO: see both todo comments below; we might also want to simplify by NOT injecting for safety for any mountpoint-pod volume sizes,
+	// and instead ask user to bound max-cache-size before v2 to v3 upgrade or use equalSplit strategy instead.
 	switch mounterCacheType {
 	case CacheEmptyDirDisk, CacheEmptyDirMemory:
+		// TODO: Evaluate whether a size limit written for the other medium should still bound the cache.
+		if pvType, err := cacheTypeFromPV(volumecontext.CacheTypeEmptyDir, volumeCtx[volumecontext.CacheEmptyDirMedium]); err != nil || pvType != mounterCacheType {
+			return
+		}
 		sizeAttr = volumecontext.CacheEmptyDirSizeLimit
 	case CacheEphemeral:
+		// TODO: Evaluate if we want to inject for cacheEphemeralStorageClassName that differs from the mounter's cache PVC storage class.
 		sizeAttr = volumecontext.CacheEphemeralStorageResourceRequest
 	default: // CacheNone only, which configureCache rejected before calling.
 		return
@@ -213,28 +223,29 @@ func setMaxCacheSizeFromDeprecatedPVSizes(args *mountpoint.Args, volumeCtx map[s
 	quantity, err := resource.ParseQuantity(pvSize)
 	if err != nil {
 		klog.Warningf("NodePublishVolume: volume %s sets the %q volume attribute to %q, which is not a"+
-			" Kubernetes quantity, so driver does not inject max-cache-size based on this value: %v."+
-			" Set %s in its mountOptions instead.",
-			volumeID, sizeAttr, pvSize, err, mountpoint.ArgMaxCacheSize)
+			" Kubernetes quantity, so the driver injects no %s from it. Under cacheLimitStrategy=none, set %s"+
+			" in its mountOptions instead.",
+			volumeID, sizeAttr, pvSize, mountpoint.ArgMaxCacheSize, mountpoint.ArgMaxCacheSize)
 		return
 	}
 
-	// MultiplyeBEFORE dividing as every integer division floors
+	// Multiply BEFORE dividing as every integer division floors
 	boundMiB := quantity.Value() * cacheSizeMarginPercent / 100 / bytesPerMiB
 
 	args.Set(mountpoint.ArgMaxCacheSize, strconv.FormatInt(boundMiB, 10))
-	// Says what the driver injected, not what bounds the mount: under cacheLimitStrategy=equalSplit
-	// s3-csi-daemonset-mounter replaces this value, and this node does not know the strategy.
-	klog.Warningf("NodePublishVolume: volume %s sets no %s in its mountOptions, so driver injects %d MiB,"+
-		" %d%% of the deprecated %q volume attribute of %q. Set %s in its mountOptions to bound it yourself.",
+	// This node does not know the mounter's cacheLimitStrategy, so the advice names both.
+	klog.Warningf("NodePublishVolume: volume %s sets no %s in its mountOptions, so the driver injects %d MiB,"+
+		" %d%% of its deprecated %q volume attribute (%q). Under cacheLimitStrategy=none, set %s in its"+
+		" mountOptions instead; under equalSplit, s3-csi-daemonset-mounter replaces it with an equal share.",
 		volumeID, mountpoint.ArgMaxCacheSize, boundMiB, cacheSizeMarginPercent,
 		sizeAttr, pvSize, mountpoint.ArgMaxCacheSize)
 }
 
 // cacheTypeFromPV returns the cache type a PV's `cache` and `cacheEmptyDirMedium` attributes name.
+// cache set to `true` / `false`, or not set, all name CacheNone (caller checks CacheEnabled separately).
 func cacheTypeFromPV(pvCache, pvCacheEmptyDirMedium string) (CacheType, error) {
 	switch pvCache {
-	case "":
+	case "", volumecontext.CacheDisabled, volumecontext.CacheEnabled: // caller should check CacheEnabled separately
 		return CacheNone, nil
 	case volumecontext.CacheTypeEphemeral:
 		return CacheEphemeral, nil // note: ignore medium which is for emptyDir only
@@ -246,12 +257,15 @@ func cacheTypeFromPV(pvCache, pvCacheEmptyDirMedium string) (CacheType, error) {
 			return CacheEmptyDirMemory, nil
 		default:
 			// "HugePages" mediums are not supported - they're backed by hugetlbfs, which Mountpoint cannot write cache blocks into.
-			return CacheNone, fmt.Errorf("unsupported emptyDir medium %q, must be %q or %q",
-				pvCacheEmptyDirMedium, "", corev1.StorageMediumMemory)
+			return CacheNone, fmt.Errorf("%q %q is not supported. Leave it unset, or set it to %q",
+				volumecontext.CacheEmptyDirMedium, pvCacheEmptyDirMedium, corev1.StorageMediumMemory)
 		}
 	default:
-		return CacheNone, fmt.Errorf("%q is not a supported cache type, must be %q or %q",
-			pvCache, volumecontext.CacheTypeEmptyDir, volumecontext.CacheTypeEphemeral)
+		// Refused rather than warned: a near miss like "ture" would otherwise serve the mount uncached silently.
+		return CacheNone, fmt.Errorf("%q is not a supported cache value. Use %q for this node's cache,"+
+			" %q for no cache, or the deprecated %q or %q",
+			pvCache, volumecontext.CacheEnabled, volumecontext.CacheDisabled,
+			volumecontext.CacheTypeEmptyDir, volumecontext.CacheTypeEphemeral)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -119,303 +118,427 @@ func TestConfigureCache(t *testing.T) {
 	// Note we also assert --cache=/cache/<volumeID> instead of MountOptionCacheDir
 	const volumeID = "test-volume-id"
 	const cacheArg = "--cache=/cache/" + volumeID
+	const deprecatedAttrs = "sets the deprecated volume attributes "
 
-	testCases := []struct {
+	type testCase struct {
 		name         string
 		mountOptions []string
 		volumeCtx    map[string]string
 		// mounterCacheType is the cache type the mounter pod has.
-		mounterCacheType       CacheType
-		expectedArgs           []string
-		expectError            bool
-		expectedErrContains    string
-		expectedWarnContains   string
-		unexpectedWarnContains string
+		mounterCacheType CacheType
+		expectedArgs     []string
+		// expectedErrContains: Rejected with InvalidArgument if set.
+		expectedErrContains string
+		// expectedWarnContains: Empty means no warning may fire at all.
+		expectedWarnContains []string
+	}
+
+	groups := []struct {
+		name  string
+		cases []testCase
 	}{
-		// Happy Cases + edge cases
 		{
-			name:             "requests a cache when the attribute matches the node's emptyDir",
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg},
-		},
-		{
-			name: "requests a cache when the attribute matches the node's tmpfs",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirMedium: "Memory",
+			name: "no cache",
+			cases: []testCase{
+				{
+					name:             "caches nothing when no volume attribute or mount option asks for it",
+					volumeCtx:        map[string]string{},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{},
+				},
+				{
+					name:             "`cache: false` caches nothing",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheDisabled},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{},
+				},
+				{
+					name:             "a deprecated attribute alone does not enable the cache, and warns it is deprecated",
+					volumeCtx:        map[string]string{volumecontext.CacheEmptyDirMedium: "Memory"},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{},
+					expectedWarnContains: []string{
+						deprecatedAttrs + `["cacheEmptyDirMedium"]`,
+						`a PV opts in with "cache" set to "true"`,
+					},
+				},
+				{
+					name:                "rejects a value that is not a cache value, rather than serve it uncached",
+					volumeCtx:           map[string]string{volumecontext.Cache: "ture"},
+					mounterCacheType:    CacheEmptyDirDisk,
+					expectedErrContains: `has an invalid cache setting: "ture" is not a supported cache value`,
+				},
 			},
-			mounterCacheType: CacheEmptyDirMemory,
-			expectedArgs:     []string{cacheArg},
 		},
 		{
-			name:             "requests a cache when the attribute matches the node's ephemeral volume",
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral},
-			mounterCacheType: CacheEphemeral,
-			expectedArgs:     []string{cacheArg},
-		},
-		{
-			name: "ignores the medium when the type is ephemeral",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:               volumecontext.CacheTypeEphemeral,
-				volumecontext.CacheEmptyDirMedium: "Memory",
+			name: "v3 `cache: true`",
+			cases: []testCase{
+				{
+					name:             "takes the node's disk emptyDir",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg},
+				},
+				{
+					name:             "takes the node's tmpfs emptyDir",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType: CacheEmptyDirMemory,
+					expectedArgs:     []string{cacheArg},
+				},
+				{
+					name:             "takes the node's ephemeral volume",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType: CacheEphemeral,
+					expectedArgs:     []string{cacheArg},
+				},
+				{
+					name:                "rejects the mount when the node has no cache volume",
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType:    CacheNone,
+					expectedErrContains: "has no cache volume",
+				},
 			},
-			mounterCacheType:     CacheEphemeral,
-			expectedArgs:         []string{cacheArg},
-			expectedWarnContains: "the medium selects an emptyDir backing only",
 		},
 		{
-			name:             "does not enable the cache when only the medium is set",
-			volumeCtx:        map[string]string{volumecontext.CacheEmptyDirMedium: "Memory"},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{},
-		},
-		// Rejection cases
-		{
-			name: "rejects a tmpfs request on a disk-backed node",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirMedium: "Memory",
+			name: "v3 `cache: true` with leftover v2 attributes",
+			cases: []testCase{
+				{
+					name:         "warns once, naming every deprecated attribute it sets",
+					mountOptions: []string{"max-cache-size 1024"},
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                                volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirMedium:                  "Memory",
+						volumecontext.CacheEmptyDirSizeLimit:               "2Gi",
+						volumecontext.CacheEphemeralStorageClassName:       "gp3",
+						volumecontext.CacheEphemeralStorageResourceRequest: "10Gi",
+					},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg, "--max-cache-size=1024"},
+					expectedWarnContains: []string{
+						deprecatedAttrs + `["cacheEmptyDirMedium" "cacheEmptyDirSizeLimit" "cacheEphemeralStorageClassName" "cacheEphemeralStorageResourceRequest"]`,
+					},
+				},
+				{
+					// `cache: true` still reads a v2 size, for safety, ONLY IF cache type matches.
+					name: "bounds the cache from a deprecated size limit",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg, "--max-cache-size=1945"},
+					expectedWarnContains: []string{
+						deprecatedAttrs + `["cacheEmptyDirSizeLimit"]`,
+						"driver injects 1945 MiB",
+					},
+				},
+				{
+					// LIMITATION
+					name: "does not bound an ephemeral node's cache from an emptyDir size limit",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType:     CacheEphemeral,
+					expectedArgs:         []string{cacheArg},
+					expectedWarnContains: []string{deprecatedAttrs + `["cacheEmptyDirSizeLimit"]`},
+				},
+				{
+					name: "does not bound a tmpfs node's cache from a disk emptyDir size limit",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType:     CacheEmptyDirMemory,
+					expectedArgs:         []string{cacheArg},
+					expectedWarnContains: []string{deprecatedAttrs + `["cacheEmptyDirSizeLimit"]`},
+				},
+				// TODO this test does not work today (we don't check mismatch for ephemeral storageClassNames yet)
+				// {
+				// 	name: "does not bound an ephemeral node's cache from an ephemeral storage request with different storageClassName",
+				// 	volumeCtx: map[string]string{
+				// 		volumecontext.Cache: volumecontext.CacheEnabled,
+				// 		volumecontext.CacheEphemeralStorageClassName:       "nvme-ssd",
+				// 		volumecontext.CacheEphemeralStorageResourceRequest: "10Gi",
+				// 	},
+				// 	mounterCacheType:         CacheEphemeral,
+				// 	mounterStorageClassName:  "gp3",
+				// 	expectedArgs:             []string{cacheArg},
+				// 	expectedWarnContains:     []string{deprecatedAttrs + `["cacheEphemeralStorageClassName" "cacheEphemeralStorageResourceRequest"]`},
+				// },
 			},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectError:      true,
 		},
 		{
-			name:             "rejects a disk request on a tmpfs node",
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEmptyDirMemory,
-			expectError:      true,
-		},
-		{
-			name:             "rejects an emptyDir request on an ephemeral node",
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEphemeral,
-			expectError:      true,
-		},
-		{
-			name:             "rejects an ephemeral request on an emptyDir node",
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectError:      true,
-		},
-		{
-			name: "rejects an emptyDir medium that is not a supported cache type",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirMedium: string(corev1.StorageMediumHugePages),
+			name: "v1 `cache` mount option",
+			cases: []testCase{
+				{
+					name:             "discards the path, takes the node's cache whatever its type, and warns it is deprecated",
+					mountOptions:     []string{"cache /tmp/customer-path"},
+					volumeCtx:        map[string]string{},
+					mounterCacheType: CacheEmptyDirMemory,
+					expectedArgs:     []string{cacheArg},
+					expectedWarnContains: []string{
+						"deprecated `cache` mount option", `set the "cache" volume attribute to "true" instead`,
+					},
+				},
+				{
+					name:                "rejects the mount when the node has no cache volume",
+					mountOptions:        []string{"cache /tmp/customer-path"},
+					volumeCtx:           map[string]string{},
+					mounterCacheType:    CacheNone,
+					expectedErrContains: "has no cache volume",
+				},
+				{
+					name:                "rejects a cache configured with both a mount option and a volume attribute",
+					mountOptions:        []string{"cache /tmp/customer-path"},
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
+					mounterCacheType:    CacheEmptyDirDisk,
+					expectedErrContains: "configured with both",
+				},
+				{
+					name:                "rejects `cache: false` alongside the mount option, as the two disagree",
+					mountOptions:        []string{"cache /tmp/customer-path"},
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheDisabled},
+					mounterCacheType:    CacheEmptyDirDisk,
+					expectedErrContains: "configured with both",
+				},
 			},
-			mounterCacheType:    CacheEmptyDirDisk,
-			expectError:         true,
-			expectedErrContains: `must be "" or "Memory"`,
 		},
 		{
-			name:                "rejects a cache request when the node has no cache volume",
-			volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType:    CacheNone,
-			expectError:         true,
-			expectedErrContains: "has no cache volume",
-		},
-		// Opting in via mountOptions
-		{
-			name:                "rejects the deprecated mount option when the node has no cache volume",
-			mountOptions:        []string{"cache /tmp/customer-path"},
-			volumeCtx:           map[string]string{},
-			mounterCacheType:    CacheNone,
-			expectError:         true,
-			expectedErrContains: "has no cache volume",
-		},
-
-		{
-			// Opting in via mount options will automatically accept whatever mounter pod cache type is.
-			name:             "the deprecated mount option accepts the node's tmpfs",
-			mountOptions:     []string{"cache /tmp/customer-path"},
-			volumeCtx:        map[string]string{},
-			mounterCacheType: CacheEmptyDirMemory,
-			expectedArgs:     []string{cacheArg},
-		},
-		{
-			name:             "does not request a cache when no volume attribute or mount option asks for one",
-			volumeCtx:        map[string]string{},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{},
-		},
-		{
-			name:             "discards the path of a `cache` mount option",
-			mountOptions:     []string{"cache /tmp/customer-path"},
-			volumeCtx:        map[string]string{},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg},
-		},
-		{
-			name:             "rejects a cache configured with both a mount option and a volume attribute",
-			mountOptions:     []string{"cache /tmp/customer-path"},
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectError:      true,
-		},
-
-		// --max-cache-size handling
-		{
-			name:             "keeps max-cache-size for a cached volume",
-			mountOptions:     []string{"max-cache-size 1024"},
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg, "--max-cache-size=1024"},
-		},
-		{
-			name:             "drops max-cache-size when the cache is not enabled",
-			mountOptions:     []string{"max-cache-size 1024"},
-			volumeCtx:        map[string]string{},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{},
-		},
-		// Misc
-		{
-			name:             "leaves an S3 Express cache-xz mount option alone on a node with no cache volume",
-			mountOptions:     []string{"cache-xz test-bucket--usw2-az1--x-s3"},
-			volumeCtx:        map[string]string{},
-			mounterCacheType: CacheNone,
-			expectedArgs:     []string{"--cache-xz=test-bucket--usw2-az1--x-s3"},
-		},
-		{
-			name: "accepts the v2-only cache and container resource attributes without leaking them into args",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                                      volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEphemeralStorageClassName:             "gp3",
-				volumecontext.CacheEphemeralStorageResourceRequest:       "10Gi",
-				volumecontext.MountpointContainerResourcesRequestsCpu:    "100m",
-				volumecontext.MountpointContainerResourcesRequestsMemory: "128Mi",
-				volumecontext.MountpointContainerResourcesLimitsCpu:      "500m",
-				volumecontext.MountpointContainerResourcesLimitsMemory:   "1Gi",
+			name: "v2 cache type",
+			cases: []testCase{
+				{
+					name:             "takes the node's disk emptyDir when it names it, and warns the type is deprecated",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg},
+					expectedWarnContains: []string{
+						`deprecated "cache" value "emptyDir"`,
+						`Set "cache" to "true" to use whichever cache this node has`,
+					},
+				},
+				{
+					name: "takes the node's tmpfs when its emptyDir medium matches",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
+						volumecontext.CacheEmptyDirMedium: "Memory",
+					},
+					mounterCacheType: CacheEmptyDirMemory,
+					expectedArgs:     []string{cacheArg},
+					expectedWarnContains: []string{
+						`deprecated "cache" value "emptyDir"`,
+						deprecatedAttrs + `["cacheEmptyDirMedium"]`,
+					},
+				},
+				{
+					name:                 "takes the node's ephemeral volume when it names it",
+					volumeCtx:            map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral},
+					mounterCacheType:     CacheEphemeral,
+					expectedArgs:         []string{cacheArg},
+					expectedWarnContains: []string{`deprecated "cache" value "ephemeral"`},
+				},
+				{
+					name: "rejects a tmpfs request on a disk node",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
+						volumecontext.CacheEmptyDirMedium: "Memory",
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedErrContains:  `requests an emptyDir (medium Memory) cache, but s3-csi-daemonset-mounter on this node provides emptyDir. Set "cache" to "true"`,
+					expectedWarnContains: []string{deprecatedAttrs + `["cacheEmptyDirMedium"]`},
+				},
+				{
+					name:                "rejects an emptyDir request on an ephemeral node",
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
+					mounterCacheType:    CacheEphemeral,
+					expectedErrContains: "provides ephemeral",
+				},
+				// TODO this test does not work today (we don't check mismatch for ephemeral storageClassNames yet)
+				// {
+				// 	name: "rejects an ephemeral request naming another storage class than the node's",
+				// 	volumeCtx: map[string]string{
+				// 		volumecontext.Cache:                          volumecontext.CacheTypeEphemeral,
+				// 		volumecontext.CacheEphemeralStorageClassName: "nvme-ssd",
+				// 	},
+				// 	mounterCacheType:        CacheEphemeral,
+				// 	mounterStorageClassName: "gp3",
+				// 	expectedErrContains:     `requests storage class "nvme-ssd"`,
+				// 	expectedWarnContains:    []string{deprecatedAttrs + `["cacheEphemeralStorageClassName"]`},
+				// },
+				{
+					name: "rejects an emptyDir medium that cannot hold cache blocks",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:               volumecontext.CacheTypeEmptyDir,
+						volumecontext.CacheEmptyDirMedium: string(corev1.StorageMediumHugePages),
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedErrContains:  `"cacheEmptyDirMedium" "HugePages" is not supported`,
+					expectedWarnContains: []string{deprecatedAttrs + `["cacheEmptyDirMedium"]`},
+				},
+				{
+					name:                "rejects the mount when the node has no cache volume",
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
+					mounterCacheType:    CacheNone,
+					expectedErrContains: "has no cache volume",
+				},
 			},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg},
 		},
 		{
-			name:             "leaves unrelated mount options alone",
-			mountOptions:     []string{"region us-west-2"},
-			volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg, "--region=us-west-2"},
-		},
-		// 95% of cacheEmptyDirSizeLimit / cacheEphemeralStorageResourceRequest is injected to max-cache-size to match v2 behaviour as fallback.
-		{
-			name: "bounds a disk emptyDir from the PV's deprecated size limit",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+			name: "max-cache-size",
+			cases: []testCase{
+				{
+					name:             "keeps max-cache-size for a cached volume",
+					mountOptions:     []string{"max-cache-size 1024"},
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg, "--max-cache-size=1024"},
+				},
+				{
+					// v2 rejected a max-cache-size above the size limit; v3 prioritises max-cache-size instead.
+					name:         "prefers max-cache-size over a deprecated size limit, even when set above it",
+					mountOptions: []string{"max-cache-size 5000"},
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=5000"},
+					expectedWarnContains: []string{deprecatedAttrs + `["cacheEmptyDirSizeLimit"]`},
+				},
+				{
+					name: "bounds a disk emptyDir from the deprecated size limit, at 95%",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=1945"}, // 2048 less a 5% margin
+					expectedWarnContains: []string{"driver injects 1945 MiB", "Under cacheLimitStrategy=none, set --max-cache-size"},
+				},
+				{
+					name: "bounds a tmpfs from the deprecated size limit",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
+						volumecontext.CacheEmptyDirMedium:    "Memory",
+						volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+					},
+					mounterCacheType:     CacheEmptyDirMemory,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=1945"},
+					expectedWarnContains: []string{"driver injects 1945 MiB"},
+				},
+				{
+					name: "bounds an ephemeral cache from the deprecated storage request",
+					volumeCtx: map[string]string{
+						volumecontext.Cache: volumecontext.CacheTypeEphemeral,
+						volumecontext.CacheEphemeralStorageResourceRequest: "10Gi",
+					},
+					mounterCacheType:     CacheEphemeral,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=9728"}, // 10240 * 95%
+					expectedWarnContains: []string{`95% of its deprecated "cacheEphemeralStorageResourceRequest" volume attribute ("10Gi")`},
+				},
+				{
+					name:                 "bounds a mount-option cache from the deprecated size limit too",
+					mountOptions:         []string{"cache /tmp/customer-path"},
+					volumeCtx:            map[string]string{volumecontext.CacheEmptyDirSizeLimit: "2Gi"},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=1945"},
+					expectedWarnContains: []string{"driver injects 1945 MiB"},
+				},
+				{
+					// Note not multiplying before dividing fails this test case, as all division floors.
+					// e.g.: boundMiB := quantity.Value() / bytesPerMiB * cacheSizeMarginPercent / 100
+					name: "a size limit of 1500Ki injects 1",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "1500Ki",
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=1"},
+					expectedWarnContains: []string{"driver injects 1 MiB"},
+				},
+				{
+					name: "a size limit at 1 MiB injects 0, which silently disables the cache",
+					volumeCtx: map[string]string{
+						volumecontext.Cache:                  volumecontext.CacheEnabled,
+						volumecontext.CacheEmptyDirSizeLimit: "1Mi",
+					},
+					mounterCacheType:     CacheEmptyDirDisk,
+					expectedArgs:         []string{cacheArg, "--max-cache-size=0"},
+					expectedWarnContains: []string{"driver injects 0 MiB"},
+				},
+				{
+					name: "does not fail on a deprecated storage request that is not a quantity",
+					volumeCtx: map[string]string{
+						volumecontext.Cache: volumecontext.CacheEnabled,
+						volumecontext.CacheEphemeralStorageResourceRequest: "10 gigabytes",
+					},
+					mounterCacheType:     CacheEphemeral,
+					expectedArgs:         []string{cacheArg},
+					expectedWarnContains: []string{`sets the "cacheEphemeralStorageResourceRequest" volume attribute to "10 gigabytes"`},
+				},
+				{
+					// Match v2.
+					name:                "rejects max-cache-size when the cache is not enabled",
+					mountOptions:        []string{"max-cache-size 1024"},
+					volumeCtx:           map[string]string{},
+					mounterCacheType:    CacheEmptyDirDisk,
+					expectedErrContains: `sets --max-cache-size in its mountOptions but does not enable the cache. Set the "cache" volume attribute to "true"`,
+				},
 			},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg, "--max-cache-size=1945"}, // 2048 less a 5% margin
-			// The v2 warning loop must stop calling this attribute ineffective once we read it.
-			expectedWarnContains:   "injects 1945 MiB",
-			unexpectedWarnContains: "has no effect in v3",
 		},
 		{
-			// v2 rejected this pair; v3 does not reject it and prioritizes max-cache-size instead.
-			name:         "keeps a max-cache-size even if above the deprecated size limit, and does not reject it",
-			mountOptions: []string{"max-cache-size 5000"},
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
+			name: "misc",
+			cases: []testCase{
+				{
+					name:             "leaves an S3 Express cache-xz mount option alone on a node with no cache volume",
+					mountOptions:     []string{"cache-xz test-bucket--usw2-az1--x-s3"},
+					volumeCtx:        map[string]string{},
+					mounterCacheType: CacheNone,
+					expectedArgs:     []string{"--cache-xz=test-bucket--usw2-az1--x-s3"},
+				},
+				{
+					name:             "leaves unrelated mount options alone",
+					mountOptions:     []string{"region us-west-2"},
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheType: CacheEmptyDirDisk,
+					expectedArgs:     []string{cacheArg, "--region=us-west-2"},
+				},
 			},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg, "--max-cache-size=5000"},
-		},
-		{
-			name: "bounds a tmpfs from the PV's deprecated size limit",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirMedium:    "Memory",
-				volumecontext.CacheEmptyDirSizeLimit: "2Gi",
-			},
-			mounterCacheType: CacheEmptyDirMemory,
-			expectedArgs:     []string{cacheArg, "--max-cache-size=1945"},
-		},
-		{
-			name: "bounds an ephemeral cache from the PV's deprecated storage request",
-			volumeCtx: map[string]string{
-				volumecontext.Cache: volumecontext.CacheTypeEphemeral,
-				volumecontext.CacheEphemeralStorageResourceRequest: "10Gi",
-			},
-			mounterCacheType:       CacheEphemeral,
-			expectedArgs:           []string{cacheArg, "--max-cache-size=9728"}, // 10240 * 95%
-			expectedWarnContains:   `95% of the deprecated "cacheEphemeralStorageResourceRequest"`,
-			unexpectedWarnContains: "has no effect in v3",
-		},
-		{
-			// Note not multiplying before dividing fails this test case, as all division floors.
-			// e.g.: boundMiB := quantity.Value() / bytesPerMiB * cacheSizeMarginPercent / 100
-			name: "a size limit of 1500Ki injects 1",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit: "1500Ki",
-			},
-			mounterCacheType: CacheEmptyDirDisk,
-			expectedArgs:     []string{cacheArg, "--max-cache-size=1"},
-		},
-		{
-			name: "a size limit at 1 MiB injects 0, which silently disables the cache",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit: "1Mi",
-			},
-			mounterCacheType:     CacheEmptyDirDisk,
-			expectedArgs:         []string{cacheArg, "--max-cache-size=0"},
-			expectedWarnContains: "driver injects 0 MiB",
-		},
-		{
-			name: "does not fail on a deprecated size limit that is not a quantity",
-			volumeCtx: map[string]string{
-				volumecontext.Cache:                  volumecontext.CacheTypeEmptyDir,
-				volumecontext.CacheEmptyDirSizeLimit: "2 gigabytes",
-			},
-			mounterCacheType:     CacheEmptyDirDisk,
-			expectedArgs:         []string{cacheArg},
-			expectedWarnContains: "is not a Kubernetes quantity",
-		},
-		{
-			name: "does not fail on a deprecated ephemeral storage request that is not a quantity",
-			volumeCtx: map[string]string{
-				volumecontext.Cache: volumecontext.CacheTypeEphemeral,
-				volumecontext.CacheEphemeralStorageResourceRequest: "10 gigabytes",
-			},
-			mounterCacheType:     CacheEphemeral,
-			expectedArgs:         []string{cacheArg},
-			expectedWarnContains: `sets the "cacheEphemeralStorageResourceRequest" volume attribute`,
 		},
 	}
 
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			args := mountpoint.ParseArgs(testCase.mountOptions)
-			logs := captureKlog(t)
+	for _, group := range groups {
+		t.Run(group.name, func(t *testing.T) {
+			for _, testCase := range group.cases {
+				t.Run(testCase.name, func(t *testing.T) {
+					args := mountpoint.ParseArgs(testCase.mountOptions)
+					logs := captureKlog(t)
 
-			err := configureCache(&args, testCase.volumeCtx, volumeID, testCase.mounterCacheType)
+					err := configureCache(&args, testCase.volumeCtx, volumeID, testCase.mounterCacheType)
 
-			if testCase.expectError {
-				if err == nil {
-					t.Fatalf("expected an error, got args %v", args.SortedList())
-				}
-				assert.Equals(t, codes.InvalidArgument, status.Code(err))
-				if testCase.expectedErrContains != "" {
-					assert.Contains(t, err.Error(), testCase.expectedErrContains)
-				}
-				return
-			}
-			assert.NoError(t, err)
-			assert.Equals(t, testCase.expectedArgs, args.SortedList())
-			if testCase.expectedWarnContains != "" {
-				assert.Contains(t, logs.String(), testCase.expectedWarnContains)
-			}
-			if testCase.unexpectedWarnContains != "" && strings.Contains(logs.String(), testCase.unexpectedWarnContains) {
-				t.Errorf("warning %q must not fire here:\n%s", testCase.unexpectedWarnContains, logs.String())
+					if len(testCase.expectedWarnContains) == 0 && logs.Len() != 0 {
+						t.Errorf("expected no warning, got:\n%s", logs.String())
+					}
+					for _, warning := range testCase.expectedWarnContains {
+						assert.Contains(t, logs.String(), warning)
+					}
+					if testCase.expectedErrContains != "" {
+						if err == nil {
+							t.Fatalf("expected an error, got args %v", args.SortedList())
+						}
+						assert.Equals(t, codes.InvalidArgument, status.Code(err))
+						assert.Contains(t, err.Error(), testCase.expectedErrContains)
+						return
+					}
+					assert.NoError(t, err)
+					assert.Equals(t, testCase.expectedArgs, args.SortedList())
+				})
 			}
 		})
 	}
 }
 
-// Note: MountOptionCacheDir tested via daemosnet_mounter_test.go "Discovery resolves the mounter pod's comm directory".
+// Note: MountOptionCacheDir tested via daemonset_mounter_test.go "Discovery resolves the mounter pod's comm directory".
 
 func TestCacheTypeFromPV(t *testing.T) {
 	testCases := []struct {
@@ -426,8 +549,18 @@ func TestCacheTypeFromPV(t *testing.T) {
 		wantErrContains       string
 	}{
 		{
-			name: "a PV that asks for no cache",
+			name: "a PV that asks for no cache (unset cache in PV)",
 			want: CacheNone,
+		},
+		{
+			name:    "`cache: false`, which is no cache said explicitly",
+			pvCache: volumecontext.CacheDisabled,
+			want:    CacheNone,
+		},
+		{
+			name:    "`cache: true`, which opts in and names no type",
+			pvCache: volumecontext.CacheEnabled,
+			want:    CacheNone,
 		},
 		{
 			name:                  "an ephemeral cache, whose medium is ignored",
@@ -450,13 +583,23 @@ func TestCacheTypeFromPV(t *testing.T) {
 			name:                  "an emptyDir cache on a medium that cannot hold cache blocks",
 			pvCache:               volumecontext.CacheTypeEmptyDir,
 			pvCacheEmptyDirMedium: string(corev1.StorageMediumHugePages),
-			wantErrContains:       `must be "" or "Memory"`,
+			wantErrContains:       `"cacheEmptyDirMedium" "HugePages" is not supported`,
 		},
 		{
-			// `true` is not accepted - we require the PV to specify the cache type
-			name:            "a value that is not a cache type",
-			pvCache:         "true",
-			wantErrContains: `must be "emptyDir" or "ephemeral"`,
+			name:            "a value that is not a cache value at all",
+			pvCache:         "yes",
+			wantErrContains: `Use "true" for this node's cache`,
+		},
+		{
+			// The accepted values are matched exactly, as `emptyDir` and `Memory` already are.
+			name:            "`True`, because the match is case sensitive",
+			pvCache:         "True",
+			wantErrContains: "is not a supported cache value",
+		},
+		{
+			name:            "`1`, which only a boolean parser would take",
+			pvCache:         "1",
+			wantErrContains: "is not a supported cache value",
 		},
 	}
 
