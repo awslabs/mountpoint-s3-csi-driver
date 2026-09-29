@@ -74,7 +74,11 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 
 // RemoveMeta removes the volume's .meta.json, treating an already-absent file as success.
 func RemoveMeta(kubeletPath, volumeID string) error {
-	metaPath := MetaFileName(kubeletPath, volumeID)
+	return removeMetaFile(MetaFileName(kubeletPath, volumeID))
+}
+
+// removeMetaFile removes the meta file at `metaPath`, treating an already-absent file as success.
+func removeMetaFile(metaPath string) error {
 	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove meta file %s: %w", metaPath, err)
 	}

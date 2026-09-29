@@ -1287,7 +1287,11 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
 				continue
 			}
-			os.Remove(metaPath)
+			if err := removeMetaFile(metaPath); err != nil {
+				klog.Errorf("MountMap: %v for volume %s, keeping in-memory tracking (will retry next cleanup)", err, meta.VolumeID)
+				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
+				continue
+			}
 			dm.uidAllocator.Release(meta.Uid)
 			continue
 		}
