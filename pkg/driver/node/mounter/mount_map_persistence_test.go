@@ -389,9 +389,6 @@ func TestRebuildMountMap_FailsOnInvalidMetaJSON(t *testing.T) {
 	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider(nil))
 	err = dm.RebuildMountMap()
 
-	// Fail closed: an unreadable/corrupt meta must abort rebuild (driver.go turns this into
-	// a fatal), not be silently skipped — skipping would leak the volume's commDir/credentials
-	// with no recovery path.
 	if err == nil {
 		t.Fatal("expected RebuildMountMap to fail on corrupt meta, got nil")
 	}

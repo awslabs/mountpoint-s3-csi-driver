@@ -1248,7 +1248,11 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		metaPath := filepath.Join(metaDir, dirEntry.Name())
 		meta, err := readMeta(metaPath)
 		if err != nil {
-			return fmt.Errorf("failed to read mount meta %s; remove or quarantine this file to allow the node to start: %w", metaPath, err)
+			// Fail closed: an unreadable/corrupt meta must abort rebuild (driver.go turns this into
+			// a fatal), not be silently skipped — skipping would leak the volume's commDir/credentials
+			// with no recovery path.
+			return fmt.Errorf("failed to read mount meta %s: %w. "+
+				"Drain this node to move workloads elsewhere, then delete this corrupted meta file to allow the node to start", metaPath, err)
 		}
 
 		// Derive SourcePath from VolumeID (not persisted, always computable)
