@@ -44,6 +44,7 @@ func TestNewMemoryLimitEqualSplit(t *testing.T) {
 	testCases := []struct {
 		name              string
 		requestBytes      int64
+		tmpfsBytes        int64
 		maxVolumesPerNode int64
 		wantShareMiB      int64
 		wantErr           bool
@@ -112,11 +113,25 @@ func TestNewMemoryLimitEqualSplit(t *testing.T) {
 			maxVolumesPerNode: 4,
 			wantErr:           true,
 		},
+		{
+			name:              "a tmpfs cache volume comes out of the request before it is split",
+			requestBytes:      4 * gib,
+			tmpfsBytes:        1 * gib,
+			maxVolumesPerNode: 4,
+			wantShareMiB:      752, // (4096 - 1024 - 64) / 4
+		},
+		{
+			name:              "a tmpfs cache volume that leaves less than Mountpoint's minimum refuses every mount",
+			requestBytes:      4 * gib,
+			tmpfsBytes:        3 * gib,
+			maxVolumesPerNode: 4,
+			wantErr:           true, // (4096 - 3072 - 64) / 4 = 240, under 512
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newMemoryLimit(memoryLimitEqualSplit, tc.requestBytes, tc.maxVolumesPerNode)
+			got, err := newMemoryLimit(memoryLimitEqualSplit, tc.requestBytes, tc.tmpfsBytes, tc.maxVolumesPerNode)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected a configuration that cannot host a mount to be refused, got share %d", got.shareMiB)
@@ -146,7 +161,7 @@ func TestNewMemoryLimitNone(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newMemoryLimit(memoryLimitNone, tc.requestBytes, tc.maxVolumesPerNode)
+			got, err := newMemoryLimit(memoryLimitNone, tc.requestBytes, 0, tc.maxVolumesPerNode)
 			assert.NoError(t, err)
 			assert.Equals(t, memoryLimitNone, got.strategy)
 			assert.Equals(t, int64(0), got.shareMiB)
@@ -158,7 +173,7 @@ func TestNewMemoryLimitNone(t *testing.T) {
 // a memoryLimit at all — the mounter exits instead, which TestNewMemoryLimitEqualSplit covers.
 func mustMemoryLimit(t *testing.T, strategy memoryLimitStrategy, requestBytes, maxVolumesPerNode int64) memoryLimit {
 	t.Helper()
-	limit, err := newMemoryLimit(strategy, requestBytes, maxVolumesPerNode)
+	limit, err := newMemoryLimit(strategy, requestBytes, 0, maxVolumesPerNode)
 	assert.NoError(t, err)
 	return limit
 }
@@ -227,6 +242,7 @@ func TestNewMemoryLimitErrorMessages(t *testing.T) {
 	testCases := []struct {
 		name              string
 		requestBytes      int64
+		tmpfsBytes        int64
 		maxVolumesPerNode int64
 		wantMentions      []string
 	}{
@@ -250,6 +266,13 @@ func TestNewMemoryLimitErrorMessages(t *testing.T) {
 			wantMentions: []string{"equalSplit", "maxVolumesPerNode", "memoryLimitStrategy=none"},
 		},
 		{
+			name:              "a share squeezed by a tmpfs cache volume names it and its remedy",
+			requestBytes:      4 * gib,
+			tmpfsBytes:        3 * gib,
+			maxVolumesPerNode: 4,
+			wantMentions:      []string{"3072 MiB tmpfs cache volume", "240", "cache.emptyDir.sizeLimit"},
+		},
+		{
 			name:              "a request too small to host anything names the overhead",
 			requestBytes:      32 * mib,
 			maxVolumesPerNode: 4,
@@ -259,7 +282,7 @@ func TestNewMemoryLimitErrorMessages(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := newMemoryLimit(memoryLimitEqualSplit, tc.requestBytes, tc.maxVolumesPerNode)
+			_, err := newMemoryLimit(memoryLimitEqualSplit, tc.requestBytes, tc.tmpfsBytes, tc.maxVolumesPerNode)
 			if err == nil {
 				t.Fatal("expected the configuration to be refused")
 			}

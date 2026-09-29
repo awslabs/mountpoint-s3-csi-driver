@@ -74,6 +74,7 @@ var _ = BeforeSuite(func() {
 			"fake_id",
 			&mounter.FakeMounter{},
 			0,
+			false,
 		),
 	}
 	go func() {
