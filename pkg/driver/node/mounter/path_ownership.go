@@ -47,7 +47,14 @@ func (dm *DaemonsetMounter) chmodWithDefault(path string, mode fs.FileMode) erro
 	if dm.chmod != nil {
 		return dm.chmod(path, mode)
 	}
-	return os.Chmod(path, mode)
+	// Chmod follows symlinks. Resolving the name against an [os.Root] on its parent makes a link
+	// pointing outside that directory an error instead.
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Chmod(filepath.Base(path), mode)
 }
 
 // secureSharedPaths makes the comm directory and the mount socket root-owned and unwritable by any
@@ -94,8 +101,7 @@ func (dm *DaemonsetMounter) ownCredentialsDirContents(dir string, uid uint32) er
 			return err
 		}
 		// csi-node writes only regular files here, so anything else was planted by the Mountpoint
-		// that owns this directory. Chmod follows symlinks, so a link would apply the mode to
-		// whatever it points at.
+		// that owns this directory.
 		if !d.IsDir() && !d.Type().IsRegular() {
 			return fmt.Errorf("refusing to own %q in %q: unexpected file type %s", path, dir, d.Type())
 		}
