@@ -3,14 +3,13 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
@@ -29,13 +28,12 @@ const (
 	expectedSockMode     = "600"
 	expectedCredDirMode  = "700"
 	expectedCredFileMode = "400"
-	mounterPodLabel      = "app=s3-csi-daemonset-mounter"
-	mounterContainerName = "mounter"
-	csiNodePodLabel      = "app=s3-csi-node"
-	csiNodeContainerName = "s3-plugin"
 
 	// mountpointProcessName is the `comm` of a Mountpoint process, as /proc/<pid>/status reports it.
 	mountpointProcessName = "mount-s3"
+
+	// mountSockName is the socket csi-node sends mount requests to, inside the comm directory.
+	mountSockName = "mount.sock"
 )
 
 // How long to wait for Mountpoint processes and mounts to appear after the pods are running.
@@ -50,9 +48,6 @@ type s3CSIProcessIsolationDaemonsetTestSuite struct {
 
 // InitS3CSIProcessIsolationDaemonsetTestSuite verifies that the kernel isolates each Mountpoint
 // process: its own UID, no groups, no capabilities, and credentials only it can reach.
-//
-// No other suite can observe these properties. Giving every mount the same UID, or skipping the
-// chown, leaves all functional tests passing and the isolation gone.
 func InitS3CSIProcessIsolationDaemonsetTestSuite() storageframework.TestSuite {
 	return &s3CSIProcessIsolationDaemonsetTestSuite{
 		tsInfo: storageframework.TestSuiteInfo{
@@ -102,38 +97,40 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		second := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, second)
 
-		// One node, because that is where two Mountpoint processes share a mounter pod.
+		// Both pods must land on one node, since that is where two Mountpoint processes share a mounter
+		// pod. createPodsOnSameNode places pods for a single volume, so it picks the node with the first
+		// and the second volume's pod is then placed on that same node.
 		targetNode, pods := createPodsOnSameNode(ctx, f, 1, first)
 		pods = append(pods, createPodOnNode(ctx, f, targetNode, second)...)
 		defer deletePodsInOrder(ctx, f, pods)
 
-		ginkgo.By("Reading the credentials of every mount-s3 process in the mounter pod")
-		var creds []mountpointProcessCreds
-		gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
-			var err error
-			creds, err = mountpointProcessCredentials(ctx, f, targetNode)
-			if err != nil {
-				return 0, err
-			}
-			return len(creds), nil
-		}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.BeNumerically(">=", 2),
-			"expected at least two mount-s3 processes on node %s", targetNode)
+		// Each mount is identified by the UID csi-node chowned its credential directory to. Counting
+		// mount-s3 processes instead would be satisfied by another spec's mounts, since specs run in
+		// parallel and share this node's mounter pod.
+		ginkgo.By("Reading the UID each of the two mounts was given")
+		commDir := commDirHostPath(ctx, f, targetNode)
+		uids := []int{
+			statPath(ctx, f, targetNode, filepath.Join(commDir, first.Pv.Name)).uid,
+			statPath(ctx, f, targetNode, filepath.Join(commDir, second.Pv.Name)).uid,
+		}
+		gomega.Expect(uids[0]).ToNot(gomega.Equal(uids[1]),
+			"two mounts on one node must be given different UIDs, both got %d", uids[0])
 
-		seen := map[int]string{}
-		for _, c := range creds {
+		for _, uid := range uids {
+			c := mountpointProcessRunningAs(ctx, f, targetNode, uid)
 			ginkgo.By(fmt.Sprintf("Checking Mountpoint pid %s (uid %d)", c.pid, c.uid()))
 
-			// All four IDs, not just the effective one: a process that switched only that could
-			// switch back.
-			for _, uid := range c.uids {
-				gomega.Expect(uid).To(gomega.And(
-					gomega.BeNumerically(">=", uidRangeStart),
-					gomega.BeNumerically("<=", uidRangeEnd),
-				), "Mountpoint pid %s must run under an allocated UID, got %v", c.pid, c.uids)
-			}
-			for _, gid := range c.gids {
-				gomega.Expect(gid).To(gomega.Equal(c.uid()),
-					"Mountpoint pid %s must have every GID set to its UID, got %v", c.pid, c.gids)
+			gomega.Expect(c.uid()).To(gomega.And(
+				gomega.BeNumerically(">=", uidRangeStart),
+				gomega.BeNumerically("<=", uidRangeEnd),
+			), "Mountpoint pid %s must run under an allocated UID, got %v", c.pid, c.uids)
+
+			// Every UID and GID, not just the effective ones: a process that switched only those keeps
+			// the ones it came from and could switch back.
+			for _, id := range append(append([]int{}, c.uids...), c.gids...) {
+				gomega.Expect(id).To(gomega.Equal(c.uid()),
+					"Mountpoint pid %s must have every UID and GID set to %d, got uids=%v gids=%v",
+					c.pid, c.uid(), c.uids, c.gids)
 			}
 
 			// Inheriting the mounter's GID 0 would give every Mountpoint anything group-root-readable.
@@ -148,12 +145,6 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 				"Mountpoint pid %s must hold no effective capabilities", c.pid)
 			gomega.Expect(c.capAmb).To(gomega.Equal("0000000000000000"),
 				"Mountpoint pid %s must hold no ambient capabilities", c.pid)
-
-			if other, dup := seen[c.uid()]; dup {
-				framework.Failf("Mountpoint pids %s and %s share UID %d, so the kernel cannot isolate them",
-					other, c.pid, c.uid())
-			}
-			seen[c.uid()] = c.pid
 		}
 	})
 
@@ -172,19 +163,17 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
 		}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.Equal(1))
 
-		// Observed from csi-node, which is privileged and applied this ownership. The mounter holds no
-		// CAP_DAC_OVERRIDE, so it cannot read these paths — that is the isolation working.
+		// Observed from csi-node, which is privileged and applied this ownership. The mounter cannot read
+		// these paths itself, holding no CAP_DAC_OVERRIDE.
 		commDir := commDirHostPath(ctx, f, targetNode)
 
 		ginkgo.By("Checking the shared comm directory and mount socket are root-owned and closed")
-		// No Mountpoint may create entries in /comm for a later mount to inherit, nor reach the socket
-		// to issue mount requests of its own.
 		comm := statPath(ctx, f, targetNode, commDir)
 		gomega.Expect(comm.mode).To(gomega.Equal(expectedCommDirMode))
 		gomega.Expect(comm.uid).To(gomega.Equal(0))
 		gomega.Expect(comm.gid).To(gomega.Equal(0))
 
-		sock := statPath(ctx, f, targetNode, commDir+"/mount.sock")
+		sock := statPath(ctx, f, targetNode, filepath.Join(commDir, mountSockName))
 		gomega.Expect(sock.mode).To(gomega.Equal(expectedSockMode))
 		gomega.Expect(sock.uid).To(gomega.Equal(0))
 		gomega.Expect(sock.gid).To(gomega.Equal(0))
@@ -198,6 +187,23 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			gomega.BeNumerically("<=", uidRangeEnd),
 		), "credential directory for %s must belong to an allocated UID", pvName)
 		gomega.Expect(credDir.gid).To(gomega.Equal(credDir.uid))
+
+		ginkgo.By("Confirming a mount's UID can neither write to /comm nor open the mount socket")
+		asMount := fmt.Sprintf("setpriv --reuid=%d --regid=%d --clear-groups", credDir.uid, credDir.uid)
+
+		out, stderr, err := execInMounterPod(ctx, f, targetNode, asMount+" touch /comm/planted")
+		gomega.Expect(err).To(gomega.HaveOccurred(),
+			"UID %d must not be able to create entries in /comm; got output %q", credDir.uid, out)
+		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"),
+			"UID %d must be refused by the kernel, but the failure was: %q", credDir.uid, stderr)
+
+		// The mount's UID must get "Permission denied" on the socket.
+		sockPath := filepath.Join("/comm", mountSockName)
+		out, stderr, err = execInMounterPod(ctx, f, targetNode, asMount+" cat "+sockPath)
+		gomega.Expect(err).To(gomega.HaveOccurred(),
+			"UID %d must not be able to open %s; got output %q", credDir.uid, sockPath, out)
+		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"),
+			"UID %d must be refused by the kernel, but the failure was: %q", credDir.uid, stderr)
 	})
 
 	// Credential files are covered here, not above: driver-level credentials from the node instance
@@ -209,12 +215,7 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		}
 
 		// An assumable role, so the mount succeeds and the token stays on disk.
-		sa, removeSA := createServiceAccount(ctx, f)
-		ginkgo.DeferCleanup(removeSA)
-		role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), iamPolicyS3FullAccess)
-		ginkgo.DeferCleanup(removeRole)
-		sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
-		waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+		sa := createServiceAccountWithAssumableRole(ctx, f, oidcProvider, iamPolicyS3FullAccess)
 
 		podLevelCtx := contextWithVolumeAttributes(ctx, map[string]string{"authenticationSource": "pod"})
 		resource := createVolumeResourceWithMountOptions(podLevelCtx, l.config, pattern,
@@ -232,8 +233,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		credDirPath := commDirHostPath(ctx, f, targetNode) + "/" + pvName
 		credDir := statPath(ctx, f, targetNode, credDirPath)
 
-		// `-A` so an empty directory yields no output rather than "." and "..". An empty directory
-		// would mean this spec asserts nothing, hence the guard below.
+		// `-A` so a credential file whose name begins with a dot is listed too, without picking up "."
+		// and "..". An empty listing would mean this spec asserts nothing, hence the guard below.
 		listing, err := execInCSINodePod(ctx, f, targetNode, fmt.Sprintf("ls -A %q", credDirPath))
 		framework.ExpectNoError(err, "while listing %s", credDirPath)
 		files := strings.Fields(listing)
@@ -242,7 +243,7 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 
 		ginkgo.By(fmt.Sprintf("Checking the %d credential file(s) belong to UID %d and are read-only", len(files), credDir.uid))
 		for _, file := range files {
-			st := statPath(ctx, f, targetNode, credDirPath+"/"+file)
+			st := statPath(ctx, f, targetNode, filepath.Join(credDirPath, file))
 			gomega.Expect(st.uid).To(gomega.Equal(credDir.uid),
 				"credential file %s must belong to the mount's UID, or Mountpoint cannot read it", file)
 			gomega.Expect(st.gid).To(gomega.Equal(credDir.uid))
@@ -251,8 +252,9 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		}
 	})
 
-	// The modes above mean nothing unless the kernel enforces them. The mounter is root without
-	// CAP_DAC_OVERRIDE, so it faces the same checks as any user: refusing it implies refusing any UID.
+	// The modes asserted above only matter if the kernel enforces them. The mounter runs as root but
+	// holds no CAP_DAC_OVERRIDE, so it is subject to the same permission checks as any other user:
+	// being refused here means any other UID is refused too.
 	ginkgo.It("should deny the mounter itself access to a mount's credential directory", func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
@@ -302,6 +304,34 @@ type pathStat struct {
 	mode string
 	uid  int
 	gid  int
+}
+
+// mountpointProcessRunningAs returns the mount-s3 process on `nodeName` whose UID is `uid`, waiting
+// for it to appear.
+//
+// csi-node chowned that mount's credentials to `uid`, so a Mountpoint must end up running as `uid`:
+// if none does, the credentials were handed to an identity nothing is using and the mount cannot
+// read them. The failure lists the UIDs actually seen so a mismatch names both sides.
+func mountpointProcessRunningAs(ctx context.Context, f *framework.Framework, nodeName string, uid int) mountpointProcessCreds {
+	var match mountpointProcessCreds
+	gomega.Eventually(ctx, func(ctx context.Context) error {
+		creds, err := mountpointProcessCredentials(ctx, f, nodeName)
+		if err != nil {
+			return err
+		}
+		seen := make([]int, 0, len(creds))
+		for _, c := range creds {
+			if c.uid() == uid {
+				match = c
+				return nil
+			}
+			seen = append(seen, c.uid())
+		}
+		return fmt.Errorf("no mount-s3 process on node %s runs as UID %d, which owns its credentials; running UIDs are %v",
+			nodeName, uid, seen)
+	}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.Succeed())
+
+	return match
 }
 
 // mountpointProcessCredentials reads the credentials and capabilities of every mount-s3 process in
@@ -384,62 +414,10 @@ func statPath(ctx context.Context, f *framework.Framework, nodeName, path string
 	return pathStat{mode: fields[0], uid: mustAtoi(fields[1]), gid: mustAtoi(fields[2])}
 }
 
-// podOnNode returns the driver pod matching `label` on `nodeName`.
-func podOnNode(ctx context.Context, f *framework.Framework, label, nodeName string) (*v1.Pod, error) {
-	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: label,
-		FieldSelector: "spec.nodeName=" + nodeName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("listing %s pods on node %s: %w", label, nodeName, err)
-	}
-	if len(pods.Items) == 0 {
-		return nil, fmt.Errorf("no %s pod on node %s", label, nodeName)
-	}
-	return &pods.Items[0], nil
-}
-
-// execInPodOnNode runs `cmd` in `container` of the pod matching `label` on `nodeName`, returning its
-// stdout and stderr.
-//
-// stderr matters: a spec asserting that access is *refused* needs to distinguish the kernel denying it
-// from the command having failed for any other reason.
-func execInPodOnNode(ctx context.Context, f *framework.Framework, label, container, nodeName, cmd string) (string, string, error) {
-	pod, err := podOnNode(ctx, f, label, nodeName)
-	if err != nil {
-		return "", "", err
-	}
-	return execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, pod.Name, container,
-		[]string{"/bin/sh", "-c", cmd})
-}
-
-// execInCSINodePod runs `cmd` in the csi-node pod on `nodeName`.
-//
-// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter it
-// can read a directory owned by a mount's UID, and it is the component that applied that ownership.
-func execInCSINodePod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, error) {
-	stdout, _, err := execInPodOnNode(ctx, f, csiNodePodLabel, csiNodeContainerName, nodeName, cmd)
-	return stdout, err
-}
-
-// execInMounterPod runs `cmd` in the mounter pod on `nodeName`, returning its stdout and stderr.
-func execInMounterPod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, string, error) {
-	return execInPodOnNode(ctx, f, mounterPodLabel, mounterContainerName, nodeName, cmd)
-}
-
 // commDirHostPath returns the mounter pod's comm emptyDir as csi-node sees it through the kubelet pod
 // directory, which is the same directory the mounter sees at /comm.
 func commDirHostPath(ctx context.Context, f *framework.Framework, nodeName string) string {
 	pod, err := podOnNode(ctx, f, mounterPodLabel, nodeName)
 	framework.ExpectNoError(err)
 	return fmt.Sprintf("/var/lib/kubelet/pods/%s/volumes/kubernetes.io~empty-dir/comm", pod.UID)
-}
-
-// mustAtoi parses a decimal field, failing the test if it is not a number. Returning a zero on a
-// parse failure would pass silently wherever zero is the expected value, as it is for every
-// root-owned shared path.
-func mustAtoi(s string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	framework.ExpectNoError(err, "while parsing %q as a number", s)
-	return n
 }
