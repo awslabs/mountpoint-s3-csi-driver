@@ -24,11 +24,21 @@ const (
 	// CacheVolumeName is the /cache directory mounted inside the mounter pod.
 	CacheVolumeName = "cache"
 
-	//	emptyDir   <mounterDir>/volumes/kubernetes.io~empty-dir/cache
-	//	ephemeral  <mounterDir>/volumes/kubernetes.io~csi/<bound PV>/mount
+	// Each layout is the GetPath of the kubelet's volume plugin: https://github.com/kubernetes/kubernetes/tree/v1.37.1/pkg/volume
+	//	emptyDir             <mounterDir>/volumes/kubernetes.io~empty-dir/cache
+	//	ephemeral, CSI PV    <mounterDir>/volumes/kubernetes.io~csi/<bound PV>/mount
+	//	ephemeral, local PV  <mounterDir>/volumes/kubernetes.io~local-volume/<bound PV>
+	//	ephemeral, NFS PV    <mounterDir>/volumes/kubernetes.io~nfs/<bound PV>
+	//	ephemeral, iSCSI PV  <mounterDir>/volumes/kubernetes.io~iscsi/<bound PV>
+	//	ephemeral, FC PV     <mounterDir>/volumes/kubernetes.io~fc/<bound PV>
+	//	ephemeral, flex PV   <mounterDir>/volumes/<driver, "/" escaped as "~">/<bound PV>
 	volumesSubdir         = "volumes"
 	emptyDirVolumesSubdir = "kubernetes.io~empty-dir"
 	csiVolumesSubdir      = "kubernetes.io~csi"
+	localVolumesSubdir    = "kubernetes.io~local-volume"
+	nfsVolumesSubdir      = "kubernetes.io~nfs"
+	iscsiVolumesSubdir    = "kubernetes.io~iscsi"
+	fcVolumesSubdir       = "kubernetes.io~fc"
 
 	// TODO: Remove to use process isolation PR defined permissions.
 	cacheDirPerm = fs.FileMode(0770)
@@ -38,7 +48,7 @@ const (
 // With mounterDir at <kubelet>/pods/<mounterUID>, the two volume kinds land in:
 //
 //	emptyDir   <mounterDir>/volumes/kubernetes.io~empty-dir/cache       (can be constructed)
-//	ephemeral  <mounterDir>/volumes/kubernetes.io~csi/pvc-<uid>/mount   (read from the mounter's cache PVC)
+//	ephemeral  <mounterDir>/volumes/<plugin dir of the bound PV>/...    (read from the mounter's cache PVC and its PV)
 func resolveCacheDir(ctx context.Context, clientset kubernetes.Interface, pod *corev1.Pod, mounterDir string) (string, error) {
 	for _, v := range pod.Spec.Volumes {
 		// Skip other volumes on mounter pod (e.g. commDir)
@@ -66,7 +76,32 @@ func resolveCacheDir(ctx context.Context, clientset kubernetes.Interface, pod *c
 			if pvc.Spec.VolumeName == "" {
 				return "", fmt.Errorf("cache volume PVC %s/%s is not bound", pod.Namespace, pvcName)
 			}
-			return filepath.Join(mounterDir, volumesSubdir, csiVolumesSubdir, pvc.Spec.VolumeName, "mount"), nil
+			pv, err := clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+			if err != nil {
+				return "", fmt.Errorf("failed to get cache volume PV %s: %w", pvc.Spec.VolumeName, err)
+			}
+			// The kubelet picks the plugin directory from the PV's source, not its StorageClass or driver, and no API
+			// returns another pod's volume path. Every CSI driver lands under ~csi.
+			switch {
+			// In-tree types (e.g. gp2's awsElasticBlockStore) keep their source on the PV but are mounted by the CSI plugin.
+			case pv.Spec.CSI != nil, pv.Spec.AWSElasticBlockStore != nil, pv.Spec.GCEPersistentDisk != nil, pv.Spec.AzureDisk != nil,
+				pv.Spec.AzureFile != nil, pv.Spec.Cinder != nil, pv.Spec.VsphereVolume != nil:
+				return filepath.Join(mounterDir, volumesSubdir, csiVolumesSubdir, pv.Name, "mount"), nil
+			case pv.Spec.Local != nil:
+				return filepath.Join(mounterDir, volumesSubdir, localVolumesSubdir, pv.Name), nil
+			case pv.Spec.NFS != nil:
+				return filepath.Join(mounterDir, volumesSubdir, nfsVolumesSubdir, pv.Name), nil
+			case pv.Spec.ISCSI != nil:
+				return filepath.Join(mounterDir, volumesSubdir, iscsiVolumesSubdir, pv.Name), nil
+			case pv.Spec.FC != nil:
+				return filepath.Join(mounterDir, volumesSubdir, fcVolumesSubdir, pv.Name), nil
+			case pv.Spec.FlexVolume != nil:
+				// The kubelet names a flex volume's directory after its driver, escaped as it escapes plugin names.
+				return filepath.Join(mounterDir, volumesSubdir, strings.ReplaceAll(pv.Spec.FlexVolume.Driver, "/", "~"), pv.Name), nil
+			default:
+				// e.g. hostPath, bind-mounted from a host path s3-csi-node cannot reach. This fails mounter pod discovery.
+				return "", fmt.Errorf("cache volume PV %s has an unsupported source: use a csi, local, nfs, iscsi, fc or flexVolume PV", pv.Name)
+			}
 		}
 	}
 	return "", nil

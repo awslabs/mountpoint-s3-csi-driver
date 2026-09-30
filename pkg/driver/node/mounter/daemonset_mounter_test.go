@@ -285,6 +285,14 @@ func setupDMWithCache(t *testing.T, cacheKind string) *dmTestCtx {
 		}
 		_, err := testCtx.client.CoreV1().PersistentVolumeClaims("kube-system").Create(testCtx.ctx, claim, metav1.CreateOptions{})
 		assert.NoError(t, err)
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: pvName},
+			Spec: corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com", VolumeHandle: "vol-cache"},
+			}},
+		}
+		_, err = testCtx.client.CoreV1().PersistentVolumes().Create(testCtx.ctx, pv, metav1.CreateOptions{})
+		assert.NoError(t, err)
 		cacheDir = filepath.Join(testCtx.mounterDir, "volumes", "kubernetes.io~csi", pvName, "mount")
 	default:
 		t.Fatalf("setupDMWithCache: %q is not a cache kind", cacheKind)

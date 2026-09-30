@@ -35,6 +35,13 @@ func TestResolveCacheDir(t *testing.T) {
 	}
 	unboundPVC := boundPVC.DeepCopy()
 	unboundPVC.Spec.VolumeName = ""
+	boundPV := func(source corev1.PersistentVolumeSource) *corev1.PersistentVolume {
+		return &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-static-cache-pv"},
+			Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: source},
+		}
+	}
+	ephemeral := withCacheVolume(corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}})
 
 	testCases := []struct {
 		name            string
@@ -65,10 +72,58 @@ func TestResolveCacheDir(t *testing.T) {
 			wantDir: emptyDirPath,
 		},
 		{
-			name:    "an ephemeral volume resolves through the PVC the kubelet bound",
-			volumes: withCacheVolume(corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}),
-			objects: []runtime.Object{boundPVC},
-			wantDir: filepath.Join(mounterDir, volumesSubdir, csiVolumesSubdir, "my-static-cache-pv", "mount"),
+			name:    "an ephemeral volume on a CSI PV resolves under kubernetes.io~csi, with /mount",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com"}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~csi/my-static-cache-pv/mount",
+		},
+		{
+			name:    "an ephemeral volume on an in-tree EBS PV (gp2) resolves under kubernetes.io~csi, as the CSI plugin mounts it",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{AWSElasticBlockStore: &corev1.AWSElasticBlockStoreVolumeSource{VolumeID: "vol-0123"}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~csi/my-static-cache-pv/mount",
+		},
+		{
+			name:    "an ephemeral volume on a local PV (instance-store NVMe) resolves under kubernetes.io~local-volume",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{Local: &corev1.LocalVolumeSource{Path: "/mnt/disks/nvme0"}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~local-volume/my-static-cache-pv",
+		},
+		{
+			name:    "an ephemeral volume on an NFS PV resolves under kubernetes.io~nfs",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{NFS: &corev1.NFSVolumeSource{Server: "nfs", Path: "/"}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~nfs/my-static-cache-pv",
+		},
+		{
+			name:    "an ephemeral volume on an iSCSI PV resolves under kubernetes.io~iscsi",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{ISCSI: &corev1.ISCSIPersistentVolumeSource{TargetPortal: "10.0.0.1:3260", IQN: "iqn.2026-10.com.example:cache", Lun: 0}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~iscsi/my-static-cache-pv",
+		},
+		{
+			name:    "an ephemeral volume on an FC PV resolves under kubernetes.io~fc",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{FC: &corev1.FCVolumeSource{WWIDs: []string{"3600508b400105e210000900000490000"}}})},
+			wantDir: mounterDir + "/volumes/kubernetes.io~fc/my-static-cache-pv",
+		},
+		{
+			name:    "an ephemeral volume on a flex PV resolves under its driver name, with \"/\" escaped as \"~\"",
+			volumes: ephemeral,
+			objects: []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{FlexVolume: &corev1.FlexPersistentVolumeSource{Driver: "example.com/cachefs"}})},
+			wantDir: mounterDir + "/volumes/example.com~cachefs/my-static-cache-pv",
+		},
+		{
+			name:            "an ephemeral volume on a hostPath PV is an error, as s3-csi-node cannot reach its host path",
+			volumes:         ephemeral,
+			objects:         []runtime.Object{boundPVC, boundPV(corev1.PersistentVolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mnt/cache"}})},
+			wantErrContains: "unsupported source",
+		},
+		{
+			name:            "an ephemeral volume whose bound PV cannot be read is an error",
+			volumes:         ephemeral,
+			objects:         []runtime.Object{boundPVC},
+			wantErrContains: "failed to get cache volume PV",
 		},
 		{
 			name:            "an ephemeral volume with no PVC at all is an error",
