@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -288,13 +289,41 @@ func TestDaemonsetMounter(t *testing.T) {
 			expectedUserAgent := "--user-agent-prefix=" + mounter.UserAgent(credentialprovider.AuthenticationSourceDriver, testK8sVersion, cluster.DefaultKubernetes)
 			assert.Equals(t, mountoptions.Options{
 				BucketName: testCtx.bucketName,
-				Args:       []string{"--prefix=data/", expectedUserAgent},
-				Env:        env.List(),
-				VolumeId:   testCtx.volumeID,
+				// --uid and --gid carry the default, so the ownership the mount presents does not follow
+				// the UID below that the process runs as.
+				Args:     []string{"--gid=1000", "--prefix=data/", "--uid=1000", expectedUserAgent},
+				Env:      env.List(),
+				VolumeId: testCtx.volumeID,
 				// The first mount on a fresh allocator takes the bottom of the range.
 				Uid: mounter.UIDRangeStart,
 				Gid: mounter.UIDRangeStart,
 			}, got)
+		})
+
+		t.Run("Keeps the uid and gid the caller asked for", func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := testCtx.targetPath(testCtx.podUID)
+
+			// A gid the caller set directly, and one node.go derives from fsGroup, reach here the same way.
+			args := mountpoint.ParseArgs([]string{"--uid=2000", "--gid=3000"})
+
+			mountRes := make(chan error, 1)
+			go func() {
+				mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, credentialprovider.ProvideContext{
+					WorkloadPodID: testCtx.podUID,
+					VolumeID:      testCtx.volumeID,
+				}, args, "", nil)
+			}()
+
+			got := testCtx.receiveMountOptions()
+			testCtx.mount.Mount("mountpoint-s3", mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID), "fuse", nil)
+			assert.NoError(t, <-mountRes)
+
+			assert.Equals(t, true, slices.Contains(got.Args, "--uid=2000"))
+			assert.Equals(t, true, slices.Contains(got.Args, "--gid=3000"))
+
+			// The process still runs as its own allocated UID, whatever ownership it reports.
+			assert.Equals(t, uint32(mounter.UIDRangeStart), got.Uid)
 		})
 
 		t.Run("Does not duplicate mounts if target is already mounted and refreshes credentials", func(t *testing.T) {

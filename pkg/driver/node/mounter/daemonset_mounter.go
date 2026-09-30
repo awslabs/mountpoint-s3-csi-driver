@@ -28,6 +28,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -426,6 +427,12 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 
 	// Set after the pod-sharing key is taken from args above, so it stays out of that key and the saved meta.
 	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authSource, dm.kubernetesVersion, dm.variant))
+
+	// If not specified, pass default --uid and --gid so the files Mountpoint serves do not appear owned
+	// by its process UID.
+	mpUID := strconv.FormatInt(*cluster.DefaultMountpointUID, 10)
+	args.SetIfAbsent(mountpoint.ArgUid, mpUID)
+	args.SetIfAbsent(mountpoint.ArgGid, mpUID)
 
 	env := envprovider.Environment{}
 	env.Merge(userEnv)

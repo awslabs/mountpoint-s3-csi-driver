@@ -18,6 +18,7 @@ const (
 	ArgMaxCacheSize    = "--max-cache-size"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
+	ArgUid             = "--uid"
 	ArgGid             = "--gid"
 	ArgDirMode         = "--dir-mode"
 	ArgFileMode        = "--file-mode"
