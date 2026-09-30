@@ -24,11 +24,15 @@ const (
 	// CacheVolumeName is the /cache directory mounted inside the mounter pod.
 	CacheVolumeName = "cache"
 
-	//	emptyDir   <mounterDir>/volumes/kubernetes.io~empty-dir/cache
-	//	ephemeral  <mounterDir>/volumes/kubernetes.io~csi/<bound PV>/mount
+	//	emptyDir             <mounterDir>/volumes/kubernetes.io~empty-dir/cache
+	//	ephemeral, CSI PV    <mounterDir>/volumes/kubernetes.io~csi/<bound PV>/mount
+	//	ephemeral, local PV  <mounterDir>/volumes/kubernetes.io~local-volume/<bound PV>
+	//	ephemeral, NFS PV    <mounterDir>/volumes/kubernetes.io~nfs/<bound PV>
 	volumesSubdir         = "volumes"
 	emptyDirVolumesSubdir = "kubernetes.io~empty-dir"
 	csiVolumesSubdir      = "kubernetes.io~csi"
+	localVolumesSubdir    = "kubernetes.io~local-volume"
+	nfsVolumesSubdir      = "kubernetes.io~nfs"
 
 	// TODO: Remove to use process isolation PR defined permissions.
 	cacheDirPerm = fs.FileMode(0770)
@@ -38,7 +42,7 @@ const (
 // With mounterDir at <kubelet>/pods/<mounterUID>, the two volume kinds land in:
 //
 //	emptyDir   <mounterDir>/volumes/kubernetes.io~empty-dir/cache       (can be constructed)
-//	ephemeral  <mounterDir>/volumes/kubernetes.io~csi/pvc-<uid>/mount   (read from the mounter's cache PVC)
+//	ephemeral  <mounterDir>/volumes/<plugin dir of the bound PV>/...    (read from the mounter's cache PVC and its PV)
 func resolveCacheDir(ctx context.Context, clientset kubernetes.Interface, pod *corev1.Pod, mounterDir string) (string, error) {
 	for _, v := range pod.Spec.Volumes {
 		// Skip other volumes on mounter pod (e.g. commDir)
@@ -66,7 +70,23 @@ func resolveCacheDir(ctx context.Context, clientset kubernetes.Interface, pod *c
 			if pvc.Spec.VolumeName == "" {
 				return "", fmt.Errorf("cache volume PVC %s/%s is not bound", pod.Namespace, pvcName)
 			}
-			return filepath.Join(mounterDir, volumesSubdir, csiVolumesSubdir, pvc.Spec.VolumeName, "mount"), nil
+			pv, err := clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+			if err != nil {
+				return "", fmt.Errorf("failed to get cache volume PV %s: %w", pvc.Spec.VolumeName, err)
+			}
+			// The kubelet picks the plugin directory from the PV's source, not its StorageClass or driver, and no API
+			// returns another pod's volume path. Every CSI driver, incl. in-tree types migrated to CSI, lands under ~csi.
+			switch {
+			case pv.Spec.CSI != nil:
+				return filepath.Join(mounterDir, volumesSubdir, csiVolumesSubdir, pv.Name, "mount"), nil
+			case pv.Spec.Local != nil:
+				return filepath.Join(mounterDir, volumesSubdir, localVolumesSubdir, pv.Name), nil
+			case pv.Spec.NFS != nil:
+				return filepath.Join(mounterDir, volumesSubdir, nfsVolumesSubdir, pv.Name), nil
+			default:
+				// e.g. hostPath, bind-mounted from a host path s3-csi-node cannot reach. This fails mounter pod discovery.
+				return "", fmt.Errorf("cache volume PV %s has an unsupported source: use a csi, local or nfs PV", pv.Name)
+			}
 		}
 	}
 	return "", nil
