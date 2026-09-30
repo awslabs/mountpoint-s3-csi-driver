@@ -30,6 +30,7 @@ type MountMeta struct {
 	ServiceAccountEKSRoleARN string   `json:"serviceAccountEKSRoleARN"`
 	PodNamespace             string   `json:"podNamespace"`
 	FSGroup                  string   `json:"fsGroup"`
+	VolumeHandle             string   `json:"volumeHandle"`
 	Uid                      uint32   `json:"uid"`
 }
 
@@ -45,6 +46,7 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 		ServiceAccountEKSRoleARN: entry.Params.ServiceAccountEKSRoleARN,
 		PodNamespace:             entry.Params.PodNamespace,
 		FSGroup:                  entry.Params.FSGroup,
+		VolumeHandle:             entry.Params.VolumeHandle,
 		Uid:                      entry.Uid,
 	}
 

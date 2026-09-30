@@ -16,6 +16,7 @@ const (
 	ArgRegion          = "--region"
 	ArgCache           = "--cache"
 	ArgMaxCacheSize    = "--max-cache-size"
+	ArgMemoryTarget    = "--memory-target"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
 	ArgUid             = "--uid"
@@ -27,6 +28,9 @@ const (
 	ArgFsTab           = "-o"
 	ArgCABundle        = "--ca-bundle"
 )
+
+// MinMemoryTargetMiB is the smallest [ArgMemoryTarget] Mountpoint's CLI accepts.
+const MinMemoryTargetMiB = 512
 
 // An ArgKey represents the key of an argument.
 type ArgKey = string

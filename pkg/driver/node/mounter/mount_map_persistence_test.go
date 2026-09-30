@@ -167,7 +167,7 @@ func TestRemoveMeta_RemovesFile(t *testing.T) {
 	_, err = os.Stat(metaPath)
 	assert.NoError(t, err)
 
-	RemoveMeta(kubeletPath, "vol-remove")
+	assert.NoError(t, RemoveMeta(kubeletPath, "vol-remove"))
 
 	_, err = os.Stat(metaPath)
 	if !os.IsNotExist(err) {
@@ -177,7 +177,7 @@ func TestRemoveMeta_RemovesFile(t *testing.T) {
 
 func TestRemoveMeta_NoopIfNotExists(t *testing.T) {
 	kubeletPath := t.TempDir()
-	RemoveMeta(kubeletPath, "vol-nonexistent")
+	assert.NoError(t, RemoveMeta(kubeletPath, "vol-nonexistent"))
 }
 
 func TestReadMeta_ParsesCorrectly(t *testing.T) {
@@ -378,18 +378,24 @@ func TestRebuildMountMap_SkipsNonMetaFiles(t *testing.T) {
 	}
 }
 
-func TestRebuildMountMap_SkipsInvalidMetaJSON(t *testing.T) {
+func TestRebuildMountMap_FailsOnInvalidMetaJSON(t *testing.T) {
 	kubeletPath := t.TempDir()
 	metaDir := filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta")
 	err := os.MkdirAll(metaDir, 0750)
 	assert.NoError(t, err)
 
 	// Invalid meta file
-	os.WriteFile(filepath.Join(metaDir, "vol-bad.meta.json"), []byte("not-json"), 0640)
+	metaPath := filepath.Join(metaDir, "vol-bad.meta.json")
+	os.WriteFile(metaPath, []byte("not-json"), 0640)
 
 	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider(nil))
 	err = dm.RebuildMountMap()
-	assert.NoError(t, err) // should not error, just skip
+
+	if err == nil {
+		t.Fatal("expected RebuildMountMap to fail on corrupt meta, got nil")
+	}
+	// Error must name the offending file so an operator can quarantine/remove it.
+	assert.Contains(t, err.Error(), metaPath)
 
 	if dm.mountMap.Get("vol-bad") != nil {
 		t.Fatal("should not create entry for invalid meta")
@@ -438,6 +444,7 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 		err := WriteMeta(kubeletPath, &MountEntry{
 			VolumeID:   "vol-live",
 			SourcePath: sourcePath,
+			Params:     MountParams{VolumeHandle: "vol-live-handle"},
 			Uid:        recoveredUID,
 		})
 		assert.NoError(t, err)
@@ -483,6 +490,7 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 		err := WriteMeta(kubeletPath, &MountEntry{
 			VolumeID:   "vol-legacy",
 			SourcePath: sourcePath,
+			Params:     MountParams{VolumeHandle: "vol-legacy-handle"},
 		})
 		assert.NoError(t, err)
 
@@ -517,6 +525,7 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 			ServiceAccountEKSRoleARN: "arn:aws:iam::123:role/r",
 			PodNamespace:             "ns-a",
 			FSGroup:                  "1000",
+			VolumeHandle:             "handle-live",
 		},
 	}
 	err := WriteMeta(kubeletPath, entry)
@@ -554,6 +563,90 @@ func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	assert.Equals(t, "--allow-other", recovered.Params.MountOptions[0])
 }
 
+func TestRebuildMountMap_ReclaimsVolumeHandle(t *testing.T) {
+	kubeletPath := t.TempDir()
+	sourcePath := SourceMountPath(kubeletPath, "pv-live")
+
+	entry := &MountEntry{
+		VolumeID:   "pv-live",
+		SourcePath: sourcePath,
+		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "handle-1"},
+	}
+	assert.NoError(t, WriteMeta(kubeletPath, entry))
+
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourcePath, Major: 0, Minor: 42},
+	}))
+	assert.NoError(t, dm.RebuildMountMap())
+
+	// Handle restored on the recovered entry.
+	recovered := dm.mountMap.Get("pv-live")
+	if recovered == nil {
+		t.Fatal("expected recovered entry for pv-live")
+	}
+	assert.Equals(t, "handle-1", recovered.Params.VolumeHandle)
+
+	// Index rebuilt from meta: a different PV reusing the handle is now rejected.
+	err := dm.mountMap.ClaimHandle("handle-1", "pv-other")
+	if err == nil {
+		t.Fatal("expected duplicate handle to be rejected after rebuild")
+	}
+	assert.Contains(t, err.Error(), "already used on this node")
+}
+
+func TestRebuildMountMap_ErrorsOnMissingHandle(t *testing.T) {
+	kubeletPath := t.TempDir()
+	sourcePath := SourceMountPath(kubeletPath, "pv-nohandle")
+
+	// A meta with no volumeHandle (e.g. written before the field existed). volumeHandle is a
+	// required PV field, so this is a corrupt/incomplete meta — rebuild must fail loud.
+	entry := &MountEntry{
+		VolumeID:   "pv-nohandle",
+		SourcePath: sourcePath,
+		Params:     MountParams{AuthenticationSource: "driver"},
+	}
+	assert.NoError(t, WriteMeta(kubeletPath, entry))
+
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourcePath, Major: 0, Minor: 42},
+	}))
+
+	err := dm.RebuildMountMap()
+	if err == nil {
+		t.Fatal("expected RebuildMountMap to error on a meta with no volumeHandle")
+	}
+	assert.Contains(t, err.Error(), "no volumeHandle in meta")
+}
+
+func TestRebuildMountMap_ErrorsOnHandleConflict(t *testing.T) {
+	kubeletPath := t.TempDir()
+	sourceA := SourceMountPath(kubeletPath, "pv-a")
+	sourceB := SourceMountPath(kubeletPath, "pv-b")
+
+	// Two recovered volumes claiming the same handle should never happen — fail the rebuild.
+	assert.NoError(t, WriteMeta(kubeletPath, &MountEntry{
+		VolumeID:   "pv-a",
+		SourcePath: sourceA,
+		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "dup-handle"},
+	}))
+	assert.NoError(t, WriteMeta(kubeletPath, &MountEntry{
+		VolumeID:   "pv-b",
+		SourcePath: sourceB,
+		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "dup-handle"},
+	}))
+
+	dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+		{MountPoint: sourceA, Major: 0, Minor: 42},
+		{MountPoint: sourceB, Major: 0, Minor: 43},
+	}))
+
+	err := dm.RebuildMountMap()
+	if err == nil {
+		t.Fatal("expected RebuildMountMap to error when two volumes claim the same handle")
+	}
+	assert.Contains(t, err.Error(), "already used on this node")
+}
+
 func TestRebuildMountMap_SourceWithNoBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-orphan")
@@ -561,7 +654,7 @@ func TestRebuildMountMap_SourceWithNoBindMounts(t *testing.T) {
 	entry := &MountEntry{
 		VolumeID:   "vol-orphan",
 		SourcePath: sourcePath,
-		Params:     MountParams{AuthenticationSource: "driver"},
+		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "handle-orphan"},
 	}
 	err := WriteMeta(kubeletPath, entry)
 	assert.NoError(t, err)
@@ -592,12 +685,12 @@ func TestRebuildMountMap_MultipleVolumes(t *testing.T) {
 	entryA := &MountEntry{
 		VolumeID:   "vol-a",
 		SourcePath: sourceA,
-		Params:     MountParams{ServiceAccountName: "sa-a"},
+		Params:     MountParams{ServiceAccountName: "sa-a", VolumeHandle: "handle-a"},
 	}
 	entryB := &MountEntry{
 		VolumeID:   "vol-b",
 		SourcePath: sourceB,
-		Params:     MountParams{ServiceAccountName: "sa-b"},
+		Params:     MountParams{ServiceAccountName: "sa-b", VolumeHandle: "handle-b"},
 	}
 	err := WriteMeta(kubeletPath, entryA)
 	assert.NoError(t, err)
@@ -669,7 +762,7 @@ func TestRemoveMeta_OnlyRemovesTargetVolume(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	RemoveMeta(kubeletPath, "vol-remove")
+	assert.NoError(t, RemoveMeta(kubeletPath, "vol-remove"))
 
 	_, err := os.Stat(MetaFileName(kubeletPath, "vol-remove"))
 	if !os.IsNotExist(err) {
@@ -679,6 +772,31 @@ func TestRemoveMeta_OnlyRemovesTargetVolume(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = os.Stat(MetaFileName(kubeletPath, "vol-also-keep"))
 	assert.NoError(t, err)
+}
+
+func TestForgetMount_KeepsEntryWhenMetaRemovalFails(t *testing.T) {
+	kubeletPath := t.TempDir()
+	dm := newTestDMWithMountInfo(kubeletPath, nil)
+
+	volumeID := "pv-1"
+	entry, _ := dm.mountMap.GetOrCreate(volumeID)
+	entry.Params.VolumeHandle = "handle-1"
+	assert.NoError(t, dm.mountMap.ClaimHandle("handle-1", volumeID))
+
+	// Make RemoveMeta fail: a non-empty directory where the .meta.json would be.
+	metaPath := MetaFileName(kubeletPath, volumeID)
+	assert.NoError(t, os.MkdirAll(filepath.Join(metaPath, "blocker"), 0750))
+
+	dm.forgetMount(volumeID, entry)
+
+	// Entry kept so the periodic cleanup can retry.
+	if dm.mountMap.Get(volumeID) == nil {
+		t.Fatal("expected entry to be kept when meta removal fails")
+	}
+	// Handle still claimed — a different PV must not be able to take it.
+	if err := dm.mountMap.ClaimHandle("handle-1", "pv-2"); err == nil {
+		t.Fatal("expected handle to remain claimed after failed meta removal")
+	}
 }
 
 func TestRebuildMountMap_DeadSourceCleansCredentials(t *testing.T) {

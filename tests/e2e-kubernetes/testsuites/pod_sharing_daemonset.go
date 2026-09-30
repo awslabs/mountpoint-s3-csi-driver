@@ -121,6 +121,63 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 				"expected exactly 1 FUSE source mount for volume %s, got %d", pvName, fuseCount)
 		})
 
+		ginkgo.It("should reject a second PV that reuses a volumeHandle already mounted on the node", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			// First pod mounts the volume, claiming its volumeHandle on the node.
+			targetNode, pods := createPodsOnSameNode(ctx, f, 1, resource)
+			defer deletePodsInOrder(ctx, f, pods)
+
+			// A second PV with a new name but the SAME volumeHandle (same bucket).
+			ginkgo.By("Creating a second PV that reuses the first volume's handle")
+			pv2, pvc2 := createPVReusingHandle(ctx, f, resource)
+			defer func() {
+				_ = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Delete(ctx, pvc2.Name, metav1.DeleteOptions{})
+				_ = f.ClientSet.CoreV1().PersistentVolumes().Delete(ctx, pv2.Name, metav1.DeleteOptions{})
+			}()
+
+			// A pod using the duplicate-handle PV on the same node must be rejected at NodePublishVolume.
+			ginkgo.By("Creating a pod with the duplicate-handle PV on the same node (should fail to mount)")
+			pod2 := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": targetNode}, []*v1.PersistentVolumeClaim{pvc2}, admissionapi.LevelBaseline, "")
+			pod2, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err)
+			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2) }()
+
+			assertPodFailsToMount(ctx, f, pod2, "volumeHandles must be unique per PV")
+		})
+
+		ginkgo.It("should still reject a duplicate volumeHandle after a CSI node pod restart", ginkgo.Serial, func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			// First pod mounts the volume, claiming its volumeHandle on the node.
+			targetNode, pods := createPodsOnSameNode(ctx, f, 1, resource)
+			defer deletePodsInOrder(ctx, f, pods)
+
+			// Restart the CSI node pod so it rebuilds the handle index from the persisted meta.
+			ginkgo.By(fmt.Sprintf("Killing CSI node pod on node %s to rebuild the mount map", targetNode))
+			killCSINodePodOnNode(ctx, f, targetNode)
+			waitForCSINodePodReady(ctx, f, targetNode)
+			waitForCSINodePodStable(ctx, f, targetNode)
+
+			// A second PV with a new name but the SAME volumeHandle must still be rejected after the rebuild.
+			ginkgo.By("Creating a second PV that reuses the first volume's handle")
+			pv2, pvc2 := createPVReusingHandle(ctx, f, resource)
+			defer func() {
+				_ = f.ClientSet.CoreV1().PersistentVolumeClaims(f.Namespace.Name).Delete(ctx, pvc2.Name, metav1.DeleteOptions{})
+				_ = f.ClientSet.CoreV1().PersistentVolumes().Delete(ctx, pv2.Name, metav1.DeleteOptions{})
+			}()
+
+			ginkgo.By("Creating a pod with the duplicate-handle PV on the same node (should fail to mount)")
+			pod2 := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": targetNode}, []*v1.PersistentVolumeClaim{pvc2}, admissionapi.LevelBaseline, "")
+			pod2, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err)
+			defer func() { e2epod.DeletePodWithWait(ctx, f.ClientSet, pod2) }()
+
+			assertPodFailsToMount(ctx, f, pod2, "volumeHandles must be unique per PV")
+		})
+
 		ginkgo.It("should reject second pod with different fsGroup on the same PV", func(ctx context.Context) {
 			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, resource)
@@ -745,6 +802,8 @@ func (t *s3CSIPodSharingDaemonsetTestSuite) DefineTests(driver storageframework.
 			// This simulates scaling up new replicas while old broken pods still exist.
 			// The CSI driver should detect dead source, create a fresh FUSE mount, and
 			// bind-mount to each new pod's target.
+			// Also covers dead-source re-mount: re-claiming the same PV's handle is idempotent,
+			// so these pods must mount, not be rejected as a duplicate.
 			ginkgo.By("Creating 3 new pods after mounter crash (old pods still running with dead mounts)")
 			var newPods []*v1.Pod
 			for i := range 3 {

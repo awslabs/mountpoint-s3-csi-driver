@@ -286,6 +286,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
 		PodNamespace:             credentialCtx.PodNamespace,
 		FSGroup:                  fsGroup,
+		VolumeHandle:             credentialCtx.VolumeID,
 	}
 
 	// If source is mounted, check health first. Dead source = mark not mounted so we go
@@ -315,6 +316,16 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		// creating new ones. cleanupMount is idempotent — safe when resources don't exist.
 		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
 			return fmt.Errorf("failed to clean up stale resources for volume %s, cannot proceed with fresh mount: %w", volumeID, cleanErr)
+		}
+
+		// First mount for this PV on the node — enforce per-node volumeHandle uniqueness here so
+		// the check runs once per entry, not on every republish/share. credentialCtx.VolumeID is
+		// the CSI volumeHandle; volumeID is the PV name. Released in MountMap.Delete on teardown.
+		if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+			// Drop the blank entry GetOrCreate inserted for this PV; otherwise it lingers,
+			// since periodic cleanup skips entries with an empty SourcePath.
+			dm.mountMap.Delete(volumeID)
+			return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
 		}
 
 		entry.Params = incomingParams
@@ -685,8 +696,9 @@ func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry) {
 // forgetMount discards a mount's records once [DaemonsetMounter.cleanupMount] has confirmed its
 // resources are gone: the meta file, then the UID, then the in-memory entry.
 //
-// The meta file goes first because it is the only durable record of the UID. A failed removal keeps
-// both the UID and the entry, so the periodic cleanup retries. Caller must hold entry.mu.
+// The meta file goes first because it is the only durable record of the UID and the volumeHandle. A
+// failed removal keeps both the UID and the entry, so the periodic cleanup retries. Caller must hold
+// entry.mu.
 func (dm *DaemonsetMounter) forgetMount(volumeID string, entry *MountEntry) {
 	if err := RemoveMeta(dm.kubeletPath, volumeID); err != nil {
 		klog.Errorf("DaemonsetMounter: %v for volume %s, keeping in-memory tracking (will retry next cleanup)",
@@ -1223,10 +1235,25 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 		ServiceAccountEKSRoleARN: meta.ServiceAccountEKSRoleARN,
 		PodNamespace:             meta.PodNamespace,
 		FSGroup:                  meta.FSGroup,
+		VolumeHandle:             meta.VolumeHandle,
 	}
 	entry.RefCount = len(targets)
 	entry.Targets = targets
 	entry.sourceMounted = sourceMounted
+}
+
+// reclaimHandle re-registers a recovered volume's handle in the uniqueness index on restart,
+// so duplicates stay rejected. volumeHandle is a required PV field (node.go rejects an empty
+// volume ID on mount), so an empty one here means a corrupt or incomplete meta; a conflict means
+// two recovered volumes claim the same handle. Both are errors that fail the rebuild.
+func (dm *DaemonsetMounter) reclaimHandle(meta *MountMeta) error {
+	if meta.VolumeHandle == "" {
+		return fmt.Errorf("recovered volume %s has no volumeHandle in meta", meta.VolumeID)
+	}
+	if err := dm.mountMap.ClaimHandle(meta.VolumeHandle, meta.VolumeID); err != nil {
+		return fmt.Errorf("recovering volume %s: %w", meta.VolumeID, err)
+	}
+	return nil
 }
 
 // RebuildMountMap reconstructs the MountMap from disk on driver startup.
@@ -1267,8 +1294,11 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		metaPath := filepath.Join(metaDir, dirEntry.Name())
 		meta, err := readMeta(metaPath)
 		if err != nil {
-			klog.Warningf("MountMap: failed to read meta file %s, skipping: %v", metaPath, err)
-			continue
+			// Fail closed: an unreadable/corrupt meta must abort rebuild (driver.go turns this into
+			// a fatal), not be silently skipped — skipping would leak the volume's commDir/credentials
+			// with no recovery path.
+			return fmt.Errorf("failed to read mount meta %s: %w. "+
+				"Drain this node to move workloads elsewhere, then delete this corrupted meta file to allow the node to start", metaPath, err)
 		}
 
 		if err := dm.uidAllocator.Reserve(meta.Uid); err != nil {
@@ -1293,6 +1323,11 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				klog.Errorf("MountMap: cleanup for dead volume %s failed: %v (keeping meta and map entry for retry)", meta.VolumeID, cleanErr)
 				// Store entry in the map so future NodePublish or periodic cleanup can
 				// retry cleanup using the original commDir where credentials were written.
+				// Reserve the handle even for this dead-but-kept entry, so a different PV can't
+				// take it and lock this volume out when it recovers (same rule as a live mount).
+				if err := dm.reclaimHandle(meta); err != nil {
+					return err
+				}
 				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
 				continue
 			}
@@ -1308,6 +1343,9 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 		// Count bind mounts sharing the same device ID (major:minor)
 		targets := findBindMountTargets(mountInfos, deviceID(sourceMI), sourcePath)
 
+		if err := dm.reclaimHandle(meta); err != nil {
+			return err
+		}
 		dm.populateEntryFromMeta(meta, sourcePath, true, targets)
 
 		klog.V(2).Infof("MountMap: recovered volume %s with %d targets from mount table", meta.VolumeID, len(targets))
