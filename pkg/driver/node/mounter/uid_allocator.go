@@ -66,7 +66,8 @@ func (a *UIDAllocator) Allocate() (uint32, error) {
 	return math.MaxUint32, ErrUIDRangeExhausted
 }
 
-// Release makes a UID available to [UIDAllocator.Allocate] again.
+// Release makes a UID available to [UIDAllocator.Allocate] again. Releasing a UID that is not
+// allocated is a no-op.
 func (a *UIDAllocator) Release(uid uint32) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

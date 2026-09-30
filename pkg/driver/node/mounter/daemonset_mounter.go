@@ -156,6 +156,12 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 	}
 }
 
+// UIDInUseForTesting reports whether the allocator still holds `uid`. Tests outside this package
+// need it to tell a released UID from one that is merely no longer in use by any mount.
+func (dm *DaemonsetMounter) UIDInUseForTesting(uid uint32) bool {
+	return dm.uidAllocator.InUse(uid)
+}
+
 // SetS3PACache sets the MountpointS3PodAttachment informer cache used for V2 legacy
 // mount credential refresh (resolving the committed IAM role ARN). Called at startup
 // only when SUPPORT_LEGACY_POD_MOUNTS is enabled.
