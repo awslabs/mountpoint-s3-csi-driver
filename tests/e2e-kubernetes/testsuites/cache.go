@@ -14,6 +14,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -175,7 +176,7 @@ func (t *s3CSICacheTestSuite) DefineTests(driver storageframework.TestDriver, pa
 					})
 				}
 			case localCacheEBSEphemeral:
-				scName := createEBSCacheSC(ctx, f)
+				scName := createEBSCacheSC(ctx, f, f.UniqueName+"-sc")
 				enhanceContext = func(ctx context.Context) context.Context {
 					return contextWithVolumeAttributes(ctx, map[string]string{
 						"cache":                                "ephemeral",
@@ -394,9 +395,8 @@ func randomCacheDir() string {
 
 // createEBSCacheSC creates a StorageClass to provision an EBS volume as local-cache.
 // It automatically cleans up SC after the test-case.
-func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
-	scName := f.UniqueName + "-sc"
-
+// Note: Also used in cache_daemonset.go
+func createEBSCacheSC(ctx context.Context, f *framework.Framework, scName string) string {
 	sc := &storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: scName,
@@ -410,13 +410,18 @@ func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
 	}
 
 	framework.Logf("Creating StorageClass %s with EBS CSI Driver provisioner", scName)
+	// A fixed name can meet one leaked by an interrupted run.
 	_, err := f.ClientSet.StorageV1().StorageClasses().Create(ctx, sc, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "Failed to create StorageClass for cache")
+	if !apierrors.IsAlreadyExists(err) {
+		framework.ExpectNoError(err, "Failed to create StorageClass for cache")
+	}
 
 	DeferCleanup(func(ctx context.Context) {
 		framework.Logf("Deleting StorageClass %s", scName)
 		err := f.ClientSet.StorageV1().StorageClasses().Delete(ctx, scName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
+		if !apierrors.IsNotFound(err) {
+			framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
+		}
 	})
 
 	return scName
