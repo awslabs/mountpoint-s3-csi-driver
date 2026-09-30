@@ -187,7 +187,7 @@ daemonsetMounters:
         memory: "4Gi"
         cpu: "500m"
     # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
-    # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: "true"`
+    # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: enabled`
     # in its volumeAttributes, and cacheLimitStrategy decides how much of the volume it gets.
     # Set either emptyDir or ephemeral cache type.
     #
@@ -210,6 +210,8 @@ daemonsetMounters:
 
     # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
     # memoryLimitStrategy=equalSplit divides only what it leaves: raise resources.requests.memory by sizeLimit.
+    # Always set sizeLimit: under cacheLimitStrategy=none it is optional, but an unbounded tmpfs can get the
+    # mounter OOM-killed, taking every mount on the node with it.
     # cache:
     #   emptyDir:
     #     sizeLimit: "1Gi"

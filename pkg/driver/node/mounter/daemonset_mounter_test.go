@@ -2,6 +2,7 @@ package mounter_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -1193,7 +1194,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 	// The PV name the driver caches under, deliberately not the CSI volume ID setupDM uses.
 	const pvName = "s3-pv-name-differs-from-handle"
 
-	cacheRequest := map[string]string{volumecontext.Cache: "true"}
+	cacheRequest := map[string]string{volumecontext.Cache: volumecontext.CacheEnabled}
 
 	// mountWithoutServing runs a Mount that is expected to fail, so it does not play the
 	// mounter's part; a request that reaches the socket would hang here rather than fail.
@@ -1249,6 +1250,30 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 
 		assert.Equals(t, "", cacheArg(got))
 		assert.FileNotExists(t, filepath.Join(testCtx.cacheDir, pvName))
+	})
+
+	t.Run("A v1 cache mount option's path is replaced with the mount's own directory", func(t *testing.T) {
+		testCtx := setupDMWithCache(t, volumecontext.CacheTypeEmptyDir)
+
+		_, got := testCtx.mountAndServe("pod-a-uid", pvName, nil, "cache /tmp/customer-path")
+
+		assert.Equals(t, "/cache/"+pvName, cacheArg(got))
+	})
+
+	t.Run("A fresh mount over a dead cached source that no longer asks for a cache records none", func(t *testing.T) {
+		testCtx := setupDMWithCache(t, volumecontext.CacheTypeEmptyDir)
+		testCtx.mountAndServe("pod-a-uid", pvName, cacheRequest)
+
+		// Unmounting the source makes it dead, so the next Mount takes the fresh-mount path and reuses the entry.
+		assert.NoError(t, testCtx.mount.Unmount(mounter.SourceMountPath(testCtx.kubeletPath, pvName)))
+		_, got := testCtx.mountAndServe("pod-b-uid", pvName, nil)
+
+		assert.Equals(t, "", cacheArg(got))
+		raw, err := os.ReadFile(mounter.MetaFileName(testCtx.kubeletPath, pvName))
+		assert.NoError(t, err)
+		var meta mounter.MountMeta
+		assert.NoError(t, json.Unmarshal(raw, &meta))
+		assert.Equals(t, "", meta.CacheDir)
 	})
 
 	t.Run("A cache request on a mounter with no cache volume is rejected before anything is created", func(t *testing.T) {
@@ -1310,7 +1335,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 		assert.FileNotExists(t, mountCacheDir)
 	})
 
-	// Rediscovery, and periodic sweeps
+	// Rediscovery
 	t.Run("Staleness drops the cache dir with the comm dir, and next discovery replaces it", func(t *testing.T) {
 		// DiscoverMounter is called to discover mounter dir / comm dir.
 		testCtx := setupDMWithCache(t, volumecontext.CacheTypeEmptyDir)
@@ -1365,43 +1390,6 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 		// The shared volume root must survive.
 		_, err = os.Stat(testCtx.cacheDir)
 		assert.NoError(t, err)
-	})
-
-	t.Run("Only stale orphan cache directories are swept", func(t *testing.T) {
-		testCtx := setupDMWithCache(t, volumecontext.CacheTypeEmptyDir)
-		pvName := "s3-pv-live"
-
-		testCtx.mountAndServe("pod-a-uid", pvName, cacheRequest)
-
-		liveCache := filepath.Join(testCtx.cacheDir, pvName)
-		staleOrphan := filepath.Join(testCtx.cacheDir, "s3-pv-from-a-crashed-driver")
-		freshOrphan := filepath.Join(testCtx.cacheDir, "s3-pv-a-mount-is-creating-now")
-		lostFound := filepath.Join(testCtx.cacheDir, "lost+found")
-		strayFile := filepath.Join(testCtx.cacheDir, "not-a-directory")
-
-		assert.NoError(t, os.Mkdir(staleOrphan, 0770))
-		assert.NoError(t, os.Mkdir(freshOrphan, 0770))
-		// Backdate creation time but still within the time threshold
-		recent := time.Now().Add(-mounter.StaleCacheDirThreshold / 2)
-		assert.NoError(t, os.Chtimes(freshOrphan, recent, recent))
-		assert.NoError(t, os.Mkdir(lostFound, 0700))
-		assert.NoError(t, os.WriteFile(strayFile, []byte("x"), 0600))
-
-		// Backdate creation time past the threshold
-		old := time.Now().Add(-2 * mounter.StaleCacheDirThreshold)
-		for _, backdated := range []string{liveCache, staleOrphan, lostFound, strayFile} {
-			assert.NoError(t, os.Chtimes(backdated, old, old))
-		}
-
-		testCtx.dm.CleanupOrphans()
-
-		assert.FileNotExists(t, staleOrphan)
-
-		// One survivor per guard: has a map entry, too fresh to judge, lost+found on ext4, not a directory.
-		for _, keep := range []string{liveCache, freshOrphan, lostFound, strayFile} {
-			_, err := os.Stat(keep)
-			assert.NoError(t, err)
-		}
 	})
 }
 

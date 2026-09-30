@@ -73,11 +73,6 @@ const (
 	// cleanupInterval is how often the periodic cleanup job runs.
 	cleanupInterval = 2 * time.Minute
 
-	// StaleCacheDirThreshold mirrors staleAttachmentThreshold in the controller's stale attachment
-	// cleaner: a sweeper cannot tell an orphan from something a concurrent creator just made, so it
-	// only acts on entries old enough to be neither.
-	StaleCacheDirThreshold = 2 * time.Minute
-
 	// cleanupHealthCheckTimeout caps the source health probe so a frozen FUSE daemon can't stall cleanup.
 	cleanupHealthCheckTimeout = 10 * time.Second
 )
@@ -269,19 +264,24 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	}
 
 	// Decide whether this mount caches and name its directory, rejecting a cache request this node cannot serve.
-	if err := configureCache(&args, volumeCtx, volumeID, mounter.cacheDir); err != nil {
+	cacheDir, err := cacheDirForMount(args, volumeCtx, volumeID, mounter.cacheDir)
+	if err != nil {
 		return err
+	}
+	if cacheDir != "" {
+		// Discard PV supplied path and use PV subdirectory in the mounter's cache directory.
+		args.Set(mountpoint.ArgCache, MountOptionCacheDir(volumeID))
 	}
 
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, volumeCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, volumeCtx, args, fsGroup, userEnv, cacheDir, targetState == TargetHealthy)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
+	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, cacheDir string, targetIsMounted bool) error {
 
 	commDir := mounter.commDir
 
@@ -361,9 +361,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		}
 		entry.Uid = uid
 
-		if args.Has(mountpoint.ArgCache) {
-			entry.CacheDir = mounter.cacheDir
-		}
+		entry.CacheDir = cacheDir
 
 		if err := WriteMeta(dm.kubeletPath, entry); err != nil {
 			return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
@@ -645,8 +643,6 @@ func (dm *DaemonsetMounter) CleanupOrphans() {
 		dm.cleanupEntry(volumeID, entry)
 		return true
 	})
-	dm.sweepOrphanCacheDirs()
-	// TODO: also sweep orphan directories in commDir?
 }
 
 // cleanupEntry reconciles and, if needed, tears down a single mount entry.
@@ -742,42 +738,6 @@ func (dm *DaemonsetMounter) forgetMount(volumeID string, entry *MountEntry) {
 	dm.mountMap.Delete(volumeID)
 }
 
-// sweepOrphanCacheDirs removes per-mount cache directories that have no MountMap entry.
-// This covers the case of meta file corruption/dissappearance before RebuildMountMap runs.
-// This also covers a case Mountpoint somehow still runs and recreates whole cache tree on
-// cache write (inc /cache/<pv-name>/).
-func (dm *DaemonsetMounter) sweepOrphanCacheDirs() {
-	mounter := dm.mounter.Load()
-	if mounter == nil || mounter.cacheDir == "" {
-		return
-	}
-	cacheDir := mounter.cacheDir
-
-	entries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		klog.Errorf("DaemonsetMounter: read cache volume %s: %v", cacheDir, err)
-		return
-	}
-	for _, e := range entries {
-		// Do not use snapshot, else if a mount started mid-sweep the cache dir would look orphaned.
-		// lost+found exists on an ext4 ephemeral volume and is not a mount's directory.
-		if !e.IsDir() || e.Name() == "lost+found" || dm.mountMap.Get(e.Name()) != nil {
-			continue
-		}
-		// The lookup above and the delete below are not atomic; and an orphan has no entry to lock.
-		// So only delete old orphans, instead of fresh directories which is only seconds old, to mitigate.
-		info, err := e.Info()
-		if err != nil || time.Since(info.ModTime()) < StaleCacheDirThreshold {
-			continue
-		}
-		if err := removeCacheDir(cacheDir, e.Name()); err != nil {
-			klog.Errorf("DaemonsetMounter: remove orphan cache dir %s/%s: %v", cacheDir, e.Name(), err)
-		} else {
-			klog.Warningf("DaemonsetMounter: removed orphan cache directory %s/%s", cacheDir, e.Name())
-		}
-	}
-}
-
 // GetErrorFileName returns the error file name for a given volume ID.
 func GetErrorFileName(volumeID string) string {
 	return volumeID + MountErrorSuffix
@@ -825,7 +785,6 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 	// - Cache write into deleted directory recreates the whole tree (recursive true), inc. /cache/pv-name/ (disk_data_cache.rs)
 	// Last bullet point points towards edge case where MP is still running after source unmount and MP creates cacheDir, even with no workloads
 	// a late read request coming back could still trigger cache writes. Addressing TODO to verify no MP process running above can solve this.
-	// And the periodic sweep also allows will catch this case.
 	if entry.CacheDir != "" {
 		if err := removeCacheDir(entry.CacheDir, entry.VolumeID); err != nil {
 			klog.Errorf("DaemonsetMounter: remove cache dir for volume %s: %v", entry.VolumeID, err)

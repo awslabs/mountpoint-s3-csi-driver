@@ -293,7 +293,13 @@ func TestProcessManager_Launch_MaxCacheSize(t *testing.T) {
 			pm := NewProcessManager(t.TempDir(), fr, memoryLimit{strategy: memoryLimitNone}, testCase.cache)
 			dev := mountertest.OpenDevNull(t)
 
-			options := mountoptions.Options{Fd: int(dev.Fd()), BucketName: "my-bucket", Args: testCase.args}
+			options := mountoptions.Options{
+				Fd:         int(dev.Fd()),
+				BucketName: "my-bucket",
+				Args:       testCase.args,
+				Uid:        mounter.UIDRangeStart,
+				Gid:        mounter.UIDRangeStart,
+			}
 			assert.NoError(t, pm.Launch("mount-123", "/usr/bin/mount-s3", options))
 
 			// cmd.Args is [binary, bucket, /dev/fd/3, ...sorted args].
@@ -610,7 +616,7 @@ func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeProcessRunner{}
-			pm := NewProcessManager(t.TempDir(), fr, memoryLimit{strategy: memoryLimitNone})
+			pm := NewProcessManager(t.TempDir(), fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 			dev := mountertest.OpenDevNull(t)
 
 			err := pm.Launch("vol-bad-creds", "/usr/bin/mount-s3", mountoptions.Options{

@@ -2,55 +2,79 @@
 {{- if ne (len .Values.daemonsetMounters) 1 }}
 {{- fail "daemonsetMounters must have exactly one entry" }}
 {{- end }}
+
+{{- /* ================================ Inputs ================================ */}}
 {{- $mounter := index .Values.daemonsetMounters 0 }}
 {{- $resources := $mounter.resources | default dict }}
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
 {{- $strategies := list "equalSplit" "none" }}
+{{- $memoryStrategy := $mounter.memoryLimitStrategy | default "" }}
 {{- $cacheEnabled := hasKey $mounter "cache" }}
 {{- $cache := $mounter.cache | default dict }}
 {{- $cacheEmptyDir := $cache.emptyDir | default dict }}
 {{- $cacheEphemeral := $cache.ephemeral | default dict }}
 {{- $cacheMedium := $cacheEmptyDir.medium | default "" }}
-{{- $cacheCapacity := "" }}
 {{- $cacheStrategy := $cache.cacheLimitStrategy | default "" }}
+{{- /* Only a missing size is empty: `| default` would also read a sizeLimit of 0 as unset. */}}
+{{- $cacheSize := hasKey $cache "emptyDir" | ternary $cacheEmptyDir.sizeLimit $cacheEphemeral.resourceRequests }}
+{{- $cacheCapacity := ternary "" (toString $cacheSize) (kindIs "invalid" $cacheSize) }}
+
+{{- /* ======================= Cache volume: validation ======================= */}}
 {{- if $cacheEnabled }}
 {{- if eq (hasKey $cache "emptyDir") (hasKey $cache "ephemeral") }}
 {{- fail "daemonsetMounters[]: cache must set exactly one of emptyDir or ephemeral." }}
 {{- end }}
-{{- /* Only a missing size is empty: `| default` would also read a sizeLimit of 0 as unset. */}}
-{{- $cacheSize := hasKey $cache "emptyDir" | ternary $cacheEmptyDir.sizeLimit $cacheEphemeral.resourceRequests }}
-{{- $cacheCapacity = ternary "" (toString $cacheSize) (kindIs "invalid" $cacheSize) }}
+{{- if hasKey $cache "emptyDir" }}
+{{- if and $cacheMedium (ne $cacheMedium "Memory") }}
+{{- fail (printf "daemonsetMounters[]: cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
+{{- end }}
+{{- if and (kindIs "invalid" $cacheEmptyDir.sizeLimit) (eq $cacheStrategy "equalSplit") }}
+{{- fail "daemonsetMounters[]: cache.emptyDir.sizeLimit is required when cache.cacheLimitStrategy is \"equalSplit\", which divides it between the maxVolumesPerNode Mountpoint processes" }}
+{{- end }}
+{{- else }}
+{{- if not $cacheEphemeral.storageClassName }}
+{{- fail "daemonsetMounters[]: cache.ephemeral.storageClassName is required when the cache block sets ephemeral" }}
+{{- end }}
+{{- if kindIs "invalid" $cacheEphemeral.resourceRequests }}
+{{- fail "daemonsetMounters[]: cache.ephemeral.resourceRequests is required when the cache block sets ephemeral" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /* ============ Cache limit (cacheLimitStrategy): validation ============ */}}
+{{- if $cacheEnabled }}
 {{- if not (has $cacheStrategy $strategies) }}
 {{- fail (printf "daemonsetMounters[]: cache.cacheLimitStrategy must be one of %v, got %q. \"equalSplit\" (recommended) gives every Mountpoint process on the node an equal share of the cache volume as its --max-cache-size; \"none\" leaves --max-cache-size to each PV's mountOptions." $strategies $cacheStrategy) }}
 {{- end }}
 {{- if and (eq $cacheStrategy "equalSplit") (le $maxVolumes 0) }}
 {{- fail (printf "daemonsetMounters[]: maxVolumesPerNode is required and must be greater than 0 when cache.cacheLimitStrategy=equalSplit, got %d: it is the divisor for the cache volume's size. If you require maxVolumesPerNode: 0 (disabling the limit), you may use cache.cacheLimitStrategy=none, and set --max-cache-size in each PV's mountOptions to prevent unbounded cache growth." $maxVolumes) }}
 {{- end }}
-{{- /* Same flooring as the mounter's share. Best-effort: a quantity this chart cannot parse skips the check. */}}
+{{- /* Best-effort: a quantity this chart cannot parse skips the check. */}}
 {{- $cacheBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" $cacheCapacity }}
 {{- if and (eq $cacheStrategy "equalSplit") $cacheBytes }}
 {{- $cacheShareMiB := divf (mulf (float64 $cacheBytes) 95.0) (mulf 100.0 (mulf (float64 $maxVolumes) 1048576.0)) | floor | int64 }}
-{{- if lt (int64 $cacheShareMiB) 1 }}
+{{- if le (int64 $cacheShareMiB) 0 }}
 {{- fail (printf "daemonsetMounters[]: cache volume of %v, less 5%% headroom, split across maxVolumesPerNode=%d gives each Mountpoint process no whole MiB of --max-cache-size. Raise cache.emptyDir.sizeLimit or cache.ephemeral.resourceRequests, or lower maxVolumesPerNode." $cacheCapacity $maxVolumes) }}
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* =========== Memory target (memoryLimitStrategy): validation =========== */}}
 {{- /* A Memory-medium emptyDir is a tmpfs, charged to this container's memory like the Mountpoints. */}}
 {{- $tmpfsMiB := 0 }}
 {{- if eq $cacheMedium "Memory" }}
-{{- $tmpfsBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" ($cacheEmptyDir.sizeLimit | default "") }}
+{{- $tmpfsBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" $cacheCapacity }}
 {{- if $tmpfsBytes }}
 {{- $tmpfsMiB = divf (float64 $tmpfsBytes) 1048576.0 | floor | int64 }}
 {{- end }}
 {{- end }}
 {{- $tmpfsReserved := ternary (printf " and the %d MiB tmpfs cache volume" (int64 $tmpfsMiB)) "" (gt (int64 $tmpfsMiB) 0) }}
 {{- $tmpfsRemedy := ternary ", or lower cache.emptyDir.sizeLimit" "" (gt (int64 $tmpfsMiB) 0) }}
-{{- $strategy := $mounter.memoryLimitStrategy | default "" }}
-{{- if not (has $strategy $strategies) }}
-{{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $strategy) }}
+{{- if not (has $memoryStrategy $strategies) }}
+{{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $memoryStrategy) }}
 {{- end }}
-{{- if eq $strategy "equalSplit" }}
+{{- if eq $memoryStrategy "equalSplit" }}
 {{- /* equalSplit reserves 64 MiB of the container's memory request for the mounter's own process, then
        divides the rest by maxVolumesPerNode, so both inputs are required. */}}
 {{- if not $requests.memory }}
@@ -73,6 +97,8 @@
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* =============================== DaemonSet =============================== */}}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -114,8 +140,7 @@ spec:
       securityContext:
         # An unprivileged container needs a group owning the volume the kubelet provisions for it,
         # or an ephemeral cache volume arrives `root:root 0755` and Mountpoint cannot write.
-        # TODO: Check if we need to disable on ROSA like in v2. (Remove TODO after e2e test on CI
-        # Or if it's covered by process isolation PR).
+        # TODO: This is covered by process isolation PR.
         fsGroup: 1000
       {{- end }}
       {{- with $mounter.affinity }}
@@ -152,7 +177,7 @@ spec:
           - --comm-dir=/comm
           - --mountpoint-bin-dir=/mountpoint-s3/bin
           - --max-volumes-per-node={{ $maxVolumes }}
-          - --memory-limit-strategy={{ $strategy }}
+          - --memory-limit-strategy={{ $memoryStrategy }}
           {{- if $cacheEnabled }}
           - --cache-limit-strategy={{ $cacheStrategy }}
           - --cache-medium={{ $cacheMedium }}
@@ -160,6 +185,7 @@ spec:
           - --v={{ $mounter.logLevel }}
         {{- if or $requests.memory $cacheCapacity }}
         env:
+          {{- /* Memory target */}}
           {{- if $requests.memory }}
           - name: MOUNTER_MEMORY_REQUEST_BYTES
             valueFrom:
@@ -168,6 +194,7 @@ spec:
                 resource: requests.memory
                 divisor: "1"
           {{- end }}
+          {{- /* Cache limit */}}
           {{- if $cacheCapacity }}
           {{- /* resourceFieldRef covers container resources only, not a volume's size, so the quantity is
                  templated in and parsed by the mounter. */}}
@@ -193,6 +220,7 @@ spec:
         volumeMounts:
           - name: comm
             mountPath: /comm
+          {{- /* Cache volume */}}
           {{- if $cacheEnabled }}
           - name: cache
             mountPath: /cache
@@ -204,17 +232,13 @@ spec:
       volumes:
       - name: comm
         emptyDir: {}
+      {{- /* Cache volume */}}
       {{- if $cacheEnabled }}
       - name: cache
         {{- if hasKey $cache "emptyDir" }}
-        {{- if and $cacheMedium (ne $cacheMedium "Memory") }}
-        {{- fail (printf "daemonsetMounters[0].cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
-        {{- end }}
         emptyDir:
           medium: {{ $cacheMedium | quote }}
-          {{- if eq $cacheStrategy "equalSplit" }}
-          sizeLimit: {{ required "daemonsetMounters[0].cache.emptyDir.sizeLimit is required when cache.cacheLimitStrategy is \"equalSplit\", which divides it between the maxVolumesPerNode Mountpoint processes" $cacheEmptyDir.sizeLimit }}
-          {{- else if $cacheEmptyDir.sizeLimit }}
+          {{- if not (kindIs "invalid" $cacheEmptyDir.sizeLimit) }}
           sizeLimit: {{ $cacheEmptyDir.sizeLimit }}
           {{- end }}
         {{- else }}
@@ -226,10 +250,10 @@ spec:
             spec:
               accessModes: ["ReadWriteOnce"]
               volumeMode: Filesystem
-              storageClassName: {{ required "daemonsetMounters[0].cache.ephemeral.storageClassName is required when the cache block sets ephemeral" $cacheEphemeral.storageClassName | quote }}
+              storageClassName: {{ $cacheEphemeral.storageClassName | quote }}
               resources:
                 requests:
-                  storage: {{ required "daemonsetMounters[0].cache.ephemeral.resourceRequests is required when the cache block sets ephemeral" $cacheEphemeral.resourceRequests }}
+                  storage: {{ $cacheEphemeral.resourceRequests }}
         {{- end }}
       {{- end }}
 {{- end }}
