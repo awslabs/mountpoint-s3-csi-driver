@@ -2,12 +2,12 @@ package mounter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,15 +72,15 @@ func resolveCacheDir(ctx context.Context, clientset kubernetes.Interface, pod *c
 	return "", nil
 }
 
-// configureCache decides whether this mount caches, rejects a cache request the mounter pod cannot
-// serve, and points `--cache` at the mount's directory.
-func configureCache(args *mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterCacheDir string) error {
+// cacheDirForMount returns the cache volume root this mount caches under, "" when it does not cache,
+// or an error for a cache request the mounter pod cannot serve.
+func cacheDirForMount(args mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterCacheDir string) (string, error) {
 	pvCache := volumeCtx[volumecontext.Cache]
 	cacheViaMountOptions := args.Has(mountpoint.ArgCache)
 
-	// Reject a cache in both mountOptions and volumeAttributes, even `cache: false`, to match v2.
+	// Reject a cache in both mountOptions and volumeAttributes, even `cache: disabled`, to match v2.
 	if cacheViaMountOptions && pvCache != "" {
-		return status.Error(codes.InvalidArgument,
+		return "", status.Error(codes.InvalidArgument,
 			"Cache configured with both `mountOptions` and `volumeAttributes`, please remove the deprecated cache configuration in `mountOptions`")
 	}
 
@@ -90,25 +90,23 @@ func configureCache(args *mountpoint.Args, volumeCtx map[string]string, volumeID
 			" so its path is ignored. Remove it from mountOptions and set the %q volume attribute to %q instead.",
 			volumeID, volumecontext.Cache, volumecontext.CacheEnabled)
 	case pvCache == "", strings.EqualFold(pvCache, volumecontext.CacheDisabled):
-		return nil
+		return "", nil
 	case strings.EqualFold(pvCache, volumecontext.CacheEnabled),
 		pvCache == volumecontext.CacheTypeEmptyDir, pvCache == volumecontext.CacheTypeEphemeral:
-		// The 3 valid cache values all enable caching.
+		// The valid cache values all enable caching.
 	default:
-		return status.Errorf(codes.InvalidArgument,
+		return "", status.Errorf(codes.InvalidArgument,
 			"Volume %s sets the %q volume attribute to %q. Set it to %q to use this node's cache, or %q for none.",
 			volumeID, volumecontext.Cache, pvCache, volumecontext.CacheEnabled, volumecontext.CacheDisabled)
 	}
 
 	if mounterCacheDir == "" {
-		return status.Errorf(codes.InvalidArgument,
+		return "", status.Errorf(codes.InvalidArgument,
 			"Volume %s requests a local cache, but s3-csi-daemonset-mounter has no cache volume."+
 				" Add a daemonsetMounters[0].cache block to the Helm values and restart its pods.", volumeID)
 	}
 
-	// Discard PV supplied path and use PV subdirectory in the mounter's cache directory.
-	args.Set(mountpoint.ArgCache, MountOptionCacheDir(volumeID))
-	return nil
+	return mounterCacheDir, nil
 }
 
 // MountOptionCacheDir returns a mount's cache directory as Mountpoint sees it, passed to `--cache`.
@@ -116,28 +114,32 @@ func MountOptionCacheDir(volumeID string) string {
 	return filepath.Join("/", CacheVolumeName, volumeID)
 }
 
-// createCacheDir creates a mount's cache directory on the node. Mountpoint requires it to exist
+// createCacheDir creates a fresh cache directory for a mount on the node. Mountpoint requires it to exist
 // before it starts, as it only creates its own `mountpoint-cache` directory inside it.
 func createCacheDir(cacheDir, volumeID string) error {
-	// Defensive only: resolveCacheDir returns "" only when the mounter has no cache volume, which configureCache rejects.
+	// Defensive only: resolveCacheDir returns "" only when the mounter has no cache volume, which cacheDirForMount rejects.
 	if cacheDir == "" {
 		return fmt.Errorf("s3-csi-daemonset-mounter has no cache volume for volume %s", volumeID)
 	}
 
+	// Start empty rather than trust a leftover, whose contents may belong to another UID, or anything planted in its place.
+	// RemoveAll does not follow symlinks.
+	if err := removeCacheDir(cacheDir, volumeID); err != nil {
+		return fmt.Errorf("failed to clear cache directory for volume %s: %w", volumeID, err)
+	}
 	mountCacheDir := filepath.Join(cacheDir, volumeID)
-	if err := os.Mkdir(mountCacheDir, cacheDirPerm); err != nil && !errors.Is(err, fs.ErrExist) {
+	// Locking /cache to rot:root 0711 will prevvent other users
+	if err := os.Mkdir(mountCacheDir, cacheDirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory %q for volume %s: %w", mountCacheDir, volumeID, err)
 	}
-	// Mkdir tolerates EEXIST and Chmod follows symlinks, so without Lstat a symlink planted here
-	// by a Mountpoint process would redirect the Chmod below. So we use os.Lstat instead of os.stat
-	// to also check fi.Mode() is not ModeSymlink (not mode Lrwxrwxrwx).
-	if fi, err := os.Lstat(mountCacheDir); err != nil {
-		return fmt.Errorf("failed to stat cache directory %q for volume %s: %w", mountCacheDir, volumeID, err)
-	} else if !fi.Mode().IsDir() {
-		return fmt.Errorf("cache directory %q for volume %s is not a directory (mode %s)", mountCacheDir, volumeID, fi.Mode())
+	// Chmod through a handle opened without following symlinks, so swapping the name cannot redirect it.
+	dir, err := os.OpenFile(mountCacheDir, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open cache directory %q for volume %s: %w", mountCacheDir, volumeID, err)
 	}
+	defer dir.Close()
 	// Mkdir subtracts the umask, which typically clears the group write bit Mountpoint needs.
-	if err := os.Chmod(mountCacheDir, cacheDirPerm); err != nil {
+	if err := dir.Chmod(cacheDirPerm); err != nil {
 		return fmt.Errorf("failed to set permissions on cache directory %q for volume %s: %w", mountCacheDir, volumeID, err)
 	}
 

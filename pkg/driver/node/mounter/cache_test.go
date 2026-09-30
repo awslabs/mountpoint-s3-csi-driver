@@ -104,10 +104,8 @@ func TestResolveCacheDir(t *testing.T) {
 	}
 }
 
-func TestConfigureCache(t *testing.T) {
-	// Note we also assert --cache=/cache/<volumeID> instead of MountOptionCacheDir
+func TestCacheDirForMount(t *testing.T) {
 	const volumeID = "test-volume-id"
-	const cacheArg = "--cache=/cache/" + volumeID
 	const mounterCacheDir = "/var/lib/kubelet/pods/mounter-uid/volumes/kubernetes.io~empty-dir/cache"
 	const bothSurfaces = "both `mountOptions` and `volumeAttributes`"
 
@@ -117,7 +115,8 @@ func TestConfigureCache(t *testing.T) {
 		volumeCtx    map[string]string
 		// mounterCacheDir is where the mounter pod's cache lives, or "" when it has no cache volume.
 		mounterCacheDir string
-		expectedArgs    []string
+		// expectedCacheDir is the cache volume root the mount records, "" when it does not cache.
+		expectedCacheDir string
 		// expectedErrContains: Rejected with InvalidArgument if set.
 		expectedErrContains string
 	}
@@ -130,22 +129,22 @@ func TestConfigureCache(t *testing.T) {
 			name: "no cache",
 			cases: []testCase{
 				{
-					name:            "caches nothing when no volume attribute or mount option asks for it",
-					volumeCtx:       map[string]string{},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{},
+					name:             "caches nothing when no volume attribute or mount option asks for it",
+					volumeCtx:        map[string]string{},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: "",
 				},
 				{
-					name:            "`cache: False` caches nothing, as false is matched in any case",
-					volumeCtx:       map[string]string{volumecontext.Cache: "False"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{},
+					name:             "`cache: Disabled` caches nothing, as disabled is matched in any case",
+					volumeCtx:        map[string]string{volumecontext.Cache: "Disabled"},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: "",
 				},
 				{
-					name:            "a deprecated attribute alone does not enable the cache",
-					volumeCtx:       map[string]string{volumecontext.CacheEmptyDirMedium: "Memory"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{},
+					name:             "a deprecated attribute alone does not enable the cache",
+					volumeCtx:        map[string]string{volumecontext.CacheEmptyDirMedium: "Memory"},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: "",
 				},
 				{
 					name:                "rejects an unrecognised cache value, naming it",
@@ -156,23 +155,23 @@ func TestConfigureCache(t *testing.T) {
 			},
 		},
 		{
-			name: "v3 `cache: true`",
+			name: "v3 `cache: enabled`",
 			cases: []testCase{
 				{
-					name:            "takes the node's cache",
-					volumeCtx:       map[string]string{volumecontext.Cache: "true"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					name:             "takes the node's cache",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 				{
-					name:            "`cache: True` takes it too, as true is matched in any case",
-					volumeCtx:       map[string]string{volumecontext.Cache: "True"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					name:             "`cache: Enabled` takes it too, as enabled is matched in any case",
+					volumeCtx:        map[string]string{volumecontext.Cache: "Enabled"},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 				{
 					name:                "rejects the mount when the node has no cache volume",
-					volumeCtx:           map[string]string{volumecontext.Cache: "true"},
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
 					mounterCacheDir:     "",
 					expectedErrContains: "has no cache volume",
 				},
@@ -182,11 +181,11 @@ func TestConfigureCache(t *testing.T) {
 			name: "v1 `cache` mount option",
 			cases: []testCase{
 				{
-					name:            "discards the path and takes the node's cache",
-					mountOptions:    []string{"cache /tmp/customer-path"},
-					volumeCtx:       map[string]string{},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					name:             "opts in and takes the node's cache, whatever path it names",
+					mountOptions:     []string{"cache /tmp/customer-path"},
+					volumeCtx:        map[string]string{},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 				{
 					name:                "rejects the mount when the node has no cache volume",
@@ -198,12 +197,12 @@ func TestConfigureCache(t *testing.T) {
 				{
 					name:                "rejects a cache configured with both a mount option and a volume attribute",
 					mountOptions:        []string{"cache /tmp/customer-path"},
-					volumeCtx:           map[string]string{volumecontext.Cache: "true"},
+					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheEnabled},
 					mounterCacheDir:     mounterCacheDir,
 					expectedErrContains: bothSurfaces,
 				},
 				{
-					name:                "rejects `cache: false` alongside the mount option, as the two disagree",
+					name:                "rejects `cache: disabled` alongside the mount option, as the two disagree",
 					mountOptions:        []string{"cache /tmp/customer-path"},
 					volumeCtx:           map[string]string{volumecontext.Cache: volumecontext.CacheDisabled},
 					mounterCacheDir:     mounterCacheDir,
@@ -215,19 +214,19 @@ func TestConfigureCache(t *testing.T) {
 			name: "v2 cache type",
 			cases: []testCase{
 				{
-					name:            "`cache: emptyDir` takes the node's cache",
-					volumeCtx:       map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					name:             "`cache: emptyDir` takes the node's cache",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 				{
-					name:            "`cache: ephemeral` takes the node's cache whatever its type",
-					volumeCtx:       map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					name:             "`cache: ephemeral` takes the node's cache whatever its type",
+					volumeCtx:        map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 				{
-					name: "accepts the v2-only cache and container resource attributes without leaking them into args",
+					name: "accepts the v2-only cache and container resource attributes",
 					volumeCtx: map[string]string{
 						volumecontext.Cache:                                      volumecontext.CacheTypeEmptyDir,
 						volumecontext.CacheEmptyDirMedium:                        "Memory",
@@ -239,8 +238,8 @@ func TestConfigureCache(t *testing.T) {
 						volumecontext.MountpointContainerResourcesLimitsCpu:      "500m",
 						volumecontext.MountpointContainerResourcesLimitsMemory:   "1Gi",
 					},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: mounterCacheDir,
 				},
 			},
 		},
@@ -248,18 +247,11 @@ func TestConfigureCache(t *testing.T) {
 			name: "max-cache-size",
 			cases: []testCase{
 				{
-					name:            "keeps max-cache-size for a cached volume",
-					mountOptions:    []string{"max-cache-size 1024"},
-					volumeCtx:       map[string]string{volumecontext.Cache: "true"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg, "--max-cache-size=1024"},
-				},
-				{
-					name:            "leaves a stray max-cache-size for Mountpoint to reject",
-					mountOptions:    []string{"max-cache-size 1024"},
-					volumeCtx:       map[string]string{},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{"--max-cache-size=1024"},
+					name:             "max-cache-size alone does not opt in, leaving it for Mountpoint to reject",
+					mountOptions:     []string{"max-cache-size 1024"},
+					volumeCtx:        map[string]string{},
+					mounterCacheDir:  mounterCacheDir,
+					expectedCacheDir: "",
 				},
 			},
 		},
@@ -267,18 +259,11 @@ func TestConfigureCache(t *testing.T) {
 			name: "misc",
 			cases: []testCase{
 				{
-					name:            "leaves an S3 Express cache-xz mount option alone on a node with no cache volume",
-					mountOptions:    []string{"cache-xz test-bucket--usw2-az1--x-s3"},
-					volumeCtx:       map[string]string{},
-					mounterCacheDir: "",
-					expectedArgs:    []string{"--cache-xz=test-bucket--usw2-az1--x-s3"},
-				},
-				{
-					name:            "leaves unrelated mount options alone",
-					mountOptions:    []string{"region us-west-2"},
-					volumeCtx:       map[string]string{volumecontext.Cache: "true"},
-					mounterCacheDir: mounterCacheDir,
-					expectedArgs:    []string{cacheArg, "--region=us-west-2"},
+					name:             "an S3 Express cache-xz mount option is not a local cache, so it mounts on a node with no cache volume",
+					mountOptions:     []string{"cache-xz test-bucket--usw2-az1--x-s3"},
+					volumeCtx:        map[string]string{},
+					mounterCacheDir:  "",
+					expectedCacheDir: "",
 				},
 			},
 		},
@@ -290,18 +275,18 @@ func TestConfigureCache(t *testing.T) {
 				t.Run(testCase.name, func(t *testing.T) {
 					args := mountpoint.ParseArgs(testCase.mountOptions)
 
-					err := configureCache(&args, testCase.volumeCtx, volumeID, testCase.mounterCacheDir)
+					cacheDir, err := cacheDirForMount(args, testCase.volumeCtx, volumeID, testCase.mounterCacheDir)
 
 					if testCase.expectedErrContains != "" {
 						if err == nil {
-							t.Fatalf("expected an error, got args %v", args.SortedList())
+							t.Fatalf("expected an error, got cache dir %q", cacheDir)
 						}
 						assert.Equals(t, codes.InvalidArgument, status.Code(err))
 						assert.Contains(t, err.Error(), testCase.expectedErrContains)
 						return
 					}
 					assert.NoError(t, err)
-					assert.Equals(t, testCase.expectedArgs, args.SortedList())
+					assert.Equals(t, testCase.expectedCacheDir, cacheDir)
 				})
 			}
 		})
@@ -321,16 +306,17 @@ func TestCreateCacheDir(t *testing.T) {
 		assert.Equals(t, fs.FileMode(0770), fi.Mode().Perm())
 	})
 
-	t.Run("sets the permissions on a directory that already exists with the wrong one", func(t *testing.T) {
+	t.Run("replaces a directory that already exists, dropping what it held", func(t *testing.T) {
 		cacheDir := t.TempDir()
 		mountCacheDir := filepath.Join(cacheDir, "s3-pv")
-		assert.NoError(t, os.Mkdir(mountCacheDir, 0700))
+		assert.NoError(t, os.MkdirAll(filepath.Join(mountCacheDir, "mountpoint-cache"), 0700))
 
 		assert.NoError(t, createCacheDir(cacheDir, "s3-pv"))
 
 		fi, err := os.Stat(mountCacheDir)
 		assert.NoError(t, err)
 		assert.Equals(t, fs.FileMode(0770), fi.Mode().Perm())
+		assert.FileNotExists(t, filepath.Join(mountCacheDir, "mountpoint-cache"))
 	})
 
 	t.Run("is idempotent, so a re-publish does not fail", func(t *testing.T) {
@@ -339,23 +325,20 @@ func TestCreateCacheDir(t *testing.T) {
 		assert.NoError(t, createCacheDir(cacheDir, "s3-pv"))
 	})
 
-	t.Run("refuses a symlink rather than chmod-ing its target", func(t *testing.T) {
+	t.Run("replaces a symlink with a directory, leaving the symlink's target untouched", func(t *testing.T) {
 		cacheDir := t.TempDir()
 		victim := t.TempDir()
 		before, err := os.Stat(victim)
 		assert.NoError(t, err)
 		assert.NoError(t, os.Symlink(victim, filepath.Join(cacheDir, "s3-pv")))
 
-		err = createCacheDir(cacheDir, "s3-pv")
-		if err == nil {
-			// Expect mode Lrwxrwxrwx, which fails.
-			t.Fatal("expected createCacheDir to refuse a symlink")
-		}
-		assert.Contains(t, err.Error(), "is not a directory")
+		assert.NoError(t, createCacheDir(cacheDir, "s3-pv"))
 
-		// The symlink's target keep the mode it had.
-		after, statErr := os.Stat(victim)
-		assert.NoError(t, statErr)
+		fi, err := os.Lstat(filepath.Join(cacheDir, "s3-pv"))
+		assert.NoError(t, err)
+		assert.Equals(t, true, fi.Mode().IsDir())
+		after, err := os.Stat(victim)
+		assert.NoError(t, err)
 		assert.Equals(t, before.Mode().Perm(), after.Mode().Perm())
 	})
 

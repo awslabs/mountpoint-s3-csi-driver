@@ -7,8 +7,8 @@ const (
 	STSRegion            = "stsRegion"
 
 	Cache                                = "cache"
-	CacheEnabled                         = "true"
-	CacheDisabled                        = "false"
+	CacheEnabled                         = "enabled"
+	CacheDisabled                        = "disabled"
 	CacheTypeEmptyDir                    = "emptyDir"
 	CacheTypeEphemeral                   = "ephemeral"
 	CacheEmptyDirSizeLimit               = "cacheEmptyDirSizeLimit"
