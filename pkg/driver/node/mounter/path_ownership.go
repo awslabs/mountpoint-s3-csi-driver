@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"k8s.io/klog/v2"
+
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
@@ -100,10 +102,11 @@ func (dm *DaemonsetMounter) ownCredentialsDirContents(dir string, uid uint32) er
 		if err != nil {
 			return err
 		}
-		// csi-node writes only regular files here, so anything else was planted by the Mountpoint
-		// that owns this directory.
+		// csi-node writes only regular files here, so anything else was planted by the Mountpoint that
+		// owns this directory and is skipped.
 		if !d.IsDir() && !d.Type().IsRegular() {
-			return fmt.Errorf("refusing to own %q in %q: unexpected file type %s", path, dir, d.Type())
+			klog.Errorf("DaemonsetMounter: not owning %q in %q: unexpected file type %s", path, dir, d.Type())
+			return nil
 		}
 
 		perm := credentialprovider.IsolatedCredentialFilePerm
