@@ -20,7 +20,7 @@ type ownershipRecorder struct {
 
 func recordOwnership(dm *DaemonsetMounter) *ownershipRecorder {
 	r := &ownershipRecorder{owners: map[string][2]int{}, modes: map[string]fs.FileMode{}}
-	dm.SetPathOwnership(
+	dm.SetChownChmodForTesting(
 		func(path string, uid, gid int) error {
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -76,13 +76,14 @@ func TestOwnCredentialsDirContentsOwnsCredentialFiles(t *testing.T) {
 		t.Fatalf("failed to write the token: %v", err)
 	}
 
-	if err := dm.ownCredentialsDirContents(credDir, UIDRangeStart); err != nil {
+	const mountUID = uint32(UIDRangeStart)
+	if err := dm.ownCredentialsDirContents(credDir, mountUID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
-	uid := int(UIDRangeStart)
+	uid := int(mountUID)
 	if got := recorder.owners[token]; got != [2]int{uid, uid} {
 		t.Errorf("token owner is %v, want %v", got, [2]int{uid, uid})
 	}

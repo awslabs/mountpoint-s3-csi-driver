@@ -1064,7 +1064,7 @@ func (dm *DaemonsetMounter) findV2S3PodAttachment(ctx context.Context, pvName st
 
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.
 func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, uid uint32, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
-	mountCredDir, err := dm.ensureCredentialsDir(commDir, volumeID, uid)
+	mountCredDir, err := dm.ensureCredentialsDirOwnedBy(commDir, volumeID, uid)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create credential directory: %w", err)
 	}

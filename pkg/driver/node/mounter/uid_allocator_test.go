@@ -32,7 +32,8 @@ func TestUIDAllocator(t *testing.T) {
 		a := mounter.NewUIDAllocator()
 		allocateAll(t, a)
 
-		// With everything taken, the next allocation must fail and the returned UID must not be zero.
+		// With everything taken, the next allocation must fail and return a value no caller could
+		// mistake for a UID.
 		exhausted, err := a.Allocate()
 		assert.ErrorIs(t, err, mounter.ErrUIDRangeExhausted)
 		assert.Equals(t, uint32(math.MaxUint32), exhausted)
@@ -50,14 +51,20 @@ func TestUIDAllocator(t *testing.T) {
 	t.Run("Wraps past the end of the range to find a free UID", func(t *testing.T) {
 		a := mounter.NewUIDAllocator()
 
-		// Fill the range, then free one near the bottom. The cursor is now at the top, so finding it
-		// requires wrapping.
-		allocateAll(t, a)
-		a.Release(mounter.UIDRangeStart + 1)
+		// Take the bottom of the range so the cursor moves off it, then reserve everything above so the
+		// only free UID is the one behind the cursor. Reaching it requires wrapping past the end.
+		bottom, err := a.Allocate()
+		assert.NoError(t, err)
+		assert.Equals(t, uint32(mounter.UIDRangeStart), bottom)
+
+		for uid := uint32(mounter.UIDRangeStart + 1); uid <= mounter.UIDRangeEnd; uid++ {
+			assert.NoError(t, a.Reserve(uid))
+		}
+		a.Release(bottom)
 
 		uid, err := a.Allocate()
 		assert.NoError(t, err)
-		assert.Equals(t, uint32(mounter.UIDRangeStart+1), uid)
+		assert.Equals(t, uint32(mounter.UIDRangeStart), uid)
 	})
 
 	t.Run("Does not reallocate a reserved UID", func(t *testing.T) {
@@ -66,6 +73,12 @@ func TestUIDAllocator(t *testing.T) {
 		assert.NoError(t, a.Reserve(seeded))
 
 		assert.Equals(t, true, a.InUse(seeded))
+
+		// A new allocator starts at the bottom of the range, so the loop below scans upwards over the
+		// reserved value rather than away from it.
+		first, err := a.Allocate()
+		assert.NoError(t, err)
+		assert.Equals(t, uint32(mounter.UIDRangeStart), first)
 
 		// Enough allocations to scan well past the reserved value.
 		for range 10 {

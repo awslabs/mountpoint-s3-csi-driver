@@ -181,7 +181,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 // installOwnershipRecorders makes the mounter record chown/chmod instead of performing them, so
 // tests exercise the per-mount ownership logic without running as root.
 func (testCtx *dmTestCtx) installOwnershipRecorders() {
-	testCtx.dm.SetPathOwnership(
+	testCtx.dm.SetChownChmodForTesting(
 		func(path string, uid, gid int) error {
 			testCtx.ownershipMu.Lock()
 			defer testCtx.ownershipMu.Unlock()

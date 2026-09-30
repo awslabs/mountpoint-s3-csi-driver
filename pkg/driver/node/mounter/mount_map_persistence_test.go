@@ -431,6 +431,8 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 	t.Run("Reserves the UID of every recovered mount", func(t *testing.T) {
 		kubeletPath := t.TempDir()
 		sourcePath := SourceMountPath(kubeletPath, "vol-live")
+		// Any UID in the range works; one away from the bottom so that restoring it is
+		// distinguishable from allocating a fresh one, which would return UIDRangeStart.
 		const recoveredUID = uint32(UIDRangeStart + 7)
 
 		err := WriteMeta(kubeletPath, &MountEntry{
@@ -441,6 +443,8 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 		assert.NoError(t, err)
 
 		dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+			// Device numbers are arbitrary: the source only has to appear in the mount table for
+			// RebuildMountMap to treat the mount as alive.
 			{MountPoint: sourcePath, Major: 0, Minor: 42},
 		}))
 		assert.NoError(t, dm.RebuildMountMap())
@@ -473,7 +477,9 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 		kubeletPath := t.TempDir()
 		sourcePath := SourceMountPath(kubeletPath, "vol-legacy")
 
-		// A meta file with no uid field reads back as zero, which is not a valid allocation.
+		// A meta file with no uid field reads back as the zero value, which is outside the range and so
+		// cannot be reserved.
+		const unrecordedUID = uint32(0)
 		err := WriteMeta(kubeletPath, &MountEntry{
 			VolumeID:   "vol-legacy",
 			SourcePath: sourcePath,
@@ -485,8 +491,13 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 		}))
 		assert.NoError(t, dm.RebuildMountMap())
 
-		assert.Equals(t, uint32(0), dm.mountMap.Get("vol-legacy").Uid)
-		assert.Equals(t, false, dm.uidAllocator.InUse(0))
+		assert.Equals(t, unrecordedUID, dm.mountMap.Get("vol-legacy").Uid)
+
+		// Nothing was reserved, so the allocator is still untouched: the first UID it issues is the
+		// bottom of the range.
+		uid, err := dm.uidAllocator.Allocate()
+		assert.NoError(t, err)
+		assert.Equals(t, uint32(UIDRangeStart), uid)
 	})
 }
 

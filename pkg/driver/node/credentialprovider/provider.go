@@ -19,14 +19,17 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 )
 
-// Permissions for a Mountpoint Pod's credentials, which csi-node writes as root and never chowns.
-// Group access is required: the pod runs as a non-root user with primary GID 0, and gets an
-// arbitrary UID on OpenShift, so the group bits are its only way in.
+// Permissions for the credentials of a Mountpoint Pod, the per-mount pod [PodMounter] creates. Used
+// only by that mounter and by the daemonset mounter's refresh of pods it inherited from it.
+//
+// csi-node writes these as root and never chowns them, and the pod runs as a non-root user with
+// primary GID 0 — an arbitrary UID on OpenShift — so the group bits are its only way in.
 const CredentialFilePerm = fs.FileMode(0640)
 const CredentialDirPerm = fs.FileMode(0750)
 
-// Permissions for one daemonset-mounter mount's credentials, which csi-node chowns to that mount's
-// allocated UID. Owner-only: group access would expose them to every other Mountpoint on the node.
+// Permissions for the credentials of one mount served by the daemonset mounter, which csi-node chowns
+// to that mount's allocated UID. Owner-only: group access would expose them to every other Mountpoint
+// on the node.
 const IsolatedCredentialFilePerm = fs.FileMode(0400)
 const IsolatedCredentialDirPerm = fs.FileMode(0700)
 

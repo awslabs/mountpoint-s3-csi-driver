@@ -27,9 +27,9 @@ const (
 type chownFunc func(path string, uid, gid int) error
 type chmodFunc func(path string, mode fs.FileMode) error
 
-// SetPathOwnership replaces the chown and chmod implementations. A nil argument keeps the real
+// SetChownChmodForTesting replaces the chown and chmod implementations. A nil argument keeps the real
 // syscall.
-func (dm *DaemonsetMounter) SetPathOwnership(chown chownFunc, chmod chmodFunc) {
+func (dm *DaemonsetMounter) SetChownChmodForTesting(chown chownFunc, chmod chmodFunc) {
 	dm.chown = chown
 	dm.chmod = chmod
 }
@@ -73,13 +73,13 @@ func (dm *DaemonsetMounter) secureSharedPaths(commDir string) error {
 	return nil
 }
 
-// ensureCredentialsDir creates this mount's credential directory, owned by `uid` and inaccessible to
-// any other UID, and returns its path.
+// ensureCredentialsDirOwnedBy creates this mount's credential directory, hands it to `uid`, closes it
+// to every other UID, and returns its path.
 //
 // It is the gate that isolates the mount: once the directory is owned by `uid` and not traversable
 // by others, nothing inside is reachable by another Mountpoint whatever mode the files carry.
 // Credentials are therefore written only after this returns.
-func (dm *DaemonsetMounter) ensureCredentialsDir(commDir, volumeID string, uid uint32) (string, error) {
+func (dm *DaemonsetMounter) ensureCredentialsDirOwnedBy(commDir, volumeID string, uid uint32) (string, error) {
 	dir := filepath.Join(commDir, volumeID)
 	perm := credentialprovider.IsolatedCredentialDirPerm
 
@@ -93,7 +93,7 @@ func (dm *DaemonsetMounter) ensureCredentialsDir(commDir, volumeID string, uid u
 // Mountpoint can read the credentials written there.
 //
 // It runs after the files are written. `dir` is already closed to other mounts by
-// [DaemonsetMounter.ensureCredentialsDir], so no file is reachable by another Mountpoint in the
+// [DaemonsetMounter.ensureCredentialsDirOwnedBy], so no file is reachable by another Mountpoint in the
 // moment before its owner is set.
 func (dm *DaemonsetMounter) ownCredentialsDirContents(dir string, uid uint32) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
