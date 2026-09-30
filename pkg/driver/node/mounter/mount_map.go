@@ -103,6 +103,11 @@ type MountEntry struct {
 	// provisioned, avoiding mismatches if the mounter pod restarts between mount and unmount.
 	CommDir string
 
+	// CacheDir is the cache volume this mount's cache directory lives in, or "" if it does not
+	// cache. Recorded because an `ephemeral` cache volume cannot be recomputed once the
+	// mounter pod it belonged to is gone.
+	CacheDir string
+
 	// Params records the mount parameters for validation of subsequent share requests.
 	Params MountParams
 
