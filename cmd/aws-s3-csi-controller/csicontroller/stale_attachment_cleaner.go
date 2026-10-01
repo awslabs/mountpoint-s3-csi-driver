@@ -153,11 +153,13 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 		}
 	}
 
+	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
+	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
+		return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
+	}
+
 	// Update the S3PodAttachment if modified
 	if modified {
-		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
-		}
 		return cm.reconciler.Update(ctx, s3pa)
 	}
 
