@@ -95,6 +95,11 @@ See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/p
 ## AWS Credentials
 
 The driver requires IAM permissions to access your Amazon S3 bucket.
+If a volume fails with an AWS credential or `AccessDenied` error, follow the
+[AWS credential troubleshooting guide](./TROUBLESHOOTING.md#im-getting-aws-credential-or-accessdenied-errors)
+to identify the selected identity, inspect the relevant logs, and validate the
+configured credential mechanism.
+
 We recommend using [Mountpoint's suggested IAM permission policy](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#iam-permissions).
 Alternatively, you can use the AWS managed policy AmazonS3FullAccess, available at ARN
 `arn:aws:iam::aws:policy/AmazonS3FullAccess`, but this managed policy grants more permissions than needed for the
