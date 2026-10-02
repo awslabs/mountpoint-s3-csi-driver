@@ -11,5 +11,5 @@ unit_tests() {
 }
 
 
-unit_tests "helm template charts/aws-mountpoint-s3-csi-driver --set isHelmRepo=true"
-unit_tests "helm template charts/aws-mountpoint-s3-csi-driver --set isEKSAddon=true"
+unit_tests "helm template ${CHART_DIR} --set isHelmRepo=true"
+unit_tests "helm template ${CHART_DIR} --set isEKSAddon=true"

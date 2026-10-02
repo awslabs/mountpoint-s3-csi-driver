@@ -87,7 +87,6 @@ sidecars:
     resources: {}
 
 controller:
-  replicaCount: 1
   # Consider deploying the controller component to special nodes for controller components.
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md#configuring-nodeSelector-for-the-controller-component for more details.
   # For example:
@@ -98,6 +97,8 @@ controller:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-controller-sa
+  # Only one controller is active at once, even with higher `replicaCount`s.
+  replicaCount: 1
 
 mountpointPod:
   namespace: mount-s3
