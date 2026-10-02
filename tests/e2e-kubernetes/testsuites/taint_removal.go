@@ -135,18 +135,13 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 
 			if v3 {
 				// Without a mounter the node pod never removes the taint
-				gomega.Consistently(ctx, func(ctx context.Context) (bool, error) {
-					n, err := f.ClientSet.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
-					if err != nil {
-						return false, err
-					}
-					return slices.ContainsFunc(n.Spec.Taints, func(t v1.Taint) bool { return t.Key == agentNotReadyTaintKey }), nil
-				}).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
+				gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
 				framework.ExpectNoError(restoreMounter(ctx))
 			}
 
 			// Wait for CSI driver pods to be ready again
 			waitForCSIDriverReady(ctx, f)
+			gomega.Eventually(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(gomega.BeFalse())
 
 			// 5. Create and verify pod scheduling on the previously tainted node
 			framework.Logf("Creating pod on previously tainted node %s", node.Name)
@@ -165,32 +160,13 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 
 // removeMounterFromNode keeps the mounter DaemonSet off nodeName until the returned function (also run on cleanup) puts it back.
 func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName string) func(context.Context) error {
-	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
-	ds, err := client.Get(ctx, mounterDaemonSetName, metav1.GetOptions{})
+	ds, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Get(ctx, mounterDaemonSetName, metav1.GetOptions{})
 	framework.ExpectNoError(err)
-	patchAffinity := func(ctx context.Context, affinity *v1.Affinity) error {
-		patch, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"affinity": affinity}}}})
-		if err != nil {
-			return err
-		}
-		_, err = client.Patch(ctx, mounterDaemonSetName, types.MergePatchType, patch, metav1.PatchOptions{})
-		return err
-	}
-
-	// Required node selector terms are ORed, so the node has to be excluded in every term
 	original := ds.Spec.Template.Spec.Affinity
-	affinity := original.DeepCopy()
-	if affinity == nil {
-		affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{}}}}}
-	}
-	terms := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-	for i := range terms {
-		terms[i].MatchFields = append(terms[i].MatchFields, v1.NodeSelectorRequirement{Key: "metadata.name", Operator: v1.NodeSelectorOpNotIn, Values: []string{nodeName}})
-	}
-	framework.ExpectNoError(patchAffinity(ctx, affinity))
+	framework.ExpectNoError(patchMounterAffinity(ctx, f, excludeNode(original, nodeName)))
 
 	restore := func(ctx context.Context) error {
-		if err := patchAffinity(ctx, original); err != nil {
+		if err := patchMounterAffinity(ctx, f, original); err != nil {
 			return err
 		}
 		waitForMounterPodReady(ctx, f, nodeName)
@@ -201,7 +177,36 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 	}
 	DeferCleanup(restore)
 
-	// A terminating mounter pod still reports Running, so wait until it's gone
+	waitForNoMounterPod(ctx, f, nodeName)
+	return restore
+}
+
+// excludeNode returns a copy of affinity that also keeps pods off nodeName.
+func excludeNode(affinity *v1.Affinity, nodeName string) *v1.Affinity {
+	affinity = affinity.DeepCopy()
+	if affinity == nil {
+		affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{}}}}}
+	}
+	// Required node selector terms are ORed, so the node has to be excluded in every term
+	terms := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	for i := range terms {
+		terms[i].MatchFields = append(terms[i].MatchFields, v1.NodeSelectorRequirement{Key: "metadata.name", Operator: v1.NodeSelectorOpNotIn, Values: []string{nodeName}})
+	}
+	return affinity
+}
+
+// patchMounterAffinity sets the affinity on the mounter DaemonSet's pod template.
+func patchMounterAffinity(ctx context.Context, f *framework.Framework, affinity *v1.Affinity) error {
+	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"affinity": affinity}}}})
+	if err != nil {
+		return err
+	}
+	_, err = f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Patch(ctx, mounterDaemonSetName, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// waitForNoMounterPod waits until no mounter pod is left on nodeName. A terminating mounter pod still reports Running.
+func waitForNoMounterPod(ctx context.Context, f *framework.Framework, nodeName string) {
 	gomega.Eventually(ctx, func(ctx context.Context) ([]v1.Pod, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=s3-csi-daemonset-mounter",
@@ -209,7 +214,17 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 		})
 		return pods.Items, err
 	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(gomega.BeEmpty())
-	return restore
+}
+
+// hasAgentNotReadyTaint returns a poll function reporting whether nodeName has the agent-not-ready taint.
+func hasAgentNotReadyTaint(client clientset.Interface, nodeName string) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return slices.ContainsFunc(node.Spec.Taints, func(t v1.Taint) bool { return t.Key == agentNotReadyTaintKey }), nil
+	}
 }
 
 // getCSIDriverNode returns a node where the CSI driver is running
