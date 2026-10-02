@@ -1,0 +1,180 @@
+# The Local Volume Static Provisioner for the daemonset-cache suite's NVMe row, applied only when a node is labelled
+# s3.csi.aws.com/local-nvme=true. Vendored so the suite downloads nothing at run time.
+#
+# Source: kubernetes-sigs/sig-storage-local-static-provisioner helm/generated_examples/eks-nvme-ssd.yaml,
+# chart local-static-provisioner-2.9.0 at commit 4d94d796, image local-volume-provisioner:v2.9.0.
+# Changed from upstream:
+#   - namespace default -> kube-system.
+#   - discovery reads /dev/disk/by-id, which udev populates on every boot, instead of /dev/disk/kubernetes, which
+#     needs a udev rule in the node's boot script. namePattern keeps the root EBS volume out and picks one of the
+#     three links udev makes per instance-store disk (base, _1 and -ns-1 on AL2023), so each disk is one PV.
+#   - the DaemonSet runs only on nodes labelled s3.csi.aws.com/local-nvme=true.
+---
+# Source: local-static-provisioner/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: local-static-provisioner
+  namespace: kube-system
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+---
+# Source: local-static-provisioner/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-static-provisioner-config
+  namespace: kube-system
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+data:
+  storageClassMap: |
+    nvme-ssd:
+      hostDir: /dev/disk/by-id
+      mountDir: /dev/disk/by-id
+      namePattern: "nvme-Amazon_EC2_NVMe_Instance_Storage_*_1"
+---
+# Source: local-static-provisioner/templates/storageclass.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nvme-ssd
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+---
+# Source: local-static-provisioner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: local-static-provisioner-node-clusterrole
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["watch"]
+- apiGroups: ["", "events.k8s.io"]
+  resources: ["events"]
+  verbs: ["create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "update"]
+---
+# Source: local-static-provisioner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: local-static-provisioner-node-binding
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+subjects:
+- kind: ServiceAccount
+  name: local-static-provisioner
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: local-static-provisioner-node-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: local-static-provisioner/templates/daemonset_linux.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: local-static-provisioner
+  namespace: kube-system
+  labels:
+    helm.sh/chart: local-static-provisioner-2.9.0
+    app.kubernetes.io/name: local-static-provisioner
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: local-static-provisioner
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: local-static-provisioner
+      app.kubernetes.io/instance: local-static-provisioner
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: local-static-provisioner
+        app.kubernetes.io/instance: local-static-provisioner
+      annotations:
+        checksum/config: ffd882b344e22fa217c669f5e3a5d2f2cdf1d049db3d2b45e934014f26b07fb8
+    spec:
+      hostPID: false
+      serviceAccountName: local-static-provisioner
+      nodeSelector:
+        kubernetes.io/os: linux
+        s3.csi.aws.com/local-nvme: "true"
+      containers:
+        - name: provisioner
+          image: registry.k8s.io/sig-storage/local-volume-provisioner:v2.9.0
+          securityContext:
+            privileged: true
+          env:
+          - name: MY_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: MY_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: JOB_CONTAINER_IMAGE
+            value: registry.k8s.io/sig-storage/local-volume-provisioner:v2.9.0
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 60
+            tcpSocket:
+              port: metrics
+            timeoutSeconds: 5
+          ports:
+          - name: metrics
+            containerPort: 8080
+          volumeMounts:
+            - name: provisioner-config
+              mountPath: /etc/provisioner/config
+              readOnly: true
+            - name: provisioner-dev
+              mountPath: /dev
+            - name: nvme-ssd
+              mountPath: /dev/disk/by-id
+              mountPropagation: HostToContainer
+      volumes:
+        - name: provisioner-config
+          configMap:
+            name: local-static-provisioner-config
+        - name: provisioner-dev
+          hostPath:
+            path: /dev
+        - name: nvme-ssd
+          hostPath:
+            path: /dev/disk/by-id

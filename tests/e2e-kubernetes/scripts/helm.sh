@@ -85,6 +85,8 @@ function helm_install_driver() {
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
     --set node.serviceAccount.create=true \
+    --set daemonsetMounters[0].cache.emptyDir.sizeLimit=2Gi \
+    --set daemonsetMounters[0].cache.cacheLimitStrategy=equalSplit \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -923,9 +924,13 @@ func createPodsOnSameNode(ctx context.Context, f *framework.Framework, n int, re
 	var targetNode string
 
 	for i := range n {
-		var nodeSelector map[string]string
+		// The volume's config may keep its workloads to some nodes, e.g. the cache suite's ones with an instance-store disk.
+		nodeSelector := maps.Clone(resource.Config.ClientNodeSelection.Selector)
 		if i > 0 && targetNode != "" {
-			nodeSelector = map[string]string{"kubernetes.io/hostname": targetNode}
+			if nodeSelector == nil {
+				nodeSelector = map[string]string{}
+			}
+			nodeSelector["kubernetes.io/hostname"] = targetNode
 		}
 
 		ginkgo.By(fmt.Sprintf("Creating pod %d with volume", i+1))
