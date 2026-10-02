@@ -12,20 +12,39 @@ import (
 )
 
 const (
-	cleanupInterval          = 2 * time.Minute
+	defaultCleanupInterval   = 2 * time.Minute
 	staleAttachmentThreshold = 2 * time.Minute
 )
 
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
 type StaleAttachmentCleaner struct {
-	reconciler *Reconciler
+	reconciler      *Reconciler
+	cleanupInterval time.Duration
+}
+
+type StaleAttachmentCleanerOption func(*StaleAttachmentCleaner)
+
+func WithCleanupInterval(interval time.Duration) StaleAttachmentCleanerOption {
+	return func(cm *StaleAttachmentCleaner) {
+		cm.cleanupInterval = interval
+	}
 }
 
 // NewStaleAttachmentCleaner creates a new StaleAttachmentCleaner
-func NewStaleAttachmentCleaner(reconciler *Reconciler) *StaleAttachmentCleaner {
-	return &StaleAttachmentCleaner{
-		reconciler: reconciler,
+func NewStaleAttachmentCleaner(reconciler *Reconciler, opts ...StaleAttachmentCleanerOption) *StaleAttachmentCleaner {
+	cm := &StaleAttachmentCleaner{
+		reconciler:      reconciler,
+		cleanupInterval: defaultCleanupInterval,
 	}
+	for _, opt := range opts {
+		opt(cm)
+	}
+	return cm
+}
+
+// Cleaner should only be running one instance at a time, so needs to opt into leader election.
+func (cm *StaleAttachmentCleaner) NeedLeaderElection() bool {
+	return true
 }
 
 // Start begins the periodic cleanup process
@@ -33,7 +52,7 @@ func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
 	log := logf.FromContext(ctx)
 	log.Info("Starting stale attachment cleaner")
 
-	ticker := time.NewTicker(cleanupInterval)
+	ticker := time.NewTicker(cm.cleanupInterval)
 	defer ticker.Stop()
 
 	for {
@@ -95,6 +114,11 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
+	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
+	// The matching UID in the informer cache satisfies this expectation; a stale snapshot cannot clear a replacement's expectation.
+	if cm.reconciler.s3paExpectations.clearIfObserved(fieldFilters, s3pa.UID) {
+		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
+	}
 	modified := false
 
 	now := time.Now().UTC()

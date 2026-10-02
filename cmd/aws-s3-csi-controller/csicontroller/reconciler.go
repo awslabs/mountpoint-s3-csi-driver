@@ -55,11 +55,13 @@ type Reconciler struct {
 	//
 	// Management: We carefully manage expectations to avoid indefinite waiting:
 	// - setPending() is called in handleNewS3PodAttachment() immediately after successfully creating a new S3PA
-	// - clear() is called in two scenarios:
+	// - clear() is called in three scenarios:
 	//   1. In handleExistingS3PodAttachment() when a pending S3PA is found (it appeared in the cache)
-	//   2. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	//   2. In recoverFromDuplicateS3PodAttachments() after deleting all empty duplicates
+	//   3. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	// - clearIfObserved() is called in cleanupStaleWorkloads() when the observed S3PA UID matches the pending expectation.
 	//
-	// Note: Reconcile() processes events sequentially, eliminating concurrency concerns.
+	// Note: Reconcile() processes events sequentially, but the stale attachment cleaner can access expectations concurrently.
 	s3paExpectations *expectations
 	client.Client
 }
@@ -316,6 +318,8 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 	fieldFilters := r.buildFieldFilters(workloadPod, pv, roleArn)
 	log := r.setupLogger(ctx, workloadPod, pvc, workloadUID, fieldFilters)
+	// The cleaner can satisfy an expectation after this lookup reads an empty cache snapshot.
+	creationWasPending := r.s3paExpectations.isPending(fieldFilters)
 	s3pa, err := r.getExistingS3PodAttachment(ctx, fieldFilters, log)
 	if err != nil {
 		return Requeue, err
@@ -331,6 +335,10 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	if s3pa != nil {
 		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, priorityClassKind, log)
 	} else {
+		if creationWasPending {
+			log.Info("MountpointS3PodAttachment creation was pending before cache lookup, requeuing")
+			return Requeue, nil
+		}
 		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, priorityClassKind, log)
 	}
 }
@@ -380,6 +388,26 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 		fieldFilters[crdv2.FieldWorkloadNamespace] = workloadPod.Namespace
 		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
 		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
+	}
+
+	return fieldFilters
+}
+
+// fieldFiltersForS3PodAttachment reconstructs the filters used to track a creation expectation from an existing S3PA.
+func fieldFiltersForS3PodAttachment(s3pa *crdv2.MountpointS3PodAttachment) client.MatchingFields {
+	fieldFilters := client.MatchingFields{
+		crdv2.FieldNodeName:             s3pa.Spec.NodeName,
+		crdv2.FieldPersistentVolumeName: s3pa.Spec.PersistentVolumeName,
+		crdv2.FieldVolumeID:             s3pa.Spec.VolumeID,
+		crdv2.FieldMountOptions:         s3pa.Spec.MountOptions,
+		crdv2.FieldWorkloadFSGroup:      s3pa.Spec.WorkloadFSGroup,
+		crdv2.FieldAuthenticationSource: s3pa.Spec.AuthenticationSource,
+	}
+
+	if s3pa.Spec.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		fieldFilters[crdv2.FieldWorkloadNamespace] = s3pa.Spec.WorkloadNamespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = s3pa.Spec.WorkloadServiceAccountName
+		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = s3pa.Spec.WorkloadServiceAccountIAMRoleARN
 	}
 
 	return fieldFilters
@@ -720,11 +748,12 @@ func (r *Reconciler) handleNewS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log); err != nil {
+	s3pa, err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log)
+	if err != nil {
 		return Requeue, err
 	}
 
-	r.s3paExpectations.setPending(fieldFilters)
+	r.s3paExpectations.setPending(fieldFilters, s3pa.UID)
 	return Requeue, nil
 }
 
@@ -736,12 +765,12 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 	roleArn string,
 	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
-) error {
+) (*crdv2.MountpointS3PodAttachment, error) {
 	authSource := r.getAuthSource(pv)
 	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
-		return err
+		return nil, err
 	}
 	s3pa := &crdv2.MountpointS3PodAttachment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -776,11 +805,11 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		} else {
 			log.Info("Successfully cleaned up Mountpoint Pod after S3PodAttachment creation failure", "mountpointPodName", mpPod.Name)
 		}
-		return err
+		return nil, err
 	}
 
 	log.Info("MountpointS3PodAttachment is created", "s3pa", s3pa.Name)
-	return nil
+	return s3pa, nil
 }
 
 // deleteS3PodAttachment deletes the given S3PA with a resourceVersion precondition.
