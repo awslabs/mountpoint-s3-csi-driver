@@ -19,6 +19,7 @@ const (
 	ArgMemoryTarget    = "--memory-target"
 	ArgUserAgentPrefix = "--user-agent-prefix"
 	ArgAWSMaxAttempts  = "--aws-max-attempts"
+	ArgUid             = "--uid"
 	ArgGid             = "--gid"
 	ArgDirMode         = "--dir-mode"
 	ArgFileMode        = "--file-mode"

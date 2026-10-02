@@ -40,6 +40,7 @@ func newTestDMWithMountInfo(kubeletPath string, provider mountInfoProviderFunc) 
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
+		uidAllocator:      NewUIDAllocator(),
 	}
 }
 
@@ -58,6 +59,7 @@ func newTestDMWithFakeMounter(kubeletPath string, provider mountInfoProviderFunc
 		kubeletPath:       kubeletPath,
 		mountInfoProvider: provider,
 		mountMap:          NewMountMap(),
+		uidAllocator:      NewUIDAllocator(),
 		mount:             mpmounter.NewWithMount(fakeMounter),
 		credProvider:      &noopCredProvider{},
 	}
@@ -431,6 +433,82 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	}
 }
 
+func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
+	t.Run("Reserves the UID of every recovered mount", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		sourcePath := SourceMountPath(kubeletPath, "vol-live")
+		// Any UID in the range works; one away from the bottom so that restoring it is
+		// distinguishable from allocating a fresh one, which would return UIDRangeStart.
+		const recoveredUID = uint32(UIDRangeStart + 7)
+
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-live",
+			SourcePath: sourcePath,
+			Params:     MountParams{VolumeHandle: "vol-live-handle"},
+			Uid:        recoveredUID,
+		})
+		assert.NoError(t, err)
+
+		dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+			// Device numbers are arbitrary: the source only has to appear in the mount table for
+			// RebuildMountMap to treat the mount as alive.
+			{MountPoint: sourcePath, Major: 0, Minor: 42},
+		}))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		// The UID must be both restored onto the entry and withheld from future allocations,
+		// otherwise a new mount could be handed a UID that still owns this mount's files.
+		assert.Equals(t, recoveredUID, dm.mountMap.Get("vol-live").Uid)
+		assert.Equals(t, true, dm.uidAllocator.InUse(recoveredUID))
+	})
+
+	t.Run("Frees the UID of a dead mount once its cleanup succeeds", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		const deadUID = uint32(UIDRangeStart + 11)
+
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-dead",
+			SourcePath: SourceMountPath(kubeletPath, "vol-dead"),
+			Uid:        deadUID,
+		})
+		assert.NoError(t, err)
+
+		// No mount table entry for the source, so the mount is dead and gets cleaned up.
+		dm := newTestDMWithMountInfoAndCredProvider(kubeletPath, fakeMountInfoProvider(nil))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		assert.Equals(t, false, dm.uidAllocator.InUse(deadUID))
+	})
+
+	t.Run("Does not reserve a UID when the meta file records none", func(t *testing.T) {
+		kubeletPath := t.TempDir()
+		sourcePath := SourceMountPath(kubeletPath, "vol-legacy")
+
+		// A meta file with no uid field reads back as the zero value, which is outside the range and so
+		// cannot be reserved.
+		const unrecordedUID = uint32(0)
+		err := WriteMeta(kubeletPath, &MountEntry{
+			VolumeID:   "vol-legacy",
+			SourcePath: sourcePath,
+			Params:     MountParams{VolumeHandle: "vol-legacy-handle"},
+		})
+		assert.NoError(t, err)
+
+		dm := newTestDMWithMountInfo(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
+			{MountPoint: sourcePath, Major: 0, Minor: 42},
+		}))
+		assert.NoError(t, dm.RebuildMountMap())
+
+		assert.Equals(t, unrecordedUID, dm.mountMap.Get("vol-legacy").Uid)
+
+		// Nothing was reserved, so the allocator is still untouched: the first UID it issues is the
+		// bottom of the range.
+		uid, err := dm.uidAllocator.Allocate()
+		assert.NoError(t, err)
+		assert.Equals(t, uint32(UIDRangeStart), uid)
+	})
+}
+
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-live")
@@ -709,7 +787,7 @@ func TestForgetMount_KeepsEntryWhenMetaRemovalFails(t *testing.T) {
 	metaPath := MetaFileName(kubeletPath, volumeID)
 	assert.NoError(t, os.MkdirAll(filepath.Join(metaPath, "blocker"), 0750))
 
-	dm.forgetMount(volumeID)
+	dm.forgetMount(volumeID, entry)
 
 	// Entry kept so the periodic cleanup can retry.
 	if dm.mountMap.Get(volumeID) == nil {

@@ -26,7 +26,7 @@ func (v Variant) String() string {
 	}
 }
 
-var defaultMountpointUID = new(int64(1000))
+var DefaultMountpointUID = new(int64(1000))
 
 // DetectVariant determines Kubernetes variant by checking API groups.
 func DetectVariant(client *rest.Config, log logr.Logger) Variant {
@@ -77,5 +77,5 @@ func (c Variant) MountpointPodUserID() *int64 {
 		return nil
 	}
 
-	return defaultMountpointUID
+	return DefaultMountpointUID
 }

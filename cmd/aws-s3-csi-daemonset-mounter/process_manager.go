@@ -17,6 +17,7 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 	"k8s.io/klog/v2"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
@@ -53,6 +54,15 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		return fmt.Errorf("invalid FUSE file descriptor %d", options.Fd)
 	}
 
+	if options.Uid < mounter.UIDRangeStart || options.Uid > mounter.UIDRangeEnd {
+		fuseDev.Close()
+		return fmt.Errorf("refusing to launch mount %s with out-of-range UID %d", mountId, options.Uid)
+	}
+	if options.Gid != options.Uid {
+		fuseDev.Close()
+		return fmt.Errorf("refusing to launch mount %s with GID %d not matching UID %d", mountId, options.Gid, options.Uid)
+	}
+
 	args := mountpoint.ParseArgs(options.Args)
 	args.Set(mountpoint.ArgForeground, mountpoint.ArgNoValue)
 
@@ -71,6 +81,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	cmd.Env = options.Env
 	cmd.Stdout = newPrefixWriter(os.Stdout, mountId)
 	cmd.Stderr = newPrefixWriter(os.Stderr, mountId)
+
+	// Give the child the per-mount credentials csi-node determined, so the kernel isolates it from
+	// every other Mountpoint on this node. Supplementary groups are cleared: the mounter runs as
+	// root, and inheriting its groups would hand the child access to every other mount's files.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    options.Uid,
+			Gid:    options.Gid,
+			Groups: []uint32{},
+		},
+	}
 
 	// Hold lock across duplicate check and process start to prevent races.
 	pm.mu.Lock()

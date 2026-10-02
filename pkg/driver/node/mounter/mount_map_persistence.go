@@ -31,6 +31,7 @@ type MountMeta struct {
 	PodNamespace             string   `json:"podNamespace"`
 	FSGroup                  string   `json:"fsGroup"`
 	VolumeHandle             string   `json:"volumeHandle"`
+	Uid                      uint32   `json:"uid"`
 }
 
 // WriteMeta atomically writes the .meta.json file for the given volume.
@@ -46,6 +47,7 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 		PodNamespace:             entry.Params.PodNamespace,
 		FSGroup:                  entry.Params.FSGroup,
 		VolumeHandle:             entry.Params.VolumeHandle,
+		Uid:                      entry.Uid,
 	}
 
 	data, err := json.Marshal(meta)
@@ -74,7 +76,11 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 
 // RemoveMeta removes the volume's .meta.json, treating an already-absent file as success.
 func RemoveMeta(kubeletPath, volumeID string) error {
-	metaPath := MetaFileName(kubeletPath, volumeID)
+	return removeMetaFile(MetaFileName(kubeletPath, volumeID))
+}
+
+// removeMetaFile removes the meta file at `metaPath`, treating an already-absent file as success.
+func removeMetaFile(metaPath string) error {
 	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove meta file %s: %w", metaPath, err)
 	}
