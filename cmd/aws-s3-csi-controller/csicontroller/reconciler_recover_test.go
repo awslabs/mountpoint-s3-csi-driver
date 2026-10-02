@@ -57,7 +57,7 @@ func TestRecoverFromDuplicateS3PodAttachments(t *testing.T) {
 		noMountpointPodsB := newS3PA("s3pa-stuck-b", map[string][]crdv2.WorkloadAttachment{})
 		c, r := newReconcilerWithObjects(t, noMountpointPodsA, noMountpointPodsB)
 		filters := testFilters()
-		r.s3paExpectations.setPending(filters)
+		r.s3paExpectations.setPending(filters, noMountpointPodsA.UID)
 
 		got, err := r.recoverFromDuplicateS3PodAttachments(context.Background(), []crdv2.MountpointS3PodAttachment{*noMountpointPodsA, *noMountpointPodsB}, filters, logr.Discard())
 		assert.NoError(t, err)
@@ -80,7 +80,7 @@ func TestRecoverFromDuplicateS3PodAttachments(t *testing.T) {
 		noMountpointPods := newS3PA("s3pa-orphan", map[string][]crdv2.WorkloadAttachment{})
 		c, r := newReconcilerWithObjects(t, withMountpointPods, noMountpointPods)
 		filters := testFilters()
-		r.s3paExpectations.setPending(filters)
+		r.s3paExpectations.setPending(filters, withMountpointPods.UID)
 
 		got, err := r.recoverFromDuplicateS3PodAttachments(context.Background(), []crdv2.MountpointS3PodAttachment{*withMountpointPods, *noMountpointPods}, filters, logr.Discard())
 		assert.NoError(t, err)
@@ -145,7 +145,7 @@ func TestRecoverFromDuplicateS3PodAttachments(t *testing.T) {
 			Build()
 		r := &Reconciler{Client: c, mountpointPodConfig: testPodConfig(), s3paExpectations: newExpectations()}
 		filters := testFilters()
-		r.s3paExpectations.setPending(filters)
+		r.s3paExpectations.setPending(filters, noMountpointPodsA.UID)
 
 		got, err := r.recoverFromDuplicateS3PodAttachments(context.Background(), []crdv2.MountpointS3PodAttachment{*noMountpointPodsA, *noMountpointPodsB}, filters, logr.Discard())
 		if err == nil {

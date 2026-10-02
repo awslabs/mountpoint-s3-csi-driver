@@ -29,6 +29,12 @@ ARG KUBECTL_VERSION=1.33.3
 RUN curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && \
     chmod +x kubectl && mv kubectl /usr/local/bin/
 
+# Install Squid to act as the forward proxy for the proxy e2e specs.
+RUN dnf install -y squid && \
+    dnf clean all && \
+    test -x /usr/sbin/squid && \
+    sed -i -E 's/^#[[:space:]]*http_access allow localnet/http_access allow localnet/' /etc/squid/squid.conf
+
 # Copy pre-compiled binaries from builder
 COPY --from=builder /e2e.test /usr/local/bin/e2e.test
 COPY --from=builder /usr/local/bin/ginkgo /usr/local/bin/ginkgo
@@ -83,5 +89,22 @@ exec ginkgo -vv -timeout 60m \
 
 EOF
 RUN chmod +x /entrypoint.sh
+
+COPY <<'EOF' /squid-entrypoint.sh
+#!/bin/sh
+set -eu
+
+# Squid writes to log files under /var/log/squid rather than stdout. Forward
+# them to this container's stdout so they are visible via `kubectl logs`.
+# --follow=name --retry tolerates the files not existing until Squid starts.
+for log in access.log error.log store.log cache.log; do
+    tail --follow=name --retry "/var/log/squid/${log}" &
+done
+
+# Create any missing cache directories, then run Squid in the foreground.
+squid -Nz
+exec squid -f /etc/squid/squid.conf -NYC
+EOF
+RUN chmod +x /squid-entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

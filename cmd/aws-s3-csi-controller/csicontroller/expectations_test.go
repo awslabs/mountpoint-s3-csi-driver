@@ -57,7 +57,7 @@ func TestExpectations(t *testing.T) {
 				"key1": "value1",
 			},
 			operations: func(e *expectations) {
-				e.setPending(client.MatchingFields{"key1": "value1"})
+				e.setPending(client.MatchingFields{"key1": "value1"}, "uid-1")
 			},
 			wantPending: true,
 		},
@@ -67,7 +67,7 @@ func TestExpectations(t *testing.T) {
 				"key1": "value1",
 			},
 			operations: func(e *expectations) {
-				e.setPending(client.MatchingFields{"key1": "value1"})
+				e.setPending(client.MatchingFields{"key1": "value1"}, "uid-1")
 				e.clear(client.MatchingFields{"key1": "value1"})
 			},
 			wantPending: false,
@@ -87,7 +87,7 @@ func TestExpectations(t *testing.T) {
 				"key2": "value2",
 			},
 			operations: func(e *expectations) {
-				e.setPending(client.MatchingFields{"key1": "value1", "key2": "value2"})
+				e.setPending(client.MatchingFields{"key1": "value1", "key2": "value2"}, "uid-1")
 				e.clear(client.MatchingFields{"key1": "value1"}) // Different key, shouldn't affect the test
 			},
 			wantPending: true,
