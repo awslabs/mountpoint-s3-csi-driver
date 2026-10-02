@@ -29,6 +29,10 @@ type Options struct {
 	// tracking and error file naming. In daemonset mode this is "<podUID>-<volumeId>".
 	// With pod sharing it'll be "volumeID" (PersistentVolume: metadata.name).
 	VolumeId string `json:"volumeId,omitempty"`
+	// Uid and Gid are the process credentials the mounter must give the Mountpoint process it
+	// spawns, so the kernel isolates it from every other Mountpoint on the node.
+	Uid uint32 `json:"uid"`
+	Gid uint32 `json:"gid"`
 }
 
 // Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.

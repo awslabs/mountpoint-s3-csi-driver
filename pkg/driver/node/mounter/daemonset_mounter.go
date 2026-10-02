@@ -28,6 +28,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -117,10 +118,16 @@ type DaemonsetMounter struct {
 	mountSyscall      mountSyscallFunc
 	bindMountSyscall  bindMountSyscallFunc
 	mountInfoProvider mountInfoProviderFunc
+	chown             chownFunc
+	chmod             chmodFunc
 
 	// mountMap tracks shared source mounts for pod-sharing.
 	// Mount/Unmount use reference-counted sharing via this map.
 	mountMap *MountMap
+
+	// uidAllocator hands out the per-mount UID/GID each Mountpoint process runs as.
+	// Repopulated from the persisted metadata by RebuildMountMap before any mount is served.
+	uidAllocator *UIDAllocator
 
 	// s3paCache is the controller-runtime informer cache for MountpointS3PodAttachment CRs.
 	// Used during the V2->V3 upgrade to resolve the committed IAM role ARN for a legacy
@@ -146,7 +153,14 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 		bindMountSyscall:  bindMountSyscall,
 		mountInfoProvider: mountInfoProvider,
 		mountMap:          NewMountMap(),
+		uidAllocator:      NewUIDAllocator(),
 	}
+}
+
+// UIDInUseForTesting reports whether the allocator still holds `uid`. Tests outside this package
+// need it to tell a released UID from one that is merely no longer in use by any mount.
+func (dm *DaemonsetMounter) UIDInUseForTesting(uid uint32) bool {
+	return dm.uidAllocator.InUse(uid)
 }
 
 // SetS3PACache sets the MountpointS3PodAttachment informer cache used for V2 legacy
@@ -317,15 +331,31 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		entry.Params = incomingParams
 		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
 		entry.CommDir = commDir
+
+		// Claim the UID this mount's Mountpoint will run as. Releasing first so that an entry that
+		// already failed once does not leak the UID it claimed then; a no-op for a new entry.
+		dm.uidAllocator.Release(entry.Uid)
+		uid, err := dm.uidAllocator.Allocate()
+		if err != nil {
+			return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
+		}
+		entry.Uid = uid
+
 		if err := WriteMeta(dm.kubeletPath, entry); err != nil {
 			return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
 		}
 	}
 
+	// Lock down the paths every mount shares before writing this mount's credentials, so no
+	// Mountpoint can create entries in the comm directory or reach the mount request socket.
+	if err := dm.secureSharedPaths(entry.CommDir); err != nil {
+		return fmt.Errorf("failed to secure shared paths for volume %s: %w", volumeID, err)
+	}
+
 	// Provision credentials under the lock. We always use entry.CommDir which is set above
 	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
 	// This ensures credentials are written to the same location that cleanup will look at.
-	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, &credentialCtx)
+	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
 		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
@@ -350,12 +380,12 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 
 	// New mount: FUSE mount at source, then bind to target.
 
-	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, args, userEnv, credsEnv, authSource); err != nil {
+	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
 		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
 			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failure for volume %s: %v", volumeID, cleanErr)
 			return err
 		}
-		dm.forgetMount(volumeID)
+		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
@@ -365,7 +395,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 			klog.Errorf("DaemonsetMounter: cleanup after BindMount failure for volume %s: %v", volumeID, cleanErr)
 			return err
 		}
-		dm.forgetMount(volumeID)
+		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
@@ -382,7 +412,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 // Credentials are already provisioned by the caller (Mount).
 // commDir is passed from the caller to ensure a single GetCommDir() per NodePublishVolume.
 func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mountPath string,
-	volumeID string, commDir string, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
+	volumeID string, commDir string, uid uint32, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
 
 	if err := os.MkdirAll(mountPath, targetDirPerm); err != nil {
 		return fmt.Errorf("failed to create mount directory %q: %w", mountPath, err)
@@ -409,6 +439,12 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 	// Set after the pod-sharing key is taken from args above, so it stays out of that key and the saved meta.
 	args.Set(mountpoint.ArgUserAgentPrefix, UserAgent(authSource, dm.kubernetesVersion, dm.variant))
 
+	// If not specified, pass default --uid and --gid so the files Mountpoint serves do not appear owned
+	// by its process UID.
+	mpUID := strconv.FormatInt(*cluster.DefaultMountpointUID, 10)
+	args.SetIfAbsent(mountpoint.ArgUid, mpUID)
+	args.SetIfAbsent(mountpoint.ArgGid, mpUID)
+
 	env := envprovider.Environment{}
 	env.Merge(userEnv)
 	env.Merge(envprovider.Default())
@@ -433,6 +469,8 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 		Args:       args.SortedList(),
 		Env:        env.List(),
 		VolumeId:   volumeID,
+		Uid:        uid,
+		Gid:        uid,
 	})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) || errors.Is(err, context.DeadlineExceeded) {
@@ -541,8 +579,8 @@ func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, creden
 			klog.Errorf("DaemonsetMounter: %v (will retry on next unmount attempt)", err)
 			// Don't remove meta or map entry — leave for retry/background cleanup.
 		} else {
-			// All resources confirmed cleaned — safe to remove bookkeeping.
-			dm.forgetMount(volumeID)
+			// All resources confirmed cleaned — safe to remove bookkeeping and hand the UID back.
+			dm.forgetMount(volumeID, entry)
 		}
 	}
 
@@ -652,20 +690,22 @@ func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry) {
 		klog.Errorf("DaemonsetMounter: cleanup: %v (will retry next tick)", err)
 		return
 	}
-	dm.forgetMount(volumeID)
+	dm.forgetMount(volumeID, entry)
 }
 
 // forgetMount discards a mount's records once [DaemonsetMounter.cleanupMount] has confirmed its
-// resources are gone: the meta file, then the in-memory entry.
+// resources are gone: the meta file, then the UID, then the in-memory entry.
 //
-// The meta file goes first because it is the only durable record of the volumeHandle. A failed removal keeps
-// the entry, so the periodic cleanup retries. Caller must hold entry.mu.
-func (dm *DaemonsetMounter) forgetMount(volumeID string) {
+// The meta file goes first because it is the only durable record of the UID and the volumeHandle. A
+// failed removal keeps both the UID and the entry, so the periodic cleanup retries. Caller must hold
+// entry.mu.
+func (dm *DaemonsetMounter) forgetMount(volumeID string, entry *MountEntry) {
 	if err := RemoveMeta(dm.kubeletPath, volumeID); err != nil {
 		klog.Errorf("DaemonsetMounter: %v for volume %s, keeping in-memory tracking (will retry next cleanup)",
 			err, volumeID)
 		return
 	}
+	dm.uidAllocator.Release(entry.Uid)
 	dm.mountMap.Delete(volumeID)
 }
 
@@ -1048,10 +1088,10 @@ func (dm *DaemonsetMounter) findV2S3PodAttachment(ctx context.Context, pvName st
 }
 
 // provideCredentials creates a per-mount credential directory and provisions credentials into it.
-func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
-	mountCredDir := filepath.Join(commDir, volumeID)
-	if err := os.MkdirAll(mountCredDir, credentialprovider.CredentialDirPerm); err != nil {
-		return nil, "", fmt.Errorf("failed to create credential directory %q: %w", mountCredDir, err)
+func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, volumeID string, uid uint32, credentialCtx *credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+	mountCredDir, err := dm.ensureCredentialsDirOwnedBy(commDir, volumeID, uid)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create credential directory: %w", err)
 	}
 	credentialCtx.WritePath = mountCredDir
 	credentialCtx.EnvPath = filepath.Join("/comm", volumeID)
@@ -1061,6 +1101,11 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 	if err != nil {
 		return nil, "", err
 	}
+
+	if err := dm.ownCredentialsDirContents(mountCredDir, uid); err != nil {
+		return nil, "", fmt.Errorf("failed to hand credentials in %q to UID %d: %w", mountCredDir, uid, err)
+	}
+
 	return env, authSource, nil
 }
 
@@ -1182,6 +1227,7 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 	defer entry.mu.Unlock()
 	entry.SourcePath = sourcePath
 	entry.CommDir = meta.CommDir
+	entry.Uid = meta.Uid
 	entry.Params = MountParams{
 		MountOptions:             meta.MountOptions,
 		AuthenticationSource:     meta.AuthenticationSource,
@@ -1255,6 +1301,10 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				"Drain this node to move workloads elsewhere, then delete this corrupted meta file to allow the node to start", metaPath, err)
 		}
 
+		if err := dm.uidAllocator.Reserve(meta.Uid); err != nil {
+			klog.Warningf("MountMap: not reserving UID for volume %s: %v", meta.VolumeID, err)
+		}
+
 		// Derive SourcePath from VolumeID (not persisted, always computable)
 		sourcePath := SourceMountPath(dm.kubeletPath, meta.VolumeID)
 
@@ -1281,7 +1331,12 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
 				continue
 			}
-			os.Remove(metaPath)
+			if err := removeMetaFile(metaPath); err != nil {
+				klog.Errorf("MountMap: %v for volume %s, keeping in-memory tracking (will retry next cleanup)", err, meta.VolumeID)
+				dm.populateEntryFromMeta(meta, sourcePath, false, nil)
+				continue
+			}
+			dm.uidAllocator.Release(meta.Uid)
 			continue
 		}
 

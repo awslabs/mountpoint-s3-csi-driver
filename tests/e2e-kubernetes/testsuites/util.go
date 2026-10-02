@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/google/uuid"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -485,4 +487,78 @@ func checkWriteToPathFailsEventually(ctx context.Context, f *framework.Framework
 	gomega.Eventually(ctx, func(ctx context.Context) error {
 		return e2epod.VerifyExecInPodFail(ctx, f, pod, cmd, 1)
 	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
+}
+
+// Labels and container names of the two driver daemonsets.
+const (
+	mounterPodLabel      = "app=s3-csi-daemonset-mounter"
+	mounterContainerName = "mounter"
+	csiNodePodLabel      = "app=s3-csi-node"
+	csiNodeContainerName = "s3-plugin"
+)
+
+// podOnNode returns the driver pod matching `label` on `nodeName`.
+func podOnNode(ctx context.Context, f *framework.Framework, label, nodeName string) (*v1.Pod, error) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: label,
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing %s pods on node %s: %w", label, nodeName, err)
+	}
+	if len(pods.Items) == 0 {
+		return nil, fmt.Errorf("no %s pod on node %s", label, nodeName)
+	}
+	return &pods.Items[0], nil
+}
+
+// execInPodOnNode runs `cmd` in `container` of the pod matching `label` on `nodeName`, returning its
+// stdout and stderr.
+//
+// stderr matters: a spec asserting that access is *refused* needs to distinguish the kernel denying it
+// from the command having failed for any other reason.
+func execInPodOnNode(ctx context.Context, f *framework.Framework, label, container, nodeName, cmd string) (string, string, error) {
+	pod, err := podOnNode(ctx, f, label, nodeName)
+	if err != nil {
+		return "", "", err
+	}
+	return execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, pod.Name, container,
+		[]string{"/bin/sh", "-c", cmd})
+}
+
+// execInCSINodePod runs `cmd` in the csi-node pod on `nodeName`.
+//
+// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter it
+// can read a directory owned by a mount's UID, and it is the component that applied that ownership.
+func execInCSINodePod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, error) {
+	stdout, _, err := execInPodOnNode(ctx, f, csiNodePodLabel, csiNodeContainerName, nodeName, cmd)
+	return stdout, err
+}
+
+// execInMounterPod runs `cmd` in the mounter pod on `nodeName`, returning its stdout and stderr.
+func execInMounterPod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, string, error) {
+	return execInPodOnNode(ctx, f, mounterPodLabel, mounterContainerName, nodeName, cmd)
+}
+
+// createServiceAccountWithAssumableRole creates a service account annotated with a fresh IAM role
+// granting `policyName`, and returns it once the role can be assumed with web identity. The service
+// account and the role are cleaned up when the spec ends.
+func createServiceAccountWithAssumableRole(ctx context.Context, f *framework.Framework, oidcProvider, policyName string) *v1.ServiceAccount {
+	sa, removeSA := createServiceAccount(ctx, f)
+	ginkgo.DeferCleanup(removeSA)
+
+	role, removeRole := createRole(ctx, f, assumeRoleWithWebIdentityPolicyDocument(ctx, oidcProvider, sa), policyName)
+	ginkgo.DeferCleanup(removeRole)
+
+	sa, _ = overrideServiceAccountRole(ctx, f, sa, *role.Arn)
+	waitUntilRoleIsAssumableWithWebIdentity(ctx, f, sa)
+	return sa
+}
+
+// mustAtoi parses a decimal field, failing the test if it is not a number. Returning a zero on a
+// parse failure would pass silently wherever zero is the expected value.
+func mustAtoi(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	framework.ExpectNoError(err, "while parsing %q as a number", s)
+	return n
 }
