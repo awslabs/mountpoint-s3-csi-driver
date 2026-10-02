@@ -24,7 +24,6 @@ func MetaFileName(kubeletPath, volumeID string) string {
 type MountMeta struct {
 	VolumeID                 string   `json:"volumeID"`
 	CommDir                  string   `json:"commDir"`
-	CacheDir                 string   `json:"cacheDir,omitempty"`
 	MountOptions             []string `json:"mountOptions"`
 	AuthenticationSource     string   `json:"authenticationSource"`
 	ServiceAccountName       string   `json:"serviceAccountName"`
@@ -41,7 +40,6 @@ func WriteMeta(kubeletPath string, entry *MountEntry) error {
 	meta := MountMeta{
 		VolumeID:                 entry.VolumeID,
 		CommDir:                  entry.CommDir,
-		CacheDir:                 entry.CacheDir,
 		MountOptions:             entry.Params.MountOptions,
 		AuthenticationSource:     entry.Params.AuthenticationSource,
 		ServiceAccountName:       entry.Params.ServiceAccountName,

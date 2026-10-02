@@ -179,6 +179,7 @@ spec:
           - --max-volumes-per-node={{ $maxVolumes }}
           - --memory-limit-strategy={{ $memoryStrategy }}
           {{- if $cacheEnabled }}
+          - --cache-dir=/cache
           - --cache-limit-strategy={{ $cacheStrategy }}
           - --cache-medium={{ $cacheMedium }}
           {{- end }}
