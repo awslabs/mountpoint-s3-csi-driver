@@ -234,9 +234,22 @@ func TestStaleAttachmentCleanerDeletesEmptyS3PA(t *testing.T) {
 		"Mountpoint Pod with no workloads": {"mp-1": {}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
 			s3pa := newS3PA("s3pa-empty", attachments)
 			c, reconciler := newReconcilerWithObjects(t, s3pa)
-			assert.NoError(t, NewStaleAttachmentCleaner(reconciler).RunCleanup(context.Background()))
+			cleaner := NewStaleAttachmentCleaner(reconciler)
+
+			// Kept on the first pass, and again if it changed since then
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+			assert.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa))
+			s3pa.Labels = map[string]string{"changed": "true"}
+			assert.NoError(t, c.Update(ctx, s3pa))
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+
+			// Deleted once it is still unchanged on the next pass
+			assert.NoError(t, cleaner.RunCleanup(ctx))
 			assertS3PADeleted(t, c, s3pa.Name)
 		})
 	}
