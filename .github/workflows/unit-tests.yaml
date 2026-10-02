@@ -22,7 +22,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Verify Helm controller replicas
+    - name: Run helm unit tests
       run: |
         ./scripts/helm-unit-tests.sh
 
