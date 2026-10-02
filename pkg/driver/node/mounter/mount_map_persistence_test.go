@@ -70,7 +70,6 @@ func TestWriteMeta_CreatesFile(t *testing.T) {
 	entry := &MountEntry{
 		VolumeID:   "vol-abc123",
 		SourcePath: filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "mnt", "vol-abc123"),
-		CacheDir:   cacheDirForKubeletPath(kubeletPath),
 		Params: MountParams{
 			MountOptions:             []string{"--allow-other", "--region=us-east-1"},
 			AuthenticationSource:     "driver",
@@ -100,7 +99,6 @@ func TestWriteMeta_CreatesFile(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equals(t, "vol-abc123", meta.VolumeID)
-	assert.Equals(t, cacheDirForKubeletPath(kubeletPath), meta.CacheDir)
 	assert.Equals(t, "driver", meta.AuthenticationSource)
 	assert.Equals(t, "default", meta.ServiceAccountName)
 	assert.Equals(t, "arn:aws:iam::111111111111:role/my-role", meta.ServiceAccountEKSRoleARN)
@@ -186,7 +184,6 @@ func TestReadMeta_ParsesCorrectly(t *testing.T) {
 	entry := &MountEntry{
 		VolumeID:   "vol-read",
 		SourcePath: "/my/source/path",
-		CacheDir:   cacheDirForKubeletPath(kubeletPath),
 		Params: MountParams{
 			MountOptions:             []string{"--read-only"},
 			AuthenticationSource:     "pod",
@@ -203,7 +200,6 @@ func TestReadMeta_ParsesCorrectly(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equals(t, "vol-read", meta.VolumeID)
-	assert.Equals(t, cacheDirForKubeletPath(kubeletPath), meta.CacheDir)
 	assert.Equals(t, "pod", meta.AuthenticationSource)
 	assert.Equals(t, "my-sa", meta.ServiceAccountName)
 	assert.Equals(t, "arn:aws:iam::222222222222:role/pod-role", meta.ServiceAccountEKSRoleARN)
@@ -407,14 +403,10 @@ func TestRebuildMountMap_FailsOnInvalidMetaJSON(t *testing.T) {
 func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-dead")
-	cacheDir := cacheDirForKubeletPath(kubeletPath)
-	mountCacheDir := filepath.Join(cacheDir, "vol-dead")
-	assert.NoError(t, os.MkdirAll(mountCacheDir, 0770))
 
 	entry := &MountEntry{
 		VolumeID:   "vol-dead",
 		SourcePath: sourcePath,
-		CacheDir:   cacheDir,
 		Params:     MountParams{AuthenticationSource: "driver", ServiceAccountName: "default"},
 	}
 	err := WriteMeta(kubeletPath, entry)
@@ -437,9 +429,6 @@ func TestRebuildMountMap_CleansUpDeadSourceMounts(t *testing.T) {
 	if !os.IsNotExist(err) {
 		t.Fatal("expected meta file to be removed for dead source")
 	}
-
-	// Cache should also be cleaned up
-	assert.Equals(t, true, os.IsNotExist(statErr(mountCacheDir)))
 }
 
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
@@ -651,39 +640,6 @@ func TestRebuildMountMap_MultipleVolumes(t *testing.T) {
 	assert.Equals(t, "sa-b", recB.Params.ServiceAccountName)
 }
 
-// TestRebuildMountMap_RecoversCacheDirFromMeta covers CacheDir surviving s3-csi-node restart
-func TestRebuildMountMap_RecoversCacheDirFromMeta(t *testing.T) {
-	kubeletPath, err := filepath.EvalSymlinks(t.TempDir())
-	assert.NoError(t, err)
-
-	const volumeID = "vol-live"
-	sourcePath := SourceMountPath(kubeletPath, volumeID)
-	targetPath := filepath.Join(kubeletPath, "pods", "wl-a", "mount")
-	cacheDir := cacheDirForKubeletPath(kubeletPath)
-	mountCacheDir := filepath.Join(cacheDir, volumeID)
-	assert.NoError(t, os.MkdirAll(mountCacheDir, 0770))
-
-	assert.NoError(t, WriteMeta(kubeletPath, &MountEntry{
-		VolumeID:   volumeID,
-		SourcePath: sourcePath,
-		CacheDir:   cacheDir,
-		Params:     MountParams{AuthenticationSource: "driver", VolumeHandle: "handle"},
-	}))
-
-	dm, fakeMounter := newTestDMWithFakeMounter(kubeletPath, fakeMountInfoProvider([]mountutils.MountInfo{
-		{MountPoint: sourcePath, Major: 0, Minor: 42},
-		{MountPoint: targetPath, Major: 0, Minor: 42},
-	}))
-	registerSourceMount(t, fakeMounter, sourcePath)
-
-	assert.NoError(t, dm.RebuildMountMap())
-	assert.NoError(t, statErr(mountCacheDir))
-
-	// Test via releaseTarget which triggers the cache cleanup
-	assert.NoError(t, dm.releaseTarget(targetPath, volumeID, credentialprovider.CleanupContext{VolumeID: volumeID}))
-	assert.Equals(t, true, os.IsNotExist(statErr(mountCacheDir)))
-}
-
 // --- Write → Read round-trip ---
 
 func TestWriteReadMetaCycle(t *testing.T) {
@@ -692,7 +648,6 @@ func TestWriteReadMetaCycle(t *testing.T) {
 	entry := &MountEntry{
 		VolumeID:   "vol-roundtrip",
 		SourcePath: SourceMountPath(kubeletPath, "vol-roundtrip"),
-		CacheDir:   cacheDirForKubeletPath(kubeletPath),
 		Params: MountParams{
 			MountOptions:             []string{"--allow-other", "--prefix=data/", "--read-only"},
 			AuthenticationSource:     "pod",
@@ -709,7 +664,6 @@ func TestWriteReadMetaCycle(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equals(t, entry.VolumeID, meta.VolumeID)
-	assert.Equals(t, entry.CacheDir, meta.CacheDir)
 	assert.Equals(t, entry.Params.AuthenticationSource, meta.AuthenticationSource)
 	assert.Equals(t, entry.Params.ServiceAccountName, meta.ServiceAccountName)
 	assert.Equals(t, entry.Params.ServiceAccountEKSRoleARN, meta.ServiceAccountEKSRoleARN)
@@ -835,11 +789,6 @@ func registerSourceMount(t *testing.T, fakeMounter *mountutils.FakeMounter, sour
 	assert.NoError(t, fakeMounter.Mount("mountpoint-s3", sourcePath, "fuse", nil))
 }
 
-// cacheDirForKubeletPath is the mounter pod's cache volume as the kubelet lays it out, spelled once so every test here agrees on it.
-func cacheDirForKubeletPath(kubeletPath string) string {
-	return filepath.Join(kubeletPath, "pods", "mounter-uid", volumesSubdir, emptyDirVolumesSubdir, CacheVolumeName)
-}
-
 func statErr(path string) error {
 	_, err := os.Stat(path)
 	return err
@@ -852,7 +801,7 @@ func TestCleanupOrphans(t *testing.T) {
 	tests := []struct {
 		name string
 		// setup seeds the map and on-host state for this case.
-		setup func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA, cacheDir string)
+		setup func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string)
 		// mountInfo is the fake kernel mount table for this case.
 		mountInfo func(sourcePath, targetA string) []mountutils.MountInfo
 
@@ -860,37 +809,31 @@ func TestCleanupOrphans(t *testing.T) {
 		expectMetaGone    bool // meta file removed
 		expectMetaPresent bool // meta file must remain — a surviving entry relies on it to rebuild the map after a CSI node restart
 		expectRefCount    int  // asserted when the entry survives
-		expectCacheGone   bool // the mount's cache directory removed; every row asserts one way or the other
 	}{
 		{
 			// Dead source (nothing in the mount table): source, creds, error file,
 			// meta, and map entry all removed.
 			name: "dead source torn down",
-			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, _, cacheDir string) {
+			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				commDir := filepath.Join(kubeletPath, "comm")
 				assert.NoError(t, os.MkdirAll(filepath.Join(commDir, volumeID), 0750))
 				os.WriteFile(filepath.Join(commDir, volumeID+".error"), []byte("boom"), 0600)
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
 				entry := seedEntry(dm, volumeID, sourcePath, commDir, nil)
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo:       func(_, _ string) []mountutils.MountInfo { return nil },
 			expectEntryGone: true,
 			expectMetaGone:  true,
-			expectCacheGone: true,
 		},
 		{
 			// Healthy source: a tracked target the kernel no longer shows is dropped
 			// and the refcount fixed, but the source stays because another target is
 			// still live. (Also covers the "healthy mount left alone" path.)
 			name: "reconciles refcount",
-			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA, cacheDir string) {
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string) {
 				targetB := filepath.Join(kubeletPath, "pods", "wl-b", "mount")
 				registerSourceMount(t, fakeMounter, sourcePath)
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
 				entry := seedEntry(dm, volumeID, sourcePath, "", []string{targetA, targetB})
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
@@ -901,18 +844,15 @@ func TestCleanupOrphans(t *testing.T) {
 			},
 			expectRefCount:    1,
 			expectMetaPresent: true,
-			expectCacheGone:   false,
 		},
 		{
 			// Teardown's cleanupMount fails (unmount errors): the entry and meta are
 			// KEPT so a later tick retries — we must not lose bookkeeping on failure.
 			name: "failed cleanup keeps entry and meta",
-			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _, cacheDir string) {
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)
 				fakeMounter.UnmountFunc = func(string) error { return fmt.Errorf("unmount failed") }
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
 				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // no live targets -> teardown attempted
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, _ string) []mountutils.MountInfo {
@@ -920,16 +860,13 @@ func TestCleanupOrphans(t *testing.T) {
 			},
 			expectRefCount:    0, // entry survives (not torn down)
 			expectMetaPresent: true,
-			expectCacheGone:   true, // Run cache cleanup EVEN IF unmount fails
 		},
 		{
 			// Healthy source, no bind mounts left in the kernel: torn down.
 			name: "last consumer gone, torn down",
-			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _, cacheDir string) {
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
 				entry := seedEntry(dm, volumeID, sourcePath, "", []string{filepath.Join(kubeletPath, "pods", "gone", "mount")})
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, _ string) []mountutils.MountInfo {
@@ -937,17 +874,14 @@ func TestCleanupOrphans(t *testing.T) {
 			},
 			expectEntryGone: true,
 			expectMetaGone:  true,
-			expectCacheGone: true,
 		},
 		{
 			// The source is healthy and the kernel shows a live bind mount that we are not
 			// tracking. Cleanup adopts it, so the refcount becomes 1 and the source is kept.
 			name: "untracked live bind mount adopted, not torn down",
-			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _, cacheDir string) {
-				registerSourceMount(t, fakeMounter, sourcePath) // source is healthy
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
+			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
+				registerSourceMount(t, fakeMounter, sourcePath)       // source is healthy
 				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // we track no targets
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
@@ -958,7 +892,6 @@ func TestCleanupOrphans(t *testing.T) {
 			},
 			expectRefCount:    1,
 			expectMetaPresent: true,
-			expectCacheGone:   false,
 		},
 		{
 			// A dead source still in the mount table with a live tracked target (mounter
@@ -967,11 +900,9 @@ func TestCleanupOrphans(t *testing.T) {
 			// anyway (recreate the pod to recover); the meta/cred churn a republishing
 			// workload would otherwise cause is stopped in Mount, not here.
 			name: "dead source with live target torn down",
-			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, targetA, cacheDir string) {
+			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, targetA string) {
 				// Source is not registered as healthy, so the health probe reports it dead.
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
 				entry := seedEntry(dm, volumeID, sourcePath, "", []string{targetA})
-				entry.CacheDir = cacheDir
 				assert.NoError(t, WriteMeta(kubeletPath, entry))
 			},
 			mountInfo: func(sourcePath, targetA string) []mountutils.MountInfo {
@@ -982,19 +913,15 @@ func TestCleanupOrphans(t *testing.T) {
 			},
 			expectEntryGone: true,
 			expectMetaGone:  true,
-			expectCacheGone: true,
 		},
 		{
 			// A mid-creation placeholder (empty SourcePath) is skipped, not deleted.
 			name: "skips placeholder",
-			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, _, _, _, cacheDir string) {
-				assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, volumeID), 0770))
-				entry, _ := dm.mountMap.GetOrCreate(volumeID)
-				entry.CacheDir = cacheDir
+			setup: func(_ *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, _, _, _ string) {
+				dm.mountMap.GetOrCreate(volumeID)
 			},
-			mountInfo:       func(_, _ string) []mountutils.MountInfo { return nil },
-			expectRefCount:  0,
-			expectCacheGone: false,
+			mountInfo:      func(_, _ string) []mountutils.MountInfo { return nil },
+			expectRefCount: 0,
 		},
 	}
 
@@ -1004,11 +931,9 @@ func TestCleanupOrphans(t *testing.T) {
 			assert.NoError(t, err)
 			sourcePath := SourceMountPath(kubeletPath, volumeID)
 			targetA := filepath.Join(kubeletPath, "pods", "wl-a", "mount")
-			cacheDir := cacheDirForKubeletPath(kubeletPath)
-			mountCacheDir := filepath.Join(cacheDir, volumeID)
 
 			dm, fakeMounter := newTestDMWithFakeMounter(kubeletPath, fakeMountInfoProvider(tt.mountInfo(sourcePath, targetA)))
-			tt.setup(t, dm, fakeMounter, kubeletPath, sourcePath, targetA, cacheDir)
+			tt.setup(t, dm, fakeMounter, kubeletPath, sourcePath, targetA)
 
 			dm.CleanupOrphans()
 
@@ -1027,13 +952,6 @@ func TestCleanupOrphans(t *testing.T) {
 				// to recover this mount after a CSI node restart.
 				assert.NoError(t, statErr(MetaFileName(kubeletPath, volumeID)))
 			}
-			if tt.expectCacheGone {
-				assert.Equals(t, true, os.IsNotExist(statErr(mountCacheDir)))
-			} else {
-				assert.NoError(t, statErr(mountCacheDir))
-			}
-			// The volume root holds every other mount's cache, so no case may take it.
-			assert.NoError(t, statErr(cacheDir))
 		})
 	}
 }

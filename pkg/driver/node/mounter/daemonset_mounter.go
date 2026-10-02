@@ -58,6 +58,9 @@ const (
 	MountSockName    = "mount.sock"
 	MountErrorSuffix = ".error"
 
+	volumesSubdir         = "volumes"
+	emptyDirVolumesSubdir = "kubernetes.io~empty-dir"
+
 	// TODO: lower sendOptionsTimeout once secondary has concurrent accept to reduce blocks on Mount -> Send -> dialWithRetry
 	sendOptionsTimeout = 15 * time.Second
 
@@ -90,8 +93,8 @@ var (
 type mounterPod struct {
 	// comm directory for communicating with mounter pod.
 	commDir string
-	// cache directory path. "" when the mounter has no cache volume. Stored as its not derivable from commDir for ephemeral cache type.
-	cacheDir string
+	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
+	hasCacheVolume bool
 }
 
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
@@ -173,7 +176,7 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
 //  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
 //     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
-//     - Write meta file, set SourcePath/CommDir/CacheDir on the entry
+//     - Write meta file, set SourcePath/CommDir on the entry
 //  4. Provision credentials (under lock to avoid race with cleanup on failure)
 //  5. If target is already mounted (republish/retry): creds refreshed above, return early
 //  6. If source is mounted (healthy) → bind mount to new target, bump refcount
@@ -249,25 +252,29 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
 	}
 
-	// Decide whether this mount caches and name its directory, rejecting a cache request this node cannot serve.
-	cacheDir, err := cacheDirForMount(args, volumeCtx, volumeID, mounter.cacheDir)
+	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
+	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
 	if err != nil {
 		return err
 	}
-	if cacheDir != "" {
-		// Discard PV supplied path and use PV subdirectory in the mounter's cache directory.
-		args.Set(mountpoint.ArgCache, MountOptionCacheDir(volumeID))
+	// Discard any PV supplied path (repeated cache mount options scenario - must remove all args)
+	for args.Has(mountpoint.ArgCache) {
+		args.Remove(mountpoint.ArgCache)
+	}
+	// The mounter picks the mount's directory
+	if caches {
+		args.Set(mountpoint.ArgCache, mountpoint.ArgNoValue)
 	}
 
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, volumeCtx, args, fsGroup, userEnv, cacheDir, targetState == TargetHealthy)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, volumeCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, cacheDir string, targetIsMounted bool) error {
+	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
 	commDir := mounter.commDir
 
@@ -337,17 +344,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		entry.Params = incomingParams
 		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
 		entry.CommDir = commDir
-		entry.CacheDir = cacheDir
 
 		if err := WriteMeta(dm.kubeletPath, entry); err != nil {
 			return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
-		}
-
-		// Create cache dir after meta is written, or a crash between them causes cache directory to not be found.
-		if entry.CacheDir != "" {
-			if err := createCacheDir(entry.CacheDir, volumeID); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -398,7 +397,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		return err
 	}
 
-	// Populate entry — SourcePath, CommDir and CacheDir already set above.
+	// Populate entry — SourcePath and CommDir already set above.
 	entry.RefCount = 1
 	entry.Targets = []string{target}
 	entry.sourceMounted = true
@@ -735,22 +734,6 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 	}
 
 	// TODO Verify no MP process running
-
-	// After the unmount, so Mountpoint is exiting rather than still writing here. Returning the
-	// error is what keeps the entry and meta file, so CleanupOrphans retries.
-	//
-	// Mountpoint details:
-	// - Cache is wiped on mount and exit, so leaked cache should self-heal on same path.
-	// - Cache read of deleted block or with errors is silent miss, so no issues with deleting cache whilst MP still running (disk_data_cache.rs)
-	// - Cache write into deleted directory recreates the whole tree (recursive true), inc. /cache/pv-name/ (disk_data_cache.rs)
-	// Last bullet point points towards edge case where MP is still running after source unmount and MP creates cacheDir, even with no workloads
-	// a late read request coming back could still trigger cache writes. Addressing TODO to verify no MP process running above can solve this.
-	if entry.CacheDir != "" {
-		if err := removeCacheDir(entry.CacheDir, entry.VolumeID); err != nil {
-			klog.Errorf("DaemonsetMounter: remove cache dir for volume %s: %v", entry.VolumeID, err)
-			errs = append(errs, err)
-		}
-	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("incomplete cleanup for volume %s (%d errors)", entry.VolumeID, len(errs))
@@ -1225,7 +1208,6 @@ func (dm *DaemonsetMounter) populateEntryFromMeta(meta *MountMeta, sourcePath st
 	defer entry.mu.Unlock()
 	entry.SourcePath = sourcePath
 	entry.CommDir = meta.CommDir
-	entry.CacheDir = meta.CacheDir
 	entry.Params = MountParams{
 		MountOptions:             meta.MountOptions,
 		AuthenticationSource:     meta.AuthenticationSource,
@@ -1311,7 +1293,6 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 				VolumeID:   meta.VolumeID,
 				SourcePath: sourcePath,
 				CommDir:    meta.CommDir,
-				CacheDir:   meta.CacheDir,
 			}
 			cleanupCtx := credentialprovider.CleanupContext{VolumeID: meta.VolumeID}
 			if cleanErr := dm.cleanupMount(entry, cleanupCtx); cleanErr != nil {
@@ -1372,16 +1353,13 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	podUID := string(running[0].UID)
 	mounterDir := filepath.Join(dm.kubeletPath, "pods", podUID)
 	commDir := commDirForMounterDir(mounterDir)
-	cacheDir, err := resolveCacheDir(ctx, dm.clientset, &running[0], mounterDir)
-	if err != nil {
-		return nil, err
-	}
+	hasCacheVolume := mounterPodHasCacheVolume(running[0])
 
-	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache dir: %q",
-		running[0].Name, podUID, commDir, cacheDir)
+	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
+		running[0].Name, podUID, commDir, hasCacheVolume)
 	return &mounterPod{
-		commDir:  commDir,
-		cacheDir: cacheDir,
+		commDir:        commDir,
+		hasCacheVolume: hasCacheVolume,
 	}, nil
 }
 

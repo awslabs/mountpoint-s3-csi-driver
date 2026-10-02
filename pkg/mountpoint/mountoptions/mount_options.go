@@ -31,7 +31,7 @@ type Options struct {
 	VolumeId string `json:"volumeId,omitempty"`
 }
 
-// Send sends given mount `options` to given `sockPath` to be received by `Recv` function on the other end.
+// Send sends given mount `options` to given `sockPath` to be received by `Recv` / `RecvOnConn` function on the other end.
 func Send(ctx context.Context, sockPath string, options Options) error {
 	sockPath = tryToMakeSockPathRelative(sockPath)
 
