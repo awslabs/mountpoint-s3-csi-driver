@@ -159,6 +159,11 @@ test:
 	# TestE2E is the Ginkgo e2e suite entry point which requires a live cluster, so we skip it.
 	cd tests/e2e-kubernetes && go test -v -skip TestE2E ./...
 
+.PHONY: test/helm-template
+test/helm-template:
+	helm lint --strict ./charts/aws-mountpoint-s3-csi-driver
+	go test -v -count=1 ./tests/helm-template/...
+
 .PHONY: cover
 cover:
 	${GOBIN}/go-test-coverage --config=./.testcoverage.yml
