@@ -136,13 +136,6 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       priorityClassName: system-node-critical
-      {{- if $cacheEnabled }}
-      securityContext:
-        # An unprivileged container needs a group owning the volume the kubelet provisions for it,
-        # or an ephemeral cache volume arrives `root:root 0755` and Mountpoint cannot write.
-        # TODO: This is covered by process isolation PR.
-        fsGroup: 1000
-      {{- end }}
       {{- with $mounter.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -216,6 +209,9 @@ spec:
               - SETUID # set the UID of each spawned Mountpoint process
               - SETGID # set its GID and clear its supplementary groups
               - KILL   # signal the children on shutdown, which do not share our UID
+              {{- if $cacheEnabled }}
+              - CHOWN  # give the cache volume to root, and each mount's cache directory to its Mountpoint's UID
+              {{- end }}
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
