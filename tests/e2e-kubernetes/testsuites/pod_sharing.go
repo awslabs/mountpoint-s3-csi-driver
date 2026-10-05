@@ -62,6 +62,7 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 	var l local
 
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"podsharing", storageframework.GetDriverTimeouts(driver))
+	dumpMountpointAndDriverInfoOnFailure(f)
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	cleanup := func(ctx context.Context) {
