@@ -356,6 +356,57 @@ func (t *s3CSIPodSharingTestSuite) DefineTests(driver storageframework.TestDrive
 			checkExecInPodSucceed(ctx, f, pods[0], "cat /mnt/volume1/terminating.txt | grep -q 'terminating'")
 		})
 
+		ginkgo.It("should recover mount for new workload after Mountpoint process crash", func(ctx context.Context) {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+
+			ginkgo.By("Creating first workload pod with continuous mount access")
+			pod1 := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			// Continuously access the mount to keep kernel FUSE dentry cache warm.
+			// This reproduces the scenario where lstat on the source mount
+			// succeeds (served from cache) even though the FUSE daemon is dead.
+			pod1.Spec.Containers[0].Command = []string{"/bin/sh"}
+			pod1.Spec.Containers[0].Args = []string{"-c", "while true; do cat /mnt/volume1/file.txt 2>/dev/null || true; sleep 1; done"}
+			pod1, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod1)
+			framework.ExpectNoError(err)
+			ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, pod1)
+			targetNode := pod1.Spec.NodeName
+
+			ginkgo.By("Verifying first pod has a healthy mount")
+			checkWriteToPathSucceed(ctx, f, pod1, "/mnt/volume1/file.txt", 1024, time.Now().UTC().UnixNano())
+
+			ginkgo.By("Crashing the Mountpoint process")
+			crashMountpointForVolume(ctx, f, resource.Pv.Name)
+
+			ginkgo.By("Verifying first pod's mount is broken")
+			framework.Gomega().Eventually(ctx, func() error {
+				return e2epod.VerifyExecInPodSucceed(ctx, f, pod1, "ls /mnt/volume1")
+			}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).ShouldNot(gomega.Succeed())
+
+			ginkgo.By("Waiting for Mountpoint Pod to restart and be Running")
+			mpPods, err := findMountpointPods(ctx, f.ClientSet, resource.Pv.Name)
+			framework.ExpectNoError(err)
+			gomega.Expect(mpPods).ToNot(gomega.BeEmpty())
+			framework.Gomega().Eventually(ctx, func() bool {
+				mpPod, err := f.ClientSet.CoreV1().Pods(mountpointNamespace).Get(ctx, mpPods[0].Name, metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				return mpPod.Status.Phase == v1.PodRunning
+			}).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(gomega.BeTrue())
+
+			ginkgo.By("Creating second workload pod on the same node")
+			pod2 := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": targetNode}, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			pod2, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod2)
+			framework.ExpectNoError(err)
+			ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, pod2)
+
+			ginkgo.By("Verifying second pod has a healthy mount")
+			seed := time.Now().UTC().UnixNano()
+			checkWriteToPathSucceed(ctx, f, pod2, "/mnt/volume1/after-crash.txt", 1024, seed)
+			checkReadFromPathSucceed(ctx, f, pod2, "/mnt/volume1/after-crash.txt", 1024, seed)
+		})
+
 		// Regression test for race condition fixed in https://github.com/awslabs/mountpoint-s3-csi-driver/pull/652
 		// This test was previously failing intermittently before the fix.
 		//
@@ -615,6 +666,40 @@ func defaultExpectedFields(nodeName string, pv *v1.PersistentVolume) map[string]
 		"AuthenticationSource": "driver",
 		"WorkloadFSGroup":      "",
 	}
+}
+
+// crashMountpointForVolume kills the mount-s3 process inside the Mountpoint Pod serving the given volume.
+func crashMountpointForVolume(ctx context.Context, f *framework.Framework, volumeName string) {
+	mpPods, err := findMountpointPods(ctx, f.ClientSet, volumeName)
+	framework.ExpectNoError(err)
+	gomega.Expect(mpPods).ToNot(gomega.BeEmpty(), "no Mountpoint pods found for volume %s", volumeName)
+
+	mpPod := mpPods[0]
+	framework.Logf("Killing mount-s3 process in Mountpoint Pod %s/%s", mpPod.Namespace, mpPod.Name)
+
+	// Find and kill the mount-s3 child process (not PID 1 which is aws-s3-csi-mounter).
+	// We iterate /proc to find the mount-s3 process by its cmdline.
+	killCmd := `for pid in $(ls /proc/ | grep -E '^[0-9]+$'); do
+		if [ "$pid" != "1" ] && cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' | grep -q mount-s3; then
+			kill -9 $pid
+			echo "killed $pid"
+			exit 0
+		fi
+	done
+	echo "mount-s3 process not found"
+	exit 1`
+
+	stdout, stderr, err := e2epod.ExecWithOptions(f, e2epod.ExecOptions{
+		Command:            []string{"/bin/sh", "-c", killCmd},
+		Namespace:          mpPod.Namespace,
+		PodName:            mpPod.Name,
+		ContainerName:      "mountpoint",
+		CaptureStdout:      true,
+		CaptureStderr:      true,
+		PreserveWhitespace: false,
+	})
+	framework.Logf("Kill result: stdout=%q stderr=%q err=%v", stdout, stderr, err)
+	framework.ExpectNoError(err, "failed to kill mount-s3 process in pod %s", mpPod.Name)
 }
 
 func checkCrossReadWrite(ctx context.Context, f *framework.Framework, pod1, pod2 *v1.Pod) {
