@@ -193,12 +193,16 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 					framework.ExpectNoError(err, "stat in the mounter on node %s: %s", m.node, stderr)
 					Expect(strings.TrimSpace(stat)).To(Equal(fmt.Sprintf("%s 711 0 0\n%s 700 %d %d", cacheMountPath, m.cacheDir, m.uid, m.uid)))
 
-					// Root without CAP_DAC_OVERRIDE is held to the 0700 mode like any other UID.
-					By("Confirming the mounter itself cannot read inside the mount's cache directory")
-					out, stderr, err := execInMounterPod(ctx, f, m.node, "ls "+m.cacheDir)
-					Expect(err).To(HaveOccurred(), "the mounter listed %s: %q", m.cacheDir, out)
-					Expect(stderr).To(ContainSubstring("Permission denied"),
-						"the mounter must be refused by the kernel, but the failure was: %q", stderr)
+					// The mounter holds CAP_DAC_OVERRIDE to remove cache directories, so use another UID to simulate a different mount's Mountpoint
+					By("Confirming another UID cannot read inside the mount's cache or credential directory")
+					otherUID := m.uid + 1
+					for _, dir := range []string{m.cacheDir, filepath.Join("/comm", m.vol.Pv.Name)} {
+						out, stderr, err := execInMounterPod(ctx, f, m.node,
+							fmt.Sprintf("setpriv --reuid=%d --regid=%d --clear-groups ls %s", otherUID, otherUID, dir))
+						Expect(err).To(HaveOccurred(), "UID %d listed %s: %q", otherUID, dir, out)
+						Expect(stderr).To(ContainSubstring("Permission denied"),
+							"UID %d must be refused by the kernel on %s, but the failure was: %q", otherUID, dir, stderr)
+					}
 
 					By("Deleting the object from S3, so the next read can only be served by the cache")
 					deleteObjectFromS3(ctx, bucketNameFromVolumeResource(m.vol), cachedFileName)
@@ -234,6 +238,17 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 						checkReadFromPathSucceed(ctx, f, m.pod, path, ioFileSize, seed)
 					})
 				}
+
+				It("grants the mounter only SETUID, SETGID, KILL, CHOWN, DAC_OVERRIDE and FOWNER, and its Mountpoint none", func(ctx context.Context) {
+					By("Checking the mounter holds only SETUID, SETGID, KILL, CHOWN, DAC_OVERRIDE and FOWNER")
+					expectMounterCapabilities(ctx, f, capSetuid|capSetgid|capKill|capChown|capDACOverride|capFowner)
+
+					m := mountCachedVolume(ctx, f, config, pattern, tc.nodeSelector, nil)
+					By("Checking Mountpoint holds no capabilities, though the mounter holds CAP_DAC_OVERRIDE and CAP_FOWNER")
+					c := mountpointProcessRunningAs(ctx, f, m.node, m.uid)
+					Expect([]string{c.capPrm, c.capEff, c.capAmb}).To(Equal([]string{"0000000000000000", "0000000000000000", "0000000000000000"}),
+						"Mountpoint pid %s must hold no permitted, effective or ambient capabilities", c.pid)
+				})
 
 				It("uses the correct cache volume, and gives the mount an equal share of it and of the memory a tmpfs cache leaves", func(ctx context.Context) {
 					m := mountCachedVolume(ctx, f, config, pattern, tc.nodeSelector, nil)
@@ -327,6 +342,11 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 
 				By("Waiting for a FailedMount event that names the Helm value to add")
 				assertPodFailsToMount(ctx, f, pod, "daemonsetMounters[0].cache")
+			})
+
+			It("grants the mounter only SETUID, SETGID and KILL", func(ctx context.Context) {
+				By("Checking the mounter holds only SETUID, SETGID and KILL")
+				expectMounterCapabilities(ctx, f, capSetuid|capSetgid|capKill)
 			})
 		})
 	})
@@ -436,7 +456,7 @@ func waitAndAssertMountpointCachedBlocks(ctx context.Context, f *framework.Frame
 	}).WithTimeout(time.Minute).WithPolling(2*time.Second).Should(BeTrue(), "Mountpoint cached no block under %s", m.cacheDir)
 }
 
-// asMountUID wraps cmd to run as the mount's UID, the only one that can look inside its cache directory.
+// asMountUID wraps cmd to run as the mount's UID, the only one that can look inside its cache directory besides the mounter.
 func asMountUID(m cachedMount, cmd string) string {
 	return fmt.Sprintf("setpriv --reuid=%d --regid=%d --clear-groups %s", m.uid, m.uid, cmd)
 }
@@ -452,6 +472,30 @@ func waitAndAssertExpressCachedBlocks(ctx context.Context, bucket string) {
 		}
 		return aws.ToInt32(out.KeyCount), nil
 	}).WithTimeout(time.Minute).WithPolling(2*time.Second).Should(BeNumerically(">", 0), "Mountpoint cached no block in %s", bucket)
+}
+
+// Capability bits, as /proc/<pid>/status masks them (linux/capability.h).
+const (
+	capChown       = 1 << 0
+	capDACOverride = 1 << 1
+	capFowner      = 1 << 3
+	capKill        = 1 << 5
+	capSetgid      = 1 << 6
+	capSetuid      = 1 << 7
+)
+
+// expectMounterCapabilities checks that every mounter, PID 1 of its container, holds exactly the want capabilities.
+func expectMounterCapabilities(ctx context.Context, f *framework.Framework, want uint64) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{LabelSelector: mounterPodLabel})
+	framework.ExpectNoError(err)
+	Expect(pods.Items).NotTo(BeEmpty())
+	for _, pod := range pods.Items {
+		out, stderr, err := execInMounterPod(ctx, f, pod.Spec.NodeName, "grep '^CapEff:' /proc/1/status")
+		framework.ExpectNoError(err, "reading the mounter's capabilities on %s: %s", pod.Spec.NodeName, stderr)
+		fields := strings.Fields(out)
+		Expect(fields).To(HaveLen(2), "unexpected CapEff line from the mounter on %s: %q", pod.Spec.NodeName, out)
+		Expect(fields[1]).To(Equal(fmt.Sprintf("%016x", want)), "the mounter on %s holds other capabilities than expected", pod.Spec.NodeName)
+	}
 }
 
 // equalSplitShares returns the --max-cache-size and --memory-target equalSplit gives each mount for this cache block.

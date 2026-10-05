@@ -63,12 +63,6 @@ const (
 )
 
 func main() {
-	// A run started by spawnRemovalHelper, as a cache directory's owner UID, empties that directory and exits here instead of serving.
-	// e.g. `aws-s3-csi-daemonset-mounter empty-cache-dir /cache/uid-65536`, run as UID 65536.
-	// We need to do this because we do not add DAC_OVERRIDE capability to the mounter pod.
-	runAsRemovalHelper(os.Args)
-
-	// The chart's normal run, e.g. `aws-s3-csi-daemonset-mounter --comm-dir=/comm ...`, falls through and serves.
 	klog.InitFlags(nil)
 	flag.Parse()
 

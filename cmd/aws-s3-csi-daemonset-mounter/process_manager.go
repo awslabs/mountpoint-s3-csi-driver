@@ -30,11 +30,9 @@ const errorFileExt = ".error"
 // cacheVolumePerm lets a Mountpoint reach its own cache directory but not create or list entries beside it.
 const cacheVolumePerm = fs.FileMode(0711)
 
-// mountCacheDirPerm closes a mount's cache directory to every UID but the one its Mountpoint runs as.
+// mountCacheDirPerm closes a mount's cache directory to every UID but the one its Mountpoint runs as;
+// the mounter overrides it with CAP_DAC_OVERRIDE.
 const mountCacheDirPerm = fs.FileMode(0700)
-
-// emptyDirArg makes this binary the removal helper, which empties a cache directory as its owner, since the mounter cannot read inside one.
-const emptyDirArg = "empty-cache-dir"
 
 // ProcessManager tracks and manages Mountpoint child processes.
 type ProcessManager struct {
@@ -293,103 +291,10 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 		return fmt.Errorf("refusing to remove cache directory %q in %q: not a cache volume and a plain directory name", entryName, pm.cacheDir)
 	}
 	path := filepath.Join(pm.cacheDir, entryName)
-	// Root owns the cache volume, so it can remove an empty directory or a file, but cannot read inside another UID's directory.
-	err := os.Remove(path)
-	// Emptying a non-empty dir needs its owner.
-	if errors.Is(err, syscall.ENOTEMPTY) {
-		info, statErr := os.Lstat(path)
-		if statErr != nil {
-			return fmt.Errorf("failed to find the owner of cache directory %q: %w", path, statErr)
-		}
-		owner := info.Sys().(*syscall.Stat_t).Uid
-		// Log error if UID is not the one in the name, but do not fail as we're deleting it now anyways.
-		if strings.HasPrefix(entryName, "uid-") && entryName != mountCacheDirName(owner) {
-			klog.Errorf("Cache directory %q is owned by UID %d, not the UID its name gives; removing it anyway", path, owner)
-		}
-		if owner == 0 {
-			// Root's own tree (should not normally happen): remove it here, so the helper only ever runs as a non-root UID.
-			err = os.RemoveAll(path)
-		} else {
-			// Use the helper (this binary with emptyDirArg flag) to empty it as that UID.
-			if err := pm.spawnRemovalHelper(path, owner); err != nil {
-				return err
-			}
-			// Remove the directory itself now that it is empty.
-			err = os.Remove(path)
-		}
-	}
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	// Emptying another UID's tree needs CAP_DAC_OVERRIDE, and CAP_FOWNER for a sticky subdirectory; the chart grants both with a cache.
+	// RemoveAll opens each directory with O_NOFOLLOW, so a planted symlink is removed, not followed.
+	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("failed to remove cache directory %q: %w", path, err)
-	}
-	return nil
-}
-
-// spawnRemovalHelper empties dir by running this binary as uid, with no groups and no capabilities.
-func (pm *ProcessManager) spawnRemovalHelper(dir string, uid uint32) error {
-	// As root the helper would keep the mounter's capabilities; root's own trees are removed in the main binary instead.
-	if uid == 0 {
-		return fmt.Errorf("refusing to run the removal helper as root for %q", dir)
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to find this binary to empty %q: %w", dir, err)
-	}
-	klog.Infof("Emptying cache directory %s as UID %d with removal helper binary", dir, uid)
-	cmd := exec.Command(self, emptyDirArg, dir)
-	cmd.Stderr = newPrefixWriter(os.Stderr, "removal helper "+filepath.Base(dir))
-	// No environment: a process of the same UID could read the helper's environment from /proc.
-	cmd.Env = []string{}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid, Groups: []uint32{}}}
-	handle, err := pm.runner.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to empty cache directory %q as UID %d: %w", dir, uid, err)
-	}
-	if exitCode, stderr := handle.Wait(); exitCode != 0 {
-		return fmt.Errorf("failed to empty cache directory %q as UID %d: exit status %d: %s", dir, uid, exitCode, bytes.TrimSpace(stderr))
-	}
-	return nil
-}
-
-// runAsRemovalHelper empties a directory and exits, when spawnRemovalHelper started this binary as the removal helper.
-func runAsRemovalHelper(args []string) {
-	if len(args) != 3 || args[1] != emptyDirArg {
-		return
-	}
-	if err := removalHelperEmptyDir(args[2]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-// removalHelperEmptyDir is the removal helper's work: it removes everything inside dir but not dir, as only root can write the cache volume.
-func removalHelperEmptyDir(dir string) error {
-	err := removalHelperRemoveContents(dir)
-	if !errors.Is(err, fs.ErrPermission) {
-		return err
-	}
-	// A Mountpoint can make its own subdirectories unreadable; as their owner we can open them up again.
-	fmt.Fprintf(os.Stderr, "Permission denied emptying %s, so making its subdirectories accessible to their owner and retrying: %v\n", dir, err)
-	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		// Directories only: Chmod follows symlinks, and WalkDir reports a symlink as not a directory.
-		if err == nil && d.IsDir() {
-			os.Chmod(path, mountCacheDirPerm)
-		}
-		return nil
-	})
-	return removalHelperRemoveContents(dir)
-}
-
-// removalHelperRemoveContents removes everything inside dir but not dir.
-func removalHelperRemoveContents(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-			return err
-		}
 	}
 	return nil
 }

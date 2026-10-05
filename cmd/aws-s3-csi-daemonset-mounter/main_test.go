@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -53,9 +52,8 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("still listens when the startup cleanup cannot remove an entry", func(t *testing.T) {
-		// The helper fails as it would on a subtree another UID owns, which an unprivileged test cannot create.
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{helperErr: errors.New("permission denied")}, cacheLimit{strategy: cacheLimitNone})
-		assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "pv-stuck", "mountpoint-cache"), 0700))
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
+		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		stop, done := startServing(t, pm)
 		close(stop)
 		<-done
@@ -71,9 +69,9 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("fails at exit naming what it could not remove, so it shows in the pod's status", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{helperErr: errors.New("permission denied")}, cacheLimit{strategy: cacheLimitNone})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		stop, done := startServing(t, pm)
-		assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "pv-stuck", "mountpoint-cache"), 0700))
+		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		close(stop)
 		err := <-done
 		if err == nil {

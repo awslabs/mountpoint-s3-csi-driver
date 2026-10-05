@@ -53,20 +53,15 @@ func (h *fakeProcessHandle) Exit(code int, stderr string) {
 }
 
 type fakeProcessRunner struct {
-	mu         sync.Mutex
-	nextPid    int
-	handles    []*fakeProcessHandle
-	startErr   error       // when set, Start fails instead of spawning
-	helperCmds []*exec.Cmd // the removal helpers started, which run in-process as the test user
-	helperErr  error       // when set, every removal helper fails instead of emptying
+	mu       sync.Mutex
+	nextPid  int
+	handles  []*fakeProcessHandle
+	startErr error // when set, Start fails instead of spawning
 }
 
 func (r *fakeProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cmd.Args[1] == emptyDirArg {
-		return r.runRemovalHelper(cmd), nil
-	}
 	if r.startErr != nil {
 		return nil, r.startErr
 	}
@@ -84,19 +79,6 @@ func (r *fakeProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 	}
 	r.handles = append(r.handles, h)
 	return h, nil
-}
-
-func (r *fakeProcessRunner) runRemovalHelper(cmd *exec.Cmd) ProcessHandle {
-	r.helperCmds = append(r.helperCmds, cmd)
-	h := &fakeProcessHandle{done: make(chan struct{})}
-	if r.helperErr != nil {
-		h.Exit(1, r.helperErr.Error())
-	} else if err := removalHelperEmptyDir(cmd.Args[2]); err != nil {
-		h.Exit(1, err.Error())
-	} else {
-		h.Exit(0, "")
-	}
-	return h
 }
 
 // newProcessManagerWithCache returns a manager whose container has a cache volume, and that volume.
@@ -117,6 +99,19 @@ func recordChowns(pm *ProcessManager) map[string][2]int {
 		return nil
 	}
 	return owners
+}
+
+// createUnremovableCacheEntry creates an entry in cacheDir that the test user cannot remove, so its removal fails.
+func createUnremovableCacheEntry(t *testing.T, cacheDir, entryName string) {
+	t.Helper()
+	// Assert, not skip: CI is unprivileged, so a root run must fail loudly rather than lose this case.
+	assert.Equals(t, false, os.Geteuid() == 0)
+	// Without CAP_DAC_OVERRIDE, which the test user lacks and the mounter holds, nothing can be unlinked from a read-only directory.
+	lockedDir := filepath.Join(cacheDir, entryName, "mountpoint-cache")
+	assert.NoError(t, os.MkdirAll(lockedDir, 0700))
+	assert.NoError(t, os.WriteFile(filepath.Join(lockedDir, "block"), []byte("x"), 0600))
+	assert.NoError(t, os.Chmod(lockedDir, 0500))
+	t.Cleanup(func() { os.Chmod(lockedDir, 0700) })
 }
 
 func assertNotExist(t *testing.T, path string) {
@@ -239,11 +234,8 @@ func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 	})
 
 	t.Run("names an entry it cannot remove, with the reason, and still removes the others", func(t *testing.T) {
-		// The helper fails as it would on a subtree another UID owns, which an unprivileged test cannot create.
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{helperErr: errors.New("permission denied")}, cacheLimit{strategy: cacheLimitNone})
-		stuck := filepath.Join(cacheDir, "pv-stuck", "mountpoint-cache")
-		assert.NoError(t, os.MkdirAll(stuck, 0700))
-		assert.NoError(t, os.WriteFile(filepath.Join(stuck, "block"), []byte("x"), 0600))
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
+		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		// Listed after pv-stuck, so the cleanup is shown to carry on past a failure.
 		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "pv-z"), 0700))
 
@@ -519,9 +511,9 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 	})
 
 	t.Run("fails without starting Mountpoint when what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
-		fr := &fakeProcessRunner{helperErr: errors.New("permission denied")}
+		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
-		assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, dirName, "mountpoint-cache"), 0700))
+		createUnremovableCacheEntry(t, cacheDir, dirName)
 
 		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
 		if err == nil {
@@ -749,49 +741,6 @@ func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
 }
 
 func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
-	t.Run("empties a directory as its owner, with no groups, then removes it", func(t *testing.T) {
-		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
-		logs := captureKlog(t)
-		// A leftover a killed Mountpoint would leave: not empty, so root alone cannot remove it.
-		owner := uint32(os.Getuid())
-		// Named for another UID, so the name always disagrees with the owner.
-		dir := filepath.Join(cacheDir, mountCacheDirName(owner+1))
-		assert.NoError(t, os.MkdirAll(filepath.Join(dir, "mountpoint-cache"), 0700))
-		assert.NoError(t, os.WriteFile(filepath.Join(dir, "mountpoint-cache", "block"), []byte("x"), 0600))
-
-		assert.NoError(t, pm.removeCacheVolumeEntry(filepath.Base(dir)))
-
-		assertNotExist(t, dir)
-		// The fake runner records the helper's command and empties the directory in-process instead of starting it.
-		assert.Equals(t, 1, len(fr.helperCmds)) // helper started only once
-		helper := fr.helperCmds[0]
-		// i.e. `aws-s3-csi-daemonset-mounter empty-cache-dir <dir>`, with no environment.
-		assert.Equals(t, []string{emptyDirArg, dir}, helper.Args[1:])
-		assert.Equals(t, []string{}, helper.Env)
-		// The test user created the directory, so it owns it; the helper must run as the owner, not as root.
-		assert.Equals(t, &syscall.Credential{Uid: owner, Gid: owner, Groups: []uint32{}}, helper.SysProcAttr.Credential)
-		assert.Contains(t, logs.String(), fmt.Sprintf("Emptying cache directory %s as UID %d", dir, owner))
-		// Since owner is now different from uid-<uid> dir name (mountCacheDirName(owner+1)) - we check for this log line too
-		assert.Contains(t, logs.String(), fmt.Sprintf("%q is owned by UID %d, not the UID its name gives; removing it anyway", dir, owner))
-
-		// A directory named for its owner is not a mismatch.
-		assert.NoError(t, os.MkdirAll(filepath.Join(cacheDir, mountCacheDirName(owner), "mountpoint-cache"), 0700))
-		logs.Reset()
-		assert.NoError(t, pm.removeCacheVolumeEntry(mountCacheDirName(owner)))
-		assert.Equals(t, false, strings.Contains(logs.String(), "not the UID its name gives"))
-	})
-
-	t.Run("never runs the removal helper as root", func(t *testing.T) {
-		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
-
-		if err := pm.spawnRemovalHelper(cacheDir, 0); err == nil {
-			t.Fatal("expected spawnRemovalHelper to refuse UID 0")
-		}
-		assert.Equals(t, 0, len(fr.helperCmds))
-	})
-
 	t.Run("fails when the mounter has no cache volume", func(t *testing.T) {
 		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 		if err := pm.removeCacheVolumeEntry("uid-65536"); err == nil {
@@ -835,45 +784,6 @@ func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 				assert.NoError(t, err)
 			})
 		}
-	})
-}
-
-func TestRemovalHelperEmptyDir(t *testing.T) {
-	t.Run("removes everything inside, including what its owner made unreadable, but not the directory", func(t *testing.T) {
-		dir := t.TempDir()
-		for _, sub := range []string{"read-only", "no-access"} {
-			assert.NoError(t, os.MkdirAll(filepath.Join(dir, "mountpoint-cache", sub), 0700))
-			assert.NoError(t, os.WriteFile(filepath.Join(dir, "mountpoint-cache", sub, "block"), []byte("x"), 0600))
-		}
-		assert.NoError(t, os.Chmod(filepath.Join(dir, "mountpoint-cache", "read-only"), 0500))
-		assert.NoError(t, os.Chmod(filepath.Join(dir, "mountpoint-cache", "no-access"), 0000))
-
-		assert.NoError(t, removalHelperEmptyDir(dir))
-
-		entries, err := os.ReadDir(dir)
-		assert.NoError(t, err)
-		assert.Equals(t, 0, len(entries))
-	})
-
-	t.Run("removes a planted symlink without following it", func(t *testing.T) {
-		dir := t.TempDir()
-		outside := t.TempDir()
-		assert.NoError(t, os.WriteFile(filepath.Join(outside, "keep"), []byte("x"), 0600))
-		assert.NoError(t, os.Chmod(outside, 0500))
-		t.Cleanup(func() { os.Chmod(outside, 0700) })
-		assert.NoError(t, os.Symlink(outside, filepath.Join(dir, "link")))
-		// Listed before "link" and unreadable, so the first removal fails and the chmod walk meets the link.
-		assert.NoError(t, os.MkdirAll(filepath.Join(dir, "a-locked", "sub"), 0700))
-		assert.NoError(t, os.Chmod(filepath.Join(dir, "a-locked"), 0))
-
-		assert.NoError(t, removalHelperEmptyDir(dir))
-
-		assertNotExist(t, filepath.Join(dir, "link"))
-		fi, err := os.Stat(outside)
-		assert.NoError(t, err)
-		assert.Equals(t, fs.FileMode(0500), fi.Mode().Perm())
-		_, err = os.Stat(filepath.Join(outside, "keep"))
-		assert.NoError(t, err)
 	})
 }
 
