@@ -725,7 +725,7 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		assert.Equals(t, fs.FileMode(0600), testCtx.modeOf(sock))
 	})
 
-	t.Run("Does not accumulate UIDs when a failed mount is retried", func(t *testing.T) {
+	t.Run("Keeps one UID across retries of a failed mount", func(t *testing.T) {
 		testCtx := setupDM(t)
 
 		// Fail in provideCredentials, which returns *without* deleting the map entry — unlike a
@@ -737,8 +737,8 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		failing.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
 		testCtx.useCredProvider(failing)
 
-		// Each attempt leaves the entry behind, so the next one claims a UID after releasing the
-		// previous. The UID handed to the credential directory is the one that attempt claimed.
+		// Each attempt leaves the entry behind, so the next one finds a UID already on it. The UID
+		// handed to the credential directory is the one that attempt used.
 		credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
 		var uids []uint32
 		for range 3 {
@@ -751,12 +751,13 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 			uids = append(uids, uint32(testCtx.ownerOf(credDir)[0]))
 		}
 
-		// Only the last attempt's UID is still held. Asserting the UIDs merely differ would prove
-		// nothing: the allocator hands out a fresh one every time regardless of what was released.
-		for _, uid := range uids[:len(uids)-1] {
-			assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
+		// The same UID throughout, still held, and the only one taken: a retry that allocated again
+		// would show up as the next UID in the range being in use.
+		for _, uid := range uids {
+			assert.Equals(t, uids[0], uid)
 		}
-		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uids[len(uids)-1]))
+		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uids[0]))
+		assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uids[0]+1))
 	})
 
 	t.Run("Hands the credential directory and its files to the mount's own UID", func(t *testing.T) {
