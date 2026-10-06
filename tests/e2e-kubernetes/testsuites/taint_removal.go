@@ -2,6 +2,7 @@ package custom_testsuites
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -9,8 +10,10 @@ import (
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/errors"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -20,7 +23,10 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
-const agentNotReadyTaintKey = "s3.csi.aws.com/agent-not-ready"
+const (
+	agentNotReadyTaintKey = "s3.csi.aws.com/agent-not-ready"
+	mounterDaemonSetName  = "s3-csi-daemonset-mounter"
+)
 
 type s3CSITaintRemovalTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
@@ -97,10 +103,20 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 	//                          |
 	//                        ------
 	Describe("Taint Removal", Serial, func() {
-		It("should remove agent-not-ready taint and allow workload scheduling", func(ctx context.Context) {
+		It("should remove agent-not-ready taint once the driver is ready and allow workload scheduling", func(ctx context.Context) {
 			// 1. Get a node where CSI driver is running
 			node := getCSIDriverNode(ctx, f)
 			framework.Logf("Selected node %s for taint removal test", node.Name)
+
+			// v3 only removes the taint once the mounter is running, so start with no mounter on the node
+			v3 := isDaemonsetMounterMode(ctx, f)
+			var restoreMounter func(context.Context) error
+			if v3 {
+				waitForNoS3VolumesOnNode(ctx, f, node.Name, driver.GetDriverInfo().Name)
+				restoreMounter = removeMounterFromNode(ctx, f, node.Name)
+				// Restart the node pod so no taint watcher from its previous start is running
+				killCSIDriverPods(ctx, f)
+			}
 
 			// 2. Apply the taint to the node
 			err := applyAgentNotReadyTaint(ctx, f.ClientSet, node.Name)
@@ -117,8 +133,15 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			framework.Logf("Restarting CSI driver pods to trigger taint watcher")
 			killCSIDriverPods(ctx, f)
 
+			if v3 {
+				// Without a mounter the node pod never removes the taint
+				gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
+				framework.ExpectNoError(restoreMounter(ctx))
+			}
+
 			// Wait for CSI driver pods to be ready again
 			waitForCSIDriverReady(ctx, f)
+			gomega.Eventually(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(gomega.BeFalse())
 
 			// 5. Create and verify pod scheduling on the previously tainted node
 			framework.Logf("Creating pod on previously tainted node %s", node.Name)
@@ -133,6 +156,75 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 		})
 	})
+}
+
+// removeMounterFromNode keeps the mounter DaemonSet off nodeName until the returned function (also run on cleanup) puts it back.
+func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName string) func(context.Context) error {
+	ds, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Get(ctx, mounterDaemonSetName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	original := ds.Spec.Template.Spec.Affinity
+	framework.ExpectNoError(patchMounterAffinity(ctx, f, excludeNode(original, nodeName)))
+
+	restore := func(ctx context.Context) error {
+		if err := patchMounterAffinity(ctx, f, original); err != nil {
+			return err
+		}
+		waitForMounterPodReady(ctx, f, nodeName)
+		// Restart the node pod so it doesn't wait out its crash-loop backoff
+		killCSIDriverPods(ctx, f)
+		waitForCSIDriverReady(ctx, f)
+		return nil
+	}
+	DeferCleanup(restore)
+
+	waitForNoMounterPod(ctx, f, nodeName)
+	return restore
+}
+
+// excludeNode returns a copy of affinity that also keeps pods off nodeName.
+func excludeNode(affinity *v1.Affinity, nodeName string) *v1.Affinity {
+	affinity = affinity.DeepCopy()
+	if affinity == nil {
+		affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{}}}}}
+	}
+	// Required node selector terms are ORed, so the node has to be excluded in every term
+	terms := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	for i := range terms {
+		terms[i].MatchFields = append(terms[i].MatchFields, v1.NodeSelectorRequirement{Key: "metadata.name", Operator: v1.NodeSelectorOpNotIn, Values: []string{nodeName}})
+	}
+	return affinity
+}
+
+// patchMounterAffinity sets the affinity on the mounter DaemonSet's pod template.
+func patchMounterAffinity(ctx context.Context, f *framework.Framework, affinity *v1.Affinity) error {
+	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"affinity": affinity}}}})
+	if err != nil {
+		return err
+	}
+	_, err = f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Patch(ctx, mounterDaemonSetName, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// waitForNoMounterPod waits until no mounter pod is left on nodeName. A terminating mounter pod still reports Running.
+func waitForNoMounterPod(ctx context.Context, f *framework.Framework, nodeName string) {
+	gomega.Eventually(ctx, func(ctx context.Context) ([]v1.Pod, error) {
+		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=s3-csi-daemonset-mounter",
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		return pods.Items, err
+	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(gomega.BeEmpty())
+}
+
+// hasAgentNotReadyTaint returns a poll function reporting whether nodeName has the agent-not-ready taint.
+func hasAgentNotReadyTaint(client clientset.Interface, nodeName string) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return slices.ContainsFunc(node.Spec.Taints, func(t v1.Taint) bool { return t.Key == agentNotReadyTaintKey }), nil
+	}
 }
 
 // getCSIDriverNode returns a node where the CSI driver is running
