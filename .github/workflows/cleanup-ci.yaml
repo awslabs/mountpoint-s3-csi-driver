@@ -1,0 +1,82 @@
+name: Cleanup CI
+
+on:
+  schedule:
+    # Run every Wednesday at 6:00 AM UTC (cron: minute hour day-of-month month day-of-week)
+    - cron: '0 6 * * 3'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only list what would be deleted; uncheck to actually delete)
+        required: false
+        default: true
+        type: boolean
+      bucket_age_days:
+        description: Delete test buckets older than this many days
+        required: false
+        default: 7
+        type: number
+      role_age_days:
+        description: Delete e2e IAM roles older than this many days
+        required: false
+        default: 7
+        type: number
+
+env:
+  DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
+  BUCKET_AGE_DAYS: ${{ github.event_name == 'schedule' && '7' || inputs.bucket_age_days }}
+  ROLE_AGE_DAYS: ${{ github.event_name == 'schedule' && '7' || inputs.role_age_days }}
+
+jobs:
+  cleanup:
+    name: Cleanup test buckets and IAM roles
+    runs-on: ubuntu-latest
+    concurrency:
+      group: e2e-cluster-${{ matrix.environment }}
+      cancel-in-progress: false
+    # On scheduled runs, don't run on forked repositories. Manual (workflow_dispatch)
+    # runs are allowed on forks so a fork owner can clean up their own account.
+    if: ${{ github.event_name != 'schedule' || ! github.repository.fork }}
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [trusted, untrusted, rosa-trusted, rosa-untrusted]
+    environment: ${{ matrix.environment }}
+    permissions:
+      id-token: write # Required for OIDC authentication with AWS
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200 # 2 hours should be sufficient for cleanup
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Delete old test buckets
+        if: always()
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          dry_run_flag=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            dry_run_flag="--dry-run"
+          fi
+          scripts/bucket-cleanup.py cleanup --days-old "${BUCKET_AGE_DAYS}" ${dry_run_flag}
+
+      - name: Delete old e2e IAM roles
+        if: always()
+        run: |
+          mode_flag="--delete"
+          if [ "${DRY_RUN}" = "true" ]; then
+            mode_flag="--dry-run"
+          fi
+          scripts/delete-e2e-roles.sh --max-age-days "${ROLE_AGE_DAYS}" "${mode_flag}"
