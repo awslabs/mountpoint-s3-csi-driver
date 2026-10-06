@@ -17,7 +17,6 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 	"k8s.io/klog/v2"
 
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
@@ -54,7 +53,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		return fmt.Errorf("invalid FUSE file descriptor %d", options.Fd)
 	}
 
-	if options.Uid < mounter.UIDRangeStart || options.Uid > mounter.UIDRangeEnd {
+	if options.Uid < mountoptions.UIDRangeStart || options.Uid > mountoptions.UIDRangeEnd {
 		fuseDev.Close()
 		return fmt.Errorf("refusing to launch mount %s with out-of-range UID %d", mountId, options.Uid)
 	}

@@ -9,17 +9,13 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-)
-
-// The UID range the driver allocates from, mirroring pkg/driver/node/mounter.UIDRange{Start,End}.
-const (
-	uidRangeStart = 65536
-	uidRangeEnd   = 131071
 )
 
 // Expected modes on the paths the mounter and Mountpoint share, mirroring the driver's constants.
@@ -121,8 +117,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			ginkgo.By(fmt.Sprintf("Checking Mountpoint pid %s (uid %d)", c.pid, c.uid()))
 
 			gomega.Expect(c.uid()).To(gomega.And(
-				gomega.BeNumerically(">=", uidRangeStart),
-				gomega.BeNumerically("<=", uidRangeEnd),
+				gomega.BeNumerically(">=", mountoptions.UIDRangeStart),
+				gomega.BeNumerically("<=", mountoptions.UIDRangeEnd),
 			), "Mountpoint pid %s must run under an allocated UID, got %v", c.pid, c.uids)
 
 			// Every UID and GID, not just the effective ones: a process that switched only those keeps
@@ -183,8 +179,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		credDir := statPath(ctx, f, targetNode, credDirPath)
 		gomega.Expect(credDir.mode).To(gomega.Equal(expectedCredDirMode))
 		gomega.Expect(credDir.uid).To(gomega.And(
-			gomega.BeNumerically(">=", uidRangeStart),
-			gomega.BeNumerically("<=", uidRangeEnd),
+			gomega.BeNumerically(">=", mountoptions.UIDRangeStart),
+			gomega.BeNumerically("<=", mountoptions.UIDRangeEnd),
 		), "credential directory for %s must belong to an allocated UID", pvName)
 		gomega.Expect(credDir.gid).To(gomega.Equal(credDir.uid))
 
