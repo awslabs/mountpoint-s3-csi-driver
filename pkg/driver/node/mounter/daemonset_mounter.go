@@ -338,6 +338,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		if entry.Uid == 0 {
 			uid, err := dm.uidAllocator.Allocate()
 			if err != nil {
+				// Nothing has been created for this mount yet, so drop the entry rather than leave it
+				// holding its volumeHandle claim until the periodic cleanup.
+				dm.mountMap.Delete(volumeID)
 				return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
 			}
 			entry.Uid = uid
@@ -359,6 +362,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
+		if !entry.sourceMounted {
+			dm.teardownEntry(volumeID, entry)
+		}
 		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
 

@@ -728,19 +728,12 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 	t.Run("Keeps one UID across retries of a failed mount", func(t *testing.T) {
 		testCtx := setupDM(t)
 
-		// Fail in provideCredentials, which returns *without* deleting the map entry — unlike a
-		// fuseMount failure, which tears the entry down and legitimately starts over. This is the
-		// shape of failure that kubelet retries against a surviving entry.
-		failing := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
-		failing.EXPECT().Provide(gomock.Any(), gomock.Any()).
-			Return(nil, credentialprovider.AuthenticationSourceUnspecified, fmt.Errorf("simulated credential failure")).AnyTimes()
-		failing.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
-		testCtx.useCredProvider(failing)
+		// A failure that leaves the map entry behind, so every retry finds a UID already on it.
+		// WriteMeta fails because a file sits where its directory belongs.
+		metaDir := filepath.Dir(mounter.MetaFileName(testCtx.kubeletPath, testCtx.volumeID))
+		assert.NoError(t, os.MkdirAll(filepath.Dir(metaDir), 0750))
+		assert.NoError(t, os.WriteFile(metaDir, nil, 0600))
 
-		// Each attempt leaves the entry behind, so the next one finds a UID already on it. The UID
-		// handed to the credential directory is the one that attempt used.
-		credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
-		var uids []uint32
 		for range 3 {
 			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
 				credentialprovider.ProvideContext{
@@ -748,16 +741,64 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 					VolumeID:      testCtx.volumeID,
 				}, mountpoint.ParseArgs(nil), "", nil)
 			assert.Equals(t, true, err != nil)
-			uids = append(uids, uint32(testCtx.ownerOf(credDir)[0]))
 		}
 
-		// The same UID throughout, still held, and the only one taken: a retry that allocated again
-		// would show up as the next UID in the range being in use.
-		for _, uid := range uids {
-			assert.Equals(t, uids[0], uid)
-		}
-		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uids[0]))
-		assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uids[0]+1))
+		// One UID in total: a retry that allocated again would have taken the next in the range.
+		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart))
+		assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart+1))
+	})
+
+	t.Run("Gives the UID back when credential provisioning fails", func(t *testing.T) {
+		testCtx := setupDM(t)
+
+		failing := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
+		failing.EXPECT().Provide(gomock.Any(), gomock.Any()).
+			Return(nil, credentialprovider.AuthenticationSourceUnspecified, fmt.Errorf("simulated credential failure")).AnyTimes()
+		failing.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+		testCtx.useCredProvider(failing)
+
+		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+			credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+		assert.Equals(t, true, err != nil)
+
+		// A mount that never came up keeps nothing: no meta file, and its UID back in the pool.
+		assert.FileNotExists(t, mounter.MetaFileName(testCtx.kubeletPath, testCtx.volumeID))
+		assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart))
+	})
+
+	t.Run("Keeps a serving mount whose credential refresh fails", func(t *testing.T) {
+		testCtx := setupDM(t)
+
+		// Succeeds for the mount, fails for the refresh that follows it.
+		refreshFails := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
+		mounted := false
+		refreshFails.EXPECT().Provide(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, _ credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+				if !mounted {
+					mounted = true
+					return envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil
+				}
+				return nil, credentialprovider.AuthenticationSourceUnspecified, fmt.Errorf("simulated refresh failure")
+			}).AnyTimes()
+		refreshFails.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+		testCtx.useCredProvider(refreshFails)
+
+		testCtx.mountVolume()
+
+		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+			credentialprovider.ProvideContext{
+				WorkloadPodID: testCtx.podUID,
+				VolumeID:      testCtx.volumeID,
+			}, mountpoint.ParseArgs(nil), "", nil)
+		assert.Equals(t, true, err != nil)
+
+		// A mount still serving its consumers keeps its records.
+		_, statErr := os.Stat(mounter.MetaFileName(testCtx.kubeletPath, testCtx.volumeID))
+		assert.NoError(t, statErr)
+		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart))
 	})
 
 	t.Run("Hands the credential directory and its files to the mount's own UID", func(t *testing.T) {
