@@ -39,6 +39,7 @@ type ProcessManager struct {
 	cacheDir        string        // the cache volume's mount path, or "" when this container has none
 	runner          ProcessRunner // interface for spawning processes; substituted in tests
 	memory          memoryLimit
+	cache           cacheLimit
 	chownForTesting func(path string, uid, gid int) error // unprivileged tests record ownership instead of chown
 
 	mu        sync.Mutex
@@ -52,12 +53,13 @@ type mountpointProcess struct {
 	handle  ProcessHandle
 }
 
-func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory memoryLimit) *ProcessManager {
+func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory memoryLimit, cache cacheLimit) *ProcessManager {
 	return &ProcessManager{
 		commDir:   commDir,
 		cacheDir:  cacheDir,
 		runner:    runner,
 		memory:    memory,
+		cache:     cache,
 		processes: make(map[uint32]mountpointProcess),
 	}
 }
@@ -154,6 +156,9 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	if targetMiB := pm.memory.targetFor(mountId, args); targetMiB > 0 {
 		args.Set(mountpoint.ArgMemoryTarget, strconv.FormatInt(targetMiB, 10))
+	}
+	if sizeMiB, ok := pm.cache.maxCacheSizeFor(mountId, args); ok {
+		args.Set(mountpoint.ArgMaxCacheSize, strconv.FormatInt(sizeMiB, 10))
 	}
 
 	cmdArgs := append([]string{
@@ -387,8 +392,9 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 		actual := countChildProcesses()
 		openFDs := countOpenFDs()
 		goroutines := runtime.NumGoroutine()
-		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d mounts=%v",
-			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB, mounts)
+		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d cache_limit_strategy=%s cache_share_mib=%d mounts=%v",
+			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB,
+			pm.cache.strategy, pm.cache.shareMiB, mounts)
 	}
 }
 

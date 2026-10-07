@@ -82,10 +82,10 @@ func (r *fakeProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 
 // newProcessManagerWithCache returns a manager whose container has a cache volume, and that volume.
 // Tests are not root, so it does not chown; a test that checks ownership replaces pm.chownForTesting.
-func newProcessManagerWithCache(t *testing.T, fr *fakeProcessRunner) (*ProcessManager, string) {
+func newProcessManagerWithCache(t *testing.T, fr *fakeProcessRunner, cache cacheLimit) (*ProcessManager, string) {
 	t.Helper()
 	cacheDir := t.TempDir()
-	pm := NewProcessManager(t.TempDir(), cacheDir, fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(t.TempDir(), cacheDir, fr, memoryLimit{strategy: memoryLimitNone}, cache)
 	pm.chownForTesting = func(string, int, int) error { return nil }
 	return pm, cacheDir
 }
@@ -124,7 +124,7 @@ func assertNotExist(t *testing.T, path string) {
 func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -177,7 +177,7 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 
 func TestProcessManager_SecureCacheVolume(t *testing.T) {
 	t.Run("gives the cache volume to root as 0711, so a Mountpoint can reach its own directory but not list or create beside it", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		chowns := recordChowns(pm)
 
 		assert.NoError(t, pm.secureCacheVolume())
@@ -190,7 +190,7 @@ func TestProcessManager_SecureCacheVolume(t *testing.T) {
 	})
 
 	t.Run("fails saying the cache volume must let root change ownership, when root cannot chown it", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
 
 		err := pm.secureCacheVolume()
@@ -201,7 +201,7 @@ func TestProcessManager_SecureCacheVolume(t *testing.T) {
 	})
 
 	t.Run("does nothing without a cache volume", func(t *testing.T) {
-		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
 
 		assert.NoError(t, pm.secureCacheVolume())
@@ -210,7 +210,7 @@ func TestProcessManager_SecureCacheVolume(t *testing.T) {
 
 func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 	t.Run("removes every entry in the cache volume, with its contents, but not a symlink's target", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		blockDir := filepath.Join(cacheDir, "pv-a", "mountpoint-cache", "V2", "ab")
 		assert.NoError(t, os.MkdirAll(blockDir, 0700))
 		assert.NoError(t, os.WriteFile(filepath.Join(blockDir, "block"), []byte("x"), 0600))
@@ -233,7 +233,7 @@ func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 	})
 
 	t.Run("names an entry it cannot remove, with the reason, and still removes the others", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		// Listed after pv-stuck, so the cleanup is shown to carry on past a failure.
 		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "pv-z"), 0700))
@@ -249,7 +249,7 @@ func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 
 	t.Run("fails when the cache volume cannot be listed", func(t *testing.T) {
 		pm := NewProcessManager(t.TempDir(), filepath.Join(t.TempDir(), "missing"), &fakeProcessRunner{},
-			memoryLimit{strategy: memoryLimitNone})
+			memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 		err := pm.emptyCacheVolume()
 		if err == nil {
@@ -259,7 +259,7 @@ func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 	})
 
 	t.Run("does nothing without a cache volume", func(t *testing.T) {
-		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 		// Note: without the "" check this would fail listing the working directory's empty path.
 		assert.NoError(t, pm.emptyCacheVolume())
@@ -269,7 +269,7 @@ func TestProcessManager_EmptyCacheVolume(t *testing.T) {
 func TestProcessManager_Launch_HappyPath(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 	dev := mountertest.OpenDevNull(t)
 
 	err := pm.Launch("mount-123", "/usr/bin/mount-s3", mountoptions.Options{
@@ -346,7 +346,7 @@ func TestProcessManager_Launch_MemoryTarget(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeProcessRunner{}
-			pm := NewProcessManager(t.TempDir(), "", fr, tc.limit)
+			pm := NewProcessManager(t.TempDir(), "", fr, tc.limit, cacheLimit{strategy: cacheLimitNone})
 			dev := mountertest.OpenDevNull(t)
 
 			options := mountoptions.Options{
@@ -373,7 +373,7 @@ func TestProcessManager_Launch_MemoryTarget(t *testing.T) {
 
 func TestProcessManager_Launch_TracksNothingWhenStartFails(t *testing.T) {
 	fr := &fakeProcessRunner{startErr: errors.New("fork/exec: no such file")}
-	pm := NewProcessManager(t.TempDir(), "", fr, mustMemoryLimit(t, memoryLimitEqualSplit, 4*gib, 4))
+	pm := NewProcessManager(t.TempDir(), "", fr, mustMemoryLimit(t, memoryLimitEqualSplit, 4*gib, 4), cacheLimit{strategy: cacheLimitNone})
 	dev := mountertest.OpenDevNull(t)
 
 	err := pm.Launch("mount-doomed", "/usr/bin/mount-s3", mountoptions.Options{
@@ -389,6 +389,64 @@ func TestProcessManager_Launch_TracksNothingWhenStartFails(t *testing.T) {
 	pm.mu.Lock()
 	assert.Equals(t, 0, len(pm.processes))
 	pm.mu.Unlock()
+}
+
+func TestProcessManager_Launch_MaxCacheSize(t *testing.T) {
+	// What the driver sends; the mounter replaces it with its own directory for the mount.
+	const cacheArg = "--cache=/cache/mount-123"
+
+	testCases := []struct {
+		name     string
+		cache    cacheLimit
+		args     []string
+		wantArgs []string
+	}{
+		{
+			name:     "equalSplit injects this node's share",
+			cache:    mustCacheLimit(t, cacheLimitEqualSplit, 4*gib, 4),
+			args:     []string{cacheArg},
+			wantArgs: []string{"--foreground", "--max-cache-size=972"},
+		},
+		{
+			name:     "equalSplit with no cache volume size injects 0, which serves the mount uncached",
+			cache:    mustCacheLimit(t, cacheLimitEqualSplit, 0, 4),
+			args:     []string{cacheArg},
+			wantArgs: []string{"--foreground", "--max-cache-size=0"},
+		},
+		{
+			name:     "none leaves the PV's size alone",
+			cache:    cacheLimit{strategy: cacheLimitNone},
+			args:     []string{cacheArg, "--max-cache-size=3000"},
+			wantArgs: []string{"--foreground", "--max-cache-size=3000"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fr := &fakeProcessRunner{}
+			pm, cacheDir := newProcessManagerWithCache(t, fr, testCase.cache)
+			dev := mountertest.OpenDevNull(t)
+
+			options := mountoptions.Options{
+				Fd:         int(dev.Fd()),
+				BucketName: "my-bucket",
+				Args:       testCase.args,
+				Uid:        mountoptions.UIDRangeStart,
+				Gid:        mountoptions.UIDRangeStart,
+			}
+			assert.NoError(t, pm.Launch("mount-123", "/usr/bin/mount-s3", options))
+
+			// cmd.Args is [binary, bucket, /dev/fd/3, ...sorted args].
+			wantArgs := append([]string{"--cache=" + filepath.Join(cacheDir, "uid-65536")}, testCase.wantArgs...)
+			assert.Equals(t, wantArgs, fr.handles[0].cmd.Args[3:])
+			// The wire slice is the driver's mount-sharing key and is persisted to its meta file, so a
+			// share leaking into it would make a running mount look incompatible with itself on restart.
+			assert.Equals(t, testCase.args, options.Args)
+
+			fr.handles[0].Exit(0, "")
+			pm.Shutdown()
+		})
+	}
 }
 
 func TestProcessManager_Launch_CacheDir(t *testing.T) {
@@ -408,7 +466,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 	t.Run("creates the mount's directory, owned by its UID and closed to every other, and points Mountpoint at it whatever --cache the request carried", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		chowns := recordChowns(pm)
 		// A request may repeat --cache; three in all, as Args.Set alone drops a second.
 		options := cachedOptions(t, "--cache=/elsewhere", "--cache=/other")
@@ -432,7 +490,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 	t.Run("removes what its UID left behind before an uncached launch too", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		// What a killed Mountpoint of an earlier mount as this UID left behind, and another UID's.
 		leftoverBlock := filepath.Join(cacheDir, dirName, "mountpoint-cache", "block")
 		assert.NoError(t, os.MkdirAll(filepath.Dir(leftoverBlock), 0700))
@@ -453,7 +511,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 	t.Run("fails without starting Mountpoint when what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		createUnremovableCacheEntry(t, cacheDir, dirName)
 
 		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
@@ -471,7 +529,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		// Assert, not skip: CI is unprivileged, so a root run must fail loudly rather than lose this case.
 		assert.Equals(t, false, os.Geteuid() == 0)
 		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		// A read-only cache volume: the kubelet has mounted it, but nothing can be created inside.
 		assert.NoError(t, os.Chmod(cacheDir, 0500))
 		t.Cleanup(func() { os.Chmod(cacheDir, 0700) })
@@ -487,7 +545,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 	t.Run("removes the directory when Mountpoint fails to start", func(t *testing.T) {
 		fr := &fakeProcessRunner{startErr: errors.New("fork/exec: no such file")}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 
 		if err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)); err == nil {
 			t.Fatal("expected Launch to fail when the process cannot start")
@@ -497,7 +555,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 	t.Run("removes the directory and its contents once Mountpoint exits, before freeing the mount", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		mountCacheDir := filepath.Join(cacheDir, dirName)
 		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
 		// A killed Mountpoint leaves its blocks behind; a clean exit would have removed mountpoint-cache itself.
@@ -534,7 +592,7 @@ func assertMountReleased(t *testing.T, pm *ProcessManager) {
 func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	for i, id := range []string{"mount-a", "mount-b", "mount-c"} {
 		dev := mountertest.OpenDevNull(t)
@@ -592,7 +650,7 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	dev1 := mountertest.OpenDevNull(t)
 	err := pm.Launch("same-mount", "/usr/bin/mount-s3", mountoptions.Options{
@@ -639,7 +697,7 @@ func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 
 func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
 	fr := &fakeProcessRunner{}
-	pm, cacheDir := newProcessManagerWithCache(t, fr)
+	pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 
 	dev1 := mountertest.OpenDevNull(t)
 	err := pm.Launch("mount-a", "/usr/bin/mount-s3", mountoptions.Options{
@@ -683,7 +741,7 @@ func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
 
 func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 	t.Run("fails when the mounter has no cache volume", func(t *testing.T) {
-		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 		if err := pm.removeCacheVolumeEntry("uid-65536"); err == nil {
 			t.Fatal("expected removeCacheVolumeEntry to refuse an empty cache volume")
 		}
@@ -703,7 +761,7 @@ func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 
 		for _, testCase := range testCases {
 			t.Run(testCase.name, func(t *testing.T) {
-				pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+				pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 				sibling := filepath.Join(filepath.Dir(cacheDir), "sibling")
 				assert.NoError(t, os.Mkdir(sibling, 0770))
 				cachedBlocks := filepath.Join(cacheDir, "uid-65536", "mountpoint-cache", "V2")
@@ -730,7 +788,7 @@ func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 
 func TestProcessManager_ChownWithDefault(t *testing.T) {
 	t.Run("chowns a directory, but not through a symlink planted at its path", func(t *testing.T) {
-		pm := NewProcessManager(t.TempDir(), t.TempDir(), &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		pm := NewProcessManager(t.TempDir(), t.TempDir(), &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 		dir := t.TempDir()
 		link := filepath.Join(t.TempDir(), "link")
 		assert.NoError(t, os.Symlink(dir, link))
@@ -746,7 +804,7 @@ func TestProcessManager_ChownWithDefault(t *testing.T) {
 func TestProcessManager_Shutdown_SendsSIGTERM(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	dev := mountertest.OpenDevNull(t)
 	err := pm.Launch("m1", "/usr/bin/mount-s3", mountoptions.Options{
@@ -778,7 +836,7 @@ func TestProcessManager_Shutdown_SendsSIGTERM(t *testing.T) {
 func TestHandleConnection_NoFdLeak(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -854,7 +912,7 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -910,7 +968,7 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 func TestHandleConnection_RefusedLaunchWritesErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	sockPath := filepath.Join(commDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -948,7 +1006,7 @@ func TestHandleConnection_RefusedLaunchWritesErrorFile(t *testing.T) {
 func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 
 	dev := mountertest.OpenDevNull(t)
 	err := pm.Launch("mount-abc", "/usr/bin/mount-s3", mountoptions.Options{
@@ -970,7 +1028,7 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 func TestProcessManager_Launch_RemovesAnEarlierErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
-	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone})
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 	errFile := filepath.Join(commDir, "mount-abc.error")
 	assert.NoError(t, os.WriteFile(errFile, []byte("credential error"), 0600))
 
@@ -995,7 +1053,7 @@ func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeProcessRunner{}
-			pm := NewProcessManager(t.TempDir(), "", fr, memoryLimit{strategy: memoryLimitNone})
+			pm := NewProcessManager(t.TempDir(), "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
 			dev := mountertest.OpenDevNull(t)
 
 			err := pm.Launch("vol-bad-creds", "/usr/bin/mount-s3", mountoptions.Options{
