@@ -9,6 +9,7 @@ matrix:
       "AmazonLinux2023",
       "Bottlerocket",
       "Ubuntu2404",
+      "Ubuntu2604",
     ]
   kubernetes-version:
     ["1.31.0", "1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1"]
@@ -26,3 +27,16 @@ matrix:
     - cluster-type: "eksctl"
       family: "Ubuntu2404"
       kubernetes-version: "1.32.1"
+    # Ubuntu2604 is only supported on EKS >= 1.35.
+    - cluster-type: "eksctl"
+      family: "Ubuntu2604"
+      kubernetes-version: "1.31.0"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2604"
+      kubernetes-version: "1.32.1"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2604"
+      kubernetes-version: "1.33.2"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2604"
+      kubernetes-version: "1.34.1"
