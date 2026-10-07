@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -28,6 +29,9 @@ const (
 	cacheMountPath = "/cache"
 	// The directory Mountpoint creates inside the `--cache` directory it is given.
 	mountpointCacheDirName = "mountpoint-cache"
+
+	// The maxVolumesPerNode every row installs, the chart's default; equalSplit divides the cache volume and memory request by it.
+	defaultMaxVolumesPerNode = 4
 
 	// One 1 KiB file is enough to prove the cache served a read.
 	cachedFileName = "cached.txt"
@@ -73,19 +77,20 @@ const localNVMeNodeLabel = "s3.csi.aws.com/local-nvme"
 var cacheVolumes = []cacheVolume{
 	{
 		name: "an emptyDir cache on the node's disk",
-		helm: map[string]any{"emptyDir": map[string]any{"medium": "", "sizeLimit": "128Mi"}},
+		helm: map[string]any{"emptyDir": map[string]any{"medium": "", "sizeLimit": "128Mi"}, "limitStrategy": "equalSplit"},
 		// Only context to run express test to save time; we can rename this later so more tests only run in disk cache if tests are taking too long.
 		runsExpressSpec: true,
 	},
 	{
 		name: "an emptyDir cache on tmpfs",
-		helm: map[string]any{"emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "128Mi"}},
+		helm: map[string]any{"emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "128Mi"}, "limitStrategy": "equalSplit"},
 	},
 	{
 		// 1Gi is the smallest gp3 volume.
 		name: "an ephemeral cache on an EBS volume",
 		helm: map[string]any{
-			"ephemeral": map[string]any{"storageClassName": daemonsetCacheStorageClassName, "resourceRequests": "1024Mi"},
+			"ephemeral":     map[string]any{"storageClassName": daemonsetCacheStorageClassName, "resourceRequests": "1024Mi"},
+			"limitStrategy": "equalSplit",
 		},
 		requires: requiresEBSCSIDriver,
 	},
@@ -96,7 +101,8 @@ var cacheVolumes = []cacheVolume{
 		// documented instance-store path caches like any ephemeral volume.
 		name: "an ephemeral cache on an NVMe instance store",
 		helm: map[string]any{
-			"ephemeral": map[string]any{"storageClassName": nvmeCacheStorageClassName, "resourceRequests": "10240Mi"},
+			"ephemeral":     map[string]any{"storageClassName": nvmeCacheStorageClassName, "resourceRequests": "10240Mi"},
+			"limitStrategy": "equalSplit",
 		},
 		// A mounter on a node without a free disk stays Pending, so only labelled nodes run the driver and the workloads.
 		nodeSelector: map[string]string{localNVMeNodeLabel: "true"},
@@ -239,6 +245,33 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 						"Mountpoint pid %s must hold no permitted, effective or ambient capabilities", c.pid)
 				})
 
+				It("uses the correct cache volume, and gives the mount an equal share of it and of the memory a tmpfs cache leaves", func(ctx context.Context) {
+					m := mountCachedVolume(ctx, f, config, pattern, tc.nodeSelector, nil)
+					mounter, err := podOnNode(ctx, f, mounterPodLabel, m.node)
+					framework.ExpectNoError(err)
+					mounterArgs := mounter.Spec.Containers[0].Args
+					// The argv carries --cache-medium, not the volume, so only the pod spec shows the chart rendered the row's cache type.
+					var cacheVol v1.Volume
+					Expect(mounter.Spec.Volumes).To(ContainElement(HaveField("Name", "cache"), &cacheVol))
+					if emptyDir, ok := tc.helm["emptyDir"].(map[string]any); ok {
+						Expect(cacheVol.EmptyDir).To(HaveField("Medium", v1.StorageMedium(emptyDir["medium"].(string))))
+					} else {
+						Expect(cacheVol.Ephemeral).NotTo(BeNil(), "the mounter has no ephemeral cache volume: %+v", cacheVol)
+					}
+					requestMiB := mounter.Spec.Containers[0].Resources.Requests.Memory().Value() / (1024 * 1024)
+					maxCacheSizeMiB, memoryTargetMiB := equalSplitShares(tc.helm, requestMiB)
+
+					// The mounter computes both after s3-csi-node sent the options, so Mountpoint's argv is the only place to read them.
+					By("Reading the arguments the mounter started this mount's Mountpoint with")
+					pid := mountpointProcessRunningAs(ctx, f, m.node, m.uid).pid
+					cmdline, stderr, err := execInMounterPod(ctx, f, m.node, "cat /proc/"+pid+"/cmdline")
+					framework.ExpectNoError(err, "reading the arguments of Mountpoint pid %s: %s", pid, stderr)
+					args := strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
+					Expect(args).To(ContainElement(fmt.Sprintf("--max-cache-size=%d", maxCacheSizeMiB)))
+					Expect(args).To(ContainElement(fmt.Sprintf("--memory-target=%d", memoryTargetMiB)),
+						"from a %d MiB memory request and cache %v, from a mounter running with %v", requestMiB, tc.helm, mounterArgs)
+				})
+
 				It("removes the mount's cache directory when its last consumer unmounts", func(ctx context.Context) {
 					m := mountCachedVolume(ctx, f, config, pattern, tc.nodeSelector, nil)
 					Expect(cacheDirExists(ctx, f, m)).To(BeTrue(), "the mounter created no %s on node %s", m.cacheDir, m.node)
@@ -276,6 +309,22 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 				})
 			})
 		}
+
+		Context("with the none strategy", func() {
+			BeforeAll(func(ctx context.Context) {
+				release.upgrade(ctx, f, withMounterCache(release, map[string]any{
+					"emptyDir": map[string]any{"medium": "", "sizeLimit": "128Mi"}, "limitStrategy": "none"}, nil))
+			})
+
+			It("passes the PV's max-cache-size to Mountpoint unchanged", func(ctx context.Context) {
+				m := mountCachedVolume(ctx, f, config, pattern, nil, []string{"max-cache-size 50"})
+				pid := mountpointProcessRunningAs(ctx, f, m.node, m.uid).pid
+				cmdline, stderr, err := execInMounterPod(ctx, f, m.node, "cat /proc/"+pid+"/cmdline")
+				framework.ExpectNoError(err, "reading the arguments of Mountpoint pid %s: %s", pid, stderr)
+				args := strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
+				Expect(args).To(ContainElement("--max-cache-size=50"))
+			})
+		})
 
 		// Last: it is the negative case and the cheapest reconfiguration, so it sits closest to the restore.
 		Context("with no cache volume, as a default install has", func() {
@@ -320,8 +369,8 @@ func clusterProvides(ctx context.Context, f *framework.Framework, req clusterPre
 	return true
 }
 
-// withMounterCache returns the installed values with one complete mounter element carrying cache (nil: none),
-// and both driver DaemonSets on nodeSelector's nodes only (nil: every node).
+// withMounterCache returns the installed values with one complete mounter element carrying cache (nil: none) and
+// defaultMaxVolumesPerNode, and both driver DaemonSets on nodeSelector's nodes only (nil: every node).
 func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[string]string) map[string]any {
 	// Helm replaces a list whole, so the element starts from the chart's: a partial one renders an absent logLevel as `--v=`.
 	chartMounter := r.chart.Values["daemonsetMounters"].([]any)[0].(map[string]any)
@@ -334,6 +383,7 @@ func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[s
 	if cache != nil {
 		mounter["cache"] = cache
 	}
+	mounter["maxVolumesPerNode"] = defaultMaxVolumesPerNode
 
 	// Placement from the chart, not the install: an install pinned to the NVMe nodes would leave unpinned workloads on nodes
 	// without s3-csi-node. Both DaemonSets read node.nodeSelector.
@@ -449,6 +499,24 @@ func expectMounterCapabilities(ctx context.Context, f *framework.Framework, want
 	}
 }
 
+// equalSplitShares returns the --max-cache-size and --memory-target equalSplit gives each mount for this cache block.
+func equalSplitShares(cache map[string]any, memoryRequestMiB int64) (maxCacheSizeMiB, memoryTargetMiB int64) {
+	var size resource.Quantity
+	var tmpfsMiB int64
+	if emptyDir, ok := cache["emptyDir"].(map[string]any); ok {
+		size = resource.MustParse(emptyDir["sizeLimit"].(string))
+		if emptyDir["medium"] == "Memory" {
+			// A tmpfs cache is charged to the mounter's memory, so equalSplit leaves it out of the memory share.
+			tmpfsMiB = size.Value() / (1024 * 1024)
+		}
+	} else {
+		size = resource.MustParse(cache["ephemeral"].(map[string]any)["resourceRequests"].(string))
+	}
+	// 95% of the cache volume, and the memory request less 64 MiB for the mounter and any tmpfs, each divided by maxVolumesPerNode.
+	return size.Value() * 95 / 100 / defaultMaxVolumesPerNode / (1024 * 1024),
+		(memoryRequestMiB - tmpfsMiB - 64) / defaultMaxVolumesPerNode
+}
+
 // cacheDirExists reports whether the mount's cache directory exists; its command always exits 0, so a failed exec never
 // reads as absent.
 func cacheDirExists(ctx context.Context, f *framework.Framework, m cachedMount) (bool, error) {
@@ -469,8 +537,10 @@ func waitAndAssertCacheDirReclaimed(ctx context.Context, f *framework.Framework,
 }
 
 // Could add later:
+//   - the PV's `max-cache-size` being ignored, by asking for a larger one in the equal-share spec.
 //   - an uncached PV on a no-cache install.
 //   - cache growth against the volume's size: the disk emptyDir's sizeLimit does not bound the mounter's cache (the kubelet
-//     does not evict the system-node-critical mounter), while tmpfs and ephemeral volumes stop at their size.
+//     does not evict the system-node-critical mounter), while tmpfs and ephemeral volumes stop at their size; and
+//     --max-cache-size keeps each mount within its share.
 //   - a mounter pod crash with leftovers, to test the startup cleanup.
 //   - a planted `uid-X` before a launch, to test the pre-launch removal.
