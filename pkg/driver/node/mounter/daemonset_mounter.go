@@ -310,6 +310,10 @@ func (dm *DaemonsetMounter) resolveExistingSource(ctx context.Context, entry *Mo
 func (dm *DaemonsetMounter) prepareFreshMount(entry *MountEntry, volumeID, commDir string,
 	incomingParams MountParams, credentialCtx credentialprovider.ProvideContext) error {
 
+	// Set before the cleanup below so that it covers the credential directory. This prevents one left
+	// by an earlier mount from being adopted instead of discarded.
+	entry.CommDir = commDir
+
 	// Ensure no associated resources (credentials, error file, FUSE mount, source directory) are left
 	// behind from a previous attempt or dead source. cleanupMount is idempotent.
 	if err := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); err != nil {
@@ -328,7 +332,6 @@ func (dm *DaemonsetMounter) prepareFreshMount(entry *MountEntry, volumeID, commD
 
 	entry.Params = incomingParams
 	entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
-	entry.CommDir = commDir
 
 	// Claim the UID this mount's Mountpoint will run as, unless this entry already holds one. The
 	// allocator never returns zero, so a zero means none was assigned. Nothing runs as the UID yet,

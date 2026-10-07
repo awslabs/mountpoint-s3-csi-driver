@@ -60,6 +60,9 @@ func (dm *DaemonsetMounter) chmodWithDefault(path string, mode fs.FileMode) erro
 // secureSharedPaths makes the comm directory and the mount socket root-owned and unwritable by any
 // Mountpoint, so none can plant a file for a later mount to pick up or connect to the socket to
 // issue mount requests.
+//
+// Called on every publish rather than once at startup: a restarted mounter pod brings a new emptyDir
+// and a new socket, and csi-node is the only thing that secures either.
 func (dm *DaemonsetMounter) secureSharedPaths(commDir string) error {
 	if err := dm.own(commDir, 0, 0, sharedDirPerm); err != nil {
 		return fmt.Errorf("failed to secure comm dir: %w", err)

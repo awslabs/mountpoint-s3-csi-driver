@@ -2,6 +2,7 @@ package mounter_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -300,6 +301,24 @@ func TestDaemonsetMounter(t *testing.T) {
 			}, got)
 		})
 
+		t.Run("Discards a credential directory left by an earlier mount", func(t *testing.T) {
+			testCtx := setupDM(t)
+
+			// A directory that outlived its map entry, so this mount is the entry's first attempt and has
+			// nothing recorded to clean. Its contents belong to whoever mounted this PV before.
+			credDir := filepath.Join(testCtx.commDir, testCtx.volumeID)
+			assert.NoError(t, os.MkdirAll(credDir, 0700))
+			stale := filepath.Join(credDir, "token")
+			assert.NoError(t, os.WriteFile(stale, []byte("an-earlier-mounts-token"), 0400))
+
+			testCtx.mountVolume()
+
+			// An earlier mount's credentials do not survive into this one.
+			if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("stale credential file still present: %v", err)
+			}
+		})
+
 		t.Run("Keeps the uid and gid the caller asked for", func(t *testing.T) {
 			testCtx := setupDM(t)
 			target := testCtx.targetPath(testCtx.podUID)
@@ -336,6 +355,9 @@ func TestDaemonsetMounter(t *testing.T) {
 			// volumeID is the PV name extracted from target path — used as credential dir name
 			expectedWritePath := filepath.Join(testCtx.commDir, testCtx.volumeID)
 			expectedEnvPath := filepath.Join("/comm", testCtx.volumeID)
+
+			// The fresh mount cleans before it provides, discarding anything an earlier mount left.
+			mockCredProvider.EXPECT().Cleanup(gomock.Any()).Return(nil)
 
 			mockCredProvider.EXPECT().Provide(gomock.Any(), gomock.Any()).
 				DoAndReturn(func(_ context.Context, provideCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
@@ -388,6 +410,9 @@ func TestDaemonsetMounter(t *testing.T) {
 			expectedWritePath := filepath.Join(testCtx.commDir, testCtx.volumeID)
 			expectedEnvPath := filepath.Join("/comm", testCtx.volumeID)
 
+			// The fresh mount cleans before it provides, discarding anything an earlier mount left.
+			mockCredProvider.EXPECT().Cleanup(gomock.Any()).Return(nil)
+
 			provideCall := mockCredProvider.EXPECT().Provide(gomock.Any(), gomock.Any()).
 				DoAndReturn(func(_ context.Context, provideCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
 					assert.Equals(t, expectedWritePath, provideCtx.WritePath)
@@ -396,6 +421,7 @@ func TestDaemonsetMounter(t *testing.T) {
 					return envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil
 				})
 
+			// The cleanup under test: the one that follows the failed mount.
 			mockCredProvider.EXPECT().Cleanup(gomock.Any()).After(provideCall).
 				DoAndReturn(func(cleanupCtx credentialprovider.CleanupContext) error {
 					assert.Equals(t, expectedWritePath, cleanupCtx.WritePath)
