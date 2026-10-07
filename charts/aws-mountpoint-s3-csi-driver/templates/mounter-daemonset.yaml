@@ -9,12 +9,16 @@
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
 {{- $strategies := list "equalSplit" "none" }}
-{{- $strategy := $mounter.memoryLimitStrategy | default "" }}
+{{- $memoryStrategy := $mounter.memoryLimitStrategy | default "" }}
 {{- $cacheEnabled := hasKey $mounter "cache" }}
 {{- $cache := $mounter.cache | default dict }}
 {{- $cacheEmptyDir := $cache.emptyDir | default dict }}
 {{- $cacheEphemeral := $cache.ephemeral | default dict }}
 {{- $cacheMedium := $cacheEmptyDir.medium | default "" }}
+{{- $cacheStrategy := $cache.limitStrategy | default "" }}
+{{- /* Only a missing size is empty: `| default` would also read a sizeLimit of 0 as unset. */}}
+{{- $cacheSize := hasKey $cache "emptyDir" | ternary $cacheEmptyDir.sizeLimit $cacheEphemeral.resourceRequests }}
+{{- $cacheCapacity := ternary "" (toString $cacheSize) (kindIs "invalid" $cacheSize) }}
 
 {{- /* ======================= Cache volume: validation ======================= */}}
 {{- if $cacheEnabled }}
@@ -24,6 +28,9 @@
 {{- if hasKey $cache "emptyDir" }}
 {{- if and $cacheMedium (ne $cacheMedium "Memory") }}
 {{- fail (printf "daemonsetMounters[]: cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
+{{- end }}
+{{- if and (kindIs "invalid" $cacheEmptyDir.sizeLimit) (eq $cacheStrategy "equalSplit") }}
+{{- fail "daemonsetMounters[]: cache.emptyDir.sizeLimit is required when cache.limitStrategy is \"equalSplit\", which divides it between the maxVolumesPerNode Mountpoint processes" }}
 {{- end }}
 {{- else }}
 {{- if not $cacheEphemeral.storageClassName }}
@@ -35,11 +42,39 @@
 {{- end }}
 {{- end }}
 
-{{- /* =========== Memory target (memoryLimitStrategy): validation =========== */}}
-{{- if not (has $strategy $strategies) }}
-{{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $strategy) }}
+{{- /* ============ Cache limit (cache.limitStrategy): validation ============ */}}
+{{- if $cacheEnabled }}
+{{- if not (has $cacheStrategy $strategies) }}
+{{- fail (printf "daemonsetMounters[]: cache.limitStrategy must be one of %v, got %q. \"equalSplit\" (recommended) gives every Mountpoint process on the node an equal share of the cache volume as its --max-cache-size; \"none\" leaves --max-cache-size to each PV's mountOptions." $strategies $cacheStrategy) }}
 {{- end }}
-{{- if eq $strategy "equalSplit" }}
+{{- if and (eq $cacheStrategy "equalSplit") (le $maxVolumes 0) }}
+{{- fail (printf "daemonsetMounters[]: maxVolumesPerNode is required and must be greater than 0 when cache.limitStrategy=equalSplit, got %d: it is the divisor for the cache volume's size. If you require maxVolumesPerNode: 0 (disabling the limit), you may use cache.limitStrategy=none, and set --max-cache-size in each PV's mountOptions to prevent unbounded cache growth." $maxVolumes) }}
+{{- end }}
+{{- /* Best-effort: a quantity this chart cannot parse skips the check. */}}
+{{- $cacheBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" $cacheCapacity }}
+{{- if and (eq $cacheStrategy "equalSplit") $cacheBytes }}
+{{- $cacheShareMiB := divf (mulf (float64 $cacheBytes) 95.0) (mulf 100.0 (mulf (float64 $maxVolumes) 1048576.0)) | floor | int64 }}
+{{- if le (int64 $cacheShareMiB) 0 }}
+{{- fail (printf "daemonsetMounters[]: cache volume of %v, less 5%% headroom, split across maxVolumesPerNode=%d gives each Mountpoint process no whole MiB of --max-cache-size. Raise cache.emptyDir.sizeLimit or cache.ephemeral.resourceRequests, or lower maxVolumesPerNode." $cacheCapacity $maxVolumes) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /* =========== Memory target (memoryLimitStrategy): validation =========== */}}
+{{- /* A Memory-medium emptyDir is a tmpfs, charged to this container's memory like the Mountpoints. */}}
+{{- $tmpfsMiB := 0 }}
+{{- if eq $cacheMedium "Memory" }}
+{{- $tmpfsBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" $cacheCapacity }}
+{{- if $tmpfsBytes }}
+{{- $tmpfsMiB = divf (float64 $tmpfsBytes) 1048576.0 | floor | int64 }}
+{{- end }}
+{{- end }}
+{{- $tmpfsReserved := ternary (printf " and the %d MiB tmpfs cache volume" (int64 $tmpfsMiB)) "" (gt (int64 $tmpfsMiB) 0) }}
+{{- $tmpfsRemedy := ternary ", or lower cache.emptyDir.sizeLimit" "" (gt (int64 $tmpfsMiB) 0) }}
+{{- if not (has $memoryStrategy $strategies) }}
+{{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $memoryStrategy) }}
+{{- end }}
+{{- if eq $memoryStrategy "equalSplit" }}
 {{- /* equalSplit reserves 64 MiB of the container's memory request for the mounter's own process, then
        divides the rest by maxVolumesPerNode, so both inputs are required. */}}
 {{- if not $requests.memory }}
@@ -50,15 +85,15 @@
 {{- end }}
 {{- /* Fail early on a request that cannot work. Best-effort only: a quantity this chart cannot parse
        skips these checks, and the mounter re-checks at runtime regardless. */}}
-{{- $budgetBytes := include "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" $requests.memory }}
+{{- $budgetBytes := include "aws-mountpoint-s3-csi-driver.quantityBytes" $requests.memory }}
 {{- if $budgetBytes }}
-{{- $budgetMiB := sub (divf (float64 $budgetBytes) 1048576.0 | floor | int64) 64 }}
+{{- $budgetMiB := sub (sub (divf (float64 $budgetBytes) 1048576.0 | floor | int64) 64) (int64 $tmpfsMiB) }}
 {{- if le (int64 $budgetMiB) 0 }}
-{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) is at or below the 64 MiB the mounter reserves for its own process, leaving nothing for Mountpoint. Raise resources.requests.memory." $requests.memory) }}
+{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) is at or below the 64 MiB the mounter reserves for its own process%s, leaving nothing for Mountpoint. Raise resources.requests.memory%s." $requests.memory $tmpfsReserved $tmpfsRemedy) }}
 {{- end }}
 {{- $shareMiB := div (int64 $budgetMiB) $maxVolumes }}
 {{- if lt (int64 $shareMiB) 512 }}
-{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) leaves %d MiB after the 64 MiB reserved for the mounter process, which split across maxVolumesPerNode=%d gives %d MiB per Mountpoint process, below Mountpoint's minimum --memory-target of 512 MiB. Raise resources.requests.memory or lower maxVolumesPerNode." $requests.memory $budgetMiB $maxVolumes $shareMiB) }}
+{{- fail (printf "daemonsetMounters[]: resources.requests.memory (%v) leaves %d MiB after the 64 MiB reserved for the mounter process%s, which split across maxVolumesPerNode=%d gives %d MiB per Mountpoint process, below Mountpoint's minimum --memory-target of 512 MiB. Raise resources.requests.memory or lower maxVolumesPerNode%s." $requests.memory $budgetMiB $tmpfsReserved $maxVolumes $shareMiB $tmpfsRemedy) }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -135,19 +170,31 @@ spec:
           - --comm-dir=/comm
           - --mountpoint-bin-dir=/mountpoint-s3/bin
           - --max-volumes-per-node={{ $maxVolumes }}
-          - --memory-limit-strategy={{ $strategy }}
+          - --memory-limit-strategy={{ $memoryStrategy }}
           {{- if $cacheEnabled }}
           - --cache-dir=/cache
+          - --cache-limit-strategy={{ $cacheStrategy }}
+          - --cache-medium={{ $cacheMedium }}
           {{- end }}
           - --v={{ $mounter.logLevel }}
-        {{- if $requests.memory }}
+        {{- if or $requests.memory $cacheCapacity }}
         env:
+          {{- /* Memory target */}}
+          {{- if $requests.memory }}
           - name: MOUNTER_MEMORY_REQUEST_BYTES
             valueFrom:
               resourceFieldRef:
                 containerName: mounter
                 resource: requests.memory
                 divisor: "1"
+          {{- end }}
+          {{- /* Cache limit */}}
+          {{- if $cacheCapacity }}
+          {{- /* resourceFieldRef covers container resources only, not a volume's size, so the quantity is
+                 templated in and parsed by the mounter. */}}
+          - name: MOUNTER_CACHE_CAPACITY
+            value: {{ $cacheCapacity | quote }}
+          {{- end }}
         {{- end }}
         securityContext:
           # Root is required so the kernel clears the spawned Mountpoint process's capabilities on

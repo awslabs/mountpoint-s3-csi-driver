@@ -102,11 +102,11 @@ Determine if running on OpenShift (incl. ROSA)
 {{- end -}}
 
 {{/*
-Best-effort parse of a Kubernetes memory quantity (e.g. "2Gi", "500M", "1.5Gi") into a byte count.
+Best-effort parse of a Kubernetes quantity (e.g. "2Gi", "500M", "1.5Gi") into a byte count.
 Returns "" for forms it does not understand, so callers can skip rather than misjudge.
 Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
 */}}
-{{- define "aws-mountpoint-s3-csi-driver.memoryQuantityBytes" -}}
+{{- define "aws-mountpoint-s3-csi-driver.quantityBytes" -}}
 {{- $value := toString . -}}
 {{- if regexMatch `^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$` $value -}}
 {{- $suffix := regexFind `[A-Za-z]+$` $value -}}
