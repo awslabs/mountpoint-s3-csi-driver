@@ -32,8 +32,6 @@ import (
 //     execInMounterPod, podOnNode
 
 const (
-	mounterDaemonSetName = "s3-csi-daemonset-mounter"
-
 	// e2eUpgradedKey marks a release an upgrade changed (the chart ignores unknown keys). It alone tells "the install
 	// chose these values" from "a previous run's restore never ran", otherwise identical and both healthy.
 	e2eUpgradedKey = "e2eUpgraded"
