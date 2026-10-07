@@ -88,7 +88,11 @@ func main() {
 		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
 	}
 
+	// The chart passes --cache-limit-strategy only with a cache volume; without one no mount here caches, so there is nothing to limit.
 	cacheLimit := cacheLimit{strategy: cacheLimitNone}
+	if *cacheLimitStrategyFlag == "" && (*cacheDir != "" || cacheVolumeBytes > 0 || *cacheMediumFlag != "") {
+		klog.Fatalf("This container has a cache volume (--cache-dir, %s or --cache-medium is set) but no --cache-limit-strategy", cacheCapacityEnvName)
+	}
 	if *cacheLimitStrategyFlag != "" {
 		cacheLimitStrategy, err := parseCacheLimitStrategy(*cacheLimitStrategyFlag)
 		if err != nil {
