@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/google/renameio"
 )
 
 // ReplaceFile safely replaces a file with a new file by copying to a temporary location first
@@ -43,4 +45,29 @@ func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
 	}
 
 	return nil
+}
+
+// WriteFileOwned atomically writes `data` to `path` with mode `perm`, owned by `uid` unless that is
+// zero. Mode and owner are applied before the rename, so a reader resolving `path` never finds the
+// file under the wrong owner.
+func WriteFileOwned(path string, data []byte, perm fs.FileMode, uid uint32) error {
+	// In the destination directory rather than a shared temp dir, since the content is sensitive.
+	pending, err := renameio.TempFile(filepath.Dir(path), path)
+	if err != nil {
+		return fmt.Errorf("write-file-owned: failed to create a temporary file for %q: %w", path, err)
+	}
+	defer pending.Cleanup()
+
+	if err := pending.Chmod(perm); err != nil {
+		return fmt.Errorf("write-file-owned: failed to set the mode of %q: %w", path, err)
+	}
+	if uid != 0 {
+		if err := pending.Chown(int(uid), int(uid)); err != nil {
+			return fmt.Errorf("write-file-owned: failed to set the owner of %q to %d: %w", path, uid, err)
+		}
+	}
+	if _, err := pending.Write(data); err != nil {
+		return fmt.Errorf("write-file-owned: failed to write %q: %w", path, err)
+	}
+	return pending.CloseAtomicallyReplace()
 }

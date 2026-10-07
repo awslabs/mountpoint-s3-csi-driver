@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
@@ -100,5 +101,64 @@ func TestReplaceFile(t *testing.T) {
 		wg.Wait()
 
 		expectContentAndPerm(t, dest, content, 0644)
+	})
+}
+
+func TestWriteFileOwned(t *testing.T) {
+	t.Run("Writes the content and mode", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "token")
+		assert.NoError(t, util.WriteFileOwned(path, []byte("a-token"), 0400, 0))
+
+		got, err := os.ReadFile(path)
+		assert.NoError(t, err)
+		assert.Equals(t, "a-token", string(got))
+
+		stat, err := os.Stat(path)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0400), stat.Mode().Perm())
+	})
+
+	t.Run("Applies the owner to the file it leaves behind", func(t *testing.T) {
+		if os.Getuid() != 0 {
+			t.Skip("changing a file's owner and group needs root")
+		}
+		// Not the writer's own UID, so the assertions below cannot hold without the chown.
+		const uid = uint32(65536)
+		path := filepath.Join(t.TempDir(), "token")
+		assert.NoError(t, util.WriteFileOwned(path, []byte("a-token"), 0400, uid))
+
+		stat, err := os.Stat(path)
+		assert.NoError(t, err)
+		sys, ok := stat.Sys().(*syscall.Stat_t)
+		assert.Equals(t, true, ok)
+		assert.Equals(t, uid, sys.Uid)
+		assert.Equals(t, uid, sys.Gid)
+	})
+
+	t.Run("Replaces an existing file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "token")
+		assert.NoError(t, os.WriteFile(path, []byte("stale"), 0600))
+		assert.NoError(t, util.WriteFileOwned(path, []byte("fresh"), 0400, 0))
+
+		got, err := os.ReadFile(path)
+		assert.NoError(t, err)
+		assert.Equals(t, "fresh", string(got))
+
+		// No temporary file is left alongside it.
+		entries, err := os.ReadDir(filepath.Dir(path))
+		assert.NoError(t, err)
+		assert.Equals(t, 1, len(entries))
+	})
+
+	t.Run("Leaves nothing behind when the path is unwritable", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "missing-dir", "token")
+		if err := util.WriteFileOwned(path, []byte("a-token"), 0400, 0); err == nil {
+			t.Fatal("expected a write into a missing directory to fail")
+		}
+
+		entries, err := os.ReadDir(dir)
+		assert.NoError(t, err)
+		assert.Equals(t, 0, len(entries))
 	})
 }

@@ -99,6 +99,10 @@ type ProvideContext struct {
 	// MountKind indicates whether the mount is managed by systemd, pod mounter or daemonset mounter
 	MountKind MountKind
 
+	// Uid is the UID that must own the credentials written for this mount, or zero to leave them
+	// owned by csi-node.
+	Uid uint32
+
 	// The following values are provided from CSI volume context.
 	AuthenticationSource     AuthenticationSource
 	PodNamespace             string

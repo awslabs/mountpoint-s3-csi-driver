@@ -142,6 +142,7 @@ func provideLongTermCredentialsFromDriver(provideCtx ProvideContext, accessKeyID
 		Basepath: provideCtx.WritePath,
 		Prefix:   prefix,
 		FilePerm: CredentialFilePerm,
+		Uid:      provideCtx.Uid,
 	}, awsprofile.Credentials{
 		AccessKeyID:     accessKeyID,
 		SecretAccessKey: secretAccessKey,

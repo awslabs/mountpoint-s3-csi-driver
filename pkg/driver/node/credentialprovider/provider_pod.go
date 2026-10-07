@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/google/renameio"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -88,7 +88,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 		// Copy STS Token file to WritePath
 		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
-		err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm)
+		err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm, provideCtx.Uid)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to write service account STS token: %v", err)
 		}
@@ -107,7 +107,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		if eksPodIdentityCredentialsEnvironmentError == nil {
 			// Copy EKS Token file to WritePath
 			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
-			err := renameio.WriteFile(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm)
+			err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm, provideCtx.Uid)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
 			}

@@ -1104,6 +1104,7 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 	credentialCtx.WritePath = mountCredDir
 	credentialCtx.EnvPath = filepath.Join("/comm", volumeID)
 	credentialCtx.MountKind = credentialprovider.MountKindDaemonset
+	credentialCtx.Uid = uid
 
 	env, authSource, err := dm.credProvider.Provide(ctx, *credentialCtx)
 	if err != nil {
