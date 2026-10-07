@@ -13,7 +13,7 @@
 //
 // Mount:
 //
-//	CheckTargetState -> load mounterPod -> ProvideCredentials -> Mount (FUSE) -> Send -> waitForMount
+//	CheckTargetState -> load mounterPod -> validateCacheRequest -> ProvideCredentials -> Mount (FUSE) -> Send -> waitForMount
 //	Stale commDir path? -> store nil, signal rediscoverCh, return error
 //
 // Background (StartCommDirWatch -> checkCommDir):
@@ -94,6 +94,8 @@ var (
 type mounterPod struct {
 	// comm directory for communicating with mounter pod.
 	commDir string
+	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
+	hasCacheVolume bool
 }
 
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
@@ -261,12 +263,26 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		}
 	}
 
-	// Load the discovered mounter pod once per NodePublishVolume to ensure credentials and
+	// Load the discovered mounter pod once per NodePublishVolume to ensure credentials, cache and
 	// mount options are sent to the same mounter instance. Prevents the race where mounter pod
 	// restarts between provideCredentials and fuseMount, causing mount-s3 to start without creds.
 	mounter := dm.mounter.Load()
 	if mounter == nil {
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
+	}
+
+	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
+	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
+	if err != nil {
+		return err
+	}
+	// Discard any PV supplied path (repeated cache mount options scenario - must remove all args)
+	for args.Has(mountpoint.ArgCache) {
+		args.Remove(mountpoint.ArgCache)
+	}
+	// The mounter picks the mount's directory
+	if caches {
+		args.Set(mountpoint.ArgCache, mountpoint.ArgNoValue)
 	}
 
 	// All paths (republish, share, new mount) go through mountOrShareSource
@@ -802,8 +818,7 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 		}
 	}
 
-	//[TODO] Clean cache dir
-	//[TODO] Verify no MP process running
+	// TODO Verify no MP process running
 
 	if len(errs) > 0 {
 		return fmt.Errorf("incomplete cleanup for volume %s (%d errors)", entry.VolumeID, len(errs))
@@ -1435,10 +1450,13 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	podUID := string(running[0].UID)
 	mounterDir := filepath.Join(dm.kubeletPath, "pods", podUID)
 	commDir := commDirForMounterDir(mounterDir)
+	hasCacheVolume := mounterPodHasCacheVolume(running[0])
 
-	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s", running[0].Name, podUID, commDir)
+	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
+		running[0].Name, podUID, commDir, hasCacheVolume)
 	return &mounterPod{
-		commDir: commDir,
+		commDir:        commDir,
+		hasCacheVolume: hasCacheVolume,
 	}, nil
 }
 

@@ -17,6 +17,8 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +32,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
@@ -51,6 +54,7 @@ type dmTestCtx struct {
 	podUID        string
 	mounterPodUID string
 	kubeletPath   string
+	mounterDir    string
 	commDir       string
 
 	// ownership records every chown/chmod the mounter applied, keyed by path, so tests can assert
@@ -77,7 +81,12 @@ func (testCtx *dmTestCtx) modeOf(path string) fs.FileMode {
 // targetPath returns a valid kubelet-style target path that targetpath.Parse can parse.
 // Format: <kubeletPath>/pods/<podUID>/volumes/kubernetes.io~csi/<volumeID>/mount
 func (testCtx *dmTestCtx) targetPath(podUID string) string {
-	return filepath.Join(testCtx.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~csi", testCtx.volumeID, "mount")
+	return testCtx.targetPathFor(podUID, testCtx.volumeID)
+}
+
+// targetPathFor is targetPath for a PV name other than the CSI volume ID.
+func (testCtx *dmTestCtx) targetPathFor(podUID, pvName string) string {
+	return filepath.Join(testCtx.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~csi", pvName, "mount")
 }
 
 func setupDM(t *testing.T) *dmTestCtx {
@@ -105,7 +114,10 @@ func setupDM(t *testing.T) *dmTestCtx {
 	nodeName := "test-node"
 	mounterPodUID := uuid.New().String()
 
-	commDir := filepath.Join(kubeletPath, "pods", mounterPodUID, "volumes", "kubernetes.io~empty-dir", mounter.CommVolumeName)
+	// No cache volume: only setupDMWithCache creates one, so every other test exercises the
+	// caching-disabled path.
+	mounterDir := filepath.Join(kubeletPath, "pods", mounterPodUID)
+	commDir := filepath.Join(mounterDir, "volumes", "kubernetes.io~empty-dir", mounter.CommVolumeName)
 	err = os.MkdirAll(commDir, 0750)
 	assert.NoError(t, err)
 
@@ -119,6 +131,10 @@ func setupDM(t *testing.T) *dmTestCtx {
 		},
 		Spec: corev1.PodSpec{
 			NodeName: nodeName,
+			Volumes: []corev1.Volume{{
+				Name:         mounter.CommVolumeName,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			}},
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
@@ -138,6 +154,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 		podUID:        podUID,
 		mounterPodUID: mounterPodUID,
 		kubeletPath:   kubeletPath,
+		mounterDir:    mounterDir,
 		commDir:       commDir,
 		owners:        map[string][2]int{},
 		modes:         map[string]fs.FileMode{},
@@ -180,6 +197,64 @@ func setupDM(t *testing.T) *dmTestCtx {
 	return testCtx
 }
 
+// setupDMWithCache is setupDM with a mounter pod that has a cache volume.
+func setupDMWithCache(t *testing.T) *dmTestCtx {
+	t.Helper()
+
+	testCtx := setupDM(t)
+	testCtx.setMounterPodCacheVolume(&corev1.Volume{
+		Name:         mounter.CacheVolumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	})
+	return testCtx
+}
+
+// setMounterPodCacheVolume sets the mounter pod's cache volume, or removes it when nil, then
+// re-runs discovery - the only thing that reads the cache type, so without it the old value stands.
+func (testCtx *dmTestCtx) setMounterPodCacheVolume(volume *corev1.Volume) {
+	testCtx.t.Helper()
+
+	pods := testCtx.client.CoreV1().Pods("kube-system")
+	list, err := pods.List(testCtx.ctx, metav1.ListOptions{})
+	assert.NoError(testCtx.t, err)
+	assert.Equals(testCtx.t, 1, len(list.Items))
+
+	pod := &list.Items[0]
+	var volumes []corev1.Volume
+	for _, v := range pod.Spec.Volumes {
+		if v.Name != mounter.CacheVolumeName {
+			volumes = append(volumes, v)
+		}
+	}
+	if volume != nil {
+		volumes = append(volumes, *volume)
+	}
+	pod.Spec.Volumes = volumes
+
+	_, err = pods.Update(testCtx.ctx, pod, metav1.UpdateOptions{})
+	assert.NoError(testCtx.t, err)
+	assert.NoError(testCtx.t, testCtx.dm.DiscoverMounter(testCtx.ctx))
+}
+
+// mountAndServe runs Mount to completion for a workload pod and PV, playing the mounter's part by
+// receiving the options, and returns the target plus what the mounter got. Only usable with
+// setupDM's default mountSyscall, which is what registers the source mount waitForMount polls for.
+func (testCtx *dmTestCtx) mountAndServe(podUID, pvName string, volumeCtx map[string]string, mountOptions ...string) (string, mountoptions.Options) {
+	testCtx.t.Helper()
+
+	target := testCtx.targetPathFor(podUID, pvName)
+	// Buffered: a failed assertion below exits that goroutine, and an unbuffered send would deadlock.
+	mountRes := make(chan error, 1)
+	go func() {
+		mountRes <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, testCtx.driverProvideCtx(podUID),
+			volumeCtx, mountpoint.ParseArgs(mountOptions), "", nil)
+	}()
+
+	got := testCtx.receiveMountOptions()
+	assert.NoError(testCtx.t, <-mountRes)
+	return target, got
+}
+
 // driverProvideCtx is the context a driver-authenticated workload pod mounts with. Two pods sharing
 // one mount must agree on it, so a sharing test passes the same one to both.
 func (testCtx *dmTestCtx) driverProvideCtx(podUID string) credentialprovider.ProvideContext {
@@ -190,6 +265,12 @@ func (testCtx *dmTestCtx) driverProvideCtx(podUID string) credentialprovider.Pro
 		ServiceAccountName:   "default",
 		PodNamespace:         "default",
 	}
+}
+
+// cacheArg returns the value of the `--cache` argument the mounter received, and whether it received one.
+func cacheArg(options mountoptions.Options) (value string, present bool) {
+	args := mountpoint.ParseArgs(options.Args)
+	return args.Value(mountpoint.ArgCache)
 }
 
 // installOwnershipRecorders makes the mounter record chown/chmod instead of performing them, so
@@ -1150,6 +1231,102 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 
 		// Only 1 FUSE mount should have happened (the initial one)
 		assert.Equals(t, 1, fuseMountCount)
+	})
+}
+
+func TestDaemonsetMounter_Cache(t *testing.T) {
+	// The PV name in the target path, deliberately not the CSI volume ID setupDM uses.
+	const pvName = "s3-pv-name-differs-from-handle"
+
+	cacheRequest := map[string]string{volumecontext.Cache: volumecontext.CacheEnabled}
+
+	// mountWithoutServing runs a Mount that is expected to fail, so it does not play the
+	// mounter's part; a request that reaches the socket would hang here rather than fail.
+	mountWithoutServing := func(testCtx *dmTestCtx, ctx context.Context, podUID string, volumeCtx map[string]string) error {
+		return testCtx.dm.Mount(ctx, testCtx.bucketName, testCtx.targetPathFor(podUID, pvName),
+			credentialprovider.ProvideContext{WorkloadPodID: podUID, VolumeID: testCtx.volumeID},
+			volumeCtx, mountpoint.ParseArgs(nil), "", nil)
+	}
+
+	// Accepting and rejecting a PV's request
+	t.Run("A PV that asks for a cache sends the mounter a bare --cache", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+
+		_, got := testCtx.mountAndServe("pod-a-uid", pvName, cacheRequest)
+
+		value, present := cacheArg(got)
+		assert.Equals(t, true, present)
+		assert.Equals(t, "", value)
+	})
+
+	t.Run("A PV that asks for no cache gets none, even on a mounter that has one", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+
+		_, got := testCtx.mountAndServe("pod-a-uid", pvName, nil)
+
+		_, present := cacheArg(got)
+		assert.Equals(t, false, present)
+	})
+
+	t.Run("A v1 cache mount option's path is dropped, leaving a bare --cache", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+
+		_, got := testCtx.mountAndServe("pod-a-uid", pvName, nil, "cache /tmp/customer-path")
+
+		value, present := cacheArg(got)
+		assert.Equals(t, true, present)
+		assert.Equals(t, "", value)
+	})
+
+	t.Run("Two v1 cache mount options leave one bare --cache", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+
+		_, got := testCtx.mountAndServe("pod-a-uid", pvName, nil, "cache /tmp/a", "cache /tmp/b")
+
+		var caches []string
+		for _, arg := range got.Args {
+			if strings.HasPrefix(arg, mountpoint.ArgCache) {
+				caches = append(caches, arg)
+			}
+		}
+		assert.Equals(t, []string{mountpoint.ArgCache}, caches)
+	})
+
+	t.Run("A cache request on a mounter with no cache volume is rejected before anything is created", func(t *testing.T) {
+		testCtx := setupDM(t)
+
+		err := mountWithoutServing(testCtx, testCtx.ctx, "pod-rejected", cacheRequest)
+		assert.Equals(t, codes.InvalidArgument, status.Code(err))
+
+		assert.FileNotExists(t, mounter.MetaFileName(testCtx.kubeletPath, pvName))
+		assert.FileNotExists(t, mounter.SourceMountPath(testCtx.kubeletPath, pvName))
+	})
+
+	// Rediscovery
+	t.Run("Staleness drops the mounter's cache volume with the comm dir, and next discovery replaces it", func(t *testing.T) {
+		// DiscoverMounter is called to discover mounter dir / comm dir.
+		testCtx := setupDMWithCache(t)
+
+		// Nothing accepts on the socket, so mountoptions.Send fails, and the driver drops the
+		// discovered mounter pod (dm.mounter.Store(nil)).
+		staleCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel()
+		err := mountWithoutServing(testCtx, staleCtx, "pod-stale", cacheRequest)
+		if err == nil {
+			t.Fatal("expected the send to fail so the mounter pod is dropped")
+		}
+		assert.Contains(t, err.Error(), "failed to send mount options")
+
+		// A cache request now reports the missing mounter rather than reading the dropped cache type.
+		err = mountWithoutServing(testCtx, testCtx.ctx, "pod-while-stale", cacheRequest)
+		assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+
+		// Simulate mounter is back + rerun discovery, but has no cache volume;
+		// PV accepted above (reached Send before) is now rejected.
+		testCtx.setMounterPodCacheVolume(nil)
+
+		err = mountWithoutServing(testCtx, testCtx.ctx, "pod-after-rediscovery", cacheRequest)
+		assert.Equals(t, codes.InvalidArgument, status.Code(err))
 	})
 }
 
