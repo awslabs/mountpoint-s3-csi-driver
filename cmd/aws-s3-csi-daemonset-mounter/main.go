@@ -19,7 +19,7 @@
 //     The driver is responsible for removing this file during Unmount.
 //
 // The mount-id (Options.VolumeId) must be unique per active mount (e.g. <WorkloadPodId>-<VolumeId>
-// or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected.
+// or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected, and so is a UID a running Mountpoint holds.
 //
 // Note: if Mountpoint crashes with non-zero exit after the driver has already completed Unmount,
 // a small .error file may be left behind. This is bounded by the number of such rare race
@@ -96,13 +96,17 @@ func main() {
 	}
 }
 
-// serve empties the cache volume, handles mount requests on sockPath until stop closes,
+// serve secures and empties the cache volume, handles mount requests on sockPath until stop closes,
 // then stops every Mountpoint and empties the cache volume again.
 func serve(pm *ProcessManager, sockPath, mountpointPath string, stop <-chan struct{}) error {
+	if err := pm.secureCacheVolume(); err != nil {
+		return err
+	}
+
 	// Clean up cache directories after startup, to remove any leftover cache directories from previous mounter pod crash.
 	if err := pm.emptyCacheVolume(); err != nil {
 		// Log error only: A directory that cannot be removed fails only the next launch as its UID (and not the whole mounter pod),
-		// to limit blast radius of a failed cleanup.
+		// which retries the removal, to limit blast radius of a failed cleanup.
 		klog.Errorf("Some leftover cache directories remain: %v", err)
 	}
 
