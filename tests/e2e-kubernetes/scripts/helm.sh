@@ -21,13 +21,13 @@ function helm_uninstall_driver() {
   KUBECONFIG=${4}
   CLUSTER_TYPE=${5}
 
-  if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
+  if release_exists ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
     if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
       echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
       set +e
-      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG --debug
       set -e
-      $KUBECTL_BIN delete secret --namespace kube-system sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
+      $KUBECTL_BIN delete secret --namespace kube-system -l "owner=helm,name=${RELEASE_NAME}" --ignore-not-found --kubeconfig "$KUBECONFIG"
     else
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
     fi
@@ -124,6 +124,20 @@ function driver_installed() {
   KUBECONFIG=${3}
   set +e
   if [[ $($HELM_BIN list -A --kubeconfig $KUBECONFIG | grep $RELEASE_NAME) == *deployed* ]]; then
+    set -e
+    return 0
+  else
+    set -e
+    return 1
+  fi
+}
+
+function release_exists() {
+  HELM_BIN=${1}
+  RELEASE_NAME=${2}
+  KUBECONFIG=${3}
+  set +e
+  if $HELM_BIN status "$RELEASE_NAME" --namespace kube-system --kubeconfig "$KUBECONFIG" >/dev/null 2>&1; then
     set -e
     return 0
   else
