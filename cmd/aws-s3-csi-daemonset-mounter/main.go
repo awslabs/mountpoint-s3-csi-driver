@@ -14,8 +14,8 @@
 //     the FUSE file descriptor via SCM_RIGHTS (Unix domain socket ancillary data).
 //  2. The mounter receives the options, spawns a Mountpoint child process with the FUSE fd,
 //     and closes the connection.
-//  3. If the Mountpoint process exits with a non-zero code, its stderr is written to
-//     <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
+//  3. If the mounter refuses a request with a valid mount-id, or the Mountpoint process exits with a non-zero
+//     code, the reason or its stderr is written to <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
 //     The driver is responsible for removing this file during Unmount.
 //
 // The mount-id (Options.VolumeId) must be unique per active mount (e.g. <WorkloadPodId>-<VolumeId>
@@ -29,6 +29,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -48,6 +49,7 @@ var (
 	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitNone),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
 			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
+	cacheDir = flag.String("cache-dir", "", "The cache volume's mount path, or \"\" when this container has none")
 )
 
 const (
@@ -72,30 +74,51 @@ func main() {
 	sockPath := filepath.Join(*commDir, mountSockName)
 	mountpointPath := filepath.Join(*mountpointBinDir, mountpointBin)
 
-	// Remove stale socket file if it exists
-	os.Remove(sockPath)
-
-	listener, err := net.Listen("unix", sockPath)
-	if err != nil {
-		klog.Fatalf("Failed to listen on %s: %v", sockPath, err)
-	}
-	defer listener.Close()
-
-	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
-
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
+	pm := NewProcessManager(*commDir, *cacheDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
 
 	// Handle shutdown signals: terminate all MP processes gracefully
+	stop := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigCh
 		klog.Infof("Received signal %s, closing listener", sig)
-		listener.Close()
+		close(stop)
 	}()
 
 	// Periodic observability: log number of tracked and actual child processes
 	go pm.LogStatusPeriodically(30 * time.Second)
+
+	if err := serve(pm, sockPath, mountpointPath, stop); err != nil {
+		klog.Fatalf("%v", err)
+	}
+}
+
+// serve empties the cache volume, handles mount requests on sockPath until stop closes,
+// then stops every Mountpoint and empties the cache volume again.
+func serve(pm *ProcessManager, sockPath, mountpointPath string, stop <-chan struct{}) error {
+	// Clean up cache directories after startup, to remove any leftover cache directories from previous mounter pod crash.
+	if err := pm.emptyCacheVolume(); err != nil {
+		// Log error only: A directory that cannot be removed fails only the next launch as its UID (and not the whole mounter pod),
+		// to limit blast radius of a failed cleanup.
+		klog.Errorf("Some leftover cache directories remain: %v", err)
+	}
+
+	// Remove stale socket file if it exists
+	os.Remove(sockPath)
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", sockPath, err)
+	}
+	defer listener.Close()
+
+	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
+
+	go func() {
+		<-stop
+		listener.Close()
+	}()
 
 	// Accept loop — sequential, kernel backlog queues concurrent requests
 	for {
@@ -114,4 +137,11 @@ func main() {
 	}
 
 	pm.Shutdown()
+
+	// Cleanup cache directories again before exit (might require termination grace period for it to full clean dirs up)
+	// Exit non-zero, so a cache volume the mounter cannot clean shows in the pod's status, not only in a log.
+	if err := pm.emptyCacheVolume(); err != nil {
+		return fmt.Errorf("some cache directories could not be removed: %w", err)
+	}
+	return nil
 }
