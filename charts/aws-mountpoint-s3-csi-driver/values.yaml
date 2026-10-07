@@ -157,6 +157,8 @@ experimental:
 # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
 # Configuration for the secondary mounter daemonset(s).
 # Only used when experimental.mounterMode is "daemonset".
+# Helm replaces this list wholesale rather than merging it with the defaults below, so an override
+# must restate each field it needs (e.g. memoryLimitStrategy and resources).
 daemonsetMounters:
     # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
@@ -186,6 +188,7 @@ daemonsetMounters:
       requests:
         memory: "4Gi"
         cpu: "500m"
+    # Log verbosity (--v) of the mounter process. Optional; defaults to 4 when omitted.
     logLevel: 4
     podLabels: {}
     # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /
