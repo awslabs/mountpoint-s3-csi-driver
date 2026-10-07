@@ -28,7 +28,7 @@ func startServing(t *testing.T, pm *ProcessManager) (stop chan struct{}, done ch
 
 func TestServe(t *testing.T) {
 	t.Run("exits without listening when the cache volume cannot be secured", func(t *testing.T) {
-		pm, _ := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, _ := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
 		sock := filepath.Join(t.TempDir(), mountSockName)
 		// Already closed, so a serve that wrongly gets past securing it returns instead of serving forever.
@@ -44,7 +44,7 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("empties the cache volume before listening", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "pv-old"), 0700))
 		stop, done := startServing(t, pm)
 		assertNotExist(t, filepath.Join(cacheDir, "pv-old"))
@@ -53,7 +53,7 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("still listens when the startup cleanup cannot remove an entry", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		stop, done := startServing(t, pm)
 		close(stop)
@@ -61,7 +61,7 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("empties the cache volume after stopping", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		stop, done := startServing(t, pm)
 		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "pv-new"), 0700))
 		close(stop)
@@ -70,7 +70,7 @@ func TestServe(t *testing.T) {
 	})
 
 	t.Run("fails at exit naming what it could not remove, so it shows in the pod's status", func(t *testing.T) {
-		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		stop, done := startServing(t, pm)
 		createUnremovableCacheEntry(t, cacheDir, "pv-stuck")
 		close(stop)
