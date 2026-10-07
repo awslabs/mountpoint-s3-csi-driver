@@ -182,7 +182,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 // installOwnershipRecorders makes the mounter record chown/chmod instead of performing them, so
 // tests exercise the per-mount ownership logic without running as root.
 func (testCtx *dmTestCtx) installOwnershipRecorders() {
-	testCtx.dm.SetChownChmodForTesting(
+	testCtx.dm.ReplaceChownChmodForTesting(
 		func(path string, uid, gid int) error {
 			testCtx.ownershipMu.Lock()
 			defer testCtx.ownershipMu.Unlock()
@@ -538,6 +538,9 @@ func TestDaemonsetMounter(t *testing.T) {
 				t.Fatal("target should be mounted after Mount")
 			}
 
+			uid := uint32(testCtx.ownerOf(filepath.Join(testCtx.commDir, testCtx.volumeID))[0])
+			assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uid))
+
 			err = testCtx.dm.Unmount(testCtx.ctx, target, credentialprovider.CleanupContext{
 				PodID:    testCtx.podUID,
 				VolumeID: testCtx.volumeID,
@@ -549,6 +552,9 @@ func TestDaemonsetMounter(t *testing.T) {
 			if mounted {
 				t.Error("target should not be mounted after Unmount")
 			}
+
+			// The mount is gone, so its UID is available to the next one.
+			assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
 		})
 	})
 

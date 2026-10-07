@@ -27,9 +27,9 @@ const (
 type chownFunc func(path string, uid, gid int) error
 type chmodFunc func(path string, mode fs.FileMode) error
 
-// SetChownChmodForTesting replaces the chown and chmod implementations. A nil argument keeps the real
+// ReplaceChownChmodForTesting replaces the chown and chmod implementations. A nil argument keeps the real
 // syscall.
-func (dm *DaemonsetMounter) SetChownChmodForTesting(chown chownFunc, chmod chmodFunc) {
+func (dm *DaemonsetMounter) ReplaceChownChmodForTesting(chown chownFunc, chmod chmodFunc) {
 	dm.chown = chown
 	dm.chmod = chmod
 }

@@ -179,18 +179,22 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
 //  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
 //     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
-//     - Write meta file, set SourcePath/CommDir on the entry
-//  4. Provision credentials (under lock to avoid race with cleanup on failure)
+//     - Claim a UID from the allocator unless the entry already holds one
+//     - Write meta file (the durable record of that UID), set SourcePath/CommDir on the entry
+//  4. Provision credentials, written owned by the entry's UID (under lock to avoid race with
+//     cleanup on failure)
 //  5. If target is already mounted (republish/retry): creds refreshed above, return early
 //  6. If source is mounted (healthy) → bind mount to new target, bump refcount
-//  7. If source not mounted → FUSE mount at source, bind mount source → target,
-//     set sourceMounted=true and refcount=1
+//  7. If source not mounted → FUSE mount at source, send the UID to the mounter so it runs
+//     Mountpoint under it, bind mount source → target, set sourceMounted=true and refcount=1
 //
 // Error handling:
 //   - If fuseMount or bindMount fails, cleanupMount is called. If cleanup succeeds,
 //     the map entry and meta file are removed (clean slate for next retry). If cleanup
 //     fails, the entry and meta are preserved so the next retry enters step 3 and
 //     retries cleanup before proceeding.
+//   - A failure before the mount serves anything drops the entry, releasing its UID. A failure
+//     while it is already serving keeps everything, since consumers still depend on it.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
