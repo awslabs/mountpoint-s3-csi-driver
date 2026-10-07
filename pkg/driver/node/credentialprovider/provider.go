@@ -151,6 +151,15 @@ func (ctx *ProvideContext) IsPodMountpoint() bool {
 	return ctx.MountKind == MountKindPod
 }
 
+// FilePerm returns the mode this mount's credential files must carry: owner-only once they belong to
+// the mount, group-readable while csi-node owns them and a Mountpoint Pod reads them as another user.
+func (ctx *ProvideContext) FilePerm() fs.FileMode {
+	if ctx.Uid != 0 {
+		return IsolatedCredentialFilePerm
+	}
+	return CredentialFilePerm
+}
+
 // ToCleanupCtx constructs CleanupContext from ProvideContext.
 func (ctx *ProvideContext) ToCleanupCtx() CleanupContext {
 	return CleanupContext{

@@ -88,7 +88,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 
 		// Copy STS Token file to WritePath
 		tokenName := podLevelSTSWebIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
-		err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), CredentialFilePerm, provideCtx.Uid)
+		err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenName), []byte(stsToken.Token), provideCtx.FilePerm(), provideCtx.Uid)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to write service account STS token: %v", err)
 		}
@@ -107,7 +107,7 @@ func (c *Provider) provideFromPod(ctx context.Context, provideCtx ProvideContext
 		if eksPodIdentityCredentialsEnvironmentError == nil {
 			// Copy EKS Token file to WritePath
 			tokenNameEKS := podLevelEksPodIdentityServiceAccountTokenName(podID, provideCtx.VolumeID, provideCtx.MountKind)
-			err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), CredentialFilePerm, provideCtx.Uid)
+			err := util.WriteFileOwned(filepath.Join(provideCtx.WritePath, tokenNameEKS), []byte(eksToken.Token), provideCtx.FilePerm(), provideCtx.Uid)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "Failed to write service account EKS Pod Identity token: %v", err)
 			}
