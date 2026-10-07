@@ -1111,10 +1111,6 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 		return nil, "", err
 	}
 
-	if err := dm.ownCredentialsDirContents(mountCredDir, uid); err != nil {
-		return nil, "", fmt.Errorf("failed to hand credentials in %q to UID %d: %w", mountCredDir, uid, err)
-	}
-
 	return env, authSource, nil
 }
 

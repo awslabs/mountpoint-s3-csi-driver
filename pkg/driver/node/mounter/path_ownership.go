@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/klog/v2"
-
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
@@ -89,32 +87,6 @@ func (dm *DaemonsetMounter) ensureCredentialsDirOwnedBy(commDir, volumeID string
 		return "", fmt.Errorf("failed to create directory %q: %w", dir, err)
 	}
 	return dir, dm.own(dir, int(uid), int(uid), perm)
-}
-
-// ownCredentialsDirContents makes `uid` the owner of every entry inside `dir`, so this mount's
-// Mountpoint can read the credentials written there.
-//
-// It runs after the files are written. `dir` is already closed to other mounts by
-// [DaemonsetMounter.ensureCredentialsDirOwnedBy], so no file is reachable by another Mountpoint in the
-// moment before its owner is set.
-func (dm *DaemonsetMounter) ownCredentialsDirContents(dir string, uid uint32) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// csi-node writes only regular files here, so anything else was planted by the Mountpoint that
-		// owns this directory and is skipped.
-		if !d.IsDir() && !d.Type().IsRegular() {
-			klog.Errorf("DaemonsetMounter: not owning %q in %q: unexpected file type %s", path, dir, d.Type())
-			return nil
-		}
-
-		perm := credentialprovider.IsolatedCredentialFilePerm
-		if d.IsDir() {
-			perm = credentialprovider.IsolatedCredentialDirPerm
-		}
-		return dm.own(path, int(uid), int(uid), perm)
-	})
 }
 
 // own sets `path`'s owner and mode.

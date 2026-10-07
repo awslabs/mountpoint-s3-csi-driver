@@ -801,22 +801,19 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart))
 	})
 
-	t.Run("Hands the credential directory and its files to the mount's own UID", func(t *testing.T) {
+	t.Run("Hands the credential directory to the mount's own UID", func(t *testing.T) {
 		testCtx := setupDM(t)
 
-		// A credential provider that actually writes a token, so the walk over the directory's
-		// contents has something to act on. Without a file here, a missing chown of the contents
-		// looks identical to a correct one.
-		tokenPath := filepath.Join(testCtx.commDir, testCtx.volumeID, "token")
-		writesToken := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
-		writesToken.EXPECT().Provide(gomock.Any(), gomock.Any()).
+		// The UID the credential provider is told to hand its files to.
+		var gotProvideUid uint32
+		recordsUid := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
+		recordsUid.EXPECT().Provide(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(_ context.Context, provideCtx credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
-				err := os.WriteFile(filepath.Join(provideCtx.WritePath, "token"), []byte("a-token"), 0600)
-				assert.NoError(t, err)
+				gotProvideUid = provideCtx.Uid
 				return envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil
 			})
-		writesToken.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
-		testCtx.useCredProvider(writesToken)
+		recordsUid.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+		testCtx.useCredProvider(recordsUid)
 
 		got := testCtx.mountVolume()
 
@@ -831,8 +828,8 @@ func TestDaemonsetMounter_PathOwnership(t *testing.T) {
 		assert.Equals(t, [2]int{uid, uid}, testCtx.ownerOf(credDir))
 		assert.Equals(t, credentialprovider.IsolatedCredentialDirPerm, testCtx.modeOf(credDir))
 
-		assert.Equals(t, [2]int{uid, uid}, testCtx.ownerOf(tokenPath))
-		assert.Equals(t, credentialprovider.IsolatedCredentialFilePerm, testCtx.modeOf(tokenPath))
+		// The files inside are owned as they are written, by the credential provider.
+		assert.Equals(t, got.Uid, gotProvideUid)
 	})
 }
 
