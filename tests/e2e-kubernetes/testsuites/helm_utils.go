@@ -30,7 +30,7 @@ import (
 //   - taint_removal.go: mounterDaemonSetName
 //   - util.go: createVolumeResourceWithMountOptions, bucketNameFromVolumeResource, createPod, createPodWithoutWaiting,
 //     checkWriteToPathSucceed, checkReadFromPathSucceed, isDaemonsetMounterMode, awsConfig,
-//     execInMounterPod
+//     execInMounterPod, podOnNode
 
 const (
 	// e2eUpgradedKey marks a release an upgrade changed (the chart ignores unknown keys). It alone tells "the install
