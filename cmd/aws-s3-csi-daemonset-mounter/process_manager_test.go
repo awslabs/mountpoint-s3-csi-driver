@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -104,7 +105,7 @@ func createUnremovableCacheEntry(t *testing.T, cacheDir, entryName string) {
 	t.Helper()
 	// Assert, not skip: CI is unprivileged, so a root run must fail loudly rather than lose this case.
 	assert.Equals(t, false, os.Geteuid() == 0)
-	// Without CAP_DAC_OVERRIDE, which the test user lacks, nothing can be unlinked from a read-only directory.
+	// Without CAP_DAC_OVERRIDE, which the test user lacks and the mounter holds, nothing can be unlinked from a read-only directory.
 	lockedDir := filepath.Join(cacheDir, entryName, "mountpoint-cache")
 	assert.NoError(t, os.MkdirAll(lockedDir, 0700))
 	assert.NoError(t, os.WriteFile(filepath.Join(lockedDir, "block"), []byte("x"), 0600))
@@ -172,6 +173,39 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 	// Cleanup
 	fr.handles[0].Exit(0, "")
 	pm.Shutdown()
+}
+
+func TestProcessManager_SecureCacheVolume(t *testing.T) {
+	t.Run("gives the cache volume to root as 0711, so a Mountpoint can reach its own directory but not list or create beside it", func(t *testing.T) {
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		chowns := recordChowns(pm)
+
+		assert.NoError(t, pm.secureCacheVolume())
+
+		// Note: This assert chownForTesting called on cacheDir with UID: 0, GID: 0; details in recordChowns
+		assert.Equals(t, map[string][2]int{cacheDir: {0, 0}}, chowns)
+		fi, err := os.Stat(cacheDir)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0711), fi.Mode().Perm())
+	})
+
+	t.Run("fails saying the cache volume must let root change ownership, when root cannot chown it", func(t *testing.T) {
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
+
+		err := pm.secureCacheVolume()
+		if err == nil {
+			t.Fatal("expected secureCacheVolume to fail when the chown fails")
+		}
+		assert.Contains(t, err.Error(), "cannot chown "+cacheDir+": the cache volume must allow root to change ownership")
+	})
+
+	t.Run("does nothing without a cache volume", func(t *testing.T) {
+		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
+
+		assert.NoError(t, pm.secureCacheVolume())
+	})
 }
 
 func TestProcessManager_EmptyCacheVolume(t *testing.T) {
@@ -256,7 +290,7 @@ func TestProcessManager_Launch_HappyPath(t *testing.T) {
 	// Verify tracked
 	pm.mu.Lock()
 	assert.Equals(t, 1, len(pm.processes))
-	assert.Equals(t, fr.handles[0].Pid(), pm.processes["mount-123"].Pid())
+	assert.Equals(t, fr.handles[0].Pid(), pm.processes[65536].handle.Pid())
 	pm.mu.Unlock()
 
 	// Clean exit
@@ -396,6 +430,43 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		pm.Shutdown()
 	})
 
+	t.Run("removes what its UID left behind before an uncached launch too", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		// What a killed Mountpoint of an earlier mount as this UID left behind, and another UID's.
+		leftoverBlock := filepath.Join(cacheDir, dirName, "mountpoint-cache", "block")
+		assert.NoError(t, os.MkdirAll(filepath.Dir(leftoverBlock), 0700))
+		assert.NoError(t, os.WriteFile(leftoverBlock, []byte("x"), 0600))
+		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "uid-65537"), 0700))
+		options := cachedOptions(t)
+		options.Args = nil
+
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", options))
+
+		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		_, err := os.Stat(filepath.Join(cacheDir, "uid-65537"))
+		assert.NoError(t, err)
+
+		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
+	})
+
+	t.Run("fails without starting Mountpoint when what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr)
+		createUnremovableCacheEntry(t, cacheDir, dirName)
+
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
+		if err == nil {
+			t.Fatal("expected Launch to refuse while a leftover of its UID remains")
+		}
+		assert.Contains(t, err.Error(), "failed to remove the leftover cache directory of UID 65536")
+		// The error reaches this mount's pod events, so the removal's own error goes to the log only.
+		assert.Equals(t, false, strings.Contains(err.Error(), "permission denied"))
+		assert.Equals(t, 0, len(fr.handles))
+		assertMountReleased(t, pm)
+	})
+
 	t.Run("fails without starting Mountpoint when the cache volume cannot be written to, and releases the mount", func(t *testing.T) {
 		// Assert, not skip: CI is unprivileged, so a root run must fail loudly rather than lose this case.
 		assert.Equals(t, false, os.Geteuid() == 0)
@@ -467,9 +538,11 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 
 	for i, id := range []string{"mount-a", "mount-b", "mount-c"} {
 		dev := mountertest.OpenDevNull(t)
+		// Distinct UIDs, as the mounter refuses a UID a running mount holds.
+		uid := uint32(65536 + i)
 		err := pm.Launch(id, "/usr/bin/mount-s3", mountoptions.Options{
-			Uid:        65536,
-			Gid:        65536,
+			Uid:        uid,
+			Gid:        uid,
 			Fd:         int(dev.Fd()),
 			BucketName: fmt.Sprintf("bucket-%d", i),
 		})
@@ -496,8 +569,7 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 	// Only mount-c still tracked
 	pm.mu.Lock()
 	assert.Equals(t, 1, len(pm.processes))
-	_, hasMountC := pm.processes["mount-c"]
-	assert.Equals(t, true, hasMountC)
+	assert.Equals(t, "mount-c", pm.processes[65538].mountId)
 	pm.mu.Unlock()
 
 	// Error file written for mount-a, not for mount-b
@@ -531,11 +603,11 @@ func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	// Second launch with same mountId should fail
+	// Second launch with same mountId should fail, even with another UID, as the node's retry for a PV gets one.
 	dev2 := mountertest.OpenDevNull(t)
 	err = pm.Launch("same-mount", "/usr/bin/mount-s3", mountoptions.Options{
-		Uid:        65536,
-		Gid:        65536,
+		Uid:        65537,
+		Gid:        65537,
 		Fd:         int(dev2.Fd()),
 		BucketName: "bucket",
 	})
@@ -562,6 +634,50 @@ func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 	assert.NoError(t, err)
 
 	fr.handles[1].Exit(0, "")
+	pm.Shutdown()
+}
+
+func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
+	fr := &fakeProcessRunner{}
+	pm, cacheDir := newProcessManagerWithCache(t, fr)
+
+	dev1 := mountertest.OpenDevNull(t)
+	err := pm.Launch("mount-a", "/usr/bin/mount-s3", mountoptions.Options{
+		Uid:        65536,
+		Gid:        65536,
+		Fd:         int(dev1.Fd()),
+		BucketName: "bucket",
+		Args:       []string{"--cache"},
+	})
+	assert.NoError(t, err)
+	cachedBlock := filepath.Join(cacheDir, "uid-65536", "block")
+	assert.NoError(t, os.WriteFile(cachedBlock, []byte("x"), 0600))
+
+	// A different mountId carrying the same UID must be rejected: two Mountpoints under one UID
+	// would defeat the per-mount kernel isolation.
+	dev2 := mountertest.OpenDevNull(t)
+	err = pm.Launch("mount-b", "/usr/bin/mount-s3", mountoptions.Options{
+		Uid:        65536,
+		Gid:        65536,
+		Fd:         int(dev2.Fd()),
+		BucketName: "bucket",
+	})
+	if err == nil {
+		t.Fatal("Expected error for duplicate UID, got nil")
+	}
+	// The error reaches mount-b's pod events, so it must not name the other mount.
+	assert.Equals(t, false, strings.Contains(err.Error(), "mount-a"))
+	// The UID check must come before the removal of that UID's directory.
+	_, err = os.Stat(cachedBlock)
+	assert.NoError(t, err)
+
+	// Only the first process is tracked.
+	pm.mu.Lock()
+	assert.Equals(t, 1, len(pm.processes))
+	assert.Equals(t, "mount-a", pm.processes[65536].mountId)
+	pm.mu.Unlock()
+
+	fr.handles[0].Exit(0, "")
 	pm.Shutdown()
 }
 
@@ -608,6 +724,21 @@ func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 				_, err = os.Stat(cachedBlocks)
 				assert.NoError(t, err)
 			})
+		}
+	})
+}
+
+func TestProcessManager_ChownWithDefault(t *testing.T) {
+	t.Run("chowns a directory, but not through a symlink planted at its path", func(t *testing.T) {
+		pm := NewProcessManager(t.TempDir(), t.TempDir(), &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone})
+		dir := t.TempDir()
+		link := filepath.Join(t.TempDir(), "link")
+		assert.NoError(t, os.Symlink(dir, link))
+
+		// Chowning to the test user's own IDs needs no privilege, so we can run the real chown not the test override one.
+		assert.NoError(t, pm.chownWithDefault(dir, os.Getuid(), os.Getgid()))
+		if err := pm.chownWithDefault(link, os.Getuid(), os.Getgid()); err == nil {
+			t.Fatal("expected chownWithDefault to refuse a symlink")
 		}
 	})
 }
@@ -664,12 +795,13 @@ func TestHandleConnection_NoFdLeak(t *testing.T) {
 		if i == iterations-1 {
 			volumeId = "" // no VolumeId — handleConnection should close fd without launching
 		}
+		uid := uint32(65536 + i)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Uid:        65536,
-				Gid:        65536,
+				Uid:        uid,
+				Gid:        uid,
 				Fd:         int(dev.Fd()),
 				BucketName: "bucket",
 				VolumeId:   volumeId,
@@ -732,14 +864,14 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 	dev := mountertest.OpenDevNull(t)
 	defer dev.Close()
 
-	sendMount := func(id string) {
+	sendMount := func(id string, uid uint32) {
 		sendDone := make(chan struct{})
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			mountoptions.Send(ctx, sockPath, mountoptions.Options{
-				Uid:        65536,
-				Gid:        65536,
+				Uid:        uid,
+				Gid:        uid,
 				Fd:         int(dev.Fd()),
 				BucketName: "bucket",
 				VolumeId:   id,
@@ -754,15 +886,15 @@ func TestHandleConnection_MountIdValidation(t *testing.T) {
 	}
 
 	for _, id := range invalidIds {
-		sendMount(id)
+		sendMount(id, 65536)
 	}
 
 	fr.mu.Lock()
 	assert.Equals(t, 0, len(fr.handles))
 	fr.mu.Unlock()
 
-	for _, id := range validIds {
-		sendMount(id)
+	for i, id := range validIds {
+		sendMount(id, uint32(65536+i))
 	}
 
 	fr.mu.Lock()
