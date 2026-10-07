@@ -156,8 +156,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	// If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
-	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir {
+	// Pod Mode: If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
+	// Daemonset mode configures the cache in DaemonsetMounter.Mount. // TODO remove once we remove pod mode code.
+	_, isDaemonsetMounter := ns.Mounter.(*mounter.DaemonsetMounter)
+	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir && !isDaemonsetMounter {
 		quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
@@ -209,6 +211,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	if err := ns.Mounter.Mount(ctx, bucket, targetContainer, credentialCtx, volumeCtx, args, fsGroup, userEnv); err != nil {
 		os.Remove(targetContainer)
+		// Mounters who rejected the request could choose their own code
+		if _, ok := status.FromError(err); ok && status.Code(err) != codes.Unknown {
+			return nil, err
+		}
 		return nil, status.Errorf(codes.Internal, "Could not mount %q at %q: %v", bucket, targetContainer, err)
 	}
 	klog.V(4).Infof("NodePublishVolume: %s was mounted", targetContainer)
