@@ -79,6 +79,7 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
 					gomock.Any(),
+					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
 				)
@@ -117,6 +118,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -159,6 +161,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -257,6 +260,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -316,6 +320,7 @@ func TestNodePublishVolume(t *testing.T) {
 						ServiceAccountTokens: tokensJSON,
 					}),
 					gomock.Any(),
+					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
 				)
@@ -353,6 +358,7 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 						ServiceAccountTokens: tokensJSON,
 					}),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -396,6 +402,7 @@ func TestNodePublishVolume(t *testing.T) {
 						ServiceAccountTokens: secretsTokens,
 					}),
 					gomock.Any(),
+					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
 				)
@@ -431,6 +438,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{
@@ -520,6 +528,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -562,6 +571,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -604,6 +614,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -646,6 +657,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-other"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -689,6 +701,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs(mountFlags)),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -877,6 +890,7 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 					gomock.Eq(ctx),
 					gomock.Eq(bucketName),
 					gomock.Eq(targetPath),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs(tc.expectedArgs)),
 					gomock.Eq(""),
@@ -1074,7 +1088,7 @@ var _ mounter.Mounter = &dummyMounter{}
 
 type dummyMounter struct{}
 
-func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
+func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 	return nil
 }
 

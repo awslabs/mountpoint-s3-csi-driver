@@ -512,7 +512,7 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-live")
-	commDir := "/var/lib/kubelet/pods/mounter-uid-abc/volumes/kubernetes.io~empty-dir/comm"
+	commDir := commDirForMounterDir("/var/lib/kubelet/pods/mounter-uid-abc")
 
 	entry := &MountEntry{
 		VolumeID:   "vol-live",
@@ -803,7 +803,8 @@ func TestRebuildMountMap_DeadSourceCleansCredentials(t *testing.T) {
 	kubeletPath := t.TempDir()
 
 	// Create a comm dir with credential files that should be cleaned up
-	commDir := filepath.Join(kubeletPath, "pods", "mounter-uid", "volumes", "kubernetes.io~empty-dir", "comm")
+	mounterDir := filepath.Join(kubeletPath, "pods", "mounter-uid")
+	commDir := commDirForMounterDir(mounterDir)
 	credDir := filepath.Join(commDir, "vol-dead-creds")
 	err := os.MkdirAll(credDir, 0750)
 	assert.NoError(t, err)
@@ -940,7 +941,7 @@ func TestCleanupOrphans(t *testing.T) {
 		},
 		{
 			// Healthy source, no bind mounts left in the kernel: torn down.
-			name: "last consumer gone torn down",
+			name: "last consumer gone, torn down",
 			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)
 				entry := seedEntry(dm, volumeID, sourcePath, "", []string{filepath.Join(kubeletPath, "pods", "gone", "mount")})
@@ -955,7 +956,7 @@ func TestCleanupOrphans(t *testing.T) {
 		{
 			// The source is healthy and the kernel shows a live bind mount that we are not
 			// tracking. Cleanup adopts it, so the refcount becomes 1 and the source is kept.
-			name: "untracked live bind mount adopted not torn down",
+			name: "untracked live bind mount adopted, not torn down",
 			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)       // source is healthy
 				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // we track no targets
