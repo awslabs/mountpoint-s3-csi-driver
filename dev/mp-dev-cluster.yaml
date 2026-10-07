@@ -4,7 +4,7 @@ kind: ClusterConfig
 metadata:
   name: mp-dev-cluster
   region: eu-north-1
-  version: "1.36"
+  version: "1.37"
 
 iam:
   # To use IRSA, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#driver-level-credentials-with-irsa
