@@ -172,6 +172,8 @@ daemonsetMounters:
     # All Mountpoint processes on a node share the mounter container's memory, so an unbounded one
     # can OOM-kill every mount on the node.
     #
+    # See more in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md
+    #
     #   "equalSplit" — the mounter reserves 64Mi of resources.requests.memory for its own process and
     #                  divides the rest equally by maxVolumesPerNode, so the defaults below give each
     #                  of 4 Mountpoint processes (4Gi - 64Mi) / 4 = 1008Mi. resources.requests.memory
