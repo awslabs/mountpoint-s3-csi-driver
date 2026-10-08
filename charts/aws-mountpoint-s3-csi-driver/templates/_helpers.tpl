@@ -108,7 +108,7 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.quantityBytes" -}}
 {{- $value := toString . -}}
-{{- if regexMatch `^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$` $value -}}
+{{- if regexMatch `^[0-9]+(\.[0-9]+)?([eE]\+?[0-9]+|Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$` $value -}}
 {{- $suffix := regexFind `[A-Za-z]+$` $value -}}
 {{- $number := trimSuffix $suffix $value | float64 -}}
 {{- $multiplier := 1.0 -}}

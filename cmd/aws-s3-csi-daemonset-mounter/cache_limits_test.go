@@ -67,7 +67,7 @@ func TestNewCacheLimitEqualSplit(t *testing.T) {
 			wantShareMiB:      633, // 1900 / 3 = 633.33..
 		},
 		{
-			// Multiple after division so integer conversion floor applied 1 time only.
+			// Multiply before division so integer conversion floor applied 1 time only.
 			name:              "the margin is applied before flooring to MiB",
 			capacityBytes:     1536 * 1024,
 			maxVolumesPerNode: 1,

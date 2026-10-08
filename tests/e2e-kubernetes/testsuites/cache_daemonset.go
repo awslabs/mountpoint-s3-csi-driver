@@ -263,10 +263,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 
 					// The mounter computes both after s3-csi-node sent the options, so Mountpoint's argv is the only place to read them.
 					By("Reading the arguments the mounter started this mount's Mountpoint with")
-					pid := mountpointProcessRunningAs(ctx, f, m.node, m.uid).pid
-					cmdline, stderr, err := execInMounterPod(ctx, f, m.node, "cat /proc/"+pid+"/cmdline")
-					framework.ExpectNoError(err, "reading the arguments of Mountpoint pid %s: %s", pid, stderr)
-					args := strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
+					args := mountpointArgs(ctx, f, m)
 					Expect(args).To(ContainElement(fmt.Sprintf("--max-cache-size=%d", maxCacheSizeMiB)))
 					Expect(args).To(ContainElement(fmt.Sprintf("--memory-target=%d", memoryTargetMiB)),
 						"from a %d MiB memory request and cache %v, from a mounter running with %v", requestMiB, tc.helm, mounterArgs)
@@ -307,6 +304,27 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 					By("Waiting for the mounter to remove the dead Mountpoint's cache directory")
 					waitAndAssertCacheDirReclaimed(ctx, f, m)
 				})
+
+				It("serves a PV that does not ask for a cache without a cache directory or --cache", func(ctx context.Context) {
+					vol := createVolumeResourceWithAttributes(ctx, config, pattern, nil, nil)
+					pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name,
+						e2epod.MakePod(f.Namespace.Name, tc.nodeSelector, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, ""))
+					framework.ExpectNoError(err)
+					DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+					uid := statPath(ctx, f, pod.Spec.NodeName, filepath.Join(commDirHostPath(ctx, f, pod.Spec.NodeName), vol.Pv.Name)).uid
+					m := cachedMount{vol: vol, pod: pod, node: pod.Spec.NodeName, uid: uid,
+						cacheDir: filepath.Join(cacheMountPath, fmt.Sprintf("uid-%d", uid))}
+
+					By("Checking Mountpoint runs without --cache, and the mounter made no cache directory for it")
+					Expect(mountpointArgs(ctx, f, m)).NotTo(ContainElement(HavePrefix("--cache")))
+					Expect(cacheDirExists(ctx, f, m)).To(BeFalse(), "the mounter created %s for a PV that does not cache", m.cacheDir)
+
+					By("Writing and reading a file through the uncached mount")
+					path := filepath.Join(e2epod.VolumeMountPath1, cachedFileName)
+					seed := time.Now().UTC().UnixNano()
+					checkWriteToPathSucceed(ctx, f, m.pod, path, ioFileSize, seed)
+					checkReadFromPathSucceed(ctx, f, m.pod, path, ioFileSize, seed)
+				})
 			})
 		}
 
@@ -318,11 +336,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 
 			It("passes the PV's max-cache-size to Mountpoint unchanged", func(ctx context.Context) {
 				m := mountCachedVolume(ctx, f, config, pattern, nil, []string{"max-cache-size 50"})
-				pid := mountpointProcessRunningAs(ctx, f, m.node, m.uid).pid
-				cmdline, stderr, err := execInMounterPod(ctx, f, m.node, "cat /proc/"+pid+"/cmdline")
-				framework.ExpectNoError(err, "reading the arguments of Mountpoint pid %s: %s", pid, stderr)
-				args := strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
-				Expect(args).To(ContainElement("--max-cache-size=50"))
+				Expect(mountpointArgs(ctx, f, m)).To(ContainElement("--max-cache-size=50"))
 			})
 		})
 
@@ -515,6 +529,15 @@ func equalSplitShares(cache map[string]any, memoryRequestMiB int64) (maxCacheSiz
 	// 95% of the cache volume, and the memory request less 64 MiB for the mounter and any tmpfs, each divided by maxVolumesPerNode.
 	return size.Value() * 95 / 100 / defaultMaxVolumesPerNode / (1024 * 1024),
 		(memoryRequestMiB - tmpfsMiB - 64) / defaultMaxVolumesPerNode
+}
+
+// mountpointArgs returns the arguments the mounter started the mount's Mountpoint with.
+func mountpointArgs(ctx context.Context, f *framework.Framework, m cachedMount) []string {
+	GinkgoHelper()
+	pid := mountpointProcessRunningAs(ctx, f, m.node, m.uid).pid
+	cmdline, stderr, err := execInMounterPod(ctx, f, m.node, "cat /proc/"+pid+"/cmdline")
+	framework.ExpectNoError(err, "reading the arguments of Mountpoint pid %s: %s", pid, stderr)
+	return strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
 }
 
 // cacheDirExists reports whether the mount's cache directory exists; its command always exits 0, so a failed exec never
