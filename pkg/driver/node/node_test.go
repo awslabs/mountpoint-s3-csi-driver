@@ -81,7 +81,8 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
-					gomock.Any(),
+					// The mounter reads the PV's cache opt-in from the volume attributes.
+					gomock.Eq(map[string]string{"bucketName": bucketName}),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -738,17 +739,17 @@ func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
 	}{
 		{
 			name:     "a mounter's own rejection reaches the kubelet with its code",
-			mountErr: status.Error(codes.InvalidArgument, "requests a tmpfs cache, but this node provides emptyDir"),
+			mountErr: status.Error(codes.InvalidArgument, "requests a local cache, but s3-csi-daemonset-mounter has no cache volume"),
 			wantCode: codes.InvalidArgument,
 		},
 		{
-			name:     "a plain mount failure is Internal, so the kubelet retries it",
+			name:     "a plain mount failure is Internal",
 			mountErr: errors.New("failed to send mount options"),
 			wantCode: codes.Internal,
 		},
 		{
 			name:     "a rejection wrapped on the way out keeps its code",
-			mountErr: fmt.Errorf("cannot share mount for volume %s: %w", volumeID, status.Error(codes.InvalidArgument, "requests a tmpfs cache")),
+			mountErr: fmt.Errorf("cannot share mount for volume %s: %w", volumeID, status.Error(codes.InvalidArgument, "requests a local cache")),
 			wantCode: codes.InvalidArgument,
 		},
 	}

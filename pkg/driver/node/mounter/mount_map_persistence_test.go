@@ -512,7 +512,7 @@ func TestRebuildMountMap_RestoresUIDs(t *testing.T) {
 func TestRebuildMountMap_RecoversLiveSourceWithBindMounts(t *testing.T) {
 	kubeletPath := t.TempDir()
 	sourcePath := SourceMountPath(kubeletPath, "vol-live")
-	commDir := commDirForMounterDir("/var/lib/kubelet/pods/mounter-uid-abc")
+	commDir := "/var/lib/kubelet/pods/mounter-uid-abc/volumes/kubernetes.io~empty-dir/comm"
 
 	entry := &MountEntry{
 		VolumeID:   "vol-live",
@@ -803,8 +803,7 @@ func TestRebuildMountMap_DeadSourceCleansCredentials(t *testing.T) {
 	kubeletPath := t.TempDir()
 
 	// Create a comm dir with credential files that should be cleaned up
-	mounterDir := filepath.Join(kubeletPath, "pods", "mounter-uid")
-	commDir := commDirForMounterDir(mounterDir)
+	commDir := filepath.Join(kubeletPath, "pods", "mounter-uid", "volumes", "kubernetes.io~empty-dir", "comm")
 	credDir := filepath.Join(commDir, "vol-dead-creds")
 	err := os.MkdirAll(credDir, 0750)
 	assert.NoError(t, err)

@@ -55,6 +55,8 @@ var (
 const (
 	mountSockName = "mount.sock"
 	mountpointBin = "mount-s3"
+
+	logStatusInterval = 30 * time.Second
 )
 
 func main() {
@@ -87,7 +89,7 @@ func main() {
 	}()
 
 	// Periodic observability: log number of tracked and actual child processes
-	go pm.LogStatusPeriodically(30 * time.Second)
+	go pm.LogStatusPeriodically(logStatusInterval)
 
 	if err := serve(pm, sockPath, mountpointPath, stop); err != nil {
 		klog.Fatalf("%v", err)
@@ -138,7 +140,8 @@ func serve(pm *ProcessManager, sockPath, mountpointPath string, stop <-chan stru
 
 	pm.Shutdown()
 
-	// Cleanup cache directories again before exit (might require termination grace period for it to full clean dirs up)
+	// Cleanup cache directories again before exit.
+	// TODO: a large cache may take longer to remove than the default termination grace period, to evaluate and add eviction test with cache.
 	// Exit non-zero, so a cache volume the mounter cannot clean shows in the pod's status, not only in a log.
 	if err := pm.emptyCacheVolume(); err != nil {
 		return fmt.Errorf("some cache directories could not be removed: %w", err)
