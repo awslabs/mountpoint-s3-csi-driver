@@ -265,6 +265,91 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
+// mountOrShareSource implements the pod-sharing Mount flow using MountMap.
+func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
+	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
+
+	entry := dm.lockCanonicalEntry(volumeID)
+	defer entry.mu.Unlock()
+
+	// Build mount params for this request — used for validation and stored on first mount.
+	incomingParams := MountParams{
+		MountOptions:             args.SortedList(),
+		AuthenticationSource:     credentialCtx.AuthenticationSource,
+		ServiceAccountName:       credentialCtx.ServiceAccountName,
+		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
+		PodNamespace:             credentialCtx.PodNamespace,
+		FSGroup:                  fsGroup,
+		VolumeHandle:             credentialCtx.VolumeID,
+	}
+
+	if err := dm.resolveExistingSource(ctx, entry, volumeID, &incomingParams); err != nil {
+		return err
+	}
+
+	if !entry.sourceMounted {
+		if err := dm.prepareFreshMount(entry, volumeID, commDir, incomingParams, credentialCtx); err != nil {
+			return err
+		}
+	}
+
+	// Lock down the paths every mount shares before writing this mount's credentials, so no
+	// Mountpoint can create entries in the comm directory or reach the mount request socket.
+	if err := dm.secureSharedPaths(entry.CommDir); err != nil {
+		return fmt.Errorf("failed to secure shared paths for volume %s: %w", volumeID, err)
+	}
+
+	// Provision credentials under the lock. We always use entry.CommDir which is set above
+	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
+	// This ensures credentials are written to the same location that cleanup will look at.
+	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
+	if err != nil {
+		if !entry.sourceMounted {
+			dm.teardownEntry(volumeID, entry)
+		}
+		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
+	}
+
+	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
+	if targetIsMounted {
+		klog.V(4).Infof("DaemonsetMounter: target %s is already mounted, credentials refreshed", target)
+		return nil
+	}
+
+	if entry.sourceMounted {
+		// Source was confirmed healthy above. Bind mount to new target.
+		if err := dm.BindMount(entry.SourcePath, target); err != nil {
+			return err
+		}
+		entry.RefCount++
+		entry.Targets = append(entry.Targets, target)
+		klog.V(4).Infof("DaemonsetMounter: shared existing mount for volume %s → %s (refcount=%d)",
+			volumeID, target, entry.RefCount)
+		return nil
+	}
+
+	// New mount: FUSE mount at source, then bind to target.
+
+	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
+		dm.abandonFreshMount(volumeID, entry, credentialCtx.ToCleanupCtx(), "fuseMount")
+		return err
+	}
+
+	// Bind mount source → target.
+	if err := dm.BindMount(entry.SourcePath, target); err != nil {
+		dm.abandonFreshMount(volumeID, entry, credentialCtx.ToCleanupCtx(), "BindMount")
+		return err
+	}
+
+	// Populate entry — SourcePath and CommDir already set above.
+	entry.RefCount = 1
+	entry.Targets = []string{target}
+	entry.sourceMounted = true
+
+	klog.V(4).Infof("DaemonsetMounter: new shared mount for volume %s at source %s → %s", volumeID, entry.SourcePath, target)
+	return nil
+}
+
 // lockCanonicalEntry returns this volume's entry, locked. The retry handles a concurrent unmount
 // deleting the entry between the lookup and the lock: the one we hold would then be orphaned, and
 // anything written through it lost.
@@ -363,91 +448,6 @@ func (dm *DaemonsetMounter) abandonFreshMount(volumeID string, entry *MountEntry
 		return
 	}
 	dm.forgetMount(volumeID, entry)
-}
-
-// mountOrShareSource implements the pod-sharing Mount flow using MountMap.
-func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
-
-	entry := dm.lockCanonicalEntry(volumeID)
-	defer entry.mu.Unlock()
-
-	// Build mount params for this request — used for validation and stored on first mount.
-	incomingParams := MountParams{
-		MountOptions:             args.SortedList(),
-		AuthenticationSource:     credentialCtx.AuthenticationSource,
-		ServiceAccountName:       credentialCtx.ServiceAccountName,
-		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
-		PodNamespace:             credentialCtx.PodNamespace,
-		FSGroup:                  fsGroup,
-		VolumeHandle:             credentialCtx.VolumeID,
-	}
-
-	if err := dm.resolveExistingSource(ctx, entry, volumeID, &incomingParams); err != nil {
-		return err
-	}
-
-	if !entry.sourceMounted {
-		if err := dm.prepareFreshMount(entry, volumeID, commDir, incomingParams, credentialCtx); err != nil {
-			return err
-		}
-	}
-
-	// Lock down the paths every mount shares before writing this mount's credentials, so no
-	// Mountpoint can create entries in the comm directory or reach the mount request socket.
-	if err := dm.secureSharedPaths(entry.CommDir); err != nil {
-		return fmt.Errorf("failed to secure shared paths for volume %s: %w", volumeID, err)
-	}
-
-	// Provision credentials under the lock. We always use entry.CommDir which is set above
-	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
-	// This ensures credentials are written to the same location that cleanup will look at.
-	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
-	if err != nil {
-		if !entry.sourceMounted {
-			dm.teardownEntry(volumeID, entry)
-		}
-		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
-	}
-
-	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
-	if targetIsMounted {
-		klog.V(4).Infof("DaemonsetMounter: target %s is already mounted, credentials refreshed", target)
-		return nil
-	}
-
-	if entry.sourceMounted {
-		// Source was confirmed healthy above. Bind mount to new target.
-		if err := dm.BindMount(entry.SourcePath, target); err != nil {
-			return err
-		}
-		entry.RefCount++
-		entry.Targets = append(entry.Targets, target)
-		klog.V(4).Infof("DaemonsetMounter: shared existing mount for volume %s → %s (refcount=%d)",
-			volumeID, target, entry.RefCount)
-		return nil
-	}
-
-	// New mount: FUSE mount at source, then bind to target.
-
-	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
-		dm.abandonFreshMount(volumeID, entry, credentialCtx.ToCleanupCtx(), "fuseMount")
-		return err
-	}
-
-	// Bind mount source → target.
-	if err := dm.BindMount(entry.SourcePath, target); err != nil {
-		dm.abandonFreshMount(volumeID, entry, credentialCtx.ToCleanupCtx(), "BindMount")
-		return err
-	}
-
-	// Populate entry — SourcePath and CommDir already set above.
-	entry.RefCount = 1
-	entry.Targets = []string{target}
-	entry.sourceMounted = true
-
-	klog.V(4).Infof("DaemonsetMounter: new shared mount for volume %s at source %s → %s", volumeID, entry.SourcePath, target)
-	return nil
 }
 
 // fuseMount performs the FUSE mount + FD send + wait cycle at the given path.
