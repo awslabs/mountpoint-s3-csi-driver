@@ -29,7 +29,7 @@
 {{- if and $cacheMedium (ne $cacheMedium "Memory") }}
 {{- fail (printf "daemonsetMounters[]: cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
 {{- end }}
-{{- if and (kindIs "invalid" $cacheEmptyDir.sizeLimit) (eq $cacheStrategy "equalSplit") }}
+{{- if and (or (kindIs "invalid" $cacheEmptyDir.sizeLimit) (eq (toString $cacheEmptyDir.sizeLimit) "")) (eq $cacheStrategy "equalSplit") }}
 {{- fail "daemonsetMounters[]: cache.emptyDir.sizeLimit is required when cache.limitStrategy is \"equalSplit\", which divides it between the maxVolumesPerNode Mountpoint processes" }}
 {{- end }}
 {{- else }}

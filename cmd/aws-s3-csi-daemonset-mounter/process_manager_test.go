@@ -393,7 +393,7 @@ func TestProcessManager_Launch_TracksNothingWhenStartFails(t *testing.T) {
 
 func TestProcessManager_Launch_MaxCacheSize(t *testing.T) {
 	// What the driver sends; the mounter replaces it with its own directory for the mount.
-	const cacheArg = "--cache=/cache/mount-123"
+	const cacheArg = "--cache"
 
 	testCases := []struct {
 		name     string

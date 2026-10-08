@@ -82,6 +82,11 @@ func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
 			expectedErrContains: `cache.emptyDir.sizeLimit is required when cache.limitStrategy is "equalSplit"`,
 		},
 		{
+			name:                "equalSplit + emptyDir, empty sizeLimit",
+			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: ""}, limitStrategy: equalSplit}}`,
+			expectedErrContains: `cache.emptyDir.sizeLimit is required when cache.limitStrategy is "equalSplit"`,
+		},
+		{
 			name:                "ephemeral, no storageClassName",
 			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {ephemeral: {resourceRequests: 10Gi}, limitStrategy: none}}`,
 			expectedErrContains: "cache.ephemeral.storageClassName is required",
@@ -114,6 +119,12 @@ func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
 			name:                "tmpfs, memory share under 512 MiB",
 			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: equalSplit, resources: {requests: {memory: 2112Mi}}, cache: {emptyDir: {sizeLimit: 1Gi, medium: Memory}, limitStrategy: equalSplit}}`,
 			expectedErrContains: "the 1024 MiB tmpfs cache volume, which split across maxVolumesPerNode=4 gives 256 MiB per Mountpoint process, below Mountpoint's minimum --memory-target of 512 MiB. Raise resources.requests.memory or lower maxVolumesPerNode, or lower cache.emptyDir.sizeLimit.",
+		},
+		{
+			// A YAML number reaches the chart as a float, which renders in exponent form.
+			name:                "tmpfs given in bytes, memory share under 512 MiB",
+			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: equalSplit, resources: {requests: {memory: 2112Mi}}, cache: {emptyDir: {sizeLimit: 1073741824, medium: Memory}, limitStrategy: equalSplit}}`,
+			expectedErrContains: "the 1024 MiB tmpfs cache volume, which split across maxVolumesPerNode=4 gives 256 MiB per Mountpoint process",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
