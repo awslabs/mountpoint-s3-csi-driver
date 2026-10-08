@@ -17,15 +17,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 )
-
-// Serial and Ordered: each cache type reinstalls the mounter via Helm, which restarts every Mountpoint on every node.
-// ContinueOnFailure, so a failed spec does not skip the cache types after it (a failed BeforeAll still does).
 
 const (
 	// Where the chart mounts the mounter's cache volume; spelled out as the contract between the chart's volumeMounts and `--cache`.
@@ -125,16 +121,15 @@ func (t *s3CSIDaemonsetCacheTestSuite) GetTestSuiteInfo() storageframework.TestS
 	return t.tsInfo
 }
 
-func (t *s3CSIDaemonsetCacheTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver, pattern storageframework.TestPattern) {
-	if pattern.VolType != storageframework.PreprovisionedPV {
-		e2eskipper.Skipf("Suite %q does not support %v", t.tsInfo.Name, pattern.VolType)
-	}
+func (t *s3CSIDaemonsetCacheTestSuite) SkipUnsupportedTests(_ storageframework.TestDriver, _ storageframework.TestPattern) {
 }
 
 func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestDriver, pattern storageframework.TestPattern) {
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"daemonset-cache", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
+	// Serial and Ordered: each cache type reinstalls the mounter via Helm, which restarts every Mountpoint on every node.
+	// ContinueOnFailure, so a failed spec does not skip the cache types after it (a failed BeforeAll still does).
 	Describe("Local cache on the mounter DaemonSet", Ordered, ContinueOnFailure, Serial, func() {
 		var (
 			config  *storageframework.PerTestConfig
@@ -285,10 +280,8 @@ func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[s
 	// without s3-csi-node. Both DaemonSets read node.nodeSelector.
 	mounter["affinity"] = chartMounter["affinity"]
 	installedNode, _ := r.installed["node"].(map[string]any)
-	node := maps.Clone(installedNode)
-	if node == nil {
-		node = map[string]any{}
-	}
+	node := map[string]any{}
+	maps.Copy(node, installedNode)
 	node["affinity"] = r.chart.Values["node"].(map[string]any)["affinity"]
 	selector := map[string]any{}
 	for k, v := range nodeSelector {

@@ -1404,7 +1404,7 @@ func dumpMountTable(ctx context.Context, f *framework.Framework, nodeName, label
 
 // waitForCSINodePodStable waits for the CSI node pod to have been Running continuously
 // for at least 5 seconds. This prevents race conditions where we exec into a pod that
-// just started but hasn't fully initialized (e.g., RebuildMountMap + DiscoverCommDir).
+// just started but hasn't fully initialized (e.g., RebuildMountMap + DiscoverMounter).
 func waitForCSINodePodStable(ctx context.Context, f *framework.Framework, nodeName string) {
 	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{

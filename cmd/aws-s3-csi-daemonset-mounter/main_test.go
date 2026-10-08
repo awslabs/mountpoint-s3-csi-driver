@@ -11,6 +11,7 @@ import (
 
 // startServing starts serve and returns once it listens, which is after its startup cleanup.
 func startServing(t *testing.T, pm *ProcessManager) (stop chan struct{}, done chan error) {
+	t.Helper()
 	sock := filepath.Join(t.TempDir(), mountSockName)
 	stop, done = make(chan struct{}), make(chan error, 1)
 	go func() { done <- serve(pm, sock, "/usr/bin/mount-s3", stop) }()

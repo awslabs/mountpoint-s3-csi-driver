@@ -61,12 +61,11 @@ func setUpDriverRelease(ctx context.Context, f *framework.Framework) *driverRele
 	ch, err := loader.Load(helmChartSource)
 	framework.ExpectNoError(err, "loading the working-tree chart at %s", helmChartSource)
 	r := &driverRelease{helm: helmCfg, name: csiDriverReleaseName(helmCfg), chart: ch}
-	// User-supplied only, so chart defaults are not written back as user overrides.
-	r.installed, err = action.NewGetValues(helmCfg).Run(r.name)
-	framework.ExpectNoError(err, "reading the user-supplied values of release %q", r.name)
 	installedRelease, err := action.NewGet(helmCfg).Run(r.name)
 	framework.ExpectNoError(err, "reading release %q", r.name)
 	r.revision = installedRelease.Version
+	// User-supplied only, so chart defaults are not written back as user overrides.
+	r.installed = installedRelease.Config
 
 	// go test's -timeout, or a killed run, exits without the restore; restoring the values read here would then report success.
 	if upgraded, _ := r.installed[e2eUpgradedKey].(bool); upgraded {
@@ -120,12 +119,6 @@ func (r *driverRelease) upgrade(ctx context.Context, f *framework.Framework, val
 	GinkgoHelper()
 	values = maps.Clone(values)
 	values[e2eUpgradedKey] = true
-	r.upgradeAndRestartDriverPods(ctx, f, values)
-}
-
-// upgradeAndRestartDriverPods upgrades the release to values and replaces the driver pods so they run them.
-func (r *driverRelease) upgradeAndRestartDriverPods(ctx context.Context, f *framework.Framework, values map[string]any) {
-	GinkgoHelper()
 	up := action.NewUpgrade(r.helm)
 	up.Namespace = helmReleaseNamespace
 	// values is complete; with an empty set Helm would otherwise reuse the release's current values.

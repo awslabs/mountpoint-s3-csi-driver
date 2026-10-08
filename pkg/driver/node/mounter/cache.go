@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	// CacheVolumeName is the /cache directory mounted inside the mounter pod.
+	// CacheVolumeName is the name of the mounter pod's cache volume, which the chart mounts at /cache.
 	CacheVolumeName = "cache"
 )
 
 // mounterPodHasCacheVolume reports whether a mounter pod mounts the cache volume its Mountpoints cache in.
-// Note: we may need to expand this function to get exact cache type for v2 style PV compatibility validations.
+// TODO: we may need to expand this function to get exact cache type for v2 style PV compatibility validations.
 func mounterPodHasCacheVolume(pod corev1.Pod) bool {
 	return slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool { return v.Name == CacheVolumeName })
 }

@@ -3,8 +3,8 @@
 // daemonset (s3-csi-daemonset-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
 //
 // The two daemonsets communicate through the secondary daemonset's emptyDir volume (commDir). The
-// primary daemonset discovers the secondary pod and resolves its directories, re-discovering them
-// when the secondary daemonset restarts.
+// primary daemonset discovers the secondary pod, its comm dir and whether it has a cache volume,
+// re-discovering them when the secondary daemonset restarts.
 //
 // Startup (driver.go):
 //
@@ -58,9 +58,6 @@ const (
 	CommVolumeName   = "comm"
 	MountSockName    = "mount.sock"
 	MountErrorSuffix = ".error"
-
-	volumesSubdir         = "volumes"
-	emptyDirVolumesSubdir = "kubernetes.io~empty-dir"
 
 	// TODO: lower sendOptionsTimeout once secondary has concurrent accept to reduce blocks on Mount -> Send -> dialWithRetry
 	sendOptionsTimeout = 15 * time.Second
@@ -288,14 +285,13 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, volumeCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter.commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
-
-	commDir := mounter.commDir
+	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext,
+	args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
 	entry := dm.lockCanonicalEntry(volumeID)
 	defer entry.mu.Unlock()
@@ -1423,7 +1419,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 }
 
 // tryDiscoverMounter performs a single attempt to find the secondary mounter pod on this node and
-// resolve its directories as seen from the primary daemonset.
+// resolve its comm dir, as seen from the primary daemonset, and whether it has a cache volume.
 func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod, error) {
 	pods, err := dm.clientset.CoreV1().Pods(mounterNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: mounterPodLabel,
@@ -1448,8 +1444,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	}
 
 	podUID := string(running[0].UID)
-	mounterDir := filepath.Join(dm.kubeletPath, "pods", podUID)
-	commDir := commDirForMounterDir(mounterDir)
+	commDir := filepath.Join(dm.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~empty-dir", CommVolumeName)
 	hasCacheVolume := mounterPodHasCacheVolume(running[0])
 
 	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
@@ -1458,11 +1453,6 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 		commDir:        commDir,
 		hasCacheVolume: hasCacheVolume,
 	}, nil
-}
-
-// commDirForMounterDir returns the mounter pod's comm volume, given its kubelet pod directory.
-func commDirForMounterDir(mounterDir string) string {
-	return filepath.Join(mounterDir, volumesSubdir, emptyDirVolumesSubdir, CommVolumeName)
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.

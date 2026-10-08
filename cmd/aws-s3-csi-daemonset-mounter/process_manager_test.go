@@ -367,7 +367,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		return mountoptions.Options{
 			Fd:         int(dev.Fd()),
 			BucketName: "my-bucket",
-			Args:       append([]string{"--cache=/cache/" + mountId}, args...),
+			Args:       append([]string{"--cache"}, args...),
 			Uid:        mountoptions.UIDRangeStart,
 			Gid:        mountoptions.UIDRangeStart}
 	}
@@ -376,7 +376,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr)
 		chowns := recordChowns(pm)
-		// Repeated `cache` mount options on a PV reach the mounter; three in all, as Args.Set alone drops a second.
+		// A request may repeat --cache; three in all, as Args.Set alone drops a second.
 		options := cachedOptions(t, "--cache=/elsewhere", "--cache=/other")
 		// Not the fixtures' 65536, so the name is shown to follow the launch's UID.
 		options.Uid, options.Gid = 65537, 65537
@@ -390,7 +390,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		assert.Equals(t, fs.FileMode(0700), fi.Mode().Perm())
 		assert.Equals(t, [2]int{65537, 65537}, chowns[mountCacheDir])
 		assert.Equals(t, []string{"--cache=" + mountCacheDir, "--foreground"}, fr.handles[0].cmd.Args[3:])
-		assert.Equals(t, []string{"--cache=/cache/" + mountId, "--cache=/elsewhere", "--cache=/other"}, options.Args)
+		assert.Equals(t, []string{"--cache", "--cache=/elsewhere", "--cache=/other"}, options.Args)
 
 		fr.handles[0].Exit(0, "")
 		pm.Shutdown()
@@ -796,7 +796,7 @@ func TestHandleConnection_RefusedLaunchWritesErrorFile(t *testing.T) {
 			Fd:         int(dev.Fd()),
 			BucketName: "bucket",
 			VolumeId:   "s3-pv",
-			Args:       []string{"--cache=/cache/s3-pv"},
+			Args:       []string{"--cache"},
 			Uid:        mountoptions.UIDRangeStart,
 			Gid:        mountoptions.UIDRangeStart,
 		})
