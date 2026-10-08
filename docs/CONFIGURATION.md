@@ -469,6 +469,8 @@ The mounter DaemonSet inherits these same `node.*` settings, so you configure to
 
 Whatever tolerations you give the driver, make sure your workloads are never more tolerant of a `NoExecute` taint than the driver is. Because the driver serves your mounts, a workload that out-tolerates it keeps running after the driver is evicted, on a mount that no longer works.
 
+Prefer giving the driver every toleration your workloads have, with no `tolerationSeconds` limit. If you must use `tolerationSeconds` for a `NoExecute` taint, set the driver's value longer than your workloads' `tolerationSeconds` plus their `terminationGracePeriodSeconds`. That keeps the driver running until your workloads have stopped and their volumes are unmounted; if the driver is evicted first, those mounts are not cleaned up.
+
 ## Configure node startup taint
 There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
 
