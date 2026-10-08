@@ -97,6 +97,8 @@ controller:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-controller-sa
+  # Only one controller is active at once, even with higher `replicaCount`s.
+  replicaCount: 1
 
 mountpointPod:
   # NOTE: `namespace` is still required in daemonset (V3) mode — the drain-only controller uses it to
