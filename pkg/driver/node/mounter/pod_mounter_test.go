@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -215,7 +216,7 @@ func TestPodMounter(t *testing.T) {
 				mountRes <- err
 			}()
 
-			mpPod := createMountpointPod(testCtx)
+			mpPod := createMountpointPod(testCtx, withMountpointVersionLabel("1.24.0"))
 			mpPod.run()
 
 			got := mpPod.receiveMountOptions(testCtx.ctx)
@@ -690,7 +691,7 @@ type mountpointPod struct {
 	podPath string
 }
 
-func createMountpointPod(testCtx *testCtx) *mountpointPod {
+func createMountpointPod(testCtx *testCtx, opts ...func(*corev1.Pod)) *mountpointPod {
 	t := testCtx.t
 	t.Helper()
 
@@ -699,6 +700,9 @@ func createMountpointPod(testCtx *testCtx) *mountpointPod {
 			UID:  types.UID(testCtx.mpPodUID),
 			Name: testCtx.mpPodName,
 		},
+	}
+	for _, opt := range opts {
+		opt(pod)
 	}
 	pod, err := testCtx.client.CoreV1().Pods(mountpointPodNamespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	assert.NoError(t, err)
@@ -727,4 +731,93 @@ func (mp *mountpointPod) receiveMountOptions(ctx context.Context) mountoptions.O
 	options, err := mountoptions.Recv(ctx, mountSock)
 	assert.NoError(mp.testCtx.t, err)
 	return options
+}
+
+// withMountpointVersionLabel returns an option for `createMountpointPod` that sets the
+// Mountpoint version label on the Mountpoint Pod to `version`.
+func withMountpointVersionLabel(version string) func(*corev1.Pod) {
+	return func(pod *corev1.Pod) {
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		pod.Labels[mppod.LabelMountpointVersion] = version
+	}
+}
+
+// TestPodMounterReadOnlyVersionGate verifies that `PodMounter` only forwards the `--read-only`
+// Mountpoint argument to the Mountpoint Pod when that Pod runs a Mountpoint version that accepts
+// `--read-only` with a FUSE file descriptor mount point (1.24.0 and later). For older versions the
+// argument must be stripped before it is sent, otherwise an older Mountpoint (e.g. 1.23.0 created by
+// a not-yet-upgraded controller) rejects the mount.
+//
+// Every row also asserts that the mount syscall (which applies the kernel MS_RDONLY flag) saw
+// `--read-only`, regardless of whether it was later stripped from the args sent to the Pod. This
+// guards the ordering the read-only guarantee depends on: the strip must run AFTER the syscall, so
+// hoisting it above the syscall (dropping MS_RDONLY for old pods) fails this test.
+func TestPodMounterReadOnlyVersionGate(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		setVersionLabel bool
+		version         string
+		wantReadOnlyArg bool
+	}{
+		{name: "1.23.0 strips --read-only", setVersionLabel: true, version: "1.23.0", wantReadOnlyArg: false},
+		{name: "1.23.99 strips --read-only", setVersionLabel: true, version: "1.23.99", wantReadOnlyArg: false},
+		{name: "1.22.5 strips --read-only", setVersionLabel: true, version: "1.22.5", wantReadOnlyArg: false},
+		{name: "1.24.0 forwards --read-only", setVersionLabel: true, version: "1.24.0", wantReadOnlyArg: true},
+		{name: "1.24.1 forwards --read-only", setVersionLabel: true, version: "1.24.1", wantReadOnlyArg: true},
+		{name: "1.25.1 forwards --read-only", setVersionLabel: true, version: "1.25.1", wantReadOnlyArg: true},
+		{name: "1.100.0 forwards --read-only", setVersionLabel: true, version: "1.100.0", wantReadOnlyArg: true},
+		{name: "2.0.0 forwards --read-only", setVersionLabel: true, version: "2.0.0", wantReadOnlyArg: true},
+		{name: "missing label strips --read-only", setVersionLabel: false, wantReadOnlyArg: false},
+		{name: "empty label strips --read-only", setVersionLabel: true, version: "", wantReadOnlyArg: false},
+		{name: "unparseable label strips --read-only", setVersionLabel: true, version: "unreleased", wantReadOnlyArg: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testCtx := setup(t)
+			testCtx.mockCredProvider.EXPECT().
+				Provide(testCtx.ctx, gomock.Any()).
+				Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil)
+
+			// Record whether the mount syscall (which applies MS_RDONLY) saw `--read-only`. It must
+			// always be true, since read-only enforcement is kernel-side and independent of the strip.
+			var syscallSawReadOnly bool
+			testCtx.mountSyscall = func(target string, args mountpoint.Args) (fd int, err error) {
+				syscallSawReadOnly = args.Has(mountpoint.ArgReadOnly)
+				testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
+				return int(mountertest.OpenDevNull(t).Fd()), nil
+			}
+
+			args := mountpoint.ParseArgs([]string{mountpoint.ArgReadOnly})
+			mountRes := make(chan error)
+			go func() {
+				err := testCtx.podMounter.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath, credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					VolumeID:             testCtx.volumeID,
+					WorkloadPodID:        testCtx.podUID,
+				}, args, testCtx.fsGroup, envprovider.Environment{})
+				if err != nil {
+					log.Println("Mount failed", err)
+				}
+				mountRes <- err
+			}()
+
+			var opts []func(*corev1.Pod)
+			if tc.setVersionLabel {
+				opts = append(opts, withMountpointVersionLabel(tc.version))
+			}
+			mpPod := createMountpointPod(testCtx, opts...)
+			mpPod.run()
+
+			got := mpPod.receiveMountOptions(testCtx.ctx)
+			assert.NoError(t, <-mountRes)
+
+			// The mount syscall must always receive `--read-only` so the kernel applies MS_RDONLY,
+			// even on versions where the argument is later stripped from what the Pod receives.
+			assert.Equals(t, true, syscallSawReadOnly)
+
+			hasReadOnlyArg := slices.Contains(got.Args, mountpoint.ArgReadOnly)
+			assert.Equals(t, tc.wantReadOnlyArg, hasReadOnlyArg)
+		})
+	}
 }
