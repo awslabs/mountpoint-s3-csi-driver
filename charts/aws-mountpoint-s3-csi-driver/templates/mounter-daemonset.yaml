@@ -6,6 +6,13 @@
 {{- $resources := $mounter.resources | default dict }}
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
+{{- /* Helm replaces a user-supplied daemonsetMounters list wholesale instead of merging it with the
+       chart defaults, so fall back to 4 when an override leaves logLevel unset (or null): an empty --v=
+       fails the mounter's flag parsing at startup. Not `default`, which would also override an explicit 0. */}}
+{{- $logLevel := $mounter.logLevel }}
+{{- if kindIs "invalid" $logLevel }}
+{{- $logLevel = 4 }}
+{{- end }}
 {{- $strategies := list "equalSplit" "none" }}
 {{- $strategy := $mounter.memoryLimitStrategy | default "" }}
 {{- if not (has $strategy $strategies) }}
@@ -106,7 +113,7 @@ spec:
           - --mountpoint-bin-dir=/mountpoint-s3/bin
           - --max-volumes-per-node={{ $maxVolumes }}
           - --memory-limit-strategy={{ $strategy }}
-          - --v={{ $mounter.logLevel }}
+          - --v={{ $logLevel }}
         {{- if $requests.memory }}
         env:
           - name: MOUNTER_MEMORY_REQUEST_BYTES
