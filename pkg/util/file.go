@@ -48,8 +48,8 @@ func ReplaceFile(destPath string, sourcePath string, perm fs.FileMode) error {
 }
 
 // WriteFileOwned atomically writes `data` to `path` with mode `perm`, owned by `uid` unless that is
-// zero. Mode and owner are applied before the rename, so a reader resolving `path` never finds the
-// file under the wrong owner.
+// zero. Mode and owner are applied before any content is written, and `path` only resolves to the
+// file once it is complete, so the content is never exposed under the wrong mode or owner.
 func WriteFileOwned(path string, data []byte, perm fs.FileMode, uid uint32) error {
 	// In the destination directory rather than a shared temp dir, since the content is sensitive.
 	pending, err := renameio.TempFile(filepath.Dir(path), path)
