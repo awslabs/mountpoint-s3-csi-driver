@@ -306,7 +306,9 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
 		if !entry.sourceMounted {
-			dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx(), "credential provisioning")
+			if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+				klog.Errorf("DaemonsetMounter: cleanup after credential provisioning failed for volume %s: %v (will retry)", volumeID, tearErr)
+			}
 		}
 		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
@@ -332,13 +334,17 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// New mount: FUSE mount at source, then bind to target.
 
 	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
-		dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx(), "fuseMount")
+		if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failed for volume %s: %v (will retry)", volumeID, tearErr)
+		}
 		return err
 	}
 
 	// Bind mount source → target.
 	if err := dm.BindMount(entry.SourcePath, target); err != nil {
-		dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx(), "BindMount")
+		if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+			klog.Errorf("DaemonsetMounter: cleanup after BindMount failed for volume %s: %v (will retry)", volumeID, tearErr)
+		}
 		return err
 	}
 
@@ -675,7 +681,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 		// Source is gone from the mount table — no bind mounts can reference it, so
 		// it's a true orphan (e.g. a crash between writing meta and creating the mount).
 		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s not in mount table, cleaning up", entry.SourcePath, volumeID)
-		dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}, "a source missing from the mount table")
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -692,7 +700,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 		return
 	case !healthy:
 		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s is dead, cleaning up", entry.SourcePath, volumeID)
-		dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}, "a dead source")
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -705,7 +715,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	// If the kernel shows zero bind mounts on this source, nobody's using it — tear it down.
 	if len(liveTargets) == 0 {
 		klog.V(2).Infof("DaemonsetMounter: cleanup: volume %s has no remaining consumers, cleaning up", volumeID)
-		dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}, "no remaining consumers")
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -713,17 +725,17 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	klog.V(4).Infof("DaemonsetMounter: cleanup: volume %s healthy with %d live consumer(s), leaving intact", volumeID, len(liveTargets))
 }
 
-// teardownEntry runs cleanupMount and, only on success, drops the mount's bookkeeping. A cleanup that
-// did not finish keeps the meta file, the UID and the entry, so a later pass retries. `reason` names
-// what prompted the teardown, for the log on that retry. Caller must hold entry.mu.
+// teardownEntry runs cleanupMount and, only on success, drops the mount's bookkeeping. An error means
+// the cleanup did not finish, so the meta file, the UID and the entry are all kept for a later pass
+// to retry. Caller must hold entry.mu.
 func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry,
-	cleanupCtx credentialprovider.CleanupContext, reason string) {
+	cleanupCtx credentialprovider.CleanupContext) error {
 
 	if err := dm.cleanupMount(entry, cleanupCtx); err != nil {
-		klog.Errorf("DaemonsetMounter: cleanup after %s for volume %s: %v (will retry)", reason, volumeID, err)
-		return
+		return err
 	}
 	dm.forgetMount(volumeID, entry)
+	return nil
 }
 
 // forgetMount discards a mount's records once [DaemonsetMounter.cleanupMount] has confirmed its
