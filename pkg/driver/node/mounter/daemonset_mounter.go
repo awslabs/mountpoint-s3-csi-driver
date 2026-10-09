@@ -305,6 +305,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
+		// Only tear down if the source mount is not present or stale.
 		if !entry.sourceMounted {
 			if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
 				klog.Errorf("DaemonsetMounter: cleanup after credential provisioning failed for volume %s: %v (will retry)", volumeID, tearErr)
