@@ -13,3 +13,6 @@ spec:
     - audience: "pods.eks.amazonaws.com"
       expirationSeconds: 3600
   requiresRepublish: true
+  {{- if and .Values.node.preventPodSchedulingIfMissing (semverCompare ">=1.37.0-0" .Capabilities.KubeVersion.Version) }}
+  preventPodSchedulingIfMissing: true
+  {{- end }}
