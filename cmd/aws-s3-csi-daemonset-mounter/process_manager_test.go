@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
@@ -222,8 +221,8 @@ func TestProcessManager_Launch_MemoryTarget(t *testing.T) {
 				Fd:         int(dev.Fd()),
 				BucketName: "my-bucket",
 				Args:       tc.args,
-				Uid:        mounter.UIDRangeStart,
-				Gid:        mounter.UIDRangeStart,
+				Uid:        mountoptions.UIDRangeStart,
+				Gid:        mountoptions.UIDRangeStart,
 			}
 			assert.NoError(t, pm.Launch("mount-123", "/usr/bin/mount-s3", options))
 
@@ -554,9 +553,9 @@ func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *tes
 		uid, gid uint32
 	}{
 		{"zero, the unset value", 0, 0},
-		{"below the range", mounter.UIDRangeStart - 1, mounter.UIDRangeStart - 1},
-		{"above the range", mounter.UIDRangeEnd + 1, mounter.UIDRangeEnd + 1},
-		{"GID not matching UID", mounter.UIDRangeStart, mounter.UIDRangeStart + 1},
+		{"below the range", mountoptions.UIDRangeStart - 1, mountoptions.UIDRangeStart - 1},
+		{"above the range", mountoptions.UIDRangeEnd + 1, mountoptions.UIDRangeEnd + 1},
+		{"GID not matching UID", mountoptions.UIDRangeStart, mountoptions.UIDRangeStart + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeProcessRunner{}

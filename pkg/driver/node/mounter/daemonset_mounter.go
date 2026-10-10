@@ -179,18 +179,23 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
 //  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
 //     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
-//     - Write meta file, set SourcePath/CommDir on the entry
-//  4. Provision credentials (under lock to avoid race with cleanup on failure)
+//     - Claim a UID from the allocator unless the entry already holds one
+//     - Write meta file (the durable record of that UID), set SourcePath/CommDir on the entry
+//  4. Provision credentials, written owned by the entry's UID (under lock to avoid race with
+//     cleanup on failure)
 //  5. If target is already mounted (republish/retry): creds refreshed above, return early
 //  6. If source is mounted (healthy) → bind mount to new target, bump refcount
-//  7. If source not mounted → FUSE mount at source, bind mount source → target,
-//     set sourceMounted=true and refcount=1
+//  7. If source not mounted → FUSE mount at source, send the UID to the mounter so it runs
+//     Mountpoint under it, bind mount source → target, set sourceMounted=true and refcount=1
 //
 // Error handling:
-//   - If fuseMount or bindMount fails, cleanupMount is called. If cleanup succeeds,
-//     the map entry and meta file are removed (clean slate for next retry). If cleanup
-//     fails, the entry and meta are preserved so the next retry enters step 3 and
-//     retries cleanup before proceeding.
+//   - If fuseMount or bindMount fails, cleanupMount is called. If cleanup succeeds, the meta file is
+//     removed, the UID released and the map entry deleted (clean slate for next retry). If cleanup
+//     fails, all three are preserved so the next retry enters step 3 and retries cleanup before
+//     proceeding.
+//   - If credential provisioning fails and the source is not yet mounted, the meta file is removed,
+//     the UID released and the map entry deleted. If the source is already mounted all three are
+//     preserved.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
@@ -265,17 +270,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
 	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
-	// Get or create the per-volume entry, then lock it.
-	// Retry loop ensures we hold the canonical entry — not one orphaned by a concurrent unmount/delete.
-	var entry *MountEntry
-	for {
-		entry, _ = dm.mountMap.GetOrCreate(volumeID)
-		entry.mu.Lock()
-		if dm.mountMap.Get(volumeID) == entry {
-			break // we hold the canonical entry
-		}
-		entry.mu.Unlock() // orphaned entry (deleted by concurrent unmount), retry
-	}
+	entry := dm.lockCanonicalEntry(volumeID)
 	defer entry.mu.Unlock()
 
 	// Build mount params for this request — used for validation and stored on first mount.
@@ -289,60 +284,13 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		VolumeHandle:             credentialCtx.VolumeID,
 	}
 
-	// If source is mounted, check health first. Dead source = mark not mounted so we go
-	// through the fresh-mount path below. Only enforce compatibility on a healthy (living) source.
-	if entry.sourceMounted {
-		healthy, healthErr := dm.IsSourceHealthy(ctx, entry.SourcePath)
-		switch {
-		case healthErr != nil:
-			// Health could not be determined (transient error or timeout). Fail closed:
-			// do NOT tear down a possibly-live source out from under active consumers.
-			// Return an error so kubelet retries NodePublishVolume.
-			return fmt.Errorf("cannot determine health of existing source mount for volume %s, will retry: %w", volumeID, healthErr)
-		case !healthy:
-			klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, will clean up and re-mount", entry.SourcePath, volumeID)
-			entry.sourceMounted = false
-		default:
-			// Healthy source — enforce compatibility before any credential writes.
-			if err := entry.Params.ValidateCompatibility(&incomingParams); err != nil {
-				return fmt.Errorf("cannot share mount for volume %s: %w", volumeID, err)
-			}
-		}
+	if err := dm.resolveExistingSource(ctx, entry, volumeID, &incomingParams); err != nil {
+		return err
 	}
 
 	if !entry.sourceMounted {
-		// Fresh mount: ensure no associated resources (credentials, error file, FUSE mount,
-		// source directory) are left behind from a previous attempt or dead source before
-		// creating new ones. cleanupMount is idempotent — safe when resources don't exist.
-		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
-			return fmt.Errorf("failed to clean up stale resources for volume %s, cannot proceed with fresh mount: %w", volumeID, cleanErr)
-		}
-
-		// First mount for this PV on the node — enforce per-node volumeHandle uniqueness here so
-		// the check runs once per entry, not on every republish/share. credentialCtx.VolumeID is
-		// the CSI volumeHandle; volumeID is the PV name. Released in MountMap.Delete on teardown.
-		if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
-			// Drop the blank entry GetOrCreate inserted for this PV; otherwise it lingers,
-			// since periodic cleanup skips entries with an empty SourcePath.
-			dm.mountMap.Delete(volumeID)
-			return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
-		}
-
-		entry.Params = incomingParams
-		entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
-		entry.CommDir = commDir
-
-		// Claim the UID this mount's Mountpoint will run as. Releasing first so that an entry that
-		// already failed once does not leak the UID it claimed then; a no-op for a new entry.
-		dm.uidAllocator.Release(entry.Uid)
-		uid, err := dm.uidAllocator.Allocate()
-		if err != nil {
-			return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
-		}
-		entry.Uid = uid
-
-		if err := WriteMeta(dm.kubeletPath, entry); err != nil {
-			return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
+		if err := dm.prepareFreshMount(entry, volumeID, commDir, incomingParams, credentialCtx); err != nil {
+			return err
 		}
 	}
 
@@ -357,6 +305,12 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
+		// Only tear down if the source mount is not present or stale.
+		if !entry.sourceMounted {
+			if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+				klog.Errorf("DaemonsetMounter: cleanup after credential provisioning failed for volume %s: %v (will retry)", volumeID, tearErr)
+			}
+		}
 		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
 	}
 
@@ -381,21 +335,17 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	// New mount: FUSE mount at source, then bind to target.
 
 	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
-		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
-			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failure for volume %s: %v", volumeID, cleanErr)
-			return err
+		if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failed for volume %s: %v (will retry)", volumeID, tearErr)
 		}
-		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
 	// Bind mount source → target.
 	if err := dm.BindMount(entry.SourcePath, target); err != nil {
-		if cleanErr := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); cleanErr != nil {
-			klog.Errorf("DaemonsetMounter: cleanup after BindMount failure for volume %s: %v", volumeID, cleanErr)
-			return err
+		if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
+			klog.Errorf("DaemonsetMounter: cleanup after BindMount failed for volume %s: %v (will retry)", volumeID, tearErr)
 		}
-		dm.forgetMount(volumeID, entry)
 		return err
 	}
 
@@ -405,6 +355,94 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	entry.sourceMounted = true
 
 	klog.V(4).Infof("DaemonsetMounter: new shared mount for volume %s at source %s → %s", volumeID, entry.SourcePath, target)
+	return nil
+}
+
+// lockCanonicalEntry returns this volume's entry, locked. The retry handles a concurrent unmount
+// deleting the entry between the lookup and the lock: the one we hold would then be orphaned, and
+// anything written through it lost.
+func (dm *DaemonsetMounter) lockCanonicalEntry(volumeID string) *MountEntry {
+	for {
+		entry, _ := dm.mountMap.GetOrCreate(volumeID)
+		entry.mu.Lock()
+		if dm.mountMap.Get(volumeID) == entry {
+			return entry
+		}
+		entry.mu.Unlock()
+	}
+}
+
+// resolveExistingSource decides what to do with an entry that believes its source is mounted: share
+// it, or clear sourceMounted so the caller re-establishes it. Caller must hold entry.mu.
+func (dm *DaemonsetMounter) resolveExistingSource(ctx context.Context, entry *MountEntry, volumeID string, incoming *MountParams) error {
+	if !entry.sourceMounted {
+		return nil
+	}
+
+	healthy, err := dm.IsSourceHealthy(ctx, entry.SourcePath)
+	switch {
+	case err != nil:
+		// Health could not be determined (transient error or timeout). Fail closed: do NOT tear down a
+		// possibly-live source out from under active consumers. kubelet retries NodePublishVolume.
+		return fmt.Errorf("cannot determine health of existing source mount for volume %s, will retry: %w", volumeID, err)
+	case !healthy:
+		klog.V(2).Infof("DaemonsetMounter: source %s is dead for volume %s, will clean up and re-mount", entry.SourcePath, volumeID)
+		entry.sourceMounted = false
+		return nil
+	default:
+		// Healthy source — enforce compatibility before any credential writes.
+		if err := entry.Params.ValidateCompatibility(incoming); err != nil {
+			return fmt.Errorf("cannot share mount for volume %s: %w", volumeID, err)
+		}
+		return nil
+	}
+}
+
+// prepareFreshMount gives the entry everything a mount needs before one is made: a clean slate, the
+// volume's handle, its paths, a UID, and a meta file recording them. Caller must hold entry.mu.
+func (dm *DaemonsetMounter) prepareFreshMount(entry *MountEntry, volumeID, commDir string,
+	incomingParams MountParams, credentialCtx credentialprovider.ProvideContext) error {
+
+	// Set before the cleanup below so that it covers the credential directory. This prevents one left
+	// by an earlier mount from being adopted instead of discarded.
+	entry.CommDir = commDir
+
+	// Ensure no associated resources (credentials, error file, FUSE mount, source directory) are left
+	// behind from a previous attempt or dead source. cleanupMount is idempotent.
+	if err := dm.cleanupMount(entry, credentialCtx.ToCleanupCtx()); err != nil {
+		return fmt.Errorf("failed to clean up stale resources for volume %s, cannot proceed with fresh mount: %w", volumeID, err)
+	}
+
+	// First mount for this PV on the node — enforce per-node volumeHandle uniqueness here so the check
+	// runs once per entry, not on every republish/share. credentialCtx.VolumeID is the CSI volumeHandle;
+	// volumeID is the PV name. Released in MountMap.Delete on teardown.
+	if err := dm.mountMap.ClaimHandle(credentialCtx.VolumeID, volumeID); err != nil {
+		// Drop the blank entry GetOrCreate inserted for this PV; otherwise it lingers, since periodic
+		// cleanup skips entries with an empty SourcePath.
+		dm.mountMap.Delete(volumeID)
+		return fmt.Errorf("cannot mount volume %s: %w", volumeID, err)
+	}
+
+	entry.Params = incomingParams
+	entry.SourcePath = SourceMountPath(dm.kubeletPath, volumeID)
+
+	// Claim the UID this mount's Mountpoint will run as, unless this entry already holds one. The
+	// allocator never returns zero, so a zero means none was assigned. Nothing runs as the UID yet,
+	// since cleanupMount above has unmounted the source.
+	if entry.Uid == 0 {
+		uid, err := dm.uidAllocator.Allocate()
+		if err != nil {
+			// Nothing has been created for this mount yet, so drop the entry rather than leave it holding
+			// its volumeHandle claim until the periodic cleanup.
+			dm.mountMap.Delete(volumeID)
+			return fmt.Errorf("failed to allocate a UID for volume %s: %w", volumeID, err)
+		}
+		entry.Uid = uid
+	}
+
+	if err := WriteMeta(dm.kubeletPath, entry); err != nil {
+		return fmt.Errorf("failed to write meta for volume %s, cannot proceed with mount: %w", volumeID, err)
+	}
 	return nil
 }
 
@@ -644,7 +682,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 		// Source is gone from the mount table — no bind mounts can reference it, so
 		// it's a true orphan (e.g. a crash between writing meta and creating the mount).
 		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s not in mount table, cleaning up", entry.SourcePath, volumeID)
-		dm.teardownEntry(volumeID, entry)
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -661,7 +701,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 		return
 	case !healthy:
 		klog.V(2).Infof("DaemonsetMounter: cleanup: source %s for volume %s is dead, cleaning up", entry.SourcePath, volumeID)
-		dm.teardownEntry(volumeID, entry)
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -674,7 +716,9 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	// If the kernel shows zero bind mounts on this source, nobody's using it — tear it down.
 	if len(liveTargets) == 0 {
 		klog.V(2).Infof("DaemonsetMounter: cleanup: volume %s has no remaining consumers, cleaning up", volumeID)
-		dm.teardownEntry(volumeID, entry)
+		if err := dm.teardownEntry(volumeID, entry, credentialprovider.CleanupContext{VolumeID: volumeID}); err != nil {
+			klog.Errorf("DaemonsetMounter: cleanup for volume %s: %v (will retry next tick)", volumeID, err)
+		}
 		return
 	}
 
@@ -682,15 +726,17 @@ func (dm *DaemonsetMounter) cleanupEntry(volumeID string, entry *MountEntry) {
 	klog.V(4).Infof("DaemonsetMounter: cleanup: volume %s healthy with %d live consumer(s), leaving intact", volumeID, len(liveTargets))
 }
 
-// teardownEntry runs cleanupMount and, only on success, drops the mount's bookkeeping. On failure
-// everything is kept so a later pass retries. Caller must hold entry.mu.
-func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry) {
-	cleanupCtx := credentialprovider.CleanupContext{VolumeID: volumeID}
+// teardownEntry runs cleanupMount and, only on success, drops the mount's bookkeeping. An error means
+// the cleanup did not finish, so the meta file, the UID and the entry are all kept for a later pass
+// to retry. Caller must hold entry.mu.
+func (dm *DaemonsetMounter) teardownEntry(volumeID string, entry *MountEntry,
+	cleanupCtx credentialprovider.CleanupContext) error {
+
 	if err := dm.cleanupMount(entry, cleanupCtx); err != nil {
-		klog.Errorf("DaemonsetMounter: cleanup: %v (will retry next tick)", err)
-		return
+		return err
 	}
 	dm.forgetMount(volumeID, entry)
+	return nil
 }
 
 // forgetMount discards a mount's records once [DaemonsetMounter.cleanupMount] has confirmed its
@@ -1096,14 +1142,11 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 	credentialCtx.WritePath = mountCredDir
 	credentialCtx.EnvPath = filepath.Join("/comm", volumeID)
 	credentialCtx.MountKind = credentialprovider.MountKindDaemonset
+	credentialCtx.Uid = uid
 
 	env, authSource, err := dm.credProvider.Provide(ctx, *credentialCtx)
 	if err != nil {
 		return nil, "", err
-	}
-
-	if err := dm.ownCredentialsDirContents(mountCredDir, uid); err != nil {
-		return nil, "", fmt.Errorf("failed to hand credentials in %q to UID %d: %w", mountCredDir, uid, err)
 	}
 
 	return env, authSource, nil

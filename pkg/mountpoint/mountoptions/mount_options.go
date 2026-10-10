@@ -18,6 +18,19 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	// UIDRangeStart and UIDRangeEnd bound the UIDs handed to Mountpoint processes, inclusive, and so
+	// the values [Options.Uid] and [Options.Gid] may carry.
+	//
+	// The range assumes the host's own files and processes use UIDs below it, which is standard for
+	// most Linux distributions, so a Mountpoint never shares an identity with the host. Its capacity
+	// is far larger than the `maxVolumesPerNode` default of 4, so exhaustion is not a practical
+	// concern.
+	UIDRangeStart = 65536
+	UIDRangeEnd   = 131071
+	UIDRangeSize  = UIDRangeEnd - UIDRangeStart + 1
+)
+
 // An Options struct represents mount options to use while invoking Mountpoint.
 type Options struct {
 	// Fd will be passed over Unix socket using `SCM_RIGHTS`, not as part of the serialized JSON.

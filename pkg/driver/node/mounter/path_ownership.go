@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/klog/v2"
-
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 )
 
@@ -29,9 +27,9 @@ const (
 type chownFunc func(path string, uid, gid int) error
 type chmodFunc func(path string, mode fs.FileMode) error
 
-// SetChownChmodForTesting replaces the chown and chmod implementations. A nil argument keeps the real
+// ReplaceChownChmodForTesting replaces the chown and chmod implementations. A nil argument keeps the real
 // syscall.
-func (dm *DaemonsetMounter) SetChownChmodForTesting(chown chownFunc, chmod chmodFunc) {
+func (dm *DaemonsetMounter) ReplaceChownChmodForTesting(chown chownFunc, chmod chmodFunc) {
 	dm.chown = chown
 	dm.chmod = chmod
 }
@@ -62,6 +60,9 @@ func (dm *DaemonsetMounter) chmodWithDefault(path string, mode fs.FileMode) erro
 // secureSharedPaths makes the comm directory and the mount socket root-owned and unwritable by any
 // Mountpoint, so none can plant a file for a later mount to pick up or connect to the socket to
 // issue mount requests.
+//
+// Called on every publish rather than once at startup: a restarted mounter pod brings a new emptyDir
+// and a new socket, and csi-node is the only thing that secures either.
 func (dm *DaemonsetMounter) secureSharedPaths(commDir string) error {
 	if err := dm.own(commDir, 0, 0, sharedDirPerm); err != nil {
 		return fmt.Errorf("failed to secure comm dir: %w", err)
@@ -89,32 +90,6 @@ func (dm *DaemonsetMounter) ensureCredentialsDirOwnedBy(commDir, volumeID string
 		return "", fmt.Errorf("failed to create directory %q: %w", dir, err)
 	}
 	return dir, dm.own(dir, int(uid), int(uid), perm)
-}
-
-// ownCredentialsDirContents makes `uid` the owner of every entry inside `dir`, so this mount's
-// Mountpoint can read the credentials written there.
-//
-// It runs after the files are written. `dir` is already closed to other mounts by
-// [DaemonsetMounter.ensureCredentialsDirOwnedBy], so no file is reachable by another Mountpoint in the
-// moment before its owner is set.
-func (dm *DaemonsetMounter) ownCredentialsDirContents(dir string, uid uint32) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// csi-node writes only regular files here, so anything else was planted by the Mountpoint that
-		// owns this directory and is skipped.
-		if !d.IsDir() && !d.Type().IsRegular() {
-			klog.Errorf("DaemonsetMounter: not owning %q in %q: unexpected file type %s", path, dir, d.Type())
-			return nil
-		}
-
-		perm := credentialprovider.IsolatedCredentialFilePerm
-		if d.IsDir() {
-			perm = credentialprovider.IsolatedCredentialDirPerm
-		}
-		return dm.own(path, int(uid), int(uid), perm)
-	})
 }
 
 // own sets `path`'s owner and mode.

@@ -5,18 +5,16 @@ import (
 	"fmt"
 	"math"
 	"sync"
+
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
+// The bounds of the range this allocator hands out, defined in [mountoptions] so the mounter can
+// validate what reaches it over the socket without importing this package.
 const (
-	// UIDRangeStart and UIDRangeEnd bound the UIDs handed to Mountpoint processes, inclusive.
-	//
-	// The range is based on the assumption that the host's files and processes use UIDs/GIDs values
-	// below this range, which is standard for most Linux distributions. This approach avoids overlap
-	// with the UIDs/GIDs of the host. The range's capacity is far larger than the
-	// `maxVolumesPerNode` default of 4, so exhaustion is not a practical concern.
-	UIDRangeStart = 65536
-	UIDRangeEnd   = 131071
-	UIDRangeSize  = UIDRangeEnd - UIDRangeStart + 1
+	UIDRangeStart = mountoptions.UIDRangeStart
+	UIDRangeEnd   = mountoptions.UIDRangeEnd
+	UIDRangeSize  = mountoptions.UIDRangeSize
 )
 
 var ErrUIDRangeExhausted = errors.New("no free UID in range")
