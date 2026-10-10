@@ -940,7 +940,7 @@ func TestCleanupOrphans(t *testing.T) {
 		},
 		{
 			// Healthy source, no bind mounts left in the kernel: torn down.
-			name: "last consumer gone torn down",
+			name: "last consumer gone, torn down",
 			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)
 				entry := seedEntry(dm, volumeID, sourcePath, "", []string{filepath.Join(kubeletPath, "pods", "gone", "mount")})
@@ -955,7 +955,7 @@ func TestCleanupOrphans(t *testing.T) {
 		{
 			// The source is healthy and the kernel shows a live bind mount that we are not
 			// tracking. Cleanup adopts it, so the refcount becomes 1 and the source is kept.
-			name: "untracked live bind mount adopted not torn down",
+			name: "untracked live bind mount adopted, not torn down",
 			setup: func(t *testing.T, dm *DaemonsetMounter, fakeMounter *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				registerSourceMount(t, fakeMounter, sourcePath)       // source is healthy
 				entry := seedEntry(dm, volumeID, sourcePath, "", nil) // we track no targets

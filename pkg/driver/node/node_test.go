@@ -3,12 +3,15 @@ package node_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
@@ -78,6 +81,8 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					// The mounter reads the PV's cache opt-in from the volume attributes.
+					gomock.Eq(map[string]string{"bucketName": bucketName}),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -117,6 +122,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -159,6 +165,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--bar", "--foo", "--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -257,6 +264,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--read-only", "--allow-root", "--test=123"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -316,6 +324,7 @@ func TestNodePublishVolume(t *testing.T) {
 						ServiceAccountTokens: tokensJSON,
 					}),
 					gomock.Any(),
+					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
 				)
@@ -353,6 +362,7 @@ func TestNodePublishVolume(t *testing.T) {
 						AuthenticationSource: credentialprovider.AuthenticationSourcePod,
 						ServiceAccountTokens: tokensJSON,
 					}),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -396,6 +406,7 @@ func TestNodePublishVolume(t *testing.T) {
 						ServiceAccountTokens: secretsTokens,
 					}),
 					gomock.Any(),
+					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
 				)
@@ -431,6 +442,7 @@ func TestNodePublishVolume(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{
@@ -520,6 +532,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -562,6 +575,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--gid=123", "--allow-other", "--dir-mode=770", "--file-mode=660"})),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -604,6 +618,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -646,6 +661,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-other"})),
 					gomock.Eq(""),
 					gomock.Eq(envprovider.Environment{}),
@@ -689,6 +705,7 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 						VolumeID:             volumeId,
 						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					}),
+					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs(mountFlags)),
 					gomock.Eq("123"),
 					gomock.Eq(envprovider.Environment{}),
@@ -705,6 +722,58 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
+	}
+}
+
+func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
+	const (
+		volumeID   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/var/lib/kubelet/pods/pod-uid/volumes/kubernetes.io~csi/test-pv-name/mount"
+	)
+
+	testCases := []struct {
+		name     string
+		mountErr error
+		wantCode codes.Code
+	}{
+		{
+			name:     "a mounter's own rejection reaches the kubelet with its code",
+			mountErr: status.Error(codes.InvalidArgument, "requests a local cache, but s3-csi-daemonset-mounter has no cache volume"),
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name:     "a plain mount failure is Internal",
+			mountErr: errors.New("failed to send mount options"),
+			wantCode: codes.Internal,
+		},
+		{
+			name:     "a rejection wrapped on the way out keeps its code",
+			mountErr: fmt.Errorf("cannot share mount for volume %s: %w", volumeID, status.Error(codes.InvalidArgument, "requests a local cache")),
+			wantCode: codes.InvalidArgument,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			defer nodeTestEnv.mockCtl.Finish()
+
+			nodeTestEnv.mockMounter.EXPECT().
+				Mount(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(testCase.mountErr)
+
+			_, err := nodeTestEnv.server.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+				VolumeId: volumeID,
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
+					AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER},
+				},
+				TargetPath:    targetPath,
+				VolumeContext: map[string]string{volumecontext.BucketName: bucketName},
+			})
+			assert.Equals(t, testCase.wantCode, status.Code(err))
+		})
 	}
 }
 
@@ -877,6 +946,7 @@ func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 					gomock.Eq(ctx),
 					gomock.Eq(bucketName),
 					gomock.Eq(targetPath),
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Eq(mountpoint.ParseArgs(tc.expectedArgs)),
 					gomock.Eq(""),
@@ -1074,7 +1144,7 @@ var _ mounter.Mounter = &dummyMounter{}
 
 type dummyMounter struct{}
 
-func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
+func (d *dummyMounter) Mount(ctx context.Context, bucketName string, target string, provideCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 	return nil
 }
 
