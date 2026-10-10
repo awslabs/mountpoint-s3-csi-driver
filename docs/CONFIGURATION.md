@@ -4,6 +4,7 @@ This document covers how to configure the CSI driver: be it through driver insta
 
 Most Mountpoint-specific configuration can be found in [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and should be specified as `mountOptions`.
 One notable exception is for Mountpoint's local data caching, which should be specified using volume attributes. See the dedicated [Mountpoint S3 CSI driver caching documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md) for more information on cache configuration.
+Mountpoint's memory usage is configured through the driver's Helm values. See the dedicated [Mountpoint S3 CSI driver memory documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md) for how to size it.
 
 ## Static Provisioning
 
@@ -54,15 +55,6 @@ spec:
       # ephemeral cache options (both required if `cache: ephemeral`):
       cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
       cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
-
-      # ----- RESOURCE CONFIGURATION -----
-      # Optional: Configure Mountpoint container resource requests/limits
-      # Note: Specifying `ResourcesRequests` is currently not recommended since it may lead to failures like those described in
-      # [Scheduler problems with v2 #543](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543)
-      mountpointContainerResourcesRequestsCpu: 500m
-      mountpointContainerResourcesRequestsMemory: 1Gi
-      mountpointContainerResourcesLimitsCpu: 500m
-      mountpointContainerResourcesLimitsMemory: 1Gi
 
       # ----- ENVIRONMENT VARIABLE CONFIGURATION -----
       # Optional: Pass extra environment variables to the mount-s3 process. Default: none.
