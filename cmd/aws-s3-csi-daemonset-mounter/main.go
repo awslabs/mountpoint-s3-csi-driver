@@ -46,9 +46,14 @@ var (
 	recvTimeout             = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
 	stderrCapacity          = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
 	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
-	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitNone),
+	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitEqualSplit),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
 			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
+	cacheLimitStrategyFlag = flag.String("cache-limit-strategy", "",
+		"How to size each Mountpoint's --max-cache-size when this container has a cache volume: \"equalSplit\" to divide it between "+
+			"max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions. Unset when it has none")
+	cacheMediumFlag = flag.String("cache-medium", "",
+		"The cache volume's emptyDir medium; \"Memory\" makes it a tmpfs charged to this container's memory")
 	cacheDir = flag.String("cache-dir", "", "The cache volume's mount path, or \"\" when this container has none")
 )
 
@@ -68,15 +73,41 @@ func main() {
 		klog.Fatalf("Invalid --memory-limit-strategy: %v", err)
 	}
 
-	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, containerMemoryRequestBytes(), *maxVolumesPerNode)
+	memoryRequestBytes, err := containerMemoryRequestBytes()
+	if err != nil {
+		klog.Fatalf("Invalid memory request: %v", err)
+	}
+	cacheVolumeBytes, err := cacheCapacityBytes()
+	if err != nil {
+		klog.Fatalf("Invalid cache volume size: %v", err)
+	}
+
+	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, memoryRequestBytes,
+		tmpfsCacheBytes(*cacheMediumFlag, cacheVolumeBytes), *maxVolumesPerNode)
 	if err != nil {
 		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
+	}
+
+	// The chart passes --cache-limit-strategy only with a cache volume; without one no mount here caches, so there is nothing to limit.
+	cacheLimit := cacheLimit{strategy: cacheLimitNone}
+	if *cacheLimitStrategyFlag == "" && (*cacheDir != "" || cacheVolumeBytes > 0 || *cacheMediumFlag != "") {
+		klog.Fatalf("This container has a cache volume (--cache-dir, %s or --cache-medium is set) but no --cache-limit-strategy", cacheCapacityEnvName)
+	}
+	if *cacheLimitStrategyFlag != "" {
+		cacheLimitStrategy, err := parseCacheLimitStrategy(*cacheLimitStrategyFlag)
+		if err != nil {
+			klog.Fatalf("Invalid --cache-limit-strategy: %v", err)
+		}
+		cacheLimit, err = newCacheLimit(cacheLimitStrategy, cacheVolumeBytes, *maxVolumesPerNode)
+		if err != nil {
+			klog.Fatalf("Invalid Mountpoint cache configuration: %v", err)
+		}
 	}
 
 	sockPath := filepath.Join(*commDir, mountSockName)
 	mountpointPath := filepath.Join(*mountpointBinDir, mountpointBin)
 
-	pm := NewProcessManager(*commDir, *cacheDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
+	pm := NewProcessManager(*commDir, *cacheDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit, cacheLimit)
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	stop := make(chan struct{})
