@@ -1,6 +1,7 @@
 package helmchart
 
 import (
+	"strings"
 	"testing"
 
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -52,6 +53,24 @@ func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
 			assert.Contains(t, err.Error(), testCase.expectedErrContains)
 		})
 	}
+}
+
+func TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache(t *testing.T) {
+	t.Run("grants CHOWN, DAC_OVERRIDE and FOWNER with a cache", func(t *testing.T) {
+		manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}}}]`)
+		assert.NoError(t, err)
+		assert.Contains(t, manifest, "- CHOWN")
+		assert.Contains(t, manifest, "- DAC_OVERRIDE")
+		assert.Contains(t, manifest, "- FOWNER")
+	})
+
+	t.Run("grants none of CHOWN, DAC_OVERRIDE and FOWNER without a cache", func(t *testing.T) {
+		manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none}]`)
+		assert.NoError(t, err)
+		assert.Equals(t, false, strings.Contains(manifest, "- CHOWN"))
+		assert.Equals(t, false, strings.Contains(manifest, "- DAC_OVERRIDE"))
+		assert.Equals(t, false, strings.Contains(manifest, "- FOWNER"))
+	})
 }
 
 // renderMounterDaemonSet renders the chart with values, a values file's YAML, and returns the mounter DaemonSet's manifest.

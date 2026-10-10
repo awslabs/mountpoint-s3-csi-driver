@@ -26,7 +26,11 @@ import (
 const errorFilePerm = fs.FileMode(0600)
 const errorFileExt = ".error"
 
-// mountCacheDirPerm closes a mount's cache directory to every UID but the one its Mountpoint runs as.
+// cacheVolumePerm lets a Mountpoint reach its own cache directory but not create or list entries beside it.
+const cacheVolumePerm = fs.FileMode(0711)
+
+// mountCacheDirPerm closes a mount's cache directory to every UID but the one its Mountpoint runs as;
+// the mounter overrides it with CAP_DAC_OVERRIDE.
 const mountCacheDirPerm = fs.FileMode(0700)
 
 // ProcessManager tracks and manages Mountpoint child processes.
@@ -38,8 +42,14 @@ type ProcessManager struct {
 	chownForTesting func(path string, uid, gid int) error // unprivileged tests record ownership instead of chown
 
 	mu        sync.Mutex
-	processes map[string]ProcessHandle // mountId -> process handle
-	wg        sync.WaitGroup           // tracks waiter goroutines
+	processes map[uint32]mountpointProcess // the UID a Mountpoint runs as -> that Mountpoint; one per UID
+	wg        sync.WaitGroup               // tracks waiter goroutines
+}
+
+// mountpointProcess is a running Mountpoint and the mount it serves.
+type mountpointProcess struct {
+	mountId string
+	handle  ProcessHandle
 }
 
 func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory memoryLimit) *ProcessManager {
@@ -48,8 +58,23 @@ func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory me
 		cacheDir:  cacheDir,
 		runner:    runner,
 		memory:    memory,
-		processes: make(map[string]ProcessHandle),
+		processes: make(map[uint32]mountpointProcess),
 	}
+}
+
+// secureCacheVolume gives the cache volume to root, so a Mountpoint can reach its own directory but not list or create beside it.
+func (pm *ProcessManager) secureCacheVolume() error {
+	if pm.cacheDir == "" {
+		return nil
+	}
+	if err := pm.chownWithDefault(pm.cacheDir, 0, 0); err != nil {
+		// NFS with root_squash / EFS access point doesn't allow root to change ownership
+		return fmt.Errorf("cannot chown %s: the cache volume must allow root to change ownership: %w", pm.cacheDir, err)
+	}
+	if err := os.Chmod(pm.cacheDir, cacheVolumePerm); err != nil {
+		return fmt.Errorf("cannot chmod %s to %o: %w", pm.cacheDir, cacheVolumePerm, err)
+	}
+	return nil
 }
 
 // emptyCacheVolume empties the /cache volume, and returns an error for anything it could not remove.
@@ -94,7 +119,7 @@ func (pm *ProcessManager) emptyCacheVolume() error {
 
 // Launch spawns a Mountpoint process for the given mount and waits for it asynchronously.
 // Takes ownership of options.Fd, caller must not close it after calling this function.
-// Returns an error if a process with the same mountId is already running.
+// Returns an error if a process with the same mountId or UID is already running.
 func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options mountoptions.Options) error {
 	fuseDev := os.NewFile(uintptr(options.Fd), "/dev/fuse")
 	if fuseDev == nil {
@@ -156,15 +181,38 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	// Hold lock across duplicate check and process start to prevent races.
 	pm.mu.Lock()
-	if _, exists := pm.processes[mountId]; exists {
+
+	// Reject a used mount ID. processes holds at most maxVolumesPerNode entries, so an O(n) scan is acceptable.
+	for _, p := range pm.processes {
+		if p.mountId == mountId {
+			pm.mu.Unlock()
+			fuseDev.Close()
+			return fmt.Errorf("mount %s still has a Mountpoint process, which may be exiting or removing its cache", mountId)
+		}
+	}
+
+	// Reject used UID, or else two mounts would be able to access cache of each other.
+	// We rely on csi-node's UID allocator moving its cursor on, so the NodePublishVolume retry gets another UID.
+	if other, taken := pm.processes[options.Uid]; taken {
 		pm.mu.Unlock()
 		fuseDev.Close()
-		return fmt.Errorf("mount %s already has a running process", mountId)
+		// Don't expose PV name / mountID for other mounts in error which reaches pod events, and only log it
+		klog.Errorf("Refusing to launch mount %s with UID %d already in use by mount %s", mountId, options.Uid, other.mountId)
+		return fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid)
 	}
 	// Delete any error files that earlier Mountpoint of this PV wrote after node deletes error files.
 	// TODO if we add process to ensure Mountpoint exited, this should not be needed.
 	os.Remove(filepath.Join(pm.commDir, mountId+errorFileExt))
 
+	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: remove it.
+	if pm.cacheDir != "" {
+		if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
+			pm.mu.Unlock()
+			fuseDev.Close()
+			klog.Errorf("Failed to remove leftover cache directory %s: %v", mountCacheDir, err)
+			return fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid)
+		}
+	}
 	if cached {
 		if err := pm.createMountCacheDir(mountCacheDir, options.Uid); err != nil {
 			pm.mu.Unlock()
@@ -188,17 +236,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// Child has its own copy of the FD (kernel dup'd it during fork/exec).
 	fuseDev.Close()
 
-	pm.processes[mountId] = handle
+	pm.processes[options.Uid] = mountpointProcess{mountId: mountId, handle: handle}
 	pm.mu.Unlock()
 
-	klog.Infof("Launched Mountpoint for mount %s (pid %d)", mountId, handle.Pid())
+	klog.Infof("Launched Mountpoint for mount %s as UID %d (pid %d)", mountId, options.Uid, handle.Pid())
 
 	pm.wg.Add(1)
 	go func() {
 		defer pm.wg.Done()
 		exitCode, stderr := handle.Wait()
 
-		// Before freeing mountId, so a relaunch cannot create the directory this then removes.
+		// Before freeing mountId and the UID, so a relaunch cannot create the directory this then removes.
 		if cached {
 			if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
 				klog.Errorf("Failed to remove cache directory of mount %s: %v", mountId, err)
@@ -210,13 +258,13 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		if exitCode != 0 {
 			pm.writeErrorFile(mountId, stderr)
 		}
-		delete(pm.processes, mountId)
+		delete(pm.processes, options.Uid)
 		pm.mu.Unlock()
 
 		if exitCode != 0 {
-			klog.Errorf("Mountpoint for mount %s exited with code %d", mountId, exitCode)
+			klog.Errorf("Mountpoint for mount %s (UID %d) exited with code %d", mountId, options.Uid, exitCode)
 		} else {
-			klog.Infof("Mountpoint for mount %s exited cleanly", mountId)
+			klog.Infof("Mountpoint for mount %s (UID %d) exited cleanly", mountId, options.Uid)
 		}
 	}()
 
@@ -228,7 +276,7 @@ func mountCacheDirName(uid uint32) string {
 	return fmt.Sprintf("uid-%d", uid)
 }
 
-// removeCacheVolumeEntry removes an entry of the cache volume.
+// removeCacheVolumeEntry removes an entry of the cache volume, whoever owns it.
 // Note Mountpoint also removes its own cache when it exits cleanly.
 func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 	// We guard escapes and partial cache delete attempts by checking the cacheDir and entryName, and returning error if something is wrong.
@@ -237,6 +285,7 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 		return fmt.Errorf("refusing to remove cache directory %q in %q: not a cache volume and a plain directory name", entryName, pm.cacheDir)
 	}
 	path := filepath.Join(pm.cacheDir, entryName)
+	// Emptying another UID's tree needs CAP_DAC_OVERRIDE, and CAP_FOWNER for a sticky subdirectory; the chart grants both with a cache.
 	// RemoveAll opens each directory with O_NOFOLLOW, so a planted symlink is removed, not followed.
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("failed to remove cache directory %q: %w", path, err)
@@ -262,7 +311,13 @@ func (pm *ProcessManager) chownWithDefault(path string, uid, gid int) error {
 	if pm.chownForTesting != nil {
 		return pm.chownForTesting(path, uid, gid)
 	}
-	return os.Chown(path, uid, gid)
+	// Chown through a handle opened without following symlinks, so a link planted at path cannot redirect it.
+	dir, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Chown(uid, gid)
 }
 
 // writeErrorFile reports a mount failure to the driver, whose waitForMount polls for this file — the
@@ -278,9 +333,9 @@ func (pm *ProcessManager) writeErrorFile(mountId string, content []byte) {
 // Shutdown sends SIGTERM to all processes and waits for them to exit.
 func (pm *ProcessManager) Shutdown() {
 	pm.mu.Lock()
-	for mountId, handle := range pm.processes {
-		klog.Infof("Sending SIGTERM to Mountpoint for mount %s (pid %d)", mountId, handle.Pid())
-		handle.Signal(syscall.SIGTERM)
+	for _, p := range pm.processes {
+		klog.Infof("Sending SIGTERM to Mountpoint for mount %s (pid %d)", p.mountId, p.handle.Pid())
+		p.handle.Signal(syscall.SIGTERM)
 	}
 	pm.mu.Unlock()
 
@@ -323,9 +378,9 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 
 		pm.mu.Lock()
 		tracked := len(pm.processes)
-		var mountIds []string
-		for id := range pm.processes {
-			mountIds = append(mountIds, id)
+		var mounts []string
+		for uid, p := range pm.processes {
+			mounts = append(mounts, fmt.Sprintf("%s:%d", p.mountId, uid))
 		}
 		pm.mu.Unlock()
 
@@ -333,7 +388,7 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 		openFDs := countOpenFDs()
 		goroutines := runtime.NumGoroutine()
 		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d mounts=%v",
-			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB, mountIds)
+			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB, mounts)
 	}
 }
 
