@@ -2,6 +2,7 @@ package csicontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -15,6 +16,15 @@ import (
 const (
 	defaultCleanupInterval   = 2 * time.Minute
 	staleAttachmentThreshold = 2 * time.Minute
+)
+
+// Reasons a MountpointS3PodAttachment is deleted by the cleaner, logged as the "reason" field.
+const (
+	// reasonEmptyOnArrival: the S3PodAttachment had no Mountpoint Pods when the cleaner first saw it,
+	// e.g. a reconciler teardown that was interrupted before it could delete the empty S3PA.
+	reasonEmptyOnArrival = "S3PodAttachment was already empty when observed (likely an interrupted reconciler teardown)"
+	// reasonEmptiedByCleaner: the cleaner removed the last stale workload, leaving no Mountpoint Pods.
+	reasonEmptiedByCleaner = "no Mountpoint Pods remain after the cleaner removed stale workloads"
 )
 
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
@@ -167,7 +177,15 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 
 	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
+		reason := reasonEmptyOnArrival
+		if modified {
+			reason = reasonEmptiedByCleaner
+		}
+		log.Info("Deleting MountpointS3PodAttachment", "reason", reason)
+		if err := cm.reconciler.deleteS3PodAttachment(ctx, s3pa); err != nil {
+			return fmt.Errorf("deleting empty MountpointS3PodAttachment (%s): %w", reason, err)
+		}
+		return nil
 	}
 
 	// Update the S3PodAttachment if modified
