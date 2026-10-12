@@ -1,0 +1,48 @@
+name: Delete Old E2E IAM Roles
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment (selects the AWS account/role to clean up)
+        required: true
+      dry_run:
+        description: Dry run (only list matching roles; uncheck to actually delete)
+        required: false
+        default: true
+        type: boolean
+      age_days:
+        description: Delete roles created more than this many days ago
+        required: false
+        default: 30
+        type: number
+
+concurrency:
+  group: e2e-cluster-${{ inputs.environment }}
+  queue: max
+
+jobs:
+  delete-e2e-roles:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 3600 # 1 hour should be sufficient for cleanup
+
+      - name: Delete old e2e IAM roles
+        run: |
+          scripts/delete-e2e-roles.sh \
+            --max-age-days "${{ inputs.age_days }}" \
+            ${{ inputs.dry_run && '--dry-run' || '--delete' }}
