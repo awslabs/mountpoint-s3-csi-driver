@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -671,8 +672,8 @@ func setupPodLevelIdentity(ctx context.Context, f *framework.Framework, oidcProv
 	config.Cleanup = func(ctx context.Context) error {
 		var errs []error
 		// Execute cleanup functions in reverse order
-		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
-			if err := cleanupFuncs[i](ctx); err != nil {
+		for _, cleanupFunc := range slices.Backward(cleanupFuncs) {
+			if err := cleanupFunc(ctx); err != nil {
 				errs = append(errs, err)
 			}
 		}

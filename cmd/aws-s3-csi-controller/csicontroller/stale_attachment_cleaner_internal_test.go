@@ -70,7 +70,7 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			fsGroup := int64(1000)
 
 			pv := &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: testPVName},
+				Name: testPVName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -83,11 +83,9 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 				},
 			}
 			workloadPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "workload",
-					Namespace: testCase.workloadNS,
-					UID:       "workload-uid",
-				},
+				Name:      "workload",
+				Namespace: testCase.workloadNS,
+				UID:       "workload-uid",
 				Spec: corev1.PodSpec{
 					NodeName:           testNodeName,
 					ServiceAccountName: testCase.workloadSA,
@@ -108,10 +106,8 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			s3pa.Spec.WorkloadServiceAccountName = testCase.workloadSA
 			s3pa.Spec.WorkloadServiceAccountIAMRoleARN = testCase.workloadRole
 			mountpointPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      mountpointPodName,
-					Namespace: testPodConfig().Namespace,
-				},
+				Name:      mountpointPodName,
+				Namespace: testPodConfig().Namespace,
 			}
 
 			objects := []client.Object{s3pa, mountpointPod}
@@ -174,12 +170,12 @@ func TestStaleAttachmentCleanerPreservesReplacementExpectation(t *testing.T) {
 
 func TestStaleAttachmentCleanerDoesNotAllowCreationAfterEmptyCacheRead(t *testing.T) {
 	workloadPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
-		Spec:       corev1.PodSpec{NodeName: testNodeName, SecurityContext: &corev1.PodSecurityContext{}},
-		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+		Name: "workload", Namespace: "default",
+		Spec:   corev1.PodSpec{NodeName: testNodeName, SecurityContext: &corev1.PodSecurityContext{}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: testPVName},
+		Name: testPVName,
 		Spec: corev1.PersistentVolumeSpec{
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{Driver: mountpointCSIDriverName, VolumeHandle: testVolumeID},
@@ -190,7 +186,7 @@ func TestStaleAttachmentCleanerDoesNotAllowCreationAfterEmptyCacheRead(t *testin
 	s3pa.UID = "pending-uid"
 	s3pa.Spec.AuthenticationSource = credentialprovider.AuthenticationSourceDriver
 	serviceAccount := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: defaultServiceAccount, Namespace: workloadPod.Namespace},
+		Name: defaultServiceAccount, Namespace: workloadPod.Namespace,
 	}
 
 	var reconciler *Reconciler
