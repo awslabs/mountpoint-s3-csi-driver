@@ -493,8 +493,6 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		// This logger is not bound to a single s3pa (it covers the whole field-tuple and
-		// iterates over duplicates), so bind the name here for the delete below.
 		s3paLog := log.WithValues("s3pa", s3pa.Name)
 		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, s3paLog); err != nil {
 			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
