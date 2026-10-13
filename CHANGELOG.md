@@ -1,3 +1,12 @@
+# v2.9.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.1/README.md)
+
+### Notable changes
+* Log the reason when the controller deletes a MountpointS3PodAttachment ([#998](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/998))
+* Update Go to 1.27.2 ([#997](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/997))
+* Update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.1 and livenessprobe:v2.20.0-eksbuild.1 ([#1002](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1002))
+
 # v2.9.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.0/README.md)
