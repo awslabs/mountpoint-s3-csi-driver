@@ -39,6 +39,18 @@ const (
 	DontRequeue = false
 )
 
+// Reasons a MountpointS3PodAttachment is deleted, passed to deleteS3PodAttachment and logged as the "reason" field.
+const (
+	// reasonNoMountpointPods: the reconciler removed the last Mountpoint Pod from the S3PA.
+	reasonNoMountpointPods = "no Mountpoint Pods remain"
+	// reasonDuplicate: a duplicate S3PA for the same field-tuple that referenced no Mountpoint Pods.
+	reasonDuplicate = "duplicate S3PodAttachment referencing no Mountpoint Pods"
+	// reasonEmptyOnArrival: the cleaner found the S3PA already empty (likely an interrupted reconciler teardown).
+	reasonEmptyOnArrival = "S3PodAttachment was already empty when observed (likely an interrupted reconciler teardown)"
+	// reasonEmptiedByCleaner: the cleaner removed the last stale workload, leaving no Mountpoint Pods.
+	reasonEmptiedByCleaner = "no Mountpoint Pods remain after the cleaner removed stale workloads"
+)
+
 // A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
@@ -481,9 +493,8 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		log.Info("Deleting duplicate MountpointS3PodAttachment that references no Mountpoint Pods", "s3pa", s3pa.Name)
-		if err := r.deleteS3PodAttachment(ctx, s3pa); err != nil {
-			return nil, fmt.Errorf("failed to delete duplicate %q referencing no Mountpoint Pods: %w", s3pa.Name, err)
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reasonDuplicate); err != nil {
+			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reasonDuplicate, err)
 		}
 	}
 
@@ -704,17 +715,15 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
-		err := r.deleteS3PodAttachment(ctx, s3pa)
+		err := r.deleteS3PodAttachment(ctx, s3pa, reasonNoMountpointPods)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
-			log.Error(err, "Failed to delete MountpointS3PodAttachment")
+			log.Error(err, "Failed to delete MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reasonNoMountpointPods)
 			return Requeue, err
 		}
-		log.Info("Deleted MountpointS3PodAttachment as it no longer has any attached Mountpoint Pods")
 		if r.s3paExpectations.isPending(fieldFilters) {
 			// Clear stale creation expectations to prevent indefinite waiting.
 			log.Info("Clearing stale creation expectation for deleted MountpointS3PodAttachment")
@@ -815,8 +824,14 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 // S3PA was modified since the caller read it; the caller can then retry/requeue.
 // Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
 // not accidentally skipped.
-func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
-	return r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string) error {
+	log := logf.FromContext(ctx)
+	log.Info("Deleting MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reason)
+	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
+		return err
+	}
+	log.Info("Deleted MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reason)
+	return nil
 }
 
 // spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.
