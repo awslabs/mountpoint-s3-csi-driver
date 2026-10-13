@@ -493,7 +493,7 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate); err != nil {
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, log); err != nil {
 			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
 		}
 	}
@@ -715,7 +715,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonNoMountpointPods)
+		err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonNoMountpointPods, log)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
@@ -824,9 +824,7 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 // S3PA was modified since the caller read it; the caller can then retry/requeue.
 // Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
 // not accidentally skipped.
-func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string) error {
-	log := logf.FromContext(ctx)
-	log.Info("Deleting MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reason)
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
 	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
 		return err
 	}
