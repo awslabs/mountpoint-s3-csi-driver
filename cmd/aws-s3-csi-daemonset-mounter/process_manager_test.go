@@ -386,9 +386,7 @@ func TestProcessManager_Launch_TracksNothingWhenStartFails(t *testing.T) {
 		t.Fatal("expected Launch to fail when the process cannot start")
 	}
 
-	pm.mu.Lock()
-	assert.Equals(t, 0, len(pm.processes))
-	pm.mu.Unlock()
+	assertMountReleased(t, pm, int(dev.Fd()), 0)
 }
 
 func TestProcessManager_Launch_CacheDir(t *testing.T) {
@@ -455,8 +453,9 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr)
 		createUnremovableCacheEntry(t, cacheDir, dirName)
+		options := cachedOptions(t)
 
-		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
 		if err == nil {
 			t.Fatal("expected Launch to refuse while a leftover of its UID remains")
 		}
@@ -464,7 +463,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		// The error reaches this mount's pod events, so the removal's own error goes to the log only.
 		assert.Equals(t, false, strings.Contains(err.Error(), "permission denied"))
 		assert.Equals(t, 0, len(fr.handles))
-		assertMountReleased(t, pm)
+		assertMountReleased(t, pm, options.Fd, 0)
 	})
 
 	t.Run("fails without starting Mountpoint when the cache volume cannot be written to, and releases the mount", func(t *testing.T) {
@@ -475,14 +474,15 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		// A read-only cache volume: the kubelet has mounted it, but nothing can be created inside.
 		assert.NoError(t, os.Chmod(cacheDir, 0500))
 		t.Cleanup(func() { os.Chmod(cacheDir, 0700) })
+		options := cachedOptions(t)
 
-		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
 		if err == nil {
 			t.Fatal("expected Launch to fail on a read-only cache volume")
 		}
 		assert.Contains(t, err.Error(), "failed to create cache directory")
 		assert.Equals(t, 0, len(fr.handles))
-		assertMountReleased(t, pm)
+		assertMountReleased(t, pm, options.Fd, 0)
 	})
 
 	t.Run("removes the directory when Mountpoint fails to start", func(t *testing.T) {
@@ -521,14 +521,16 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 	})
 }
 
-// assertMountReleased asserts that a failed Launch gave up the lock and tracks nothing, so a retry can proceed.
-func assertMountReleased(t *testing.T, pm *ProcessManager) {
+// assertMountReleased asserts that a failed Launch gave up the lock and the FUSE device fd, and tracks only the running mounts, so a retry can proceed.
+func assertMountReleased(t *testing.T, pm *ProcessManager, fd int, running int) {
 	t.Helper()
 	if !pm.mu.TryLock() {
 		t.Fatal("the failed launch kept the lock")
 	}
 	defer pm.mu.Unlock()
-	assert.Equals(t, 0, len(pm.processes))
+	assert.Equals(t, running, len(pm.processes))
+	assert.Equals(t, running, len(pm.uids))
+	assert.ErrorIs(t, syscall.Fstat(fd, &syscall.Stat_t{}), syscall.EBADF)
 }
 
 func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
@@ -616,9 +618,7 @@ func TestProcessManager_Launch_DuplicateMountId_Rejected(t *testing.T) {
 	}
 
 	// Only one process tracked
-	pm.mu.Lock()
-	assert.Equals(t, 1, len(pm.processes))
-	pm.mu.Unlock()
+	assertMountReleased(t, pm, int(dev2.Fd()), 1)
 
 	// After first exits, same mountId can be reused
 	fr.handles[0].Exit(0, "")
@@ -672,8 +672,8 @@ func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Only the first process is tracked.
+	assertMountReleased(t, pm, int(dev2.Fd()), 1)
 	pm.mu.Lock()
-	assert.Equals(t, 1, len(pm.processes))
 	assert.Equals(t, "mount-a", pm.processes[65536].mountId)
 	pm.mu.Unlock()
 

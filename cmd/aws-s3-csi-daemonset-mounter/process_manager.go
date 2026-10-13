@@ -43,6 +43,7 @@ type ProcessManager struct {
 
 	mu        sync.Mutex
 	processes map[uint32]mountpointProcess // the UID a Mountpoint runs as -> that Mountpoint; one per UID
+	uids      map[string]uint32            // mountId -> the UID its Mountpoint runs as; added and deleted with processes
 	wg        sync.WaitGroup               // tracks waiter goroutines
 }
 
@@ -59,6 +60,7 @@ func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory me
 		runner:    runner,
 		memory:    memory,
 		processes: make(map[uint32]mountpointProcess),
+		uids:      make(map[string]uint32),
 	}
 }
 
@@ -181,24 +183,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	// Hold lock across duplicate check and process start to prevent races.
 	pm.mu.Lock()
-
-	// Reject a used mount ID. processes holds at most maxVolumesPerNode entries, so an O(n) scan is acceptable.
-	for _, p := range pm.processes {
-		if p.mountId == mountId {
-			pm.mu.Unlock()
-			fuseDev.Close()
-			return fmt.Errorf("mount %s still has a Mountpoint process, which may be exiting or removing its cache", mountId)
-		}
+	if _, exists := pm.uids[mountId]; exists {
+		return pm.unlockAndClose(fuseDev, fmt.Errorf("mount %s still has a Mountpoint process, which may be exiting or removing its cache", mountId))
 	}
 
 	// Reject used UID, or else two mounts would be able to access cache of each other.
 	// We rely on csi-node's UID allocator moving its cursor on, so the NodePublishVolume retry gets another UID.
 	if other, taken := pm.processes[options.Uid]; taken {
-		pm.mu.Unlock()
-		fuseDev.Close()
-		// Don't expose PV name / mountID for other mounts in error which reaches pod events, and only log it
+		// Don't expose other mounts' PV name / mount ID in the error: handleConnection writes it to the error file, s3-csi-node returns it
+		// as the NodePublishVolume error, and the kubelet shows it as a FailedMount event to anyone who can read the workload namespace's events.
 		klog.Errorf("Refusing to launch mount %s with UID %d already in use by mount %s", mountId, options.Uid, other.mountId)
-		return fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid)
+		return pm.unlockAndClose(fuseDev, fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid))
 	}
 	// Delete any error files that earlier Mountpoint of this PV wrote after node deletes error files.
 	// TODO if we add process to ensure Mountpoint exited, this should not be needed.
@@ -207,17 +202,13 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: remove it.
 	if pm.cacheDir != "" {
 		if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
-			pm.mu.Unlock()
-			fuseDev.Close()
 			klog.Errorf("Failed to remove leftover cache directory %s: %v", mountCacheDir, err)
-			return fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid)
+			return pm.unlockAndClose(fuseDev, fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid))
 		}
 	}
 	if cached {
 		if err := pm.createMountCacheDir(mountCacheDir, options.Uid); err != nil {
-			pm.mu.Unlock()
-			fuseDev.Close()
-			return err
+			return pm.unlockAndClose(fuseDev, err)
 		}
 	}
 
@@ -228,15 +219,14 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 				klog.Errorf("Failed to remove cache directory of mount %s after a failed start: %v", mountId, rmErr)
 			}
 		}
-		pm.mu.Unlock()
-		fuseDev.Close()
-		return fmt.Errorf("failed to start Mountpoint: %w", err)
+		return pm.unlockAndClose(fuseDev, fmt.Errorf("failed to start Mountpoint: %w", err))
 	}
 
 	// Child has its own copy of the FD (kernel dup'd it during fork/exec).
 	fuseDev.Close()
 
 	pm.processes[options.Uid] = mountpointProcess{mountId: mountId, handle: handle}
+	pm.uids[mountId] = options.Uid
 	pm.mu.Unlock()
 
 	klog.Infof("Launched Mountpoint for mount %s as UID %d (pid %d)", mountId, options.Uid, handle.Pid())
@@ -259,6 +249,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 			pm.writeErrorFile(mountId, stderr)
 		}
 		delete(pm.processes, options.Uid)
+		delete(pm.uids, mountId)
 		pm.mu.Unlock()
 
 		if exitCode != 0 {
@@ -274,6 +265,13 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 // mountCacheDirName names the cache directory of the Mountpoint running as uid.
 func mountCacheDirName(uid uint32) string {
 	return fmt.Sprintf("uid-%d", uid)
+}
+
+// unlockAndClose gives up the lock and the FUSE device of a launch that fails under the lock, and returns err.
+func (pm *ProcessManager) unlockAndClose(fuseDev *os.File, err error) error {
+	pm.mu.Unlock()
+	fuseDev.Close()
+	return err
 }
 
 // removeCacheVolumeEntry removes an entry of the cache volume, whoever owns it.
