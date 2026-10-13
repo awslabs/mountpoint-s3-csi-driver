@@ -158,10 +158,8 @@ func createMountpointPod(t *testing.T, client kubernetes.Interface, name string)
 	t.Helper()
 
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			UID:  types.UID(uuid.New().String()),
-			Name: name,
-		},
+		UID:  types.UID(uuid.New().String()),
+		Name: name,
 	}
 	pod, err := client.CoreV1().Pods(testMountpointPodNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	assert.NoError(t, err)
