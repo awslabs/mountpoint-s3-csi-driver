@@ -173,7 +173,7 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 			reason = reasonEmptiedByCleaner
 		}
 		if err := cm.reconciler.deleteS3PodAttachment(ctx, s3pa, reason); err != nil {
-			return fmt.Errorf("deleting empty MountpointS3PodAttachment (%s): %w", reason, err)
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reason, err)
 		}
 		return nil
 	}
