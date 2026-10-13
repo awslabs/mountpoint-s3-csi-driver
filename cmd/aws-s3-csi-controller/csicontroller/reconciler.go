@@ -493,7 +493,10 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, log); err != nil {
+		// This logger is not bound to a single s3pa (it covers the whole field-tuple and
+		// iterates over duplicates), so bind the name here for the delete below.
+		s3paLog := log.WithValues("s3pa", s3pa.Name)
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, s3paLog); err != nil {
 			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
 		}
 	}
@@ -721,7 +724,7 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
-			log.Error(err, "Failed to delete MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reconcilerReasonNoMountpointPods)
+			log.Error(err, "Failed to delete MountpointS3PodAttachment", "reason", reconcilerReasonNoMountpointPods)
 			return Requeue, err
 		}
 		if r.s3paExpectations.isPending(fieldFilters) {
@@ -828,7 +831,7 @@ func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.Moun
 	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
 		return err
 	}
-	log.Info("Deleted MountpointS3PodAttachment", "s3pa", s3pa.Name, "reason", reason)
+	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
 	return nil
 }
 
