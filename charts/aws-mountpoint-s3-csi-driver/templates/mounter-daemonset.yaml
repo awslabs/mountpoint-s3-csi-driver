@@ -2,12 +2,40 @@
 {{- if ne (len .Values.daemonsetMounters) 1 }}
 {{- fail "daemonsetMounters must have exactly one entry" }}
 {{- end }}
+
+{{- /* ================================ Inputs ================================ */}}
 {{- $mounter := index .Values.daemonsetMounters 0 }}
 {{- $resources := $mounter.resources | default dict }}
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
 {{- $strategies := list "equalSplit" "none" }}
 {{- $strategy := $mounter.memoryLimitStrategy | default "" }}
+{{- $cacheEnabled := hasKey $mounter "cache" }}
+{{- $cache := $mounter.cache | default dict }}
+{{- $cacheEmptyDir := $cache.emptyDir | default dict }}
+{{- $cacheEphemeral := $cache.ephemeral | default dict }}
+{{- $cacheMedium := $cacheEmptyDir.medium | default "" }}
+
+{{- /* ======================= Cache volume: validation ======================= */}}
+{{- if $cacheEnabled }}
+{{- if eq (hasKey $cache "emptyDir") (hasKey $cache "ephemeral") }}
+{{- fail "daemonsetMounters[]: cache must set exactly one of emptyDir or ephemeral." }}
+{{- end }}
+{{- if hasKey $cache "emptyDir" }}
+{{- if and $cacheMedium (ne $cacheMedium "Memory") }}
+{{- fail (printf "daemonsetMounters[]: cache.emptyDir.medium must be \"\" (node disk) or \"Memory\" (tmpfs), got %q. A HugePages medium is backed by hugetlbfs, which Mountpoint cannot write cache blocks into" $cacheMedium) }}
+{{- end }}
+{{- else }}
+{{- if not $cacheEphemeral.storageClassName }}
+{{- fail "daemonsetMounters[]: cache.ephemeral.storageClassName is required when the cache block sets ephemeral" }}
+{{- end }}
+{{- if kindIs "invalid" $cacheEphemeral.resourceRequests }}
+{{- fail "daemonsetMounters[]: cache.ephemeral.resourceRequests is required when the cache block sets ephemeral" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /* =========== Memory target (memoryLimitStrategy): validation =========== */}}
 {{- if not (has $strategy $strategies) }}
 {{- fail (printf "daemonsetMounters[]: memoryLimitStrategy must be one of %v, got %q. \"equalSplit\" gives every Mountpoint process on the node an equal share of resources.requests.memory as its --memory-target; \"none\" leaves --memory-target to each PV's mountOptions." $strategies $strategy) }}
 {{- end }}
@@ -34,6 +62,8 @@
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* =============================== DaemonSet =============================== */}}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -106,6 +136,9 @@ spec:
           - --mountpoint-bin-dir=/mountpoint-s3/bin
           - --max-volumes-per-node={{ $maxVolumes }}
           - --memory-limit-strategy={{ $strategy }}
+          {{- if $cacheEnabled }}
+          - --cache-dir=/cache
+          {{- end }}
           - --v={{ $mounter.logLevel }}
         {{- if $requests.memory }}
         env:
@@ -129,11 +162,19 @@ spec:
               - SETUID # set the UID of each spawned Mountpoint process
               - SETGID # set its GID and clear its supplementary groups
               - KILL   # signal the children on shutdown, which do not share our UID
+              {{- if $cacheEnabled }}
+              - CHOWN  # give each mount's cache directory to its Mountpoint's UID
+              {{- end }}
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
           - name: comm
             mountPath: /comm
+          {{- /* Cache volume */}}
+          {{- if $cacheEnabled }}
+          - name: cache
+            mountPath: /cache
+          {{- end }}
         {{- with $mounter.resources }}
         resources:
           {{- toYaml . | nindent 12 }}
@@ -141,4 +182,28 @@ spec:
       volumes:
       - name: comm
         emptyDir: {}
+      {{- /* Cache volume */}}
+      {{- if $cacheEnabled }}
+      - name: cache
+        {{- if hasKey $cache "emptyDir" }}
+        emptyDir:
+          medium: {{ $cacheMedium | quote }}
+          {{- if not (kindIs "invalid" $cacheEmptyDir.sizeLimit) }}
+          sizeLimit: {{ $cacheEmptyDir.sizeLimit }}
+          {{- end }}
+        {{- else }}
+        ephemeral:
+          volumeClaimTemplate:
+            metadata:
+              labels:
+                s3.csi.aws.com/type: local-ephemeral-cache
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              volumeMode: Filesystem
+              storageClassName: {{ $cacheEphemeral.storageClassName | quote }}
+              resources:
+                requests:
+                  storage: {{ $cacheEphemeral.resourceRequests }}
+        {{- end }}
+      {{- end }}
 {{- end }}
