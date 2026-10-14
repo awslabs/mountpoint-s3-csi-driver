@@ -17,12 +17,39 @@ matrix:
     # field rather than trying to exclude all other variants.
     - family: "AmazonLinux2023"
       selinux-mode: "enforcing"
+    # Canonical patches plain Ubuntu EKS AMIs only during EKS standard support, so extended-support versions use UbuntuPro2404.
+    # Check the tabs on https://cloud-images.ubuntu.com/docs/aws/eks/ to see e.g. Noble 1.33 is missing but Noble Pro 1.33 is present.
+    # To check the AMI used: (use eks-pro instead of eks for Pro):
+    #   aws ssm get-parameter --region us-east-1 --name /aws/service/canonical/ubuntu/eks/24.04/1.33/stable/current/amd64/hvm/ebs-gp3/ami-id
+    # eksctl AMI families: https://docs.aws.amazon.com/eks/latest/eksctl/custom-ami-support.html#setting-the-node-ami-family
+    - cluster-type: "eksctl"
+      arch: "x86"
+      family: "UbuntuPro2404"
+      kubernetes-version: "1.33.2"
+    - cluster-type: "eksctl"
+      arch: "arm"
+      family: "UbuntuPro2404"
+      kubernetes-version: "1.33.2"
   exclude:
-    # Ubuntu2404 is only supported on EKS >= 1.33.
-    # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.
+    # Plain Ubuntu2404 EKS AMIs aren't patched for these versions (see the Ubuntu Pro note above).
     - cluster-type: "eksctl"
       family: "Ubuntu2404"
       kubernetes-version: "1.31.0"
     - cluster-type: "eksctl"
       family: "Ubuntu2404"
       kubernetes-version: "1.32.1"
+    - cluster-type: "eksctl"
+      family: "Ubuntu2404"
+      kubernetes-version: "1.33.2"
+
+# Combinations CI no longer tests, whose clusters earlier runs or other branch runs may have left behind.
+# delete-cluster.yaml deletes these as well as everything in `matrix`.
+retired:
+  - cluster-type: "eksctl"
+    arch: "x86"
+    family: "Ubuntu2404"
+    kubernetes-version: "1.33.2"
+  - cluster-type: "eksctl"
+    arch: "arm"
+    family: "Ubuntu2404"
+    kubernetes-version: "1.33.2"

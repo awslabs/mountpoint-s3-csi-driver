@@ -4,6 +4,9 @@ on:
       matrix:
         description: "Matrix"
         value: ${{ jobs.build_matrix.outputs.matrix }}
+      delete_matrix:
+        description: "Matrix + retired combinations, so we won't have to modify workflow for deleting those clusters"
+        value: ${{ jobs.build_matrix.outputs.delete_matrix }}
 
 permissions:
   contents: read
@@ -13,9 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.parse_yaml.outputs.matrix }}
+      delete_matrix: ${{ steps.parse_yaml.outputs.delete_matrix }}
     steps:
       - uses: actions/checkout@v7
       - name: Parse matrix.yaml file
         id: parse_yaml
         run: |
             echo "matrix=$(yq -P -o=json '.matrix' '.github/matrix.yaml' | jq -c)" >> $GITHUB_OUTPUT
+            # Retired combinations go in `include`, where an entry that fits no tested combination becomes a job of its own.
+            echo "delete_matrix=$(yq -o=json '.' '.github/matrix.yaml' | jq -c '.matrix.include += .retired | .matrix')" >> $GITHUB_OUTPUT
