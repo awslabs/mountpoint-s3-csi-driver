@@ -163,7 +163,9 @@ spec:
               - SETGID # set its GID and clear its supplementary groups
               - KILL   # signal the children on shutdown, which do not share our UID
               {{- if $cacheEnabled }}
-              - CHOWN  # give each mount's cache directory to its Mountpoint's UID
+              - CHOWN  # give the cache volume to root, and each mount's cache directory to its Mountpoint's UID
+              - DAC_OVERRIDE # remove a mount's cache directory, owned by its Mountpoint's UID and closed to root
+              - FOWNER # remove a sticky subdirectory a Mountpoint could have made in its cache directory
               {{- end }}
           seccompProfile:
             type: RuntimeDefault

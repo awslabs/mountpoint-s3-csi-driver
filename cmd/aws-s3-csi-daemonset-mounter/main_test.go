@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -26,6 +27,22 @@ func startServing(t *testing.T, pm *ProcessManager) (stop chan struct{}, done ch
 }
 
 func TestServe(t *testing.T) {
+	t.Run("exits without listening when the cache volume cannot be secured", func(t *testing.T) {
+		pm, _ := newProcessManagerWithCache(t, &fakeProcessRunner{})
+		pm.chownForTesting = func(string, int, int) error { return syscall.EPERM }
+		sock := filepath.Join(t.TempDir(), mountSockName)
+		// Already closed, so a serve that wrongly gets past securing it returns instead of serving forever.
+		stop := make(chan struct{})
+		close(stop)
+
+		err := serve(pm, sock, "/usr/bin/mount-s3", stop)
+		if err == nil {
+			t.Fatal("expected serve to fail when the cache volume cannot be secured")
+		}
+		assert.Contains(t, err.Error(), "cannot chown")
+		assertNotExist(t, sock)
+	})
+
 	t.Run("empties the cache volume before listening", func(t *testing.T) {
 		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{})
 		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "pv-old"), 0700))
