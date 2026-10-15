@@ -112,6 +112,10 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			"The chart in this repository may reference container images that have not been published yet, or contain in-progress changes that are incompatible with the images it references. " +
 			"Please see supported installation methods in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md.")
 	}
+	if installMethod == "kustomize" {
+		klog.Warning("We are planning to deprecate the Kustomize installation method, and it will not be available in the next major version. " +
+			"We recommend the Helm repository or EKS Addon installation methods, see https://github.com/awslabs/mountpoint-s3-csi-driver/issues/<NNN>.")
+	}
 	// `credentialprovider.RegionFromIMDSOnce` is a `sync.OnceValues` and it only makes request to IMDS once,
 	// this call is basically here to pre-warm the cache of IMDS call.
 	go func() {

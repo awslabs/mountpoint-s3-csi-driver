@@ -58,7 +58,7 @@ See [AWS Credentials](CONFIGURATION.md#aws-credentials) for instructions and dif
 
 ### Deploy Mountpoint for Amazon S3 CSI Driver
 
-You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks), [Helm](https://helm.sh/), or [Kustomize](https://github.com/kubernetes-sigs/kustomize).
+You may deploy the Mountpoint for Amazon S3 CSI Driver via [Amazon EKS managed add-on](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html#workloads-add-ons-available-eks), [Helm](https://helm.sh/), or [Kustomize](https://github.com/kubernetes-sigs/kustomize) (we are planning to deprecate Kustomize, and it will not be available in the next major version).
 
 > [!IMPORTANT]
 > When upgrading the CSI Driver, existing [Mountpoint Pods](ARCHITECTURE.md#the-mounter-component--mountpoint-pod-aws-s3-csi-mounter) remain unchanged to avoid disrupting your active workloads. New Mountpoint Pods with the updated version are created only when workload pods are started or restarted.
@@ -115,7 +115,7 @@ kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/
 ```
 
 > [!WARNING]
-> Using a GitHub branch (`main`, `release-X.Y`, or any other) to deploy the CSI Driver is not supported. Charts in the GitHub repository may contain upcoming features incompatible with the currently released stable version of the CSI Driver image.
+> We are planning to deprecate the Kustomize installation method, and it will not be available in the next major version. We recommend the [Helm repository](#helm) or [EKS Addon](#amazon-eks-managed-add-on) installation methods; see [GitHub issue #NNN](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/<NNN>).
 
 #### Once Mountpoint for Amazon S3 CSI Driver has been deployed, verify the pods are running:
 
