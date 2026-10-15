@@ -793,7 +793,7 @@ func TestPodMounterReadOnlyVersionGate(t *testing.T) {
 					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
 					VolumeID:             testCtx.volumeID,
 					WorkloadPodID:        testCtx.podUID,
-				}, args, testCtx.fsGroup, envprovider.Environment{})
+				}, nil, args, testCtx.fsGroup, envprovider.Environment{})
 				if err != nil {
 					log.Println("Mount failed", err)
 				}
