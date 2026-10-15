@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/google/renameio"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
 )
 
 const (
@@ -54,6 +54,8 @@ type Settings struct {
 	Prefix string
 	// FilePerm specifies the file permissions for created profile files
 	FilePerm fs.FileMode
+	// Uid is the UID that must own the created files, or zero to leave them owned by the writer.
+	Uid uint32
 }
 
 // prefixed prepends the Settings prefix to the given suffix
@@ -82,14 +84,14 @@ func Create(settings Settings, credentials Credentials) (Profile, error) {
 
 	configFilename := settings.prefixed(awsProfileConfigFilenameSuffix)
 	configPath := settings.path(configFilename)
-	err := writeAWSProfileFile(configPath, configFileContents(name), settings.FilePerm)
+	err := writeAWSProfileFile(configPath, configFileContents(name), settings.FilePerm, settings.Uid)
 	if err != nil {
 		return Profile{}, fmt.Errorf("aws-profile: Failed to create config file %s: %v", configPath, err)
 	}
 
 	credentialsFilename := settings.prefixed(awsProfileCredentialsFilenameSuffix)
 	credentialsPath := settings.path(credentialsFilename)
-	err = writeAWSProfileFile(credentialsPath, credentialsFileContents(name, credentials), settings.FilePerm)
+	err = writeAWSProfileFile(credentialsPath, credentialsFileContents(name, credentials), settings.FilePerm, settings.Uid)
 	if err != nil {
 		return Profile{}, fmt.Errorf("aws-profile: Failed to create credentials file %s: %v", credentialsPath, err)
 	}
@@ -121,8 +123,8 @@ func Cleanup(settings Settings) error {
 }
 
 // writeAWSProfileFile safely writes AWS profile content to a file with given permissions
-func writeAWSProfileFile(path string, content string, filePerm os.FileMode) error {
-	return renameio.WriteFile(path, []byte(content), filePerm)
+func writeAWSProfileFile(path string, content string, filePerm os.FileMode, uid uint32) error {
+	return util.WriteFileOwned(path, []byte(content), filePerm, uid)
 }
 
 // credentialsFileContents generates the contents for an AWS credentials file

@@ -141,7 +141,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
 		}
 
-		if err := dm.DiscoverCommDir(context.Background()); err != nil {
+		if err := dm.DiscoverMounter(context.Background()); err != nil {
 			klog.Fatalf("Failed to discover mounter pod: %v", err)
 		}
 		go dm.StartCommDirWatch(stopCh)

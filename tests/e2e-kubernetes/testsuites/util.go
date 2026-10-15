@@ -528,7 +528,7 @@ func execInPodOnNode(ctx context.Context, f *framework.Framework, label, contain
 
 // execInCSINodePod runs `cmd` in the csi-node pod on `nodeName`.
 //
-// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter it
+// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter (without a cache) it
 // can read a directory owned by a mount's UID, and it is the component that applied that ownership.
 func execInCSINodePod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, error) {
 	stdout, _, err := execInPodOnNode(ctx, f, csiNodePodLabel, csiNodeContainerName, nodeName, cmd)
