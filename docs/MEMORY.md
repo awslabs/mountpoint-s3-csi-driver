@@ -6,9 +6,39 @@ This document explains the memory model and how to size it for your workload.
 
 ## The memory model
 
-One `s3-csi-daemonset-mounter` Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per distinct volume. All of those processes share that single container's memory.
+One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share that single container's memory.
 
-The driver therefore gives each Mountpoint process an explicit budget using Mountpoint's [`--memory-target`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage) argument, derived from two Helm values:
+The driver therefore bounds each Mountpoint process with Mountpoint's [`--memory-target`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage) argument. `--memory-target` is not a guaranteed limit, but Mountpoint manages its buffers to stay within it: under memory pressure it slows down I/O, reclaims buffers it no longer needs, and reduces prefetching.
+
+How each process gets its `--memory-target` is set by the `memoryLimitStrategy` Helm value:
+
+* [`equalSplit`](#the-equalsplit-strategy) (default): the driver splits the mounter's `resources.requests.memory` equally between `maxVolumesPerNode` volumes and ignores any `--memory-target` in a PV's `mountOptions`.
+* [`none`](#the-none-strategy): you set `--memory-target` per volume in each PV's `mountOptions` and size `resources.requests.memory` to cover them.
+
+Whichever strategy you use:
+
+* **The budget is a per-node reservation.** `requests.memory` is requested on every node as soon as the driver is installed, whether or not any S3 volume is mounted. The 4Gi default is roughly 28% of the allocatable memory of a 16 GiB node.
+* **The budget is per volume, not per workload Pod.** Workload Pods on the same node that use the same volume share its Mountpoint process, and therefore its budget.
+
+**Keep the targets within `requests.memory`.** The request is all the scheduler reserves for the mounter, so any memory used beyond it comes out of what was scheduled for other Pods. The mounter is `system-node-critical`, so under node memory pressure the kubelet never evicts it; it evicts your workload Pods instead.
+
+> [!WARNING]
+> The chart sets no `resources.limits.memory`. If you add one, leave headroom above `requests.memory`. The targets add up to almost the whole request, and Mountpoint's [`--memory-target` is not a guaranteed limit](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage), so a limit equal to the request risks an OOM kill of the mounter container, which can stop every mount on the node.
+
+## Memory and throughput
+
+**More memory per mount lets Mountpoint prefetch further ahead and keep more data in flight, which raises throughput until something else becomes the limit**, such as the instance's network bandwidth or CPU, FUSE overhead, or how your application reads and writes. Once one of those is the limit, raising the target adds no more throughput.
+
+The target at which throughput stops improving depends on the instance type and the workload, so there is no single recommended value. On smaller instances, network bandwidth or CPU is often already the limit at the default target of 1008 MiB, while on high-bandwidth instances a larger target can raise throughput substantially. Benchmark your own workload before settling on a value.
+
+Two other related settings matter for throughput:
+
+* Each Mountpoint process independently detects the node's full network bandwidth and sizes its request concurrency for it, so several busy mounts on one node all compete for the same link. If several mounts are busy at once, consider partitioning the bandwidth explicitly with [`--maximum-throughput-gbps`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-mountpoint-performance) in each PV's `mountOptions`.
+* Mountpoint detects the node's bandwidth by reading its instance type from [IMDS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html), and uses 10 Gbps if IMDS is unreachable. The mounter doesn't use the host network, so it can reach IMDS only if the node's IMDS hop limit is 2 or greater. If it isn't and the node is faster than 10 Gbps, set `--maximum-throughput-gbps` in the PV's `mountOptions` rather than raising the hop limit, which would also expose the node's IAM credentials to all Pods on the node. Volumes using [Pod-Level Credentials](CONFIGURATION.md#pod-level-credentials) never query IMDS, so on such nodes set `--maximum-throughput-gbps` on them whatever the hop limit. To check the bandwidth each mount detected, see [Verifying the configuration](#verifying-the-configuration).
+
+## The `equalSplit` strategy
+
+`equalSplit` is the default. It gives each Mountpoint process an equal share of the mounter's memory request as its `--memory-target`, derived from two Helm values:
 
 ```yaml
 daemonsetMounters:
@@ -20,7 +50,7 @@ daemonsetMounters:
         cpu: "500m"
 ```
 
-With the default `equalSplit` strategy:
+Each Mountpoint process gets:
 
 ```
 --memory-target (MiB) = (requests.memory in MiB − 64 − in-memory cache size) ÷ maxVolumesPerNode
@@ -30,35 +60,24 @@ The 64 MiB is held back for the mounter's own process, which lives in the same c
 
 With the defaults above, which configure no cache, every Mountpoint process gets `--memory-target=1008`, i.e. `(4096 − 64) ÷ 4`.
 
-Three properties of this model matter when sizing it:
+**The split is static.** Each process gets the same share regardless of how busy it is. One busy mount on a node with `maxVolumesPerNode: 4` is capped at a quarter of the budget even when the other three slots are empty.
 
-* **The budget is a per-node reservation.** `requests.memory` is requested on every node as soon as the driver is installed, whether or not any S3 volume is mounted. The 4Gi default is roughly 28% of the allocatable memory of a 16 GiB node.
-* **The split is static.** Each process gets the same share regardless of how busy it is. One busy mount on a node with `maxVolumesPerNode: 4` is capped at a quarter of the budget even when the other three slots are empty.
-* **The budget is per volume, not per workload Pod.** Workload Pods on the same node that use the same volume share its Mountpoint process, and therefore its budget.
+A `--memory-target` in a PV's `mountOptions` is **ignored** and the equal share is used instead. The mounter logs a warning naming the volume, so check the mounter log if a per-volume target does not seem to take effect.
 
-`--memory-target` is a target, not a hard cap: Mountpoint slows I/O down, reclaims buffers and reduces prefetching to stay near it, rather than failing.
-
-**Keep the targets within `requests.memory`.** The request is all the scheduler reserves for the mounter, so any memory used beyond it comes out of what was scheduled for other Pods. The mounter is `system-node-critical`, so under node memory pressure the kubelet never evicts it; it evicts your workload Pods instead.
-
-The chart sets no `resources.limits.memory`. If you add one, leave headroom above `requests.memory`: the equal split hands out almost the whole request as targets, and an OOM kill of the mounter container can stop every mount on the node.
-
-## Memory and throughput
-
-**More memory per mount lets Mountpoint prefetch further ahead and keep more data in flight, which raises throughput until something else becomes the limit**, such as the instance's network bandwidth or CPU, FUSE overhead, or how your application reads and writes. Past that point, a higher target doesn't add throughput.
-
-Where that point falls depends on the instance type and the workload, so there is no single recommended value. On smaller instances, network bandwidth or CPU is often already the limit at the default target of 1008 MiB, while on high-bandwidth instances a larger target can raise throughput substantially. Benchmark your own workload before settling on a value.
-
-Two other related settings matter for throughput:
-
-* Each Mountpoint process independently detects the node's full network bandwidth and sizes its request concurrency for it, so several busy mounts on one node all compete for the same link. If several mounts are busy at once, consider partitioning the bandwidth explicitly with [`--maximum-throughput-gbps`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-mountpoint-performance) in each PV's `mountOptions`.
-* Bandwidth detection reads the instance type from [IMDS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html). If IMDS is unreachable, Mountpoint assumes 10 Gbps. For the mounter, IMDS needs a hop limit of 2 or greater; see [Troubleshooting the automatic STS region detection](CONFIGURATION.md#troubleshooting-the-automatic-sts-region-detection) for how to check it. Volumes using [Pod-Level Credentials](CONFIGURATION.md#pod-level-credentials) never query IMDS, so set `--maximum-throughput-gbps` on them explicitly if the node is faster than 10 Gbps.
-
-## Sizing the mounter memory request
+### Sizing the mounter memory request
 
 Work in this order:
 
-1. **Pick `maxVolumesPerNode`**: the largest number of *distinct* S3 volumes you expect a single node to mount. This is also advertised to the Kubernetes scheduler as the node's volume limit, so it caps how many S3 volumes are placed on a node. Prefer the smallest number that fits your workload, because a lower value means a larger share for each volume.
-2. **Pick a per-mount target.** As a rough guide from tests with parallel sequential reads and writes: on a `t3.xlarge`, a target above the default 1008 MiB gave no more throughput; on a 100 Gbps `c6in.16xlarge`, one mount reached about 37 Gbps at 2 GiB and 65–70 Gbps at 4–6 GiB, with no gain above that.
+1. **Pick `maxVolumesPerNode`**: the largest number of distinct S3 PersistentVolumes a single node should mount at once. It is also advertised to the Kubernetes scheduler as the node's volume limit: Pods that would exceed it are placed on another node, or stay `Pending` until one has room. To choose it:
+   * Count the distinct S3 PVs used by the Pods you expect to run together on one node. A Pod that mounts more S3 PVs than `maxVolumesPerNode` can never be scheduled.
+   * If you are upgrading from v2, count the distinct PVs on each node from the `MountpointS3PodAttachment` objects at a busy time. The first column is the count; the top line is your busiest node:
+     ```sh
+     kubectl get mountpoints3podattachments \
+       -o jsonpath='{range .items[*]}{.spec.nodeName}{" "}{.spec.persistentVolumeName}{"\n"}{end}' \
+       | sort -u | awk '{print $1}' | uniq -c | sort -rn | head
+     ```
+   * Prefer the smallest number that fits, because a lower value means a larger share for each volume.
+2. **Pick a per-mount target.** As a rough guide from tests with parallel sequential reads and writes: on a `t3.xlarge`, raising the target above the default 1008 MiB didn't increase throughput; on a 100 Gbps `c6in.16xlarge`, one mount reached about 37 Gbps at 2 GiB and 65–70 Gbps at 4–6 GiB, and throughput plateaued above that.
 3. **Compute the request:** `requests.memory = 64 MiB + in-memory cache size + (target × maxVolumesPerNode)`.
 4. **Check that it fits** alongside your workloads on the smallest node type in the cluster, remembering that it is reserved on every node.
 
@@ -76,38 +95,11 @@ Combinations that would give a share below 512 MiB are rejected.
 
 The memory target also caps how many files a mount can have open for writing at once (109 at the default 1008 MiB); see [Maximum number of files open for writing](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#maximum-number-of-files-open-for-writing).
 
-## Verifying the configuration
-
-The mounter logs the resolved strategy and the inputs it used when it starts:
-
-```sh
-$ kubectl logs -n kube-system <mounter-pod> | grep memoryLimitStrategy
-memoryLimitStrategy=equalSplit: each Mountpoint gets --memory-target=1008 (this container's resources.requests.memory of 4294967296 bytes, minus 64 MiB for the mounter process, divided by maxVolumesPerNode=4).
-```
-
-After a `helm upgrade`, a node shows the new values only once its mounter Pod has been replaced, because the mounter DaemonSet uses the `OnDelete` update strategy.
-
-To find the mounter Pod on a particular node:
-
-```sh
-kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node>
-```
-
-The mounter also repeats the effective share in its periodic status line, alongside the live mount count:
-
-```
-Status: tracked=2 actual_children=2 open_fds=14 goroutines=21 memory_limit_strategy=equalSplit share_mib=1008 mounts=[...]
-```
-
-Mountpoint's own startup lines are forwarded into the same log, prefixed with the mount ID, and confirm the memory target each process accepted and the network bandwidth it detected:
-
-```sh
-kubectl logs -n kube-system <mounter-pod> | grep -e "memory target" -e "target network throughput"
-```
-
-## Setting `--memory-target` per volume
+## The `none` strategy
 
 If an equal split does not suit your workload, for example when one volume needs far more memory than the others on the same node, set `memoryLimitStrategy: none` and specify `--memory-target` per volume in the PV's `mountOptions`.
+
+### Setting `--memory-target` per volume
 
 For example, with one volume read at high throughput and another used only for uploading logs:
 
@@ -144,11 +136,52 @@ spec:
 
 See [`memory_target_per_volume.yaml`](../examples/kubernetes/static_provisioning/memory_target_per_volume.yaml) for the complete example.
 
-With `none`, the driver passes your value through untouched, so keeping the targets within the mounter's `requests.memory` is up to you. The scheduler counts volumes against `maxVolumesPerNode` but knows nothing about their targets, so size the request for the largest set of volumes that can end up on one node: 64 MiB, plus the in-memory cache size if any, plus the targets of your `maxVolumesPerNode` largest volumes, or of all your volumes if you have fewer. Each volume runs at most one Mountpoint process per node however many Pods use it, which is why the example above needs no more than the sum of its two targets. If you have more large volumes than one node can hold at once, either size for the worst case or keep them apart, for example with pod anti-affinity between the workloads that use them.
+### Sizing the mounter memory request
+
+With `none`, the driver passes each PV's `--memory-target` through unchanged. It is your responsibility to ensure that the targets of the volumes mounted on a node fit within the mounter's `requests.memory`.
+
+The scheduler places up to `maxVolumesPerNode` S3 volumes on a node but doesn't know their targets, so assume that the `maxVolumesPerNode` PVs with the highest `--memory-target` can end up on the same node, and size for them:
+
+```
+requests.memory = 64 MiB + in-memory cache size + sum of the maxVolumesPerNode highest --memory-target values among your PVs
+```
+
+If you have no more PVs than `maxVolumesPerNode`, this is the sum of all their targets, as in the example above: 64 + 6144 + 512 = 6720 MiB. Each PV counts once per node, however many Pods on the node use it, because they share one Mountpoint process.
+
+For example, with `maxVolumesPerNode: 2` and three PVs with targets of 6144, 4096 and 512 MiB, size for the two highest: 64 + 6144 + 4096 = 10304 MiB. If that is too much to reserve on every node, keep the 6144 MiB and 4096 MiB volumes on different nodes, for example with pod anti-affinity between the workloads that use them, and size for the highest pair that can still share a node: 64 + 6144 + 512 = 6720 MiB.
 
 > [!WARNING]
 > A PV with no `--memory-target` gets Mountpoint's default: 95% of the mounter container's `resources.limits.memory`, or of roughly the whole node's memory if no limit is set. Every such mount computes the same figure independently; it is not divided between them. Set `--memory-target` on every PV when using `none`. The mounter logs a warning naming any volume that doesn't.
 
 `memoryLimitStrategy: none` is also the only strategy compatible with `maxVolumesPerNode: 0` (no scheduler volume limit), since there is then nothing to divide the budget by. With both, nothing bounds how much memory the mounts on a node can use.
 
-Under `equalSplit`, a `--memory-target` in a PV's `mountOptions` is **ignored** and the equal share is used instead. The mounter logs a warning naming the volume, so check the mounter log if a per-volume target does not seem to take effect.
+## Verifying the configuration
+
+The mounter logs the resolved strategy and the inputs it used when it starts:
+
+```sh
+$ kubectl logs -n kube-system <mounter-pod> | grep memoryLimitStrategy
+memoryLimitStrategy=equalSplit: each Mountpoint gets --memory-target=1008 (this container's resources.requests.memory of 4294967296 bytes, minus 64 MiB for the mounter process, divided by maxVolumesPerNode=4).
+```
+
+With `none`, the line is `memoryLimitStrategy=none: --memory-target is left to each PV's mountOptions.` instead.
+
+After a `helm upgrade`, a node shows the new values only once its mounter Pod has been replaced, because the mounter DaemonSet uses the `OnDelete` update strategy.
+
+To find the mounter Pod on a particular node:
+
+```sh
+kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node>
+```
+
+Under `equalSplit`, the mounter also repeats the effective share in its periodic status line, alongside the live mount count:
+
+```
+Status: tracked=2 actual_children=2 open_fds=14 goroutines=21 memory_limit_strategy=equalSplit share_mib=1008 mounts=[...]
+```
+
+Mountpoint's own startup lines are forwarded into the same log, prefixed with the mount ID, and confirm the memory target each process accepted and the network bandwidth it detected:
+
+```sh
+kubectl logs -n kube-system <mounter-pod> | grep -e "memory target" -e "target network throughput"
+```
