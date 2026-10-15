@@ -84,13 +84,11 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			name:   "different node",
 			nodeID: "node1",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod1",
-					Namespace: mountpointPodNamespace,
-					UID:       testUID,
-					Annotations: map[string]string{
-						mppod.AnnotationNeedsUnmount: "true",
-					},
+				Name:      "pod1",
+				Namespace: mountpointPodNamespace,
+				UID:       testUID,
+				Annotations: map[string]string{
+					mppod.AnnotationNeedsUnmount: "true",
 				},
 				Spec: corev1.PodSpec{
 					NodeName: "different-node",
@@ -105,14 +103,12 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			name:   "same node with unmount annotation",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod1",
-					Namespace: mountpointPodNamespace,
-					UID:       testUID,
-					Annotations: map[string]string{
-						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     testVolumeId,
-					},
+				Name:      "pod1",
+				Namespace: mountpointPodNamespace,
+				UID:       testUID,
+				Annotations: map[string]string{
+					mppod.AnnotationNeedsUnmount: "true",
+					mppod.AnnotationVolumeId:     testVolumeId,
 				},
 				Spec: corev1.PodSpec{
 					NodeName: nodeName,
@@ -127,11 +123,9 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			name:   "same node without unmount annotation",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod1",
-					Namespace: mountpointPodNamespace,
-					UID:       testUID,
-				},
+				Name:      "pod1",
+				Namespace: mountpointPodNamespace,
+				UID:       testUID,
 				Spec: corev1.PodSpec{
 					NodeName: nodeName,
 				},
@@ -145,14 +139,12 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			name:   "same node with unmount annotation, not mountpoint",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod1",
-					Namespace: mountpointPodNamespace,
-					UID:       testUID,
-					Annotations: map[string]string{
-						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     testVolumeId,
-					},
+				Name:      "pod1",
+				Namespace: mountpointPodNamespace,
+				UID:       testUID,
+				Annotations: map[string]string{
+					mppod.AnnotationNeedsUnmount: "true",
+					mppod.AnnotationVolumeId:     testVolumeId,
 				},
 				Spec: corev1.PodSpec{
 					NodeName: nodeName,
@@ -167,14 +159,12 @@ func TestHandleS3PodAttachmentUpdate(t *testing.T) {
 			name:   "same node with unmount annotation, no source directory",
 			nodeID: nodeName,
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod1",
-					Namespace: mountpointPodNamespace,
-					UID:       testUID,
-					Annotations: map[string]string{
-						mppod.AnnotationNeedsUnmount: "true",
-						mppod.AnnotationVolumeId:     testVolumeId,
-					},
+				Name:      "pod1",
+				Namespace: mountpointPodNamespace,
+				UID:       testUID,
+				Annotations: map[string]string{
+					mppod.AnnotationNeedsUnmount: "true",
+					mppod.AnnotationVolumeId:     testVolumeId,
 				},
 				Spec: corev1.PodSpec{
 					NodeName: nodeName,
@@ -253,11 +243,9 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			name: "no dangling mounts",
 			pods: []*corev1.Pod{
 				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod1",
-						Namespace: mountpointPodNamespace,
-						UID:       testUID,
-					},
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       testUID,
 					Spec: corev1.PodSpec{
 						NodeName: nodeName,
 					},
@@ -269,14 +257,12 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			name: "pod marked for unmount",
 			pods: []*corev1.Pod{
 				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod1",
-						Namespace: mountpointPodNamespace,
-						UID:       testUID,
-						Annotations: map[string]string{
-							mppod.AnnotationNeedsUnmount: "true",
-							mppod.AnnotationVolumeId:     testVolumeId,
-						},
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       testUID,
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+						mppod.AnnotationVolumeId:     testVolumeId,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: nodeName,
@@ -289,17 +275,15 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			name: "pod marked for unmount with legacy label fallback",
 			pods: []*corev1.Pod{
 				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod1",
-						Namespace: mountpointPodNamespace,
-						UID:       testUID,
-						Annotations: map[string]string{
-							mppod.AnnotationNeedsUnmount: "true",
-							// No AnnotationVolumeId - should fallback to legacy label
-						},
-						Labels: map[string]string{
-							mppod.DeprecatedLabelVolumeId: testVolumeId,
-						},
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       testUID,
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+						// No AnnotationVolumeId - should fallback to legacy label
+					},
+					Labels: map[string]string{
+						mppod.DeprecatedLabelVolumeId: testVolumeId,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: nodeName,
@@ -312,14 +296,12 @@ func TestCleanupDanglingMounts(t *testing.T) {
 			name: "with dangling mount and unmount error",
 			pods: []*corev1.Pod{
 				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod1",
-						Namespace: mountpointPodNamespace,
-						UID:       testUID,
-						Annotations: map[string]string{
-							mppod.AnnotationNeedsUnmount: "true",
-							mppod.AnnotationVolumeId:     testVolumeId,
-						},
+					Name:      "pod1",
+					Namespace: mountpointPodNamespace,
+					UID:       testUID,
+					Annotations: map[string]string{
+						mppod.AnnotationNeedsUnmount: "true",
+						mppod.AnnotationVolumeId:     testVolumeId,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: nodeName,

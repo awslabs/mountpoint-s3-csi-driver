@@ -95,7 +95,7 @@ func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*byt
 
 	// We parse each YAML object from Helm manifests, handling EOF and skipping empty objects
 	for {
-		var obj map[string]interface{}
+		var obj map[string]any
 		if err := decoder.Decode(&obj); err != nil {
 			if err == io.EOF {
 				break
@@ -111,22 +111,22 @@ func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*byt
 
 		// Patch CSIDriver token expiration
 		if kind == "CSIDriver" {
-			spec := obj["spec"].(map[string]interface{})
-			tokenRequests := spec["tokenRequests"].([]interface{})
+			spec := obj["spec"].(map[string]any)
+			tokenRequests := spec["tokenRequests"].([]any)
 			// Loop handles variable array length
 			for i := range tokenRequests {
-				tr := tokenRequests[i].(map[string]interface{})
+				tr := tokenRequests[i].(map[string]any)
 				tr["expirationSeconds"] = r.expirationSeconds
 			}
 		}
 
 		// Patch ServiceAccount token expiration annotation
 		if kind == "ServiceAccount" {
-			metadata := obj["metadata"].(map[string]interface{})
+			metadata := obj["metadata"].(map[string]any)
 			if name, _ := metadata["name"].(string); name == "s3-csi-driver-sa" {
-				annotations, ok := metadata["annotations"].(map[string]interface{})
+				annotations, ok := metadata["annotations"].(map[string]any)
 				if !ok {
-					annotations = make(map[string]interface{})
+					annotations = make(map[string]any)
 					metadata["annotations"] = annotations
 				}
 				annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", r.expirationSeconds)
