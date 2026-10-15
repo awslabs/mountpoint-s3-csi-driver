@@ -115,6 +115,7 @@ The following table provides the support status for various distros with regards
 
 * [Driver Installation](docs/INSTALL.md)
 * [Configuring volumes and credentials](docs/CONFIGURATION.md)
+* [Configuring Mountpoint memory](docs/MEMORY.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)
 * [Kubernetes Static Provisioning Example](/examples/kubernetes/static_provisioning)
 * [Driver Uninstallation](docs/INSTALL.md#uninstalling-the-driver)
