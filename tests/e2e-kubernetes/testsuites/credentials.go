@@ -1230,9 +1230,7 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: pod.Namespace,
-		},
+		Namespace: pod.Namespace,
 		Spec: authenticationv1.TokenRequestSpec{
 			Audiences: []string{serviceAccountTokenAudienceEKS},
 			BoundObjectRef: &authenticationv1.BoundObjectReference{
@@ -1263,9 +1261,7 @@ func createCredentialSecret(ctx context.Context, f *framework.Framework, credent
 	client := f.ClientSet.CoreV1().Secrets(csiDriverDaemonSetNamespace)
 
 	secret, err := client.Create(ctx, &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: credentialSecretName,
-		},
+		Name: credentialSecretName,
 		StringData: map[string]string{
 			"key_id":        *credentials.AccessKeyId,
 			"access_key":    *credentials.SecretAccessKey,
@@ -1378,8 +1374,7 @@ func deletePodIdentityAssociation(ctx context.Context, sa *v1.ServiceAccount, as
 		ClusterName:   &ClusterName,
 	})
 
-	var rsf *types.ResourceNotFoundException
-	if goerrors.As(err, &rsf) {
+	if _, ok := goerrors.AsType[*types.ResourceNotFoundException](err); ok {
 		return nil
 	}
 	return err
