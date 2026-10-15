@@ -120,6 +120,22 @@ The S3 CSI driver includes a feature to prevent this race condition by using nod
 
 For EKS managed node groups, add the taint to your node group configuration (more details in [this documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)). For self-managed nodes, [apply the taint using kubectl](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/) when nodes join the cluster.
 
+On Kubernetes 1.37 and later, you can instead [have the scheduler wait for the driver](./CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver), which needs no node taints.
+
+## My Pod is stuck at `Pending` with "s3.csi.aws.com CSI driver is not installed on the node"
+
+With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) enabled, the scheduler only places Pods that use S3 volumes on nodes where the CSI Driver has registered. A short wait while a new node starts the driver is expected. If the Pod stays `Pending`:
+
+- Check that the CSI Driver is running and registered on the nodes you expect:
+  ```bash
+  $ kubectl get pods -n kube-system -l app=s3-csi-node -o wide
+  $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'
+  ```
+  The driver doesn't run on nodes that `node.affinity` or `node.nodeSelector` exclude, or on nodes with taints it doesn't tolerate.
+- If the Pod is waiting for Cluster Autoscaler to add a node, check that Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, and that node groups that scale from zero have the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag with `s3.csi.aws.com` in its value.
+
+To go back to the previous scheduling behavior, set `node.preventPodSchedulingIfMissing` to `false`.
+
 ## Mountpoint pods are failing with "Failed to receive mount options from /comm/mount.sock"
 
 Mountpoint pods are scheduled immediately when a workload's pod is scheduled.
