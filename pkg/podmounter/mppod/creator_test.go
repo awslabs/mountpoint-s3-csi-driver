@@ -46,18 +46,14 @@ func TestCreatingHeadroomPod(t *testing.T) {
 	creator := mppod.NewCreator(createTestConfig(cluster.DefaultKubernetes), testr.New(t))
 
 	workloadPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "workload-pod",
-			Namespace: "workload-namespace",
-			UID:       "2a1d7271-dc3a-416f-8b22-4eccba5c1373",
-		},
+		Name:      "workload-pod",
+		Namespace: "workload-namespace",
+		UID:       "2a1d7271-dc3a-416f-8b22-4eccba5c1373",
 	}
 
 	t.Run("Basic HeadroomPod creation", func(t *testing.T) {
 		pv := &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testVolName,
-			},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
@@ -120,9 +116,7 @@ func TestCreatingHeadroomPod(t *testing.T) {
 	t.Run("With Container Resources specified in PV", func(t *testing.T) {
 		t.Run("With valid requests and limits", func(t *testing.T) {
 			pv := &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -154,9 +148,7 @@ func TestCreatingHeadroomPod(t *testing.T) {
 
 		t.Run("With only requests", func(t *testing.T) {
 			pv := &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -184,9 +176,7 @@ func TestCreatingHeadroomPod(t *testing.T) {
 
 		t.Run("With only limits", func(t *testing.T) {
 			pv := &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -233,9 +223,7 @@ func TestCreatingHeadroomPod(t *testing.T) {
 			} {
 				t.Run(name, func(t *testing.T) {
 					pv := &corev1.PersistentVolume{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: testVolName,
-						},
+						Name: testVolName,
 						Spec: corev1.PersistentVolumeSpec{
 							PersistentVolumeSource: corev1.PersistentVolumeSource{
 								CSI: &corev1.CSIPersistentVolumeSource{
@@ -298,11 +286,9 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
 		assert.Equals(t, &corev1.Volume{
 			Name: mppod.CommunicationDirName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium:    corev1.StorageMediumMemory,
-					SizeLimit: resource.NewQuantity(mppod.CommunicationDirSizeLimit, resource.BinarySI),
-				},
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				Medium:    corev1.StorageMediumMemory,
+				SizeLimit: resource.NewQuantity(mppod.CommunicationDirSizeLimit, resource.BinarySI),
 			},
 		}, findVolumeFromPod(mpPod, mppod.CommunicationDirName))
 		assert.Equals(t, &corev1.Affinity{
@@ -345,9 +331,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 	t.Run("Empty PV", func(t *testing.T) {
 		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testVolName,
-			},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
@@ -364,9 +348,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	t.Run("Mount Options", func(t *testing.T) {
 		t.Run("With cache", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -390,9 +372,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	t.Run("Cache Configuration", func(t *testing.T) {
 		t.Run("With emptyDir cache", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -415,9 +395,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		t.Run("With emptyDir cache and size limit", func(t *testing.T) {
 			sizeLimit := "1Gi"
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -442,9 +420,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With emptyDir cache and memory medium", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -470,9 +446,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		t.Run("With emptyDir cache, size limit and memory medium", func(t *testing.T) {
 			sizeLimit := "1Gi"
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -501,9 +475,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			scName := "test-cache-sc"
 			storageRequest := "1Gi"
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -523,10 +495,8 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			verifyLocalCacheVolume(t, mpPod, corev1.VolumeSource{
 				Ephemeral: &corev1.EphemeralVolumeSource{
 					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels: map[string]string{
-								"s3.csi.aws.com/type": "local-ephemeral-cache",
-							},
+						Labels: map[string]string{
+							"s3.csi.aws.com/type": "local-ephemeral-cache",
 						},
 						Spec: corev1.PersistentVolumeClaimSpec{
 							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -545,9 +515,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With ephemeral cache but missing storage class name", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -565,9 +533,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With ephemeral cache but missing resource request", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -585,9 +551,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With ephemeral cache but invalid resource request", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -606,9 +570,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With invalid cache type", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -625,9 +587,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With invalid emptyDir size limit", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -645,9 +605,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With invalid emptyDir medium", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -665,9 +623,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With both mount options cache and volume attributes cache", func(t *testing.T) {
 			_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -688,9 +644,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 	t.Run("With ServiceAccountName specified in PV", func(t *testing.T) {
 		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testVolName,
-			},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
@@ -711,9 +665,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 	t.Run("With Container Resources specified in PV", func(t *testing.T) {
 		t.Run("With valid requests and limits", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -744,9 +696,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With valid requests only", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -773,9 +723,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		t.Run("With valid limits only", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testVolName,
-				},
+				Name: testVolName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -829,9 +777,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 			} {
 				t.Run(name, func(t *testing.T) {
 					_, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: testVolName,
-						},
+						Name: testVolName,
 						Spec: corev1.PersistentVolumeSpec{
 							PersistentVolumeSource: corev1.PersistentVolumeSource{
 								CSI: &corev1.CSIPersistentVolumeSource{
@@ -850,9 +796,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 	t.Run("With Preempting Priority Class", func(t *testing.T) {
 		mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testVolName,
-			},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
@@ -917,7 +861,7 @@ func TestPodLabels(t *testing.T) {
 		creator := mppod.NewCreator(config, testr.New(t))
 
 		pv := &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
@@ -945,15 +889,13 @@ func TestPodLabels(t *testing.T) {
 		creator := mppod.NewCreator(config, testr.New(t))
 
 		workloadPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "workload-pod",
-				Namespace: "default",
-				UID:       "test-uid",
-			},
+			Name:      "workload-pod",
+			Namespace: "default",
+			UID:       "test-uid",
 		}
 
 		pv := &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Name: testVolName,
 		}
 
 		hrPod, err := creator.HeadroomPod(workloadPod, pv)
@@ -974,7 +916,7 @@ func TestPodLabels(t *testing.T) {
 		creator := mppod.NewCreator(config, testr.New(t))
 
 		pv := &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{Name: testVolName},
+			Name: testVolName,
 			Spec: corev1.PersistentVolumeSpec{
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{VolumeHandle: testVolID},
@@ -993,11 +935,9 @@ func TestPodLabels(t *testing.T) {
 
 		// Test Headroom Pod
 		workloadPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "workload-pod",
-				Namespace: "default",
-				UID:       "test-uid",
-			},
+			Name:      "workload-pod",
+			Namespace: "default",
+			UID:       "test-uid",
 		}
 
 		hrPod, err := creator.HeadroomPod(workloadPod, pv)

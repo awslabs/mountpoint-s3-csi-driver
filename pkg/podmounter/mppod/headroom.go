@@ -44,11 +44,9 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 	labels[LabelHeadroomForVolume] = pv.Name
 
 	hrPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      HeadroomPodNameFor(workloadPod, pv),
-			Namespace: c.config.Namespace,
-			Labels:    labels,
-		},
+		Name:      HeadroomPodNameFor(workloadPod, pv),
+		Namespace: c.config.Namespace,
+		Labels:    labels,
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
 				corev1.LabelOSStable: "linux",
