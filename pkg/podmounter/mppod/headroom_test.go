@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
@@ -166,9 +165,7 @@ func TestLabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod without labels",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: "test-uid-123",
-				},
+				UID: "test-uid-123",
 			},
 			expectedResult: true,
 			expectedLabel:  "test-uid-123",
@@ -176,11 +173,9 @@ func TestLabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod with existing labels but no headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: "test-uid-456",
-					Labels: map[string]string{
-						"app": "test-app",
-					},
+				UID: "test-uid-456",
+				Labels: map[string]string{
+					"app": "test-app",
 				},
 			},
 			expectedResult: true,
@@ -189,11 +184,9 @@ func TestLabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod already has headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					UID: "test-uid-789",
-					Labels: map[string]string{
-						mppod.LabelHeadroomForWorkload: "existing-value",
-					},
+				UID: "test-uid-789",
+				Labels: map[string]string{
+					mppod.LabelHeadroomForWorkload: "existing-value",
 				},
 			},
 			expectedResult: false,
@@ -219,10 +212,8 @@ func TestWorkloadHasLabelPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod with headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						mppod.LabelHeadroomForWorkload: "test-uid",
-					},
+				Labels: map[string]string{
+					mppod.LabelHeadroomForWorkload: "test-uid",
 				},
 			},
 			expected: true,
@@ -230,19 +221,15 @@ func TestWorkloadHasLabelPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod without labels",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: nil,
-				},
+				Labels: nil,
 			},
 			expected: false,
 		},
 		{
 			name: "pod with other labels but no headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "test-app",
-					},
+				Labels: map[string]string{
+					"app": "test-app",
 				},
 			},
 			expected: false,
@@ -267,11 +254,9 @@ func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod with headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						mppod.LabelHeadroomForWorkload: "test-uid",
-						"app":                          "test-app",
-					},
+				Labels: map[string]string{
+					mppod.LabelHeadroomForWorkload: "test-uid",
+					"app":                          "test-app",
 				},
 			},
 			expectedResult: true,
@@ -282,10 +267,8 @@ func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod with only headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						mppod.LabelHeadroomForWorkload: "test-uid",
-					},
+				Labels: map[string]string{
+					mppod.LabelHeadroomForWorkload: "test-uid",
 				},
 			},
 			expectedResult: true,
@@ -294,10 +277,8 @@ func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod without headroom label",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "test-app",
-					},
+				Labels: map[string]string{
+					"app": "test-app",
 				},
 			},
 			expectedResult: false,
@@ -308,9 +289,7 @@ func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
 		{
 			name: "pod without labels",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: nil,
-				},
+				Labels: nil,
 			},
 			expectedResult: false,
 			expectedLabels: nil,
@@ -328,11 +307,9 @@ func TestUnlabelWorkloadPodForHeadroomPod(t *testing.T) {
 
 func TestHeadroomLabelingFunctions(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			UID: "test-uid",
-			Labels: map[string]string{
-				"app": "test-app",
-			},
+		UID: "test-uid",
+		Labels: map[string]string{
+			"app": "test-app",
 		},
 	}
 
@@ -371,45 +348,35 @@ func TestIsHeadroomPod(t *testing.T) {
 		{
 			name: "headroom pod",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "hr-abc123",
-				},
+				Name: "hr-abc123",
 			},
 			expected: true,
 		},
 		{
 			name: "regular pod",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "regular-pod-name",
-				},
+				Name: "regular-pod-name",
 			},
 			expected: false,
 		},
 		{
 			name: "mountpoint pod",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "mp-abc123",
-				},
+				Name: "mp-abc123",
 			},
 			expected: false,
 		},
 		{
 			name: "pod with headroom pod prefix in middle",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "pod-hr-name",
-				},
+				Name: "pod-hr-name",
 			},
 			expected: false,
 		},
 		{
 			name: "pod with empty name",
 			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "",
-				},
+				Name: "",
 			},
 			expected: false,
 		},
