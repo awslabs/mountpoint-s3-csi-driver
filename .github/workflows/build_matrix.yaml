@@ -23,5 +23,5 @@ jobs:
         id: parse_yaml
         run: |
             echo "matrix=$(yq -P -o=json '.matrix' '.github/matrix.yaml' | jq -c)" >> $GITHUB_OUTPUT
-            # Retired combinations go in `include`, where an entry that fits no tested combination becomes a job of its own.
+            # Only delete-cluster.yaml uses this: each `retired` entry becomes an extra job alongside matrix combinations
             echo "delete_matrix=$(yq -o=json '.' '.github/matrix.yaml' | jq -c '.matrix.include += .retired | .matrix')" >> $GITHUB_OUTPUT
