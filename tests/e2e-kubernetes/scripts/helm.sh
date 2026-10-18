@@ -62,6 +62,8 @@ function helm_install_driver() {
   KUBECONFIG=${6}
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
   CLUSTER_TYPE=${8}
+  # Optional values file on top of the chart's, e.g. a cluster profile's.
+  EXTRA_VALUES_FILE=${9:-}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
@@ -78,8 +80,14 @@ function helm_install_driver() {
     IRSA_FLAG=""
   fi
 
+  EXTRA_VALUES_FLAG=""
+  if [[ -n "${EXTRA_VALUES_FILE}" ]]; then
+    EXTRA_VALUES_FLAG="--values ${EXTRA_VALUES_FILE}"
+  fi
+
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
+    ${EXTRA_VALUES_FLAG} \
     --set unsupportedDevInstall=true \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
@@ -87,6 +95,9 @@ function helm_install_driver() {
     --set node.serviceAccount.create=true \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
+  # First, as on clusters provisioning nodes on demand (e.g. EKS Auto Mode), the daemonsets' pods only appear
+  # once a node gets provisioned for the controller.
+  $KUBECTL_BIN rollout status deployment s3-csi-controller -n kube-system --timeout=5m --kubeconfig $KUBECONFIG
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   # Wait for pod readiness (rollout status doesn't support OnDelete strategy)
   $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-daemonset-mounter -n kube-system --timeout=60s --kubeconfig $KUBECONFIG

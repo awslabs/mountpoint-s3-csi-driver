@@ -35,6 +35,7 @@ jobs:
     env:
       AWS_REGION: "${{ vars.AWS_REGION }}"
       CLUSTER_TYPE: "${{ matrix.cluster-type }}"
+      CLUSTER_PROFILE: "${{ matrix.cluster-profile }}"
       ARCH: "${{ matrix.arch }}"
       AMI_FAMILY: "${{ matrix.family }}"
       # envtest doesn't support all versions, here K8S_VERSION is a full version like 1.28.13,

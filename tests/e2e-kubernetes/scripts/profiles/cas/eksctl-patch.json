@@ -1,0 +1,84 @@
+[
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/name",
+    "value": "system"
+  },
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/labels/alpha.eksctl.io~1nodegroup-name",
+    "value": "system"
+  },
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/tags/alpha.eksctl.io~1nodegroup-name",
+    "value": "system"
+  },
+  {
+    "op": "add",
+    "path": "/iam/serviceAccounts",
+    "value": [
+      {
+        "metadata": {
+          "name": "cluster-autoscaler",
+          "namespace": "kube-system"
+        },
+        "wellKnownPolicies": {
+          "autoScaler": true
+        }
+      }
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/iam/podIdentityAssociations",
+    "value": [
+      {
+        "namespace": "kube-system",
+        "serviceAccountName": "s3-csi-driver-sa",
+        "permissionPolicyARNs": [
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        ],
+        "permissionPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3express:*"],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/managedNodeGroups/-",
+    "value": {
+      "name": "pool-default",
+      "instanceType": "m5.large",
+      "minSize": 0,
+      "desiredCapacity": 0,
+      "maxSize": 4,
+      "labels": {
+        "e2e.s3.csi.aws.com/pool": "default"
+      },
+      "taints": [
+        {
+          "key": "e2e.s3.csi.aws.com/pool",
+          "value": "default",
+          "effect": "NoSchedule"
+        },
+        {
+          "key": "s3.csi.aws.com/agent-not-ready",
+          "effect": "NoExecute"
+        }
+      ],
+      "propagateASGTags": true,
+      "disablePodIMDS": true
+    }
+  },
+  { "op": "copy", "from": "/managedNodeGroups/0/amiFamily", "path": "/managedNodeGroups/1/amiFamily" },
+  { "op": "copy", "from": "/managedNodeGroups/0/iam", "path": "/managedNodeGroups/1/iam" }
+]

@@ -26,6 +26,35 @@ ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh
 ACTION=delete_cluster tests/e2e-kubernetes/scripts/run.sh
 ```
 
+## Cluster profiles
+
+A cluster can be created from a profile in `scripts/profiles`, which changes how it's set up, e.g. to have an autoscaler provision its nodes. Set `CLUSTER_PROFILE` for every action:
+
+```bash
+export CLUSTER_PROFILE=karpenter AMI_FAMILY=AmazonLinux2023 K8S_VERSION=1.36.1
+
+ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh
+ACTION=install_driver tests/e2e-kubernetes/scripts/run.sh
+ACTION=run_scheduling_tests tests/e2e-kubernetes/scripts/run.sh
+ACTION=delete_cluster FORCE=true tests/e2e-kubernetes/scripts/run.sh
+```
+
+The profiles are:
+- `karpenter`: Karpenter, installed by eksctl.
+- `cas`: Cluster Autoscaler, scaling a managed nodegroup from zero.
+- `automode`: EKS Auto Mode.
+
+Each has a pool of nodes its autoscaler provisions only for the pods targeting it, through the `e2e.s3.csi.aws.com/pool=default` label and NoSchedule taint on the pool's nodes. These nodes register with the `s3.csi.aws.com/agent-not-ready:NoExecute` startup taint, and pods can't reach IMDS on them, so the driver gets its credentials from EKS Pod Identity.
+
+A profile is a directory with:
+- `profile.sh`, defining `profile_setup`, run after creating or re-using the cluster, and `profile_teardown`, run before deleting it.
+- An optional `eksctl-patch.json`, a JSON patch applied to the cluster's eksctl config. Changing it re-creates the profile's clusters.
+- An optional `values.yaml`, applied on top of the driver chart's values when installing the driver.
+
+## Scheduling tests
+
+The scheduling tests (`testsuites/scheduling.go`, `run_scheduling_tests`) check that workloads get scheduled and mounted on the nodes an autoscaler provisions for them, on the profiles' pools. In CI, they run on the cells of `.github/matrix.yaml` with `tests: "scheduling"`.
+
 ## Prerequisites
 To run command above its expected that you have AWS credentials in ENVs with the following policies attached:
 ```

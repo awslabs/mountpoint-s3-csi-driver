@@ -32,9 +32,11 @@ func init() {
 	flag.StringVar(&BucketRegion, "bucket-region", "us-east-1", "region where temporary buckets will be created")
 	flag.StringVar(&ClusterName, "cluster-name", "", "name of the cluster")
 	flag.StringVar(&ClusterType, "cluster-type", "eksctl", "type of cluster (eksctl or openshift)")
+	flag.StringVar(&ClusterProfile, "cluster-profile", "", "profile the cluster was created from, if any (see scripts/profiles)")
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&UpgradeTests, "run-upgrade-tests", false, "run upgrade tests")
+	flag.BoolVar(&SchedulingTests, "run-scheduling-tests", false, "run scheduling tests")
 	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
 	flag.Parse()
 
@@ -170,6 +172,8 @@ var _ = utils.SIGDescribe("CSI Volumes", func() {
 		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
 	} else if UpgradeTests {
 		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIUpgradeTestSuite}
+	} else if SchedulingTests {
+		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSISchedulingTestSuite}
 	} else {
 		testSuites = getCSITestSuites()
 	}
