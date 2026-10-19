@@ -5,7 +5,7 @@ matrix:
   cluster-type: ["eksctl"]
   arch: ["x86", "arm"]
   # Canonical patches plain Ubuntu EKS AMIs only during EKS standard support, but patches pro AMIs during extended support.
-  # We UbuntuPro2404 so we don't need to move each one to Pro when its standard support ends every time.
+  # We use UbuntuPro2404 so we don't need to move each one to Pro when its standard support ends every time.
   # Check the tabs on https://cloud-images.ubuntu.com/docs/aws/eks/ to see e.g. Noble 1.33 is missing but Noble Pro 1.33 is present.
   # To check the AMI used (use eks instead of eks-pro for plain Ubuntu):
   #   aws ssm get-parameter --region us-east-1 --name /aws/service/canonical/ubuntu/eks-pro/24.04/1.33/stable/current/amd64/hvm/ebs-gp3/ami-id
