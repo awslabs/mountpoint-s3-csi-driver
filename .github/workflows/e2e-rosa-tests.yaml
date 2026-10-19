@@ -94,7 +94,7 @@ jobs:
           ACTION: "install_tools"
         run: tests/e2e-kubernetes/scripts/run.sh
       - name: Install OpenShift CLI
-        uses: redhat-actions/openshift-tools-installer@v2
+        uses: redhat-actions/openshift-tools-installer@v3
         with:
           oc: "latest"
       - name: Get ROSA Token
