@@ -131,10 +131,8 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		}
 
 		proxyPod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   proxyName,
-				Labels: proxyLabels,
-			},
+			Name:   proxyName,
+			Labels: proxyLabels,
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
 					squidProxyContainer(proxyPort),
@@ -152,9 +150,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		serviceClient := f.ClientSet.CoreV1().Services(f.Namespace.Name)
 
 		proxyService := &v1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: proxyName,
-			},
+			Name: proxyName,
 			Spec: v1.ServiceSpec{
 				Selector: proxyLabels,
 				Ports:    []v1.ServicePort{{Port: proxyPort}},

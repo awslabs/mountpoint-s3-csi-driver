@@ -174,7 +174,7 @@ const (
 
 func newS3PA(name string, attachments map[string][]crdv2.WorkloadAttachment) *crdv2.MountpointS3PodAttachment {
 	return &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:                   testNodeName,
 			PersistentVolumeName:       testPVName,
