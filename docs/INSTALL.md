@@ -5,10 +5,17 @@
 
 ## Prerequisites
 
-* Kubernetes Version >= 1.30
+* Kubernetes Version >= 1.31
 * A [supported Operating System (OS)](/README.md#distros-support-matrix) with **x86-64** or **arm64** architectures.
 
 ## Installation
+
+The S3 CSI Driver is distributed through the following supported channels:
+- [**EKS Addon**](#amazon-eks-managed-add-on) (recommended for EKS clusters) — see [Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- [**Helm repository**](#helm) — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
+
+> [!WARNING]
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries. Please migrate to the Helm repository or EKS Addon installation methods. For more details, please see [GitHub issue #859](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859).
 
 ### Cluster setup (optional)
 
@@ -108,7 +115,7 @@ kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/
 ```
 
 > [!WARNING]
-> Using the main branch to deploy the CSI Driver is not supported. The main branch may contain upcoming features incompatible with the currently released stable version of the CSI Driver.
+> Using a GitHub branch (`main`, `release-X.Y`, or any other) to deploy the CSI Driver is not supported. Charts in the GitHub repository may contain upcoming features incompatible with the currently released stable version of the CSI Driver image.
 
 #### Once Mountpoint for Amazon S3 CSI Driver has been deployed, verify the pods are running:
 

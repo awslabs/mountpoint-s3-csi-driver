@@ -135,6 +135,7 @@ deploy_helm_chart() {
     echo "deploying Helm chart..."
     helm upgrade --install aws-mountpoint-s3-csi-driver \
         --namespace kube-system \
+        --set unsupportedDevInstall=true \
         --set image.repository="${ecr_repository_url}" \
         --set image.pullPolicy=Always \
         --set image.tag=latest \
@@ -176,6 +177,7 @@ deploy_containers() {
     ALL_ARCH_linux="amd64" \
     TAG="latest" \
     DOCKERFILE="${dockerfile}" \
+    FORCE_BUILD=true \
       make login_registry all-push
 
     # Restart the node and controller pods

@@ -32,7 +32,7 @@ spec:
     # ...
 ```
 
-Kubernetes will only process the mount procedure for one of the volumes, and the other volume will be stuck pending and therefore the Pod will be stuck at `ContainerCreating` status. You need to make sure `volumeHandle` is unique in each volume. See [multiple_buckets_one_pod.yaml](../examples/kubernetes/static_provisioning/multiple_pods_one_pv.yaml) example for a correct usage.
+Kubernetes will only process the mount procedure for one of the volumes, and the other volume will be stuck pending and therefore the Pod will be stuck at `ContainerCreating` status. You need to make sure `volumeHandle` is unique in each volume. See [multiple_buckets_one_pod.yaml](../examples/kubernetes/static_provisioning/multiple_buckets_one_pod.yaml) example for a correct usage.
 
 When encountering this issue, you may see errors similar to the one below in `kubelet` logs:
 
@@ -144,6 +144,24 @@ This error occurs when workload pods are terminated before the Mountpoint pod th
 - If any workload pod takes longer than 10 minutes to terminate, it may encounter "Transport endpoint is not connected" errors when the Mountpoint pod is force-killed after its grace period expires.
 
 **Recommendation:** Keep workload pod termination grace periods sufficiently low to ensure graceful shutdown completes within the Mountpoint pod's 10-minute window and the grace period specified in the `drain` operation (e.g. via Karpenter NodePool [settings](https://karpenter.sh/docs/concepts/nodepools/#spectemplatespecterminationgraceperiod)).
+
+## My node drain fails with "cannot delete Pods that declare no controller"
+
+`kubectl drain` refuses to evict the Mountpoint pods, failing with:
+
+```
+cannot delete Pods that declare no controller (use --force to override): mount-s3/mp-xxxxx
+```
+
+The Mountpoint pods (`mp-*` in the `mount-s3` namespace) have no owning controller, so `kubectl drain` won't evict them without `--force`. Passing `--force` is safe — the Mountpoint pods keep serving the volume during their grace period so workloads shut down first (see ["Transport endpoint is not connected"](#my-workload-pods-are-getting-transport-endpoint-is-not-connected-errors-during-node-drain) above):
+
+```
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --force
+```
+
+[`--delete-emptydir-data`](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain) is required because the Mountpoint pods use an [in-memory `emptyDir`](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/e9031e3542fb421ec5a7242a2359a24043b6c6c1/pkg/podmounter/mppod/creator.go#L191-L199) (`/comm`) that `kubectl drain` won't evict otherwise, even with `--force`; `--ignore-daemonsets` is a standard drain flag for the node's DaemonSets, including the driver's `s3-csi-node`.
+
+Note that `--force` does **not** bypass PodDisruptionBudgets. If a workload's PDB does not allow the disruption (for example `maxUnavailable: 0`), the drain stalls with `Cannot evict pod as it would violate the pod's disruption budget.` — that is the PDB protecting your workload. Relax the PDB so the workload can reschedule, rather than deleting its pods to force the drain through.
 
 ## Cluster Autoscaler blocked by Mountpoint pods (prior to v2.5.0)
 

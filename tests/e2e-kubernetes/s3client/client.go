@@ -3,7 +3,10 @@ package s3client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
 // DefaultRegion is the default AWS region to use if unspecified.
@@ -29,6 +33,11 @@ var expressAZs = map[string]string{
 
 const s3BucketNameMaxLength = 63
 const s3BucketNamePrefix = "s3-csi-k8s-e2e-"
+
+// processToken returns a token unique to this OS process.
+func processToken() string {
+	return strconv.Itoa(os.Getpid())
+}
 
 // DeleteBucketFunc is a cleanup function thats returned as a result of "Create*Bucket" calls.
 // It clears the content of the bucket if not empty, and then deletes the bucket.
@@ -78,12 +87,22 @@ func (c *Client) CreateStandardBucket(ctx context.Context) (string, DeleteBucket
 	return bucketName, c.create(ctx, input)
 }
 
+// expressAZ returns the S3 Express availability zone for the client's region.
+// It checks the S3_EXPRESS_AZ environment variable first, allowing callers to override
+// the built-in map for regions not yet in the hardcoded list.
+func (c *Client) expressAZ() string {
+	if az := os.Getenv("S3_EXPRESS_AZ"); az != "" {
+		return az
+	}
+	return expressAZs[c.region]
+}
+
 // CreateDirectoryBucket creates a new directory S3 bucket with a random name (by following
 // "Directory bucket naming rules") and returns the bucket name and a clean up function.
 func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucketFunc) {
-	regionAz := expressAZs[c.region]
+	regionAz := c.expressAZ()
 	if regionAz == "" {
-		framework.Failf("Unknown S3 Express region %s\n", c.region)
+		e2eskipper.Skipf("Unknown S3 Express region %s\n", c.region)
 	}
 
 	// refer to s3 express bucket naming conventions
@@ -142,10 +161,18 @@ func (c *Client) create(ctx context.Context, input *s3.CreateBucketInput) Delete
 	bucketName := *input.Bucket
 
 	_, err := c.client.CreateBucket(ctx, input)
-	framework.ExpectNoError(err, "Failed to create S3 bucket %s", bucketName)
-	if err == nil {
-		framework.Logf("S3 Bucket %s created", bucketName)
+	// The S3 client is configured with retries (see NewWithRegion). Under transient
+	// failures the first attempt can succeed server-side while still returning an error,
+	// and a retry will then observe BucketAlreadyOwnedByYou. That response confirms
+	// this account already owns the bucket, so the create is effectively done — treat
+	// it as success. BucketAlreadyExists (owned by a *different* account) is NOT
+	// swallowed here and will still fail the test.
+	if _, ok := errors.AsType[*types.BucketAlreadyOwnedByYou](err); ok {
+		framework.Logf("S3 Bucket %s already owned by this account; treating as created", bucketName)
+	} else {
+		framework.ExpectNoError(err, "Failed to create S3 bucket %s", bucketName)
 	}
+	framework.Logf("S3 Bucket %s created", bucketName)
 
 	return func(ctx context.Context) error {
 		return c.delete(ctx, bucketName)
@@ -173,11 +200,16 @@ func (c *Client) delete(ctx context.Context, bucketName string) error {
 	return nil
 }
 
-// randomBucketName generates a random bucket name by using prefix (`s3BucketNamePrefix`) and `suffix`
-// and generating random string for the remaining space according to S3's limit (63 as of today).
+// randomBucketName generates a bucket name of the form
+// "<prefix><processToken>-<random><suffix>", filling the remaining space up to
+// S3's limit (63 as of today) with random characters.
+// Use a per-process token to ensure parallel test runs use different bucket names.
+// Without it, if parallel test processes were launched in the same nanosecond,
+// they could share the same RNG state and produce the same bucket names, and then
+// cause conflicts/bucket owned by you errors.
 func (c *Client) randomBucketName(suffix string) string {
-	prefixLen := len(s3BucketNamePrefix)
-	suffixLen := len(suffix)
-	rand := utilrand.String(s3BucketNameMaxLength - prefixLen - suffixLen)
-	return s3BucketNamePrefix + rand + suffix
+	token := processToken()
+	fixedLen := len(s3BucketNamePrefix) + len(token) + len("-") + len(suffix)
+	rand := utilrand.String(s3BucketNameMaxLength - fixedLen)
+	return s3BucketNamePrefix + token + "-" + rand + suffix
 }

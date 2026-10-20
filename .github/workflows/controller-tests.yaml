@@ -7,6 +7,11 @@ on:
   merge_group:
     types: ["checks_requested"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only cancel superseded runs on pull requests, never on `main` or in a merge queue.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -28,10 +33,10 @@ jobs:
       ENVTEST_K8S_VERSION: "${K8S_VERSION%.*}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: "go.mod"
 

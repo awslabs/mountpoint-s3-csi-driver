@@ -2,9 +2,11 @@ package csicontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	crdv2 "github.com/awslabs/mountpoint-s3-csi-driver/pkg/api/v2"
@@ -12,20 +14,42 @@ import (
 )
 
 const (
-	cleanupInterval          = 2 * time.Minute
+	defaultCleanupInterval   = 2 * time.Minute
 	staleAttachmentThreshold = 2 * time.Minute
 )
 
 // StaleAttachmentCleaner handles periodic cleanup of stale workload attachments in case reconciler missed pod deletion event.
 type StaleAttachmentCleaner struct {
-	reconciler *Reconciler
+	reconciler      *Reconciler
+	cleanupInterval time.Duration
+	// Already-empty S3PodAttachments (UID to resourceVersion) seen on the previous pass and on this pass
+	emptyBefore, emptyNow map[types.UID]string
+}
+
+type StaleAttachmentCleanerOption func(*StaleAttachmentCleaner)
+
+func WithCleanupInterval(interval time.Duration) StaleAttachmentCleanerOption {
+	return func(cm *StaleAttachmentCleaner) {
+		cm.cleanupInterval = interval
+	}
 }
 
 // NewStaleAttachmentCleaner creates a new StaleAttachmentCleaner
-func NewStaleAttachmentCleaner(reconciler *Reconciler) *StaleAttachmentCleaner {
-	return &StaleAttachmentCleaner{
-		reconciler: reconciler,
+func NewStaleAttachmentCleaner(reconciler *Reconciler, opts ...StaleAttachmentCleanerOption) *StaleAttachmentCleaner {
+	cm := &StaleAttachmentCleaner{
+		reconciler:      reconciler,
+		cleanupInterval: defaultCleanupInterval,
+		emptyNow:        map[types.UID]string{},
 	}
+	for _, opt := range opts {
+		opt(cm)
+	}
+	return cm
+}
+
+// Cleaner should only be running one instance at a time, so needs to opt into leader election.
+func (cm *StaleAttachmentCleaner) NeedLeaderElection() bool {
+	return true
 }
 
 // Start begins the periodic cleanup process
@@ -33,7 +57,7 @@ func (cm *StaleAttachmentCleaner) Start(ctx context.Context) error {
 	log := logf.FromContext(ctx)
 	log.Info("Starting stale attachment cleaner")
 
-	ticker := time.NewTicker(cleanupInterval)
+	ticker := time.NewTicker(cm.cleanupInterval)
 	defer ticker.Stop()
 
 	for {
@@ -77,6 +101,8 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 		return err
 	}
 
+	cm.emptyBefore, cm.emptyNow = cm.emptyNow, map[types.UID]string{}
+
 	// Check each S3PodAttachment for stale workload references
 	for _, s3pa := range s3paList.Items {
 		if err := cm.cleanupStaleWorkloads(ctx, &s3pa, existingPods); err != nil {
@@ -95,6 +121,17 @@ func (cm *StaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 // If S3PodAttachment has no remaining Mountpoint Pods, the entire S3PodAttachment is deleted.
 func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
+	fieldFilters := fieldFiltersForS3PodAttachment(s3pa)
+	// The matching UID in the informer cache satisfies this expectation; a stale snapshot cannot clear a replacement's expectation.
+	if cm.reconciler.s3paExpectations.clearIfObserved(fieldFilters, s3pa.UID) {
+		log.Info("MountpointS3PodAttachment creation is pending, removing from pending")
+	}
+	// Only delete an already-empty S3PodAttachment if it was unchanged since the previous pass, to avoid racing the reconciler
+	if !hasWorkloads(s3pa) && cm.emptyBefore[s3pa.UID] != s3pa.ResourceVersion {
+		cm.emptyNow[s3pa.UID] = s3pa.ResourceVersion
+		return nil
+	}
+
 	modified := false
 
 	now := time.Now().UTC()
@@ -129,15 +166,34 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 		}
 	}
 
+	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
+	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
+		reason := cleanerReasonEmptyOnArrival
+		if modified {
+			reason = cleanerReasonEmptiedByCleaner
+		}
+		if err := cm.reconciler.deleteS3PodAttachment(ctx, s3pa, reason, log); err != nil {
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reason, err)
+		}
+		return nil
+	}
+
 	// Update the S3PodAttachment if modified
 	if modified {
-		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
-		}
 		return cm.reconciler.Update(ctx, s3pa)
 	}
 
 	return nil
+}
+
+// hasWorkloads returns whether any Mountpoint Pod in the S3PodAttachment has a workload attached.
+func hasWorkloads(s3pa *crdv2.MountpointS3PodAttachment) bool {
+	for _, attachments := range s3pa.Spec.MountpointS3PodAttachments {
+		if len(attachments) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanupStaleHeadroomPods removes stale Headroom Pods.

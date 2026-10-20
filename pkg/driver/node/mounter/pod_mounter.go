@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -236,10 +237,21 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 		return fmt.Errorf("Failed to mount %s: %w", source, err)
 	}
 
-	// Remove the read-only argument from the list as mount-s3 does not support it when using FUSE
-	// file descriptor (we already pass MS_RDONLY flag during mount syscall in `pod_mounter_linux.go`)
+	// The receiving Mountpoint Pod may run an older image than this node: nodes can be upgraded before the controller.
+	// Anything sent here must work with Mountpoint and aws-s3-csi-mounter from older releases; gate new
+	// arguments on the Mountpoint Pod's `s3.csi.aws.com/mountpoint-version` label.
+
+	// Mountpoint only started accepting `--read-only` together with a FUSE file descriptor mount
+	// point in v1.24.0. Strip it in earlier versions
 	if args.Has(mountpoint.ArgReadOnly) {
-		args.Remove(mountpoint.ArgReadOnly)
+		strippedReadOnly := false
+		labelValue := mpPod.Labels[mppod.LabelMountpointVersion]
+		mpVersion, err := version.ParseGeneric(labelValue)
+		if err != nil || mpVersion.LessThan(minReadOnlyFUSEVersion) {
+			args.Remove(mountpoint.ArgReadOnly)
+			strippedReadOnly = true
+		}
+		klog.V(4).Infof("Mountpoint Pod %s has version label %q, stripped --read-only: %t", mpPod.Name, labelValue, strippedReadOnly)
 	}
 
 	// This will set to false in the success condition. This is set to `true` by default to
@@ -286,6 +298,11 @@ func (pm *PodMounter) mountS3AtSource(ctx context.Context, source string, mpPod 
 	unmount = false
 	return nil
 }
+
+// minReadOnlyFUSEVersion is the first Mountpoint version that accepts the `--read-only` argument
+// together with a FUSE file descriptor mount point.
+// See https://github.com/awslabs/mountpoint-s3-csi-driver/pull/922.
+var minReadOnlyFUSEVersion = version.MustParseGeneric("1.24.0")
 
 // Unmount unmounts only the bind mount point at `target`.
 // Unmounting of source mount and credential cleanup for PodMounter is done separately in PodUnmounter

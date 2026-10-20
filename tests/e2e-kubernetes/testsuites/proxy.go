@@ -3,6 +3,7 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -114,6 +115,9 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		})
 
 		resource := createVolumeResource(proxy, l.config, pattern, v1.ReadWriteMany, []string{
+			fmt.Sprintf("uid=%d", defaultNonRootUser),
+			fmt.Sprintf("gid=%d", defaultNonRootGroup),
+			"allow-other",
 			"debug",
 			"debug-crt",
 		})
@@ -126,17 +130,11 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		}
 
 		proxyPod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   proxyName,
-				Labels: proxyLabels,
-			},
+			Name:   proxyName,
+			Labels: proxyLabels,
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
-					{
-						Name:  "proxy",
-						Image: "public.ecr.aws/ubuntu/squid:latest",
-						Ports: []v1.ContainerPort{{ContainerPort: proxyPort}},
-					},
+					squidProxyContainer(proxyPort),
 				},
 			},
 		}
@@ -151,9 +149,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		serviceClient := f.ClientSet.CoreV1().Services(f.Namespace.Name)
 
 		proxyService := &v1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: proxyName,
-			},
+			Name: proxyName,
 			Spec: v1.ServiceSpec{
 				Selector: proxyLabels,
 				Ports:    []v1.ServicePort{{Port: proxyPort}},
@@ -179,7 +175,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking write to a volume")
-		checkWriteToPath(ctx, f, pod, fileInVol, toWrite, seed)
+		checkWriteToPathSucceed(ctx, f, pod, fileInVol, toWrite, seed)
 
 		ginkgo.By("Checking mountpoint actually operate behind proxy")
 		// Find the Mountpoint pods associated with our volume
@@ -202,4 +198,20 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			"mountpointEnv.FOO": "BAR",
 		}), "environment variable not allowed")
 	})
+}
+
+func squidProxyContainer(port int32) v1.Container {
+	container := v1.Container{
+		Name:  "proxy",
+		Image: "public.ecr.aws/ubuntu/squid:latest",
+		Ports: []v1.ContainerPort{{ContainerPort: port}},
+	}
+
+	// If we're running with a test image override, use it instead of ecr public.
+	if img := os.Getenv("TEST_POD_IMAGE"); img != "" {
+		container.Image = img
+		container.Command = []string{"/squid-entrypoint.sh"}
+	}
+
+	return container
 }

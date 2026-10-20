@@ -47,18 +47,20 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: "go.mod"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@master
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.IAM_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -96,12 +98,14 @@ jobs:
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # Allow fork PR checkouts since we gate deployments and the code only has access to ephemeral test cluster
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: "go.mod"
       - name: Configure AWS Credentials

@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -450,10 +451,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -484,11 +483,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-								Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
+							Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -520,10 +517,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -579,16 +574,12 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
@@ -633,32 +624,24 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						ns := &corev1.Namespace{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "ns-",
-							},
+							GenerateName: "ns-",
 						}
 						Expect(k8sClient.Create(ctx, ns)).To(Succeed())
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      sa1.Name,
-								Namespace: ns.Name,
-							},
+							Name:      sa1.Name,
+							Namespace: ns.Name,
 						}
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
 						_, err := controllerutil.CreateOrUpdate(ctx, k8sClient, sa2, func() error { return nil })
 						Expect(err).To(Succeed())
 						pvc2 := &corev1.PersistentVolumeClaim{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "test-pvc",
-								Namespace:    ns.Name,
-							},
+							GenerateName: "test-pvc",
+							Namespace:    ns.Name,
 							Spec: corev1.PersistentVolumeClaimSpec{
 								StorageClassName: vol.pvc.Spec.StorageClassName,
 								AccessModes:      vol.pvc.Spec.AccessModes,
@@ -957,6 +940,30 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(pod.Pod)
 			waitForObjectToDisappear(s3pa)
 		})
+
+		It("should keep S3 Pod Attachment while workload pod is terminating but still running", func() {
+			vol := createVolume()
+			vol.bind()
+
+			gracePeriod := int64(300)
+			pod := createPod(withPVC(vol.pvc), func(p *corev1.Pod) {
+				p.Spec.TerminationGracePeriodSeconds = &gracePeriod
+			})
+			pod.schedule(testNode)
+
+			// Pod gets a Mountpoint Pod and transitions to Running
+			s3pa, _ := waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol, pod)
+			pod.running()
+
+			// Pod is deleted but ignores SIGTERM — still Running with DeletionTimestamp set
+			pod.terminate()
+
+			// S3PA should persist while the pod is still running during graceful termination
+			Consistently(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa)).To(Succeed())
+				g.Expect(findMountpointPodNameForWorkload(s3pa, string(pod.UID))).ToNot(BeEmpty())
+			}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
+		})
 	})
 
 	Context("Duplicate S3PodAttachments recovery", func() {
@@ -1018,10 +1025,9 @@ var _ = Describe("Mountpoint Controller", func() {
 
 	Context("Mountpoint Pod Customization", func() {
 		It("should use configured service account name in PV", func() {
-			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+			sa := &corev1.ServiceAccount{
 				Name:      "mount-s3-sa",
-				Namespace: mountpointNamespace,
-			}}
+				Namespace: mountpointNamespace}
 			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 			waitForObject(sa)
 
@@ -1125,10 +1131,8 @@ var _ = Describe("Mountpoint Controller", func() {
 				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
 					Ephemeral: &corev1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-							ObjectMeta: metav1.ObjectMeta{
-								Labels: map[string]string{
-									"s3.csi.aws.com/type": "local-ephemeral-cache",
-								},
+							Labels: map[string]string{
+								"s3.csi.aws.com/type": "local-ephemeral-cache",
 							},
 							Spec: corev1.PersistentVolumeClaimSpec{
 								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -1598,10 +1602,8 @@ func withPVC(pvc *corev1.PersistentVolumeClaim) podModifier {
 	return func(pod *corev1.Pod) {
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: pvc.Name,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvc.Name,
-				},
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvc.Name,
 			},
 		})
 	}
@@ -1659,10 +1661,8 @@ type podModifier func(*corev1.Pod)
 // createPod creates a new Kubernetes Pod in the control plane with given `modifiers`.
 func createPod(modifiers ...podModifier) *testPod {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    defaultNamespace,
-			GenerateName: "test-pod-",
-		},
+		Namespace:    defaultNamespace,
+		GenerateName: "test-pod-",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
@@ -1747,9 +1747,7 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pv",
-		},
+		GenerateName: "test-pv",
 		Spec: corev1.PersistentVolumeSpec{
 			// Needs to be empty for static provisioning
 			StorageClassName: "",
@@ -1765,10 +1763,8 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pvc",
-			Namespace:    defaultNamespace,
-		},
+		GenerateName: "test-pvc",
+		Namespace:    defaultNamespace,
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: new(""),
 			AccessModes:      accessModes,
@@ -1812,10 +1808,8 @@ func waitForHeadroomPodForWorkload(pod *testPod, vol *testVolume) *testPod {
 // waitForMountpointPodWithName waits and returns the Mountpoint Pod scheduled for given `mpPodName`
 func waitForMountpointPodWithName(mpPodName string) *testPod {
 	mountpointPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mpPodName,
-			Namespace: mountpointNamespace,
-		},
+		Name:      mpPodName,
+		Namespace: mountpointNamespace,
 	}
 	waitForObject(mountpointPod)
 	return &testPod{Pod: mountpointPod}
@@ -1952,6 +1946,7 @@ func verifyMountpointPodFor(pod *testPod, vol *testVolume, mountpointPod *testPo
 	Expect(mountpointPod.ObjectMeta.Annotations).To(HaveKeyWithValue(mppod.AnnotationVolumeId, vol.pv.Spec.CSI.VolumeHandle))
 
 	Expect(mountpointPod.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
+	Expect(mountpointPod.Spec.NodeSelector).To(Equal(map[string]string{corev1.LabelOSStable: "linux"}))
 
 	Expect(mountpointPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms).To(Equal([]corev1.NodeSelectorTerm{
 		{
@@ -2012,10 +2007,15 @@ func verifyHeadroomPodFor(pod *testPod, vol *testVolume, headroomPod *testPod) {
 // waitForObject waits until `obj` appears in the control plane.
 func waitForObject[Obj client.Object](obj Obj, verifiers ...func(Gomega, Obj)) {
 	GinkgoHelper()
+	waitForObjectWithClient(ctx, k8sClient, obj, verifiers...)
+}
+
+func waitForObjectWithClient[Obj client.Object](ctx context.Context, client client.Client, obj Obj, verifiers ...func(Gomega, Obj)) {
+	GinkgoHelper()
 
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
-		g.Expect(k8sClient.Get(ctx, key, obj)).To(Succeed())
+		g.Expect(client.Get(ctx, key, obj)).To(Succeed())
 		for _, verifier := range verifiers {
 			verifier(g, obj)
 		}
@@ -2100,9 +2100,14 @@ func defaultExpectedFields(nodeName string, pv *corev1.PersistentVolume) map[str
 
 // waitForObjectToDisappear waits until `obj` disappears in the control plane.
 func waitForObjectToDisappear(obj client.Object) {
+	waitForObjectToDisappearWithClient(ctx, k8sClient, obj)
+}
+
+func waitForObjectToDisappearWithClient(ctx context.Context, client client.Client, obj client.Object) {
+	GinkgoHelper()
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, key, obj)
+		err := client.Get(ctx, key, obj)
 		if err == nil {
 			g.Expect(obj.GetDeletionTimestamp()).ToNot(BeNil(), "Expected deletion timestamp to be non-nil: %#v", obj)
 		} else {
@@ -2160,7 +2165,7 @@ func generateRandomNodeName() string {
 // an empty `MountpointS3PodAttachments` map.
 func newEmptyS3PodAttachment(node string, pv *corev1.PersistentVolume) *crdv2.MountpointS3PodAttachment {
 	return &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "s3pa-empty-"},
+		GenerateName: "s3pa-empty-",
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:                   node,
 			PersistentVolumeName:       pv.Name,

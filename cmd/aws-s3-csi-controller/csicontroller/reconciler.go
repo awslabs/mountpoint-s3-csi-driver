@@ -39,6 +39,18 @@ const (
 	DontRequeue = false
 )
 
+// Reasons a MountpointS3PodAttachment is deleted, passed to deleteS3PodAttachment and logged as the
+// "reason" field. Grouped by the caller that deletes the S3PA.
+const (
+	// Reconciler-driven deletions.
+	reconcilerReasonNoMountpointPods = "reconciler removed the last workload"
+	reconcilerReasonDuplicate        = "duplicate S3PodAttachment that never referenced any Mountpoint Pod"
+
+	// Stale-attachment-cleaner-driven deletions.
+	cleanerReasonEmptyOnArrival   = "cleaner found the S3PodAttachment already empty (likely an interrupted reconciler teardown)"
+	cleanerReasonEmptiedByCleaner = "cleaner removed the last stale workload"
+)
+
 // A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
@@ -55,11 +67,13 @@ type Reconciler struct {
 	//
 	// Management: We carefully manage expectations to avoid indefinite waiting:
 	// - setPending() is called in handleNewS3PodAttachment() immediately after successfully creating a new S3PA
-	// - clear() is called in two scenarios:
+	// - clear() is called in three scenarios:
 	//   1. In handleExistingS3PodAttachment() when a pending S3PA is found (it appeared in the cache)
-	//   2. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	//   2. In recoverFromDuplicateS3PodAttachments() after deleting all empty duplicates
+	//   3. In removeWorkloadFromS3PodAttachment() when deleting an S3PA with a stale pending expectation
+	// - clearIfObserved() is called in cleanupStaleWorkloads() when the observed S3PA UID matches the pending expectation.
 	//
-	// Note: Reconcile() processes events sequentially, eliminating concurrency concerns.
+	// Note: Reconcile() processes events sequentially, but the stale attachment cleaner can access expectations concurrently.
 	s3paExpectations *expectations
 	client.Client
 }
@@ -298,6 +312,10 @@ type workloadVolume struct {
 // the Mountpoint Pod will be scheduled for termination as well. This is because if `workloadPod` never transition into its `Running` state,
 // the Mountpoint Pod might never got a successful mount operation, and thus it might never get unmount operation to cleanly exit
 // and might hang there until it reaches its timeout. We just terminate it in this case to prevent unnecessary waits.
+//
+// If `workloadPod` is `Running` and scheduled for termination (i.e., `DeletionTimestamp` is non-nil during graceful shutdown),
+// it is still treated as active. The pod may still be accessing the S3 volume during its termination grace period
+// (e.g., if it ignores SIGTERM), so the Mountpoint Pod and S3PodAttachment must remain until the pod actually exits.
 func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	ctx context.Context,
 	workloadPod *corev1.Pod,
@@ -312,6 +330,8 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	}
 	fieldFilters := r.buildFieldFilters(workloadPod, pv, roleArn)
 	log := r.setupLogger(ctx, workloadPod, pvc, workloadUID, fieldFilters)
+	// The cleaner can satisfy an expectation after this lookup reads an empty cache snapshot.
+	creationWasPending := r.s3paExpectations.isPending(fieldFilters)
 	s3pa, err := r.getExistingS3PodAttachment(ctx, fieldFilters, log)
 	if err != nil {
 		return Requeue, err
@@ -327,6 +347,10 @@ func (r *Reconciler) spawnOrDeleteMountpointPodIfNeeded(
 	if s3pa != nil {
 		return r.handleExistingS3PodAttachment(ctx, workloadPod, pv, s3pa, fieldFilters, priorityClassKind, log)
 	} else {
+		if creationWasPending {
+			log.Info("MountpointS3PodAttachment creation was pending before cache lookup, requeuing")
+			return Requeue, nil
+		}
 		return r.handleNewS3PodAttachment(ctx, workloadPod, pv, roleArn, fieldFilters, priorityClassKind, log)
 	}
 }
@@ -376,6 +400,26 @@ func (r *Reconciler) buildFieldFilters(workloadPod *corev1.Pod, pv *corev1.Persi
 		fieldFilters[crdv2.FieldWorkloadNamespace] = workloadPod.Namespace
 		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = getServiceAccountName(workloadPod)
 		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = roleArn
+	}
+
+	return fieldFilters
+}
+
+// fieldFiltersForS3PodAttachment reconstructs the filters used to track a creation expectation from an existing S3PA.
+func fieldFiltersForS3PodAttachment(s3pa *crdv2.MountpointS3PodAttachment) client.MatchingFields {
+	fieldFilters := client.MatchingFields{
+		crdv2.FieldNodeName:             s3pa.Spec.NodeName,
+		crdv2.FieldPersistentVolumeName: s3pa.Spec.PersistentVolumeName,
+		crdv2.FieldVolumeID:             s3pa.Spec.VolumeID,
+		crdv2.FieldMountOptions:         s3pa.Spec.MountOptions,
+		crdv2.FieldWorkloadFSGroup:      s3pa.Spec.WorkloadFSGroup,
+		crdv2.FieldAuthenticationSource: s3pa.Spec.AuthenticationSource,
+	}
+
+	if s3pa.Spec.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		fieldFilters[crdv2.FieldWorkloadNamespace] = s3pa.Spec.WorkloadNamespace
+		fieldFilters[crdv2.FieldWorkloadServiceAccountName] = s3pa.Spec.WorkloadServiceAccountName
+		fieldFilters[crdv2.FieldWorkloadServiceAccountIAMRoleARN] = s3pa.Spec.WorkloadServiceAccountIAMRoleARN
 	}
 
 	return fieldFilters
@@ -449,9 +493,9 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		log.Info("Deleting duplicate MountpointS3PodAttachment that references no Mountpoint Pods", "s3pa", s3pa.Name)
-		if err := r.deleteS3PodAttachment(ctx, s3pa); err != nil {
-			return nil, fmt.Errorf("failed to delete duplicate %q referencing no Mountpoint Pods: %w", s3pa.Name, err)
+		s3paLog := log.WithValues("s3pa", s3pa.Name)
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, s3paLog); err != nil {
+			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
 		}
 	}
 
@@ -672,17 +716,15 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
-		err := r.deleteS3PodAttachment(ctx, s3pa)
+		err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonNoMountpointPods, log)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
-			log.Error(err, "Failed to delete MountpointS3PodAttachment")
+			log.Error(err, "Failed to delete MountpointS3PodAttachment", "reason", reconcilerReasonNoMountpointPods)
 			return Requeue, err
 		}
-		log.Info("Deleted MountpointS3PodAttachment as it no longer has any attached Mountpoint Pods")
 		if r.s3paExpectations.isPending(fieldFilters) {
 			// Clear stale creation expectations to prevent indefinite waiting.
 			log.Info("Clearing stale creation expectation for deleted MountpointS3PodAttachment")
@@ -716,11 +758,12 @@ func (r *Reconciler) handleNewS3PodAttachment(
 		return DontRequeue, nil
 	}
 
-	if err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log); err != nil {
+	s3pa, err := r.createS3PodAttachmentWithMPPod(ctx, workloadPod, pv, roleArn, priorityClassKind, log)
+	if err != nil {
 		return Requeue, err
 	}
 
-	r.s3paExpectations.setPending(fieldFilters)
+	r.s3paExpectations.setPending(fieldFilters, s3pa.UID)
 	return Requeue, nil
 }
 
@@ -732,19 +775,17 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 	roleArn string,
 	priorityClassKind mppod.PriorityClassKind,
 	log logr.Logger,
-) error {
+) (*crdv2.MountpointS3PodAttachment, error) {
 	authSource := r.getAuthSource(pv)
 	mpPod, err := r.spawnMountpointPod(ctx, workloadPod, pv, priorityClassKind, log)
 	if err != nil {
 		log.Error(err, "Failed to spawn Mountpoint Pod")
-		return err
+		return nil, err
 	}
 	s3pa := &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "s3pa-",
-			Labels: map[string]string{
-				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
-			},
+		GenerateName: "s3pa-",
+		Labels: map[string]string{
+			LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 		},
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,
@@ -772,11 +813,11 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		} else {
 			log.Info("Successfully cleaned up Mountpoint Pod after S3PodAttachment creation failure", "mountpointPodName", mpPod.Name)
 		}
-		return err
+		return nil, err
 	}
 
 	log.Info("MountpointS3PodAttachment is created", "s3pa", s3pa.Name)
-	return nil
+	return s3pa, nil
 }
 
 // deleteS3PodAttachment deletes the given S3PA with a resourceVersion precondition.
@@ -784,8 +825,12 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 // S3PA was modified since the caller read it; the caller can then retry/requeue.
 // Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
 // not accidentally skipped.
-func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
-	return r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
+	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
+		return err
+	}
+	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
+	return nil
 }
 
 // spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.
@@ -1108,12 +1153,11 @@ func extractCSISpecFromPV(pv *corev1.PersistentVolume) *corev1.CSIPersistentVolu
 	return csi
 }
 
-// isPodActive returns whether given the Pod is active and not in the process of termination.
-// Copied from https://github.com/kubernetes/kubernetes/blob/8770bd58d04555303a3a15b30c245a58723d0f4a/pkg/controller/controller_utils.go#L1009-L1013.
+// isPodActive returns whether the given Pod is active.
+// A pod is active if it is running (regardless of terminating status, to allow shut-downs
+// which access the volume), or if it is pending and not terminating.
 func isPodActive(p *corev1.Pod) bool {
-	return corev1.PodSucceeded != p.Status.Phase &&
-		corev1.PodFailed != p.Status.Phase &&
-		p.DeletionTimestamp == nil
+	return isPodRunning(p) || (p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil)
 }
 
 // isPodTerminating returns whether the given Pod is terminating.

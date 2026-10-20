@@ -144,15 +144,15 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		seed := time.Now().UTC().UnixNano()
 		toWrite := 1024 // 1KB
 		ginkgo.By("Checking write to a volume")
-		checkWriteToPath(ctx, f, pod, fileInVol, toWrite, seed)
+		checkWriteToPathSucceed(ctx, f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking read from a volume")
-		checkReadFromPath(ctx, f, pod, fileInVol, toWrite, seed)
+		checkReadFromPathSucceed(ctx, f, pod, fileInVol, toWrite, seed)
 		ginkgo.By("Checking file group owner")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
+		checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '644 %d %d'", fileInVol, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking dir group owner")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
+		checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("stat -L -c '%%a %%g %%u' %s | grep '755 %d %d'", volPath, defaultNonRootGroup, defaultNonRootUser))
 		ginkgo.By("Checking pod identity")
-		e2epod.VerifyExecInPodSucceed(ctx, f, pod, fmt.Sprintf("id | grep 'uid=%d gid=%d groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
+		checkExecInPodSucceed(ctx, f, pod, fmt.Sprintf("id; id | grep 'uid=%d[^ ]* gid=%d[^ ]* groups=%d'", defaultNonRootUser, defaultNonRootGroup, defaultNonRootGroup))
 	}
 	ginkgo.It("should access volume as a non-root user", func(ctx context.Context) {
 		validateWriteToVolume(ctx)

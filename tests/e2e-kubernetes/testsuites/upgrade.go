@@ -88,7 +88,7 @@ func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*byt
 
 	// We parse each YAML object from Helm manifests, handling EOF and skipping empty objects
 	for {
-		var obj map[string]interface{}
+		var obj map[string]any
 		if err := decoder.Decode(&obj); err != nil {
 			if err == io.EOF {
 				break
@@ -104,22 +104,22 @@ func (r *tokenExpirationPostRenderer) Run(renderedManifests *bytes.Buffer) (*byt
 
 		// Patch CSIDriver token expiration
 		if kind == "CSIDriver" {
-			spec := obj["spec"].(map[string]interface{})
-			tokenRequests := spec["tokenRequests"].([]interface{})
+			spec := obj["spec"].(map[string]any)
+			tokenRequests := spec["tokenRequests"].([]any)
 			// Loop handles variable array length
 			for i := range tokenRequests {
-				tr := tokenRequests[i].(map[string]interface{})
+				tr := tokenRequests[i].(map[string]any)
 				tr["expirationSeconds"] = r.expirationSeconds
 			}
 		}
 
 		// Patch ServiceAccount token expiration annotation
 		if kind == "ServiceAccount" {
-			metadata := obj["metadata"].(map[string]interface{})
+			metadata := obj["metadata"].(map[string]any)
 			if name, _ := metadata["name"].(string); name == "s3-csi-driver-sa" {
-				annotations, ok := metadata["annotations"].(map[string]interface{})
+				annotations, ok := metadata["annotations"].(map[string]any)
 				if !ok {
-					annotations = make(map[string]interface{})
+					annotations = make(map[string]any)
 					metadata["annotations"] = annotations
 				}
 				annotations["eks.amazonaws.com/token-expiration"] = fmt.Sprintf("%d", r.expirationSeconds)
@@ -210,10 +210,10 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		path := filepath.Join(e2epod.VolumeMountPath1, filename)
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPath(ctx, f, pod, path, testWriteSize, seed)
-		checkReadFromPath(ctx, f, pod, path, testWriteSize, seed)
+		checkWriteToPathSucceed(ctx, f, pod, path, testWriteSize, seed)
+		checkReadFromPathSucceed(ctx, f, pod, path, testWriteSize, seed)
 		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{filename, "test.txt"})
-		checkDeletingPath(ctx, f, pod, path)
+		checkDeletingPathSucceed(ctx, f, pod, path)
 		checkListingPathWithEntries(ctx, f, pod, e2epod.VolumeMountPath1, []string{"test.txt"})
 	}
 
@@ -261,14 +261,13 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		return []*v1.Pod{pliFullAccessPod}, []*v1.Pod{dliReadOnlyAccessPod, pliReadOnlyAccessPod}
 	}
 
-	// writeAndVerifyTestFile writes a test file and verifies it can be read
-	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod) (testFile string, testWriteSize int, seed int64) {
-		seed = time.Now().UTC().UnixNano()
+	// writeAndVerifyTestFile writes a test file with content derived from seed and verifies it can be read.
+	writeAndVerifyTestFile := func(ctx context.Context, pods []*v1.Pod, seed int64) (testFile string, testWriteSize int) {
 		testWriteSize = 1024
 		testFile = filepath.Join(e2epod.VolumeMountPath1, "test.txt")
 		for _, pod := range pods {
-			checkWriteToPath(ctx, f, pod, testFile, testWriteSize, seed)
-			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
+			checkWriteToPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 		return
 	}
@@ -276,7 +275,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyReadOnlyAccess verifies pods can list but not write
 	verifyReadOnlyAccess := func(ctx context.Context, pods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range pods {
-			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
 			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
@@ -295,11 +294,11 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	// verifyWorkloadHealth checks if pods can perform expected operations
 	verifyWorkloadHealth := func(ctx context.Context, fullAccessPods, readOnlyPods []*v1.Pod, testFile string, testWriteSize int, seed int64) {
 		for _, pod := range fullAccessPods {
-			checkReadFromPath(ctx, f, pod, testFile, testWriteSize, seed)
+			checkReadFromPathSucceed(ctx, f, pod, testFile, testWriteSize, seed)
 			checkBasicFileOperations(ctx, pod)
 		}
 		for _, pod := range readOnlyPods {
-			checkListingPath(ctx, f, pod, e2epod.VolumeMountPath1)
+			checkListingPathSucceed(ctx, f, pod, e2epod.VolumeMountPath1)
 			checkWriteToPathFails(ctx, f, pod, testFile, testWriteSize, seed)
 		}
 	}
@@ -333,14 +332,17 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		fullAccessPodsSetA, readOnlyAccessPodsSetA := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 		fullAccessPodsSetB, readOnlyAccessPodsSetB := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
 
+		// One seed for all sets: monitoring verifies every pod against a single seed.
+		seed := time.Now().UTC().UnixNano()
+
 		// Test Set A workloads
 		framework.Logf("Testing Set A workloads...")
-		testFile, testWriteSize, seed := writeAndVerifyTestFile(ctx, fullAccessPodsSetA)
+		testFile, testWriteSize := writeAndVerifyTestFile(ctx, fullAccessPodsSetA, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetA, testFile, testWriteSize, seed)
 
 		// Test Set B workloads
 		framework.Logf("Testing Set B workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetB, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetB, testFile, testWriteSize, seed)
 
 		// Upgrade to the new version with token expiration patching
@@ -358,12 +360,12 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 		// Test Set C workloads
 		framework.Logf("Testing Set C workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetC, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
 
 		// Test Set D workloads
 		framework.Logf("Testing Set D workloads...")
-		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
+		testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetD, seed)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
 
 		// Ensure the workloads are still healthy
@@ -403,7 +405,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			// Test Set E workloads
 			framework.Logf("Testing Set E workloads...")
-			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
+			testFile, testWriteSize = writeAndVerifyTestFile(ctx, fullAccessPodsSetE, seed)
 			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
 
 			// Monitor Set A + D + E for 150 minutes after rollback
@@ -465,15 +467,23 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 	}
 }
 
-// buildHelmValues creates common Helm values for install/upgrade
-func buildHelmValues() map[string]any {
-	values := map[string]any{
+// buildHelmValuesBase creates Helm values for installation of the previous version,
+// without image overrides so the chart's default image would be used.
+func buildHelmValuesBase() map[string]any {
+	return map[string]any{
+		"unsupportedDevInstall": true,
 		"node": map[string]any{
 			"podInfoOnMountCompat": map[string]any{
 				"enable": "true",
 			},
 		},
 	}
+}
+
+// buildHelmValuesForUpgrade creates Helm values for install/upgrade of the new version,
+// overriding the image fields to use the CI-built container from the current commit.
+func buildHelmValuesForUpgrade() map[string]any {
+	values := buildHelmValuesBase()
 	if helmChartContainerRepository != "" && helmChartContainerTag != "" {
 		values["image"] = map[string]any{
 			"repository": helmChartContainerRepository,
@@ -608,13 +618,14 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := installClient.RunWithContext(context.Background(), chart, buildHelmValues())
+	release, err := installClient.RunWithContext(context.Background(), chart, buildHelmValuesBase())
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q created", release.Name)
 }
 
 // monitorWorkloadsForDuration monitors workload health for a specified duration, checking every minute and logging progress.
+// TODO: track the seed per set so each set can write distinct content, which would also catch a pod reading another set's volume.
 func monitorWorkloadsForDuration(
 	ctx context.Context,
 	fullAccessPods []*v1.Pod,
@@ -651,7 +662,7 @@ func upgradeCSIDriver(cfg *action.Configuration, f *framework.Framework, version
 	chart, err := loader.Load(chartPath)
 	framework.ExpectNoError(err)
 
-	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, buildHelmValues())
+	release, err := upgradeClient.RunWithContext(context.Background(), helmReleaseName, chart, buildHelmValuesForUpgrade())
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q updated to %v (from %q)", release.Name, version, chartPath)

@@ -115,10 +115,10 @@ func (t *s3CSIHeadroomTestSuite) DefineTests(driver storageframework.TestDriver,
 		path := filepath.Join(volPath, filename)
 		testWriteSize := 1024 // 1KB
 
-		checkWriteToPath(ctx, f, pod, path, testWriteSize, seed)
-		checkReadFromPath(ctx, f, pod, path, testWriteSize, seed)
+		checkWriteToPathSucceed(ctx, f, pod, path, testWriteSize, seed)
+		checkReadFromPathSucceed(ctx, f, pod, path, testWriteSize, seed)
 		checkListingPathWithEntries(ctx, f, pod, volPath, []string{filename})
-		checkDeletingPath(ctx, f, pod, path)
+		checkDeletingPathSucceed(ctx, f, pod, path)
 		checkListingPathWithEntries(ctx, f, pod, volPath, []string{})
 	}
 

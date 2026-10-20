@@ -1,5 +1,43 @@
 # Unreleased
 
+### Notable changes
+* Support Mountpoint [version 1.24.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.24.0) ([#922](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/922))
+  * Mountpoint now supports setting a target for total memory usage via the `--memory-target` CLI argument. This target is not a guaranteed limit but Mountpoint manages the memory available for data buffers to stay within the target: under memory pressure it slows down I/O, reclaims buffers it no longer needs and reduces prefetching. See [the configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage). ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
+  * **Breaking**: Mountpoint now limits how many files can be open for writing at the same time, derived from `--memory-target` and `--write-part-size`. Once the limit is reached, opening a file for writing fails with `ENOMEM` until an existing write file handle is closed. See [the configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#maximum-number-of-files-open-for-writing) for how the limit is calculated. ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
+  * Mountpoint now fails at startup if `--read-part-size` exceeds the memory available for data buffers and `--memory-target` was set explicitly. If the memory target is the default, the read part size is reduced to fit and a warning is logged instead. ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
+  * Add experimental metrics for observing memory pressure: `experimental.pool.allocation_queue_depth`, `experimental.pool.allocation_queue_wait`, `experimental.mem.cursor_resets`, `experimental.mem.seek_window_resets`, and `experimental.fs.write_handle_limit_exceeded`. See [the metrics documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/METRICS.md). ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
+  * Change memory pool metrics in logs. `pool.reserved_bytes` is replaced by `pool.acquired_bytes` and `pool.bytes_in_use`, `pool.allocated_bytes` and `pool.allocate_latency_us` are new, and the `size` dimension on `pool.allocated_pages`, `pool.empty_pages`, `pool.slack_bytes` and `pool.trim_pages` is renamed to `buffer_size`. ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
+  * Fix cgroup memory limit detection for inherited limits from parent slices. ([#1933](https://github.com/awslabs/mountpoint-s3/pull/1933))
+
+# v2.8.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.8.0/README.md)
+
+### Notable changes
+* Removed support for AL2, and Ubuntu 22.04.
+* Drop support for Kubernetes 1.30.
+* Add an OS selector to Mountpoint pods ([#895](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/895))
+* Grant event permissions for leader election ([#893](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/893))
+* Do not delete S3 Pod Attachments when workloads are running and terminating ([#842](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/842))
+* Update Go to 1.26.6 ([#909](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/909))
+* Update sidecar images to csi-node-driver-registrar:v2.17.0-eksbuild.5 & livenessprobe:v2.19.0-eksbuild.5 ([#910](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/910))
+* Support Mountpoint [version 1.23.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.23.0) ([#868](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/868))
+  * Add support for CRC64NVME full-object checksums on uploads. The `--upload-checksums` argument now accepts `crc64nvme` in addition to the existing `crc32c` and `off` values. ([#1838](https://github.com/awslabs/mountpoint-s3/pull/1838))
+  * Add `--infer-content-type` flag to infer the `Content-Type` of new objects based on their file extension instead of using the default `binary/octet-stream`. ([#1790](https://github.com/awslabs/mountpoint-s3/pull/1790))
+  * Fix credential resolution when using a source profile with STS Web Identity. ([#1889](https://github.com/awslabs/mountpoint-s3/pull/1889))
+  * Fix memory limiter ignoring container cgroup memory limits, which could cause out-of-memory issues in memory-constrained containers. ([#1806](https://github.com/awslabs/mountpoint-s3/pull/1806))
+  * Reduce peak memory usage of incremental (append) uploads by removing an unnecessary buffer copy in the internal S3 client. ([#1882](https://github.com/awslabs/mountpoint-s3/pull/1882))
+  * Add additional debug information to FUSE operation logs including the ID of the process triggering the file system operation. ([#1718](https://github.com/awslabs/mountpoint-s3/pull/1718))
+
+# v2.7.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.7.0/README.md)
+
+### Notable changes
+* Add controller leader election to prevent duplicate MountpointS3PodAttachment resources from being created during controller rolling updates, when the old and new controller pods briefly co-exist. ([#814](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/814))
+* Update Go to 1.26.4. ([#823](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/823))
+* Update csi-node-driver-registrar to v2.17.0-eksbuild.2 and livenessprobe to v2.19.0-eksbuild.2. ([#824](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/824))
+
 # v2.6.0
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.6.0/README.md)

@@ -21,13 +21,13 @@ function helm_uninstall_driver() {
   KUBECONFIG=${4}
   CLUSTER_TYPE=${5}
 
-  if driver_installed ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
+  if release_exists ${HELM_BIN} ${RELEASE_NAME} ${KUBECONFIG}; then
     if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
       echo "OpenShift cluster detected - using graceful Helm uninstall as ClusterRoleBindings and ServiceAccounts cannot be deleted due to admission webhooks."
       set +e
-      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
+      $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG --debug
       set -e
-      $KUBECTL_BIN delete secret --namespace kube-system sh.helm.release.v1.${RELEASE_NAME}.v1 --ignore-not-found --kubeconfig $KUBECONFIG
+      $KUBECTL_BIN delete secret --namespace kube-system -l "owner=helm,name=${RELEASE_NAME}" --ignore-not-found --kubeconfig "$KUBECONFIG"
     else
       $HELM_BIN uninstall $RELEASE_NAME --namespace kube-system --kubeconfig $KUBECONFIG
     fi
@@ -35,6 +35,19 @@ function helm_uninstall_driver() {
     $KUBECTL_BIN wait --for=delete pod --selector="app=s3-csi-node" -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   else
     echo "driver does not seem to be installed"
+  fi
+  # Clean up the mount-s3 namespace before reinstalling. A previous run may
+  # have left Mountpoint pods in mount-s3 that are still running, and
+  # Kubernetes rejects new resource creation in a namespace that is being terminated.
+  if $KUBECTL_BIN get namespace mount-s3 --kubeconfig $KUBECONFIG &>/dev/null; then
+    echo "Deleting leftover mount-s3 namespace..."
+    # Mountpoint pods ignore SIGTERM and have a 10-minute termination grace period - bypass it.
+    $KUBECTL_BIN delete pods --all --namespace mount-s3 --grace-period=0 --force --ignore-not-found --kubeconfig $KUBECONFIG || true
+    $KUBECTL_BIN delete namespace mount-s3 --kubeconfig $KUBECONFIG --ignore-not-found
+    if ! $KUBECTL_BIN wait --for=delete namespace/mount-s3 --timeout=120s --kubeconfig $KUBECONFIG; then
+      echo "WARNING: mount-s3 namespace did not finish terminating within 120s"
+      $KUBECTL_BIN get namespace mount-s3 -o yaml --kubeconfig $KUBECONFIG || true
+    fi
   fi
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get CSIDriver --kubeconfig $KUBECONFIG
@@ -67,6 +80,7 @@ function helm_install_driver() {
 
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
+    --set unsupportedDevInstall=true \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \
     --set image.pullPolicy=Always \
@@ -109,6 +123,20 @@ function driver_installed() {
   KUBECONFIG=${3}
   set +e
   if [[ $($HELM_BIN list -A --kubeconfig $KUBECONFIG | grep $RELEASE_NAME) == *deployed* ]]; then
+    set -e
+    return 0
+  else
+    set -e
+    return 1
+  fi
+}
+
+function release_exists() {
+  HELM_BIN=${1}
+  RELEASE_NAME=${2}
+  KUBECONFIG=${3}
+  set +e
+  if $HELM_BIN status "$RELEASE_NAME" --namespace kube-system --kubeconfig "$KUBECONFIG" >/dev/null 2>&1; then
     set -e
     return 0
   else

@@ -132,6 +132,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Running mount-s3 with mount flag -o is not supported in CSI Driver.")
 	}
 
+	// `--ca-bundle` is not supported in CSI Driver yet.
+	if args.Has(mountpoint.ArgCABundle) {
+		return nil, status.Errorf(codes.InvalidArgument, "Running mount-s3 with %s is not supported in CSI Driver.", mountpoint.ArgCABundle)
+	}
+
 	fsGroup := ""
 	if capMount := volCap.GetMount(); capMount != nil {
 		if volumeMountGroup := capMount.GetVolumeMountGroup(); volumeMountGroup != "" {

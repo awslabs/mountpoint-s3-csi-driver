@@ -231,18 +231,18 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	expectWriteToSucceed := func(ctx context.Context, pod *v1.Pod) writtenFile {
 		seed := time.Now().UTC().UnixNano()
 		framework.Logf("checking writing to %s", testFilePath)
-		checkWriteToPath(ctx, f, pod, testFilePath, testWriteSize, seed)
+		checkWriteToPathSucceed(ctx, f, pod, testFilePath, testWriteSize, seed)
 		return writtenFile{testFilePath, seed, testWriteSize}
 	}
 
 	expectReadToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking reading from %s", file.path)
-		checkReadFromPath(ctx, f, pod, file.path, file.size, file.seed)
+		checkReadFromPathSucceed(ctx, f, pod, file.path, file.size, file.seed)
 	}
 
 	expectDeleteToSucceed := func(ctx context.Context, pod *v1.Pod, file writtenFile) {
 		framework.Logf("checking if deletion of %s succeeds", file.path)
-		checkDeletingPath(ctx, f, pod, file.path)
+		checkDeletingPathSucceed(ctx, f, pod, file.path)
 	}
 
 	expectWriteToFail := func(ctx context.Context, pod *v1.Pod) {
@@ -253,7 +253,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	expectListToSucceed := func(ctx context.Context, pod *v1.Pod) {
 		framework.Logf("checking listing %s", testVolumePath)
-		checkListingPath(ctx, f, pod, testVolumePath)
+		checkListingPathSucceed(ctx, f, pod, testVolumePath)
 	}
 
 	expectReadOnly := func(ctx context.Context, pod *v1.Pod) {
@@ -1216,9 +1216,7 @@ func waitUntilRoleIsAssumableWithEKS(ctx context.Context, f *framework.Framework
 
 	saClient := f.ClientSet.CoreV1().ServiceAccounts(sa.Namespace)
 	serviceAccountToken, err := saClient.CreateToken(ctx, sa.Name, &authenticationv1.TokenRequest{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: pod.Namespace,
-		},
+		Namespace: pod.Namespace,
 		Spec: authenticationv1.TokenRequestSpec{
 			Audiences: []string{serviceAccountTokenAudienceEKS},
 			BoundObjectRef: &authenticationv1.BoundObjectReference{
@@ -1249,9 +1247,7 @@ func createCredentialSecret(ctx context.Context, f *framework.Framework, credent
 	client := f.ClientSet.CoreV1().Secrets(csiDriverDaemonSetNamespace)
 
 	secret, err := client.Create(ctx, &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: credentialSecretName,
-		},
+		Name: credentialSecretName,
 		StringData: map[string]string{
 			"key_id":        *credentials.AccessKeyId,
 			"access_key":    *credentials.SecretAccessKey,
@@ -1364,8 +1360,7 @@ func deletePodIdentityAssociation(ctx context.Context, sa *v1.ServiceAccount, as
 		ClusterName:   &ClusterName,
 	})
 
-	var rsf *types.ResourceNotFoundException
-	if goerrors.As(err, &rsf) {
+	if _, ok := goerrors.AsType[*types.ResourceNotFoundException](err); ok {
 		return nil
 	}
 	return err

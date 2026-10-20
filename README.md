@@ -21,16 +21,29 @@ For Amazon EKS clusters, the Mountpoint for Amazon S3 CSI driver is also availab
 
 Mountpoint for Amazon S3 does not implement all the features of a POSIX file system, and there are some differences that may affect compatibility with your application. See [Mountpoint file system behavior](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md) for a detailed description of Mountpoint's behavior and POSIX support and how they could affect your application.
 
+## Installation
+
+The S3 CSI Driver is distributed through the following supported channels:
+- **EKS Addon** (recommended for EKS clusters) — see [Amazon EKS guide](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html)
+- **Helm repository** — `helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver`
+
+> [!WARNING]
+> Installing directly from a GitHub branch (`main`, `release-X.Y`, or any other) is not supported. Charts in the GitHub repository may reference unreleased images or contain in-progress changes that are incompatible with published binaries. Please migrate to the Helm repository or EKS Addon installation methods.
+
+See [Driver Installation](docs/INSTALL.md) for detailed instructions.
+
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v2.6.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.6.0                       |
+| v2.8.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.8.0                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v2.7.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.7.0                       |
+| v2.6.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.6.0                       |
 | v2.5.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0                       |
 | v2.4.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.4.1                       |
 | v2.4.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.4.0                       |
@@ -83,20 +96,20 @@ This policy is non-binding and subject to change.
 
 ## Compatibility
 
-The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.30+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
+The Mountpoint for S3 CSI Driver is compatible with Kubernetes versions v1.31+ and implements the CSI Specification v1.9.0. The driver supports **x86-64** and **arm64** architectures.
 
 ## Distros Support Matrix
 
 The following table provides the support status for various distros with regards to CSI Driver version:
 
-| Distro                                  | Experimental | Stable | Deprecated | Removed |
-|-----------------------------------------|-------------:|-------:|-----------:|--------:|
-| Amazon Linux 2       |         - |   1.0.0 |          - |       - |
-| Amazon Linux 2023    |         - |   1.0.0 |          - |       - |
-| Ubuntu 20.04         |         - |   1.0.0 |          - |   2.5.0 |
-| Ubuntu 22.04         |         - |   1.0.0 |          - |       - |
-| Ubuntu 24.04         |         - |   2.0.0 |          - |       - |
-| Bottlerocket >1.19.2 |         - |   1.4.0 |          - |       - |
+| Distro               | Stable     | Removed | Currently Supported EKS Versions |
+|----------------------|-----------:|--------:|----------------------------------|
+| Amazon Linux 2       |      1.0.0 |   2.8.0 | —                                |
+| Amazon Linux 2023    |      1.0.0 |       — | 1.31 – 1.36                      |
+| Ubuntu 20.04         |      1.0.0 |   2.5.0 | —                                |
+| Ubuntu 22.04         |      1.0.0 |   2.8.0 | —                                |
+| Ubuntu 24.04         |      2.0.0 |       — | 1.31 – 1.36                      |
+| Bottlerocket >1.19.2 |      1.4.0 |       — | 1.31 – 1.36                      |
 
 ## Documentation
 

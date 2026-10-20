@@ -9,7 +9,7 @@ export AWS_REGION=us-east-1
 export TAG=20cb9d919704522d93ac40914b760dbd0487bcf3 # CSI Driver image tag to install
 export IMAGE_NAME="s3-csi-driver" # repository is inferred from current AWS account and region
 export SSH_KEY=/home/csiuser/.ssh/k8s.private.pub # optional
-export K8S_VERSION="1.30.0" # optional, must be a full version
+export K8S_VERSION="1.31.0" # optional, must be a full version
 
 ACTION=install_tools tests/e2e-kubernetes/scripts/run.sh
 ACTION=create_cluster tests/e2e-kubernetes/scripts/run.sh
@@ -19,7 +19,7 @@ ACTION=install_driver  tests/e2e-kubernetes/scripts/run.sh
 # option 1: kubeconfig inferred from CLUSTER_TYPE and ARCH
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 # option 2: kubeconfig set explicitly
-export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.eksctl.1.30.0.k8s.local.kubeconfig
+export KUBECONFIG=/local/home/vlaad/local/aws-s3-csi-driver/tests/e2e-kubernetes/csi-test-artifacts/s3-csi-cluster.eksctl.1.31.0.k8s.local.kubeconfig
 ACTION=run_tests tests/e2e-kubernetes/scripts/run.sh
 
 ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh

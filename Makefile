@@ -14,7 +14,7 @@
 SHELL = /bin/bash
 
 # MP CSI Driver version
-VERSION=2.6.0
+VERSION=2.8.0
 
 PKG=github.com/awslabs/mountpoint-s3-csi-driver
 GIT_COMMIT?=$(shell git rev-parse HEAD)
@@ -32,6 +32,7 @@ REGISTRY?=""
 IMAGE_NAME?=""
 IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
+FORCE_BUILD?=false
 
 DOCKERFILE?="Dockerfile"
 
@@ -107,7 +108,7 @@ sub-image-%:
 .PHONY: image
 image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION):
-	@if [ "$(OUTPUT_TYPE)" = "registry" ] && docker manifest inspect $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) > /dev/null 2>&1; then \
+	@if [ "$(FORCE_BUILD)" != "true" ] && [ "$(OUTPUT_TYPE)" = "registry" ] && docker manifest inspect $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) > /dev/null 2>&1; then \
 		echo "Image $(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) already exists in registry, skipping build"; \
 	else \
 		DOCKER_BUILDKIT=1 docker buildx build \
@@ -134,7 +135,7 @@ login_registry:
 
 .PHONY: download_go_deps
 download_go_deps:
-	go mod download
+	go mod download || (echo "go mod download failed, retrying (1/2)..." && sleep 5 && go mod download) || (echo "go mod download failed, retrying (2/2)..." && sleep 10 && go mod download)
 
 .PHONY: bin
 bin:
@@ -154,6 +155,9 @@ test:
 	# skipping controller test cases because we don't implement controller for static provisioning,
 	# this is a known limitation of sanity testing package: https://github.com/kubernetes-csi/csi-test/issues/214
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities" -ginkgo.skip="should remove target path"
+	# Run unit tests in e2e-kubernetes (image override, parsing, etc.) without requiring a cluster.
+	# TestE2E is the Ginkgo e2e suite entry point which requires a live cluster, so we skip it.
+	cd tests/e2e-kubernetes && go test -v -skip TestE2E ./...
 
 .PHONY: cover
 cover:
