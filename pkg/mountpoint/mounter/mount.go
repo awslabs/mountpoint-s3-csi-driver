@@ -4,6 +4,7 @@ package mounter
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
@@ -85,10 +86,23 @@ func (m *Mounter) Unmount(target Target) error {
 // This is achieved by calling the `mountutils.List()` method to enumerate all mount points.
 func (m *Mounter) CheckMountpoint(target Target) (bool, error) {
 	if err := statx(target); err != nil {
+		klog.Warningf("CheckMountpoint: statx(%q) failed: %v", target, err)
 		return false, err
 	}
+	klog.V(5).Infof("CheckMountpoint: statx(%q) succeeded", target)
+
+	// statx succeeds on dead FUSE mounts (cached inode), but open() triggers
+	// the FUSE opendir path and returns ENOTCONN if the daemon is gone.
+	f, openErr := os.Open(target)
+	if openErr != nil {
+		klog.Warningf("CheckMountpoint: mount %q appears stale (open failed: %v), treating as corrupted", target, openErr)
+		return false, openErr
+	}
+	f.Close()
+	klog.V(5).Infof("CheckMountpoint: Open(%q) succeeded", target)
 
 	isMountPoint, err := m.mount.IsMountPoint(target)
+	klog.V(5).Infof("CheckMountpoint: IsMountPoint(%q) = %v, err=%v", target, isMountPoint, err)
 	if err != nil {
 		return false, err
 	}
@@ -103,14 +117,16 @@ func (m *Mounter) CheckMountpoint(target Target) (bool, error) {
 
 	for _, mp := range mountPoints {
 		if mp.Path == target {
+			klog.V(5).Infof("CheckMountpoint: found mount entry for %q: device=%q", target, mp.Device)
 			if mp.Device != fsName {
-				klog.Infof("mounter: %q is a %q mount, but %q is expected, ignoring", target, mp.Device, fsName)
+				klog.V(5).Infof("mounter: %q is a %q mount, but %q is expected, ignoring", target, mp.Device, fsName)
 				continue
 			}
 			return true, nil
 		}
 	}
 
+	klog.V(5).Infof("CheckMountpoint: %q is a mount point but no matching entry found in mount list", target)
 	return false, nil
 }
 
