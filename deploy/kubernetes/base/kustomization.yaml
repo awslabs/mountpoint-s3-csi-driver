@@ -1,3 +1,5 @@
+# We are planning to deprecate the Kustomize installation method, and it will not be available in the next major version.
+# We recommend the Helm repository or EKS Addon installation methods, see https://github.com/awslabs/mountpoint-s3-csi-driver/issues/<NNN>.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
