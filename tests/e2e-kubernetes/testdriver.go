@@ -19,7 +19,6 @@ var (
 	BucketRegion    string // assumed to be the same as k8s cluster's region
 	ClusterName     string
 	ClusterType     string
-	ClusterProfile  string
 	BucketPrefix    string
 	Performance     bool
 	UpgradeTests    bool

@@ -47,9 +47,8 @@ The profiles are:
 Each has a pool of nodes its autoscaler provisions only for the pods targeting it, through the `e2e.s3.csi.aws.com/pool=default` label and NoSchedule taint on the pool's nodes. These nodes register with the `s3.csi.aws.com/agent-not-ready:NoExecute` startup taint, and pods can't reach IMDS on them, so the driver gets its credentials from EKS Pod Identity.
 
 A profile is a directory with:
-- `profile.sh`, defining `profile_setup`, run after creating or re-using the cluster, and `profile_teardown`, run before deleting it.
+- `profile.sh`, defining `profile_setup`, run after creating or re-using the cluster, `profile_teardown`, run before deleting it, and `profile_print_info`, printing what the autoscaler says about the nodes when the scheduling tests fail.
 - An optional `eksctl-patch.json`, a JSON patch applied to the cluster's eksctl config. Changing it re-creates the profile's clusters.
-- An optional `values.yaml`, applied on top of the driver chart's values when installing the driver.
 
 ## Scheduling tests
 

@@ -20,3 +20,9 @@ function profile_teardown() {
   $KUBECTL_BIN wait --for=delete nodeclaims -l e2e.s3.csi.aws.com/pool --timeout=10m --kubeconfig "${KUBECONFIG}"
   set -e
 }
+
+# Prints what Auto Mode says about the nodes it provisions, when the tests fail. Its node provisioning runs outside of
+# the cluster, so there are no logs to print.
+function profile_print_info() {
+  $KUBECTL_BIN get nodepools,nodeclaims -o wide --kubeconfig "${KUBECONFIG}"
+}

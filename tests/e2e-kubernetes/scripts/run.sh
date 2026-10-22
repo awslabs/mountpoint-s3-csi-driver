@@ -77,12 +77,11 @@ if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
     EKSCTL_PATCH_SELINUX_ENFORCING_FILE=""
 fi
 
-# A profile is a directory with a `profile.sh` defining `profile_setup` and `profile_teardown`, an optional
-# `eksctl-patch.json` applied on top of the patches above, and an optional `values.yaml` for the driver's chart.
+# A profile is a directory with a `profile.sh` defining `profile_setup`, `profile_teardown` and `profile_print_info`,
+# and an optional `eksctl-patch.json` applied on top of the patches above.
 PROFILE_DIR=""
 EKSCTL_PATCH_PROFILE_FILE=""
 PROFILE_TEARDOWN_HOOK=""
-PROFILE_HELM_VALUES_FILE=""
 if [[ -n "${CLUSTER_PROFILE}" ]]; then
     PROFILE_DIR=${BASE_DIR}/profiles/${CLUSTER_PROFILE}
     if [[ ! -f "${PROFILE_DIR}/profile.sh" ]]; then
@@ -93,9 +92,6 @@ if [[ -n "${CLUSTER_PROFILE}" ]]; then
     if [[ -f "${PROFILE_DIR}/eksctl-patch.json" ]]; then
         EKSCTL_PATCH_PROFILE_FILE=${PROFILE_DIR}/eksctl-patch.json
     fi
-    if [[ -f "${PROFILE_DIR}/values.yaml" ]]; then
-        PROFILE_HELM_VALUES_FILE=${PROFILE_DIR}/values.yaml
-    fi
     PROFILE_TEARDOWN_HOOK=profile_teardown
 fi
 
@@ -103,7 +99,7 @@ CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 CSI_DRIVER_IRSA_ROLE_ARN=${CSI_DRIVER_IRSA_ROLE_ARN:-}
 
 # Flags of the e2e tests, for every action running them.
-TEST_FLAGS="--bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE} --cluster-profile=${CLUSTER_PROFILE}"
+TEST_FLAGS="--bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}"
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -207,8 +203,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${TAG}" \
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
-    "${CLUSTER_TYPE}" \
-    "${PROFILE_HELM_VALUES_FILE}"
+    "${CLUSTER_TYPE}"
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
@@ -230,6 +225,12 @@ elif [[ "${ACTION}" == "run_scheduling_tests" ]]; then
   KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 60m -- ${TEST_FLAGS} --run-scheduling-tests
   EXIT_CODE=$?
   print_cluster_info
+  if [[ ${EXIT_CODE} -ne 0 && -n "${CLUSTER_PROFILE}" ]]; then
+    # What the autoscaler said about the nodes, before its events expire (after an hour). The tests log the events
+    # about the workloads, which go away with the tests' namespace.
+    $KUBECTL_BIN events -A --kubeconfig ${KUBECONFIG}
+    profile_print_info
+  fi
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e

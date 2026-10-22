@@ -40,3 +40,10 @@ function profile_setup() {
 function profile_teardown() {
   :
 }
+
+# Prints what Cluster Autoscaler says about the nodegroups it scales, when the tests fail.
+function profile_print_info() {
+  $KUBECTL_BIN get configmap cluster-autoscaler-status -n kube-system -o jsonpath='{.data.status}{"\n"}' \
+    --kubeconfig "${KUBECONFIG}"
+  $KUBECTL_BIN logs -n kube-system deployment/cluster-autoscaler --tail=200 --kubeconfig "${KUBECONFIG}"
+}

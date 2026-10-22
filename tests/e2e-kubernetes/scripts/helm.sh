@@ -62,8 +62,6 @@ function helm_install_driver() {
   KUBECONFIG=${6}
   CSI_DRIVER_IRSA_ROLE_ARN=${7}
   CLUSTER_TYPE=${8}
-  # Optional values file on top of the chart's, e.g. a cluster profile's.
-  EXTRA_VALUES_FILE=${9:-}
 
   helm_uninstall_driver \
     "$HELM_BIN" \
@@ -80,14 +78,8 @@ function helm_install_driver() {
     IRSA_FLAG=""
   fi
 
-  EXTRA_VALUES_FLAG=""
-  if [[ -n "${EXTRA_VALUES_FILE}" ]]; then
-    EXTRA_VALUES_FLAG="--values ${EXTRA_VALUES_FILE}"
-  fi
-
   $HELM_BIN upgrade --install $RELEASE_NAME --namespace kube-system ./charts/aws-mountpoint-s3-csi-driver --values \
     ./charts/aws-mountpoint-s3-csi-driver/values.yaml \
-    ${EXTRA_VALUES_FLAG} \
     --set unsupportedDevInstall=true \
     --set image.repository=${REPOSITORY} \
     --set image.tag=${TAG} \

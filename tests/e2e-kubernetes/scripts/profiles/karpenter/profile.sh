@@ -32,6 +32,13 @@ function profile_teardown() {
   set -e
 }
 
+# Prints what Karpenter says about the nodes it provisions, when the tests fail.
+function profile_print_info() {
+  $KUBECTL_BIN get nodepools,nodeclaims -o wide --kubeconfig "${KUBECONFIG}"
+  # From both replicas, as only the leader's logs tell what Karpenter did.
+  $KUBECTL_BIN logs -n karpenter -l app.kubernetes.io/name=karpenter --prefix --tail=200 --kubeconfig "${KUBECONFIG}"
+}
+
 function karpenter_node_role_name() {
   aws eks describe-nodegroup --cluster-name "${CLUSTER_NAME}" --region "${REGION}" --nodegroup-name system \
     --query 'nodegroup.nodeRole' --output text | awk -F/ '{print $NF}'

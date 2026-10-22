@@ -11,6 +11,7 @@
 package custom_testsuites
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -91,13 +92,13 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 	})
 
 	f.It("should scale out workloads beyond a node's volume limit without overcommitting any node", f.WithSerial(), func(ctx context.Context) {
-		ginkgo.By("Waiting for the pool to have no nodes")
 		waitForEmptyNodePool(ctx, f)
 		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
 
 		driverName := driver.GetDriverInfo().Name
+		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
 		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
 		framework.ExpectNoError(err)
 		workloads := 2 * limit
@@ -114,6 +115,8 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, pod)
 			pods = append(pods, pod)
 		}
+		// Runs before the workloads are deleted.
+		ginkgo.DeferCleanup(logEventsOnFailure, f)
 		start := time.Now()
 
 		ginkgo.By("Waiting for the autoscaler to provision nodes for all of them")
@@ -130,6 +133,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			framework.ExpectNoError(err)
 			inUse, err := countS3VolumesOnNode(ctx, f, node, driverName)
 			framework.ExpectNoError(err)
+			framework.Logf("Node %s mounts %d of %d volumes", node, inUse, nodeLimit)
 			gomega.Expect(inUse).To(gomega.BeNumerically("<=", nodeLimit),
 				"node %s mounts %d volumes, more than its limit of %d", node, inUse, nodeLimit)
 			waitForMounterPodReady(ctx, f, node)
@@ -161,6 +165,7 @@ func targetNodePool(spec *v1.PodSpec) {
 
 // waitForEmptyNodePool waits for the autoscaler to remove the pool's nodes, which it does once they're empty.
 func waitForEmptyNodePool(ctx context.Context, f *framework.Framework) {
+	ginkgo.By("Waiting for the pool to have no nodes")
 	gomega.Eventually(ctx, func(ctx context.Context) ([]string, error) {
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: nodePoolKey + "=" + nodePoolValue})
 		if err != nil {
@@ -215,6 +220,24 @@ func podWaitingReason(pod *v1.Pod) string {
 		}
 	}
 	return fmt.Sprintf("on node %s: %s", pod.Spec.NodeName, pod.Status.Phase)
+}
+
+// logEventsOnFailure logs the events in the test's namespace if the test failed, e.g. the autoscaler's about why it
+// didn't provision a node for a workload. They go away with the namespace, before `run.sh` prints the cluster's events.
+func logEventsOnFailure(ctx context.Context, f *framework.Framework) {
+	if !ginkgo.CurrentSpecReport().Failed() {
+		return
+	}
+	ginkgo.By("Logging the events in the namespace")
+	events, err := f.ClientSet.CoreV1().Events(f.Namespace.Name).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		framework.Logf("Failed to list the events: %v", err)
+		return
+	}
+	for _, e := range events.Items {
+		framework.Logf("%s %s: %s from %s: %s", e.InvolvedObject.Kind, e.InvolvedObject.Name, e.Reason,
+			cmp.Or(e.ReportingController, e.Source.Component), e.Message)
+	}
 }
 
 func podNodes(pods []*v1.Pod) []string {
