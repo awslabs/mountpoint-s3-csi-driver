@@ -251,3 +251,49 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+## Security scanning helpers
+
+TRIVY ?= $(TOOLS_BIN)/trivy-$(TRIVY_VERSION)
+TRIVY_VERSION ?= 0.76.1
+TRIVY_SEVERITY ?= HIGH,CRITICAL
+GOVULNCHECK_VERSION ?= v1.9.0
+HELM_VALUES ?= charts/aws-mountpoint-s3-csi-driver/values.yaml
+
+# Install trivy binary from GitHub releases (pinned version)
+.PHONY: install-trivy
+install-trivy: $(TOOLS_BIN)
+	@[ -f "$(TRIVY)" ] || { \
+		echo "Installing Trivy v$(TRIVY_VERSION) into $(TOOLS_BIN)..."; \
+		ARCH=$$(uname -m | sed 's/x86_64/64bit/' | sed 's/aarch64/ARM64/'); \
+		curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_Linux-$${ARCH}.tar.gz" | tar xz -C $(TOOLS_BIN) trivy && mv $(TOOLS_BIN)/trivy $(TRIVY); \
+	}
+
+# Scan the built binaries, including the Go standard library they were compiled with
+.PHONY: trivy-bin
+trivy-bin: install-trivy bin
+	$(TRIVY) rootfs -q --ignore-unfixed --severity $(TRIVY_SEVERITY) bin/
+
+# Scan all container images referenced in the Helm chart
+.PHONY: trivy-images
+trivy-images: install-trivy
+	@for IMAGE_REF in \
+		$$(yq '.image.repository + ":" + .image.tag' $(HELM_VALUES)) \
+		$$(yq '.sidecars.nodeDriverRegistrar.image.repository + ":" + .sidecars.nodeDriverRegistrar.image.tag' $(HELM_VALUES)) \
+		$$(yq '.sidecars.livenessProbe.image.repository + ":" + .sidecars.livenessProbe.image.tag' $(HELM_VALUES)) \
+		$$(yq '.experimental.headroomPodImage' $(HELM_VALUES)); \
+	do \
+		echo ""; \
+		echo "=== Scanning $$IMAGE_REF ==="; \
+		$(TRIVY) image --ignore-unfixed --severity $(TRIVY_SEVERITY) "$$IMAGE_REF"; \
+	done
+
+# Run Go vulnerability check
+.PHONY: govulncheck
+govulncheck:
+	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	govulncheck ./...
+
+# Run all security scans (govulncheck + trivy all scans)
+.PHONY: security-scan
+security-scan: govulncheck trivy-bin trivy-images
