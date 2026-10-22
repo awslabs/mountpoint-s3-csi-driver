@@ -39,7 +39,7 @@ def delete_bucket(s3, bucket_name, created, dry_run=False):
 def delete_single(args):
     """Delete a single bucket by name"""
     s3 = boto3.client('s3')
-    delete_bucket(s3, args.bucket, datetime.now(timezone.utc), dry_run=False)
+    delete_bucket(s3, args.bucket, datetime.now(timezone.utc), dry_run=args.dry_run)
 
 def cleanup_old(args):
     """Clean up old buckets with prefix"""
@@ -99,6 +99,7 @@ def main():
     # Single bucket deletion
     single_parser = subparsers.add_parser('delete', help='Delete a single bucket')
     single_parser.add_argument('bucket', help='Bucket name to delete')
+    single_parser.add_argument('--dry-run', action='store_true', help='Show what would be deleted without deleting')
     single_parser.set_defaults(func=delete_single)
 
     # Cleanup old buckets
