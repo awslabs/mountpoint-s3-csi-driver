@@ -122,3 +122,75 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 {{- printf "%.0f" (mulf $number $multiplier) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Checks the daemonsetMounters entries. Each entry becomes its own mounter DaemonSet, so names must not repeat, and with
+two or more entries each must say which nodes it applies to.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.validateMounterEntries" -}}
+{{- $entries := .Values.daemonsetMounters }}
+{{- if lt (len $entries) 1 }}
+{{- fail "daemonsetMounters must have at least one entry" }}
+{{- end }}
+{{- $names := list }}
+{{- $selections := list }}
+{{- $unnamed := 0 }}
+{{- range $m := $entries }}
+{{- if lt (int $m.maxVolumesPerNode) 0 }}
+{{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 0" }}
+{{- end }}
+{{- if $m.name }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $m.name) }}
+{{- fail (printf "daemonsetMounters: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSet" $m.name) }}
+{{- end }}
+{{- if has $m.name $names }}
+{{- fail (printf "daemonsetMounters: two entries are named %q; each entry needs its own name" $m.name) }}
+{{- end }}
+{{- $names = append $names $m.name }}
+{{- else }}
+{{- $unnamed = add1 $unnamed }}
+{{- end }}
+{{- if and (gt (len $entries) 1) (not $m.nodeSelector) (not $m.matchExpressions) }}
+{{- fail (printf "daemonsetMounters[%s]: nodeSelector or matchExpressions is required when there is more than one entry, or its mounter would run on every node" ($m.name | default "")) }}
+{{- end }}
+{{- $selection := toJson (dict "nodeSelector" $m.nodeSelector "matchExpressions" $m.matchExpressions) }}
+{{- if has $selection $selections }}
+{{- fail (printf "daemonsetMounters: two entries select the same nodes with %s" $selection) }}
+{{- end }}
+{{- $selections = append $selections $selection }}
+{{- range $k, $_ := $m.nodeSelector }}
+{{- if hasKey ($.Values.node.nodeSelector | default dict) $k }}
+{{- fail (printf "daemonsetMounters[%s].nodeSelector and node.nodeSelector both set %q" ($m.name | default "") $k) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if gt $unnamed 1 }}
+{{- fail "daemonsetMounters: at most one entry may leave out name" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Returns .affinity with each required node term repeated once per list in .exprLists, with that list's expressions
+added. Kubernetes ORs the terms, so the result matches a node if any list does. Other rules are kept as they are.
+With no lists, .affinity is returned unchanged.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.addToNodeTerms" -}}
+{{- $affinity := deepCopy (.affinity | default dict) }}
+{{- if .exprLists }}
+{{- $nodeAffinity := $affinity.nodeAffinity | default dict }}
+{{- $required := $nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | default dict }}
+{{- $nodeTerms := $required.nodeSelectorTerms | default (list (dict)) }}
+{{- $terms := list }}
+{{- range $n := $nodeTerms }}
+{{- range $exprs := $.exprLists }}
+{{- $term := dict "matchExpressions" (concat ($n.matchExpressions | default list) $exprs) }}
+{{- with $n.matchFields }}{{- $_ := set $term "matchFields" . }}{{- end }}
+{{- $terms = append $terms $term }}
+{{- end }}
+{{- end }}
+{{- $_ := set $required "nodeSelectorTerms" $terms }}
+{{- $_ := set $nodeAffinity "requiredDuringSchedulingIgnoredDuringExecution" $required }}
+{{- $_ := set $affinity "nodeAffinity" $nodeAffinity }}
+{{- end }}
+{{- toYaml $affinity }}
+{{- end }}

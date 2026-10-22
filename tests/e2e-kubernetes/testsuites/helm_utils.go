@@ -135,7 +135,9 @@ func restartDriverPods(ctx context.Context, f *framework.Framework) {
 	// The mounter is OnDelete, so a release change alone changes none of its pods.
 	By("Restarting the mounter pods, then the s3-csi-node pods")
 	deletePods(ctx, f, mounterPodLabel)
-	waitForDaemonSetReady(ctx, f, mounterDaemonSetName, mounterPodLabel, mounterRestartTimeout)
+	for _, name := range mounterDaemonSetNames(ctx, f) {
+		waitForDaemonSetReady(ctx, f, name, mounterPodLabel, mounterRestartTimeout)
+	}
 	// s3-csi-node exits when it finds no mounter, and the kubelet backs off its restarts for up to five minutes.
 	deletePods(ctx, f, csiNodePodLabel)
 	waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
@@ -166,16 +168,36 @@ func waitForDaemonSetReady(ctx context.Context, f *framework.Framework, name, la
 			return false, nil
 		}
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{LabelSelector: label})
-		if err != nil || int32(len(pods.Items)) != desired {
+		if err != nil {
 			return false, err
 		}
+		// Every mounter DaemonSet's pods carry the same label, so count only this one's.
+		var own int32
 		for i := range pods.Items {
+			if !metav1.IsControlledBy(&pods.Items[i], ds) {
+				continue
+			}
+			own++
 			if pods.Items[i].Status.Phase != v1.PodRunning || !isPodReady(&pods.Items[i]) {
 				return false, nil
 			}
 		}
-		return true, nil
+		return own == desired, nil
 	}).WithTimeout(timeout).WithPolling(5*time.Second).Should(BeTrue(), func() string { return describePods(ctx, f, label) })
+}
+
+// mounterDaemonSetNames returns the release's mounter DaemonSets, one per daemonsetMounters entry.
+func mounterDaemonSetNames(ctx context.Context, f *framework.Framework) []string {
+	GinkgoHelper()
+	list, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{})
+	framework.ExpectNoError(err, "listing DaemonSets")
+	var names []string
+	for _, ds := range list.Items {
+		if strings.HasPrefix(ds.Name, mounterDaemonSetName) {
+			names = append(names, ds.Name)
+		}
+	}
+	return names
 }
 
 // describePods says why pods are not ready, so a rejected rendered flag (exit code, args) is told apart from a claim that

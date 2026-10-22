@@ -242,6 +242,22 @@ daemonsetMounters:
     logLevel: 4
     podLabels: {}
     # The mounter inherits the node pod's nodeSelector, affinity and tolerations (node.nodeSelector,
-    # node.affinity, node.tolerateAllTaints, node.defaultTolerations, node.tolerations), so both
-    # DaemonSets target the same nodes; it has no such fields of its own.
+    # node.affinity, node.tolerateAllTaints, node.defaultTolerations, node.tolerations).
+    #
+    # To give different nodes different settings, add more entries. Each entry becomes its own
+    # mounter DaemonSet, s3-csi-daemonset-mounter-<name>, so each needs a name, except one that may
+    # leave it out and keep s3-csi-daemonset-mounter. Each also needs a nodeSelector,
+    # matchExpressions, or both, to say which nodes it applies to. Set maxVolumesPerNode,
+    # memoryLimitStrategy, resources and logLevel in each entry too, since this list replaces the
+    # default entry.
+    #
+    # Make sure no node matches two entries. If one does, its node pod logs an error and keeps
+    # using one mounter, the one this node's mounts already use, and the other mounter is unused.
+    #
+    # An entry for nodes in a Karpenter NodePool with 64GiB of memory or more:
+    # name: bigmem
+    # nodeSelector:
+    #   karpenter.sh/nodepool: general
+    # matchExpressions:
+    #   - { key: karpenter.k8s.aws/instance-memory, operator: Gt, values: ["65535"] }
     imagePullSecrets: []
