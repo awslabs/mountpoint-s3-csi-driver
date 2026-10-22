@@ -1,10 +1,8 @@
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
-{{- if ne (len .Values.daemonsetMounters) 1 }}
-{{- fail "daemonsetMounters must have exactly one entry" }}
-{{- end }}
+{{- range $mounter := .Values.daemonsetMounters }}
+{{- with $ }}
 
 {{- /* ================================ Inputs ================================ */}}
-{{- $mounter := index .Values.daemonsetMounters 0 }}
 {{- $resources := $mounter.resources | default dict }}
 {{- $requests := $resources.requests | default dict }}
 {{- $maxVolumes := int $mounter.maxVolumesPerNode }}
@@ -98,11 +96,12 @@
 {{- end }}
 {{- end }}
 
+---
 {{- /* =============================== DaemonSet =============================== */}}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: s3-csi-daemonset-mounter
+  name: s3-csi-daemonset-mounter{{ with $mounter.name }}-{{ . }}{{ end }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
@@ -119,6 +118,8 @@ spec:
     metadata:
       labels:
         app: s3-csi-daemonset-mounter
+        # The node pod reads this from its mounter and advertises it to the scheduler.
+        s3.csi.aws.com/max-volumes-per-node: {{ $maxVolumes | quote }}
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
         {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}
@@ -135,8 +136,12 @@ spec:
         {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with $mounter.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       priorityClassName: system-node-critical
-      {{- with .Values.node.affinity }}
+      {{- $exprLists := ternary (list $mounter.matchExpressions) (list) (not (empty $mounter.matchExpressions)) }}
+      {{- with include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
@@ -255,4 +260,6 @@ spec:
                   storage: {{ $cacheEphemeral.resourceRequests }}
         {{- end }}
       {{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

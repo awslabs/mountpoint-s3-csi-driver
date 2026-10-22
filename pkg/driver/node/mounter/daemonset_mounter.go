@@ -19,6 +19,7 @@
 // Background (StartCommDirWatch -> checkCommDir):
 //
 //	stat(socket) -> healthy? return : tryDiscoverMounter
+//	every 30s: tryDiscoverMounter -> a second mounter pod? log an error, keep using the first
 package mounter
 
 import (
@@ -69,6 +70,8 @@ const (
 	commDirStaleCheckInterval = 1 * time.Second
 	commDirDiscoveryTimeout   = 60 * time.Second
 	commDirRediscoveryTimeout = 15 * time.Second
+	// mounterPodCheckInterval is how often a running node pod lists mounter pods to catch a second one on its node.
+	mounterPodCheckInterval = 30 * time.Second
 
 	// cleanupInterval is how often the periodic cleanup job runs.
 	cleanupInterval = 2 * time.Minute
@@ -93,7 +96,12 @@ type mounterPod struct {
 	commDir string
 	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
 	hasCacheVolume bool
+	// maxVolumes is the mounter pod's MounterMaxVolumesLabel, or -1 if it has none.
+	maxVolumes int64
 }
+
+// MounterMaxVolumesLabel is the mounter pod label the chart sets to its entry's maxVolumesPerNode.
+const MounterMaxVolumesLabel = "s3.csi.aws.com/max-volumes-per-node"
 
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
 type mountSyscallFunc func(target string, opts mpmounter.MountOptions) (int, error)
@@ -1204,7 +1212,7 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 
 	var lastErr error
 	err := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
-		mounter, err := dm.tryDiscoverMounter(ctx)
+		mounter, err := dm.tryDiscoverMounter(ctx, true)
 		if err == nil {
 			dm.mounter.Store(mounter)
 			return true, nil
@@ -1225,10 +1233,15 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 	ticker := time.NewTicker(commDirCheckInterval)
 	defer ticker.Stop()
+	podCheck := time.NewTicker(mounterPodCheckInterval)
+	defer podCheck.Stop()
 	for {
 		select {
 		case <-stopCh:
 			return
+		case <-podCheck.C:
+			dm.checkForSecondMounter()
+			continue
 		case <-ticker.C:
 		case <-dm.rediscoverCh:
 		}
@@ -1255,7 +1268,7 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	mounter, err := dm.tryDiscoverMounter(ctx)
+	mounter, err := dm.tryDiscoverMounter(ctx, false)
 	if err != nil {
 		klog.V(4).Infof("DaemonsetMounter: rediscovery failed: %v", err)
 		return false
@@ -1263,6 +1276,24 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 	dm.mounter.Store(mounter)
 	klog.V(2).Infof("DaemonsetMounter: re-discovered mounter: %s", mounter.commDir)
 	return true
+}
+
+// MounterMaxVolumesPerNode returns the discovered mounter pod's MounterMaxVolumesLabel, if it has one.
+func (dm *DaemonsetMounter) MounterMaxVolumesPerNode() (int64, bool) {
+	m := dm.mounter.Load()
+	if m == nil || m.maxVolumes < 0 {
+		return 0, false
+	}
+	return m.maxVolumes, true
+}
+
+// checkForSecondMounter logs an error if a second mounter pod is running on this node, and keeps the mounter it has.
+func (dm *DaemonsetMounter) checkForSecondMounter() {
+	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
+	defer cancel()
+	if _, err := dm.tryDiscoverMounter(ctx, false); errors.Is(err, ErrMultipleMounterPods) {
+		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err)
+	}
 }
 
 // GetCommDir returns the cached comm dir path without blocking, exported for testing.
@@ -1420,7 +1451,8 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 
 // tryDiscoverMounter performs a single attempt to find the secondary mounter pod on this node and
 // resolve its comm dir, as seen from the primary daemonset, and whether it has a cache volume.
-func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod, error) {
+// With pickOne, a second running mounter pod is logged and one is picked, rather than returned as an error.
+func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context, pickOne bool) (*mounterPod, error) {
 	pods, err := dm.clientset.CoreV1().Pods(mounterNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: mounterPodLabel,
 		FieldSelector: "spec.nodeName=" + dm.nodeID,
@@ -1430,29 +1462,70 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	}
 
 	var running []corev1.Pod
+	var names []string
 	for _, pod := range pods.Items {
 		if pod.Status.Phase == corev1.PodRunning {
 			running = append(running, pod)
+			names = append(names, pod.Name)
 		}
 	}
 
 	if len(running) > 1 {
-		return nil, fmt.Errorf("%w on node %s (expected exactly 1, got %d)", ErrMultipleMounterPods, dm.nodeID, len(running))
+		err := fmt.Errorf("%w on node %s (expected exactly 1, got %d: %s)", ErrMultipleMounterPods, dm.nodeID, len(running), strings.Join(names, ", "))
+		if !pickOne {
+			return nil, err
+		}
+		running = []corev1.Pod{dm.mounterInUse(running)}
+		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
 	}
 	if len(running) == 0 {
 		return nil, fmt.Errorf("%w on node %s", ErrNoRunningMounterPod, dm.nodeID)
 	}
 
 	podUID := string(running[0].UID)
-	commDir := filepath.Join(dm.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~empty-dir", CommVolumeName)
+	commDir := dm.commDirOf(running[0])
 	hasCacheVolume := mounterPodHasCacheVolume(running[0])
+	maxVolumes := int64(-1)
+	if n, err := strconv.ParseInt(running[0].Labels[MounterMaxVolumesLabel], 10, 64); err == nil && n >= 0 {
+		maxVolumes = n
+	}
 
-	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
-		running[0].Name, podUID, commDir, hasCacheVolume)
+	// Logged only when it changes, as the periodic second-mounter check re-runs discovery every 30s.
+	if cur := dm.mounter.Load(); cur == nil || cur.commDir != commDir {
+		klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
+			running[0].Name, podUID, commDir, hasCacheVolume)
+	}
 	return &mounterPod{
 		commDir:        commDir,
 		hasCacheVolume: hasCacheVolume,
+		maxVolumes:     maxVolumes,
 	}, nil
+}
+
+// mounterInUse returns the pod whose comm dir this node's mounts use, or else the oldest pod.
+func (dm *DaemonsetMounter) mounterInUse(pods []corev1.Pod) corev1.Pod {
+	inUse := map[string]bool{}
+	dm.mountMap.Range(func(_ string, entry *MountEntry) bool {
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		inUse[entry.CommDir] = true
+		return true
+	})
+	oldest := pods[0]
+	for _, pod := range pods {
+		if inUse[dm.commDirOf(pod)] {
+			return pod
+		}
+		if pod.CreationTimestamp.Before(&oldest.CreationTimestamp) {
+			oldest = pod
+		}
+	}
+	return oldest
+}
+
+// commDirOf returns the mounter pod's comm dir as seen from this node pod.
+func (dm *DaemonsetMounter) commDirOf(pod corev1.Pod) string {
+	return filepath.Join(dm.kubeletPath, "pods", string(pod.UID), "volumes", "kubernetes.io~empty-dir", CommVolumeName)
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.
