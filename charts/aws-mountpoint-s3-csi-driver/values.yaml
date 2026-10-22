@@ -58,12 +58,23 @@ node:
                 values:
                   - fargate
                   - hybrid
+                  - auto
+          # EKS Auto Mode nodes, except the built-in system NodePool (CriticalAddonsOnly).
+          - matchExpressions:
+              - key: eks.amazonaws.com/compute-type
+                operator: In
+                values:
+                  - auto
+              - key: karpenter.sh/nodepool
+                operator: NotIn
+                values:
+                  - system
 
 sidecars:
   nodeDriverRegistrar:
     image:
       repository: public.ecr.aws/csi-components/csi-node-driver-registrar
-      tag: v2.17.0-eksbuild.7
+      tag: v2.18.0-eksbuild.1
       pullPolicy: IfNotPresent
     env:
       - name: KUBE_NODE_NAME
@@ -79,7 +90,7 @@ sidecars:
   livenessProbe:
     image:
       repository: public.ecr.aws/csi-components/livenessprobe
-      tag: v2.19.0-eksbuild.7
+      tag: v2.20.0-eksbuild.1
       pullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: /csi
@@ -228,7 +239,7 @@ daemonsetMounters:
     #   limitStrategy: equalSplit
     logLevel: 4
     podLabels: {}
-    # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /
-    # node.defaultTolerations / node.tolerations); it has no toleration field of its own.
-    affinity: {}
+    # The mounter inherits the node pod's nodeSelector, affinity and tolerations (node.nodeSelector,
+    # node.affinity, node.tolerateAllTaints, node.defaultTolerations, node.tolerations), so both
+    # DaemonSets target the same nodes; it has no such fields of its own.
     imagePullSecrets: []
