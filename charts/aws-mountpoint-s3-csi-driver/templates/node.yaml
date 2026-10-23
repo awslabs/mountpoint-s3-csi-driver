@@ -8,6 +8,21 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
+{{- $affinity := .Values.node.affinity }}
+{{- if eq .Values.experimental.mounterMode "daemonset" }}
+{{- include "aws-mountpoint-s3-csi-driver.validateMounterEntries" . }}
+{{- /* The node pod runs wherever any entry's mounter runs: one node term per entry. */}}
+{{- $exprLists := list }}
+{{- range $m := .Values.daemonsetMounters }}
+{{- $exprs := list }}
+{{- range $k, $v := $m.nodeSelector }}
+{{- $exprs = append $exprs (dict "key" $k "operator" "In" "values" (list (toString $v))) }}
+{{- end }}
+{{- $exprs = concat $exprs ($m.matchExpressions | default list) }}
+{{- if $exprs }}{{- $exprLists = append $exprLists $exprs }}{{- end }}
+{{- end }}
+{{- $affinity = include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
+{{- end }}
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -39,7 +54,7 @@ spec:
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
-      {{- with .Values.node.affinity }}
+      {{- with $affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
@@ -122,19 +137,10 @@ spec:
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else if .Values.isHelmRepo }}helm{{ else }}helm-dev{{ end }}
             {{- if eq .Values.experimental.mounterMode "daemonset" }}
-            {{- if ne (len .Values.daemonsetMounters) 1 }}
-            {{- fail "daemonsetMounters must have exactly one entry" }}
-            {{- end }}
-            {{- $mounter := index .Values.daemonsetMounters 0 }}
-            {{- if lt (int $mounter.maxVolumesPerNode) 0 }}
-            {{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 0" }}
-            {{- end }}
             - name: MOUNTER_MODE
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
-            - name: MAX_VOLUMES_PER_NODE
-              value: "{{ $mounter.maxVolumesPerNode }}"
             {{- end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID

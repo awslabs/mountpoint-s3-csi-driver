@@ -690,10 +690,6 @@ func TestDaemonsetMounter(t *testing.T) {
 				wantErr error
 			}{
 				{"no pods", nil, mounter.ErrNoRunningMounterPod},
-				{"multiple running pods", []runtime.Object{
-					mounterPod("mounter-aaa", corev1.PodRunning),
-					mounterPod("mounter-bbb", corev1.PodRunning),
-				}, mounter.ErrMultipleMounterPods},
 				{"non-running pod", []runtime.Object{
 					mounterPod("mounter-pending", corev1.PodPending),
 				}, mounter.ErrNoRunningMounterPod},
@@ -716,6 +712,31 @@ func TestDaemonsetMounter(t *testing.T) {
 					}
 					assert.ErrorIs(t, err, tt.wantErr)
 					assert.ErrorIs(t, err, mounter.ErrCommDirDiscoveryFailed)
+				})
+			}
+		})
+
+		t.Run("DiscoverMounter reads the mounter pod's max-volumes-per-node label", func(t *testing.T) {
+			for _, tt := range []struct {
+				label  string
+				want   int64
+				wantOK bool
+			}{{"5", 5, true}, {"0", 0, true}, {"", 0, false}, {"-1", 0, false}, {"x", 0, false}} {
+				t.Run(tt.label, func(t *testing.T) {
+					t.Setenv("CONTAINER_KUBELET_PATH", t.TempDir())
+					pod := mounterPod("mounter-aaa", corev1.PodRunning)
+					if tt.label != "" {
+						pod.Labels[mounter.MounterMaxVolumesLabel] = tt.label
+					}
+					dm := mounter.NewDaemonsetMounter(fake.NewSimpleClientset(pod), "test-node", mpmounter.NewWithMount(mountutils.NewFakeMounter(nil)), nil, nil, nil, nil, "", cluster.DefaultKubernetes)
+
+					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					defer cancel()
+
+					assert.NoError(t, dm.DiscoverMounter(ctx))
+					got, ok := dm.MounterMaxVolumesPerNode()
+					assert.Equals(t, tt.wantOK, ok)
+					assert.Equals(t, tt.want, got)
 				})
 			}
 		})
