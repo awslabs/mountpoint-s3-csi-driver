@@ -70,11 +70,9 @@ Work in this order:
 
 1. **Pick `maxVolumesPerNode`**: the largest number of distinct S3 PersistentVolumes a single node should mount at once. It is also advertised to the Kubernetes scheduler as the node's volume limit: Pods that would exceed it are placed on another node, or stay `Pending` until one has room. To choose it:
    * Count the distinct S3 PVs used by the Pods you expect to run together on one node. A Pod that mounts more S3 PVs than `maxVolumesPerNode` can never be scheduled.
-   * If you are upgrading from v2, count the distinct PVs on each node from the `MountpointS3PodAttachment` objects at a busy time. The first column is the count; the top line is your busiest node:
+   * If you are upgrading from v2, count the `MountpointS3PodAttachment` objects on each node at a busy time. The first column is the count; the top line is your busiest node:
      ```sh
-     kubectl get mountpoints3podattachments \
-       -o jsonpath='{range .items[*]}{.spec.nodeName}{" "}{.spec.persistentVolumeName}{"\n"}{end}' \
-       | sort -u | awk '{print $1}' | uniq -c | sort -rn | head
+     kubectl get s3pa -o json | jq -r '.items[].spec.nodeName' | sort | uniq -c | sort -rn | head
      ```
    * Prefer the smallest number that fits, because a lower value means a larger share for each volume.
 2. **Pick a per-mount target.** As a rough guide from tests with parallel sequential reads and writes: on a `t3.xlarge`, raising the target above the default 1008 MiB didn't increase throughput; on a 100 Gbps `c6in.16xlarge`, one mount reached about 37 Gbps at 2 GiB and 65–70 Gbps at 4–6 GiB, and throughput plateaued above that.
