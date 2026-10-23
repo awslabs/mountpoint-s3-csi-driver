@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1485,7 +1486,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			s3Vol := createVolume()
 			s3Vol.bind()
 
-			ebsPVC := createDynamicallyProvisionedPVC("ebs-gp3-wait-for-first-consumer")
+			ebsPVC := createDynamicallyProvisionedPVC(createWaitForFirstConsumerStorageClass(ebsCSIDriver))
 
 			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
 
@@ -1504,8 +1505,9 @@ var _ = Describe("Mountpoint Controller", func() {
 		It("should not ungate pod while a statically provisioned S3 PVC is still binding", func() {
 			// A statically provisioned S3 PVC that's pre-bound from the PV side: `pv.spec.claimRef`
 			// points at the PVC, but the PV controller hasn't populated `pvc.spec.volumeName` yet,
-			// so the PVC is still `Pending`. We must keep the pod gated until it binds, otherwise we'd
-			// lose the requeue and never spawn a Mountpoint Pod for this volume.
+			// so the PVC is still `Pending`. It has no StorageClass, so it can bind without the pod
+			// being scheduled and we must keep the pod gated until it does - otherwise we'd lose the
+			// requeue and never spawn a Mountpoint Pod for this volume.
 			vol1 := createVolume()
 			vol1.bind()
 
@@ -1525,6 +1527,45 @@ var _ = Describe("Mountpoint Controller", func() {
 					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
 				))
 			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should not ungate pod while a static S3 PVC with no StorageClass has no PV yet", func() {
+			// `storageClassName: ""`, no `volumeName`, and no PV pointing at it yet (e.g. the PV is applied later).
+			// It can still bind statically without the pod being scheduled, so we must wait for it.
+			vol1 := createVolume()
+			vol1.bind()
+
+			staticPVC := createDynamicallyProvisionedPVC("")
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(staticPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			Consistently(func(g Gomega) {
+				var p corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
+				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
+					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
+				))
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should ungate pod when an unbound PVC uses a WaitForFirstConsumer StorageClass naming the S3 provisioner", func() {
+			// `WaitForFirstConsumer` delays binding whatever the provisioner is, so the provisioner must not
+			// be part of the decision: waiting here would deadlock the pod even though the StorageClass names
+			// the S3 CSI Driver. We give up the headroom reservation for that volume instead.
+			s3Vol := createVolume()
+			s3Vol.bind()
+
+			wffcS3PVC := createDynamicallyProvisionedPVC(createWaitForFirstConsumerStorageClass(s3CSIDriver))
+
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(wffcS3PVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
+			verifyHeadroomPodFor(pod, s3Vol, hrPod)
+
+			pod.waitUntilSchedulingUngated()
 		})
 	})
 
@@ -1863,6 +1904,20 @@ func createDynamicallyProvisionedPVC(storageClassName string) *corev1.Persistent
 	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create dynamically provisioned PVC")
 	waitForObject(pvc)
 	return pvc
+}
+
+// createWaitForFirstConsumerStorageClass creates a StorageClass using `WaitForFirstConsumer` binding
+// with the given provisioner, and returns its name.
+func createWaitForFirstConsumerStorageClass(provisioner string) string {
+	bindingMode := storagev1.VolumeBindingWaitForFirstConsumer
+	sc := &storagev1.StorageClass{
+		ObjectMeta:        metav1.ObjectMeta{GenerateName: "test-wffc-sc-"},
+		Provisioner:       provisioner,
+		VolumeBindingMode: &bindingMode,
+	}
+	Expect(k8sClient.Create(ctx, sc)).To(Succeed(), "Failed to create StorageClass")
+	waitForObject(sc)
+	return sc.Name
 }
 
 // createS3PVClaiming creates an S3-backed PV whose `spec.claimRef` points at `pvc`, without touching
