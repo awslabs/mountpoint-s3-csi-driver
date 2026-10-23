@@ -1,5 +1,11 @@
 on:
   workflow_call:
+    inputs:
+      regular_tests_only:
+        description: "If true, leaves out the cells running other tests than the regular ones (`tests`)"
+        required: false
+        type: boolean
+        default: false
     outputs:
       matrix:
         description: "Matrix"
@@ -17,5 +23,11 @@ jobs:
       - uses: actions/checkout@v7
       - name: Parse matrix.yaml file
         id: parse_yaml
+        env:
+          REGULAR_TESTS_ONLY: ${{ inputs.regular_tests_only }}
         run: |
-            echo "matrix=$(yq -P -o=json '.matrix' '.github/matrix.yaml' | jq -c)" >> $GITHUB_OUTPUT
+            MATRIX=$(yq -P -o=json '.matrix' '.github/matrix.yaml')
+            if [[ "${REGULAR_TESTS_ONLY}" == "true" ]]; then
+              MATRIX=$(echo "${MATRIX}" | jq '.include |= map(select(has("tests") | not))')
+            fi
+            echo "matrix=$(echo "${MATRIX}" | jq -c)" >> $GITHUB_OUTPUT

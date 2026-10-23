@@ -1,0 +1,47 @@
+[
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/name",
+    "value": "system"
+  },
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/labels/alpha.eksctl.io~1nodegroup-name",
+    "value": "system"
+  },
+  {
+    "op": "replace",
+    "path": "/managedNodeGroups/0/tags/alpha.eksctl.io~1nodegroup-name",
+    "value": "system"
+  },
+  {
+    "op": "add",
+    "path": "/karpenter",
+    "value": {
+      "version": "1.14.1"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/iam/podIdentityAssociations",
+    "value": [
+      {
+        "namespace": "kube-system",
+        "serviceAccountName": "s3-csi-driver-sa",
+        "permissionPolicyARNs": [
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        ],
+        "permissionPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3express:*"],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

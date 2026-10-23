@@ -87,6 +87,9 @@ function helm_install_driver() {
     --set node.serviceAccount.create=true \
     ${IRSA_FLAG} \
     --kubeconfig ${KUBECONFIG}
+  # First, as on clusters provisioning nodes on demand (e.g. EKS Auto Mode), the daemonsets' pods only appear
+  # once a node gets provisioned for the controller.
+  $KUBECTL_BIN rollout status deployment s3-csi-controller -n kube-system --timeout=5m --kubeconfig $KUBECONFIG
   $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   # Wait for pod readiness (rollout status doesn't support OnDelete strategy)
   $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-daemonset-mounter -n kube-system --timeout=60s --kubeconfig $KUBECONFIG

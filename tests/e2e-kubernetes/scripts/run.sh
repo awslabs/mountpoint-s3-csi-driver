@@ -28,6 +28,8 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
+# Optional profile in `profiles/` the cluster is created from.
+CLUSTER_PROFILE=${CLUSTER_PROFILE:-}
 IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
@@ -42,6 +44,10 @@ K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 # because they all run in parallel and conflicting name would break other tests.
 if [[ "${CLUSTER_TYPE}" == "openshift" ]]; then
     CLUSTER_NAME=${CLUSTER_NAME:-"s3-csi-rosa"}
+elif [[ "${CLUSTER_TYPE}" == "eksctl" && -n "${CLUSTER_PROFILE}" ]]; then
+    # Kept short as eksctl names IAM roles after the cluster (e.g. `eksctl-KarpenterNodeRole-<cluster>`),
+    # and those are limited to 64 characters.
+    CLUSTER_NAME="s3-csi-${CLUSTER_PROFILE}-${ARCH}-${K8S_VERSION_EKSCTL/./-}"
 elif [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
     # EKS does not allow cluster names with ".", we're replacing them with "-".
     CLUSTER_NAME="s3-csi-cluster-${CLUSTER_TYPE}-${AMI_FAMILY,,}-${ARCH}-${K8S_VERSION_EKSCTL/./-}"
@@ -71,8 +77,29 @@ if [[ "${SELINUX_MODE}" != "enforcing" ]]; then
     EKSCTL_PATCH_SELINUX_ENFORCING_FILE=""
 fi
 
+# A profile is a directory with a `profile.sh` defining `profile_setup`, `profile_teardown` and `profile_print_info`,
+# and an optional `eksctl-patch.json` applied on top of the patches above.
+PROFILE_DIR=""
+EKSCTL_PATCH_PROFILE_FILE=""
+PROFILE_TEARDOWN_HOOK=""
+if [[ -n "${CLUSTER_PROFILE}" ]]; then
+    PROFILE_DIR=${BASE_DIR}/profiles/${CLUSTER_PROFILE}
+    if [[ ! -f "${PROFILE_DIR}/profile.sh" ]]; then
+        echo "Unsupported cluster profile: ${CLUSTER_PROFILE}."
+        exit 1
+    fi
+    source "${PROFILE_DIR}"/profile.sh
+    if [[ -f "${PROFILE_DIR}/eksctl-patch.json" ]]; then
+        EKSCTL_PATCH_PROFILE_FILE=${PROFILE_DIR}/eksctl-patch.json
+    fi
+    PROFILE_TEARDOWN_HOOK=profile_teardown
+fi
+
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 CSI_DRIVER_IRSA_ROLE_ARN=${CSI_DRIVER_IRSA_ROLE_ARN:-}
+
+# Flags of the e2e tests, for every action running them.
+TEST_FLAGS="--bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}"
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -116,7 +143,14 @@ function create_cluster() {
       "$INSTANCE_TYPE" \
       "$AMI_FAMILY" \
       "$K8S_VERSION_EKSCTL" \
-      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
+      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" \
+      "$EKSCTL_PATCH_PROFILE_FILE" \
+      "$PROFILE_TEARDOWN_HOOK"
+  fi
+  if [[ -n "${CLUSTER_PROFILE}" ]]; then
+    # Also run when re-using the cluster, so that changes to the profile's setup take effect.
+    update_kubeconfig
+    profile_setup
   fi
 }
 
@@ -126,7 +160,8 @@ function delete_cluster() {
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
       "$REGION" \
-      "${FORCE:-}"
+      "${FORCE:-}" \
+      "$PROFILE_TEARDOWN_HOOK"
   fi
 }
 
@@ -172,21 +207,35 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- ${TEST_FLAGS}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_upgrade_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE} --run-upgrade-tests
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 10h -- ${TEST_FLAGS} --run-upgrade-tests
   EXIT_CODE=$?
   print_cluster_info
+  exit $EXIT_CODE
+elif [[ "${ACTION}" == "run_scheduling_tests" ]]; then
+  set +e
+  pushd tests/e2e-kubernetes
+  # Not in parallel (`-p`): the tests scale the cluster's nodes.
+  KUBECONFIG=${KUBECONFIG} ginkgo -vv --github-output -timeout 60m -- ${TEST_FLAGS} --run-scheduling-tests
+  EXIT_CODE=$?
+  print_cluster_info
+  if [[ ${EXIT_CODE} -ne 0 && -n "${CLUSTER_PROFILE}" ]]; then
+    # What the autoscaler said about the nodes, before its events expire (after an hour). The tests log the events
+    # about the workloads, which go away with the tests' namespace.
+    $KUBECTL_BIN events -A --kubeconfig ${KUBECONFIG}
+    profile_print_info
+  fi
   exit $EXIT_CODE
 elif [[ "${ACTION}" == "run_perf" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --performance=true --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
+  KUBECONFIG=${KUBECONFIG} go test -ginkgo.vv ${TEST_FLAGS} --performance=true
   EXIT_CODE=$?
   print_cluster_info
   popd
@@ -204,6 +253,6 @@ elif [[ "${ACTION}" == "delete_cluster" ]]; then
 elif [[ "${ACTION}" == "e2e_cleanup" ]]; then
   e2e_cleanup || true
 else
-  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
+  echo "ACTION := install_tools|create_cluster|install_driver|update_kubeconfig|run_tests|run_upgrade_tests|run_scheduling_tests|run_perf|e2e_cleanup|uninstall_driver|delete_cluster"
   exit 1
 fi

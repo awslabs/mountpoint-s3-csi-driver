@@ -236,9 +236,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	klog.Infof("Launched Mountpoint for mount %s as UID %d (pid %d)", mountId, options.Uid, handle.Pid())
 
-	pm.wg.Add(1)
-	go func() {
-		defer pm.wg.Done()
+	pm.wg.Go(func() {
 		exitCode, stderr := handle.Wait()
 
 		// Before freeing mountId and the UID, so a relaunch cannot create the directory this then removes.
@@ -262,7 +260,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		} else {
 			klog.Infof("Mountpoint for mount %s (UID %d) exited cleanly", mountId, options.Uid)
 		}
-	}()
+	})
 
 	return nil
 }
