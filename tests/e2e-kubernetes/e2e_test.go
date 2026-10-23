@@ -35,6 +35,7 @@ func init() {
 	flag.StringVar(&BucketPrefix, "bucket-prefix", "local", "prefix for temporary buckets")
 	flag.BoolVar(&Performance, "performance", false, "run performance tests")
 	flag.BoolVar(&UpgradeTests, "run-upgrade-tests", false, "run upgrade tests")
+	flag.BoolVar(&SchedulingTests, "run-scheduling-tests", false, "run scheduling tests")
 	flag.BoolVar(&IMDSAvailable, "imds-available", false, "indicates whether instance metadata service is available")
 	flag.Parse()
 
@@ -170,6 +171,8 @@ var _ = utils.SIGDescribe("CSI Volumes", func() {
 		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIPerformanceTestSuite}
 	} else if UpgradeTests {
 		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSIUpgradeTestSuite}
+	} else if SchedulingTests {
+		testSuites = []func() framework.TestSuite{custom_testsuites.InitS3CSISchedulingTestSuite}
 	} else {
 		testSuites = getCSITestSuites()
 	}

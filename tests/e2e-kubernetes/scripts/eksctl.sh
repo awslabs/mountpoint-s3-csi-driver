@@ -36,8 +36,16 @@ function eksctl_compute_cluster_spec_hash() {
   NODE_TYPE=${1}
   ZONES=${2}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${3}
+  EKSCTL_PATCH_PROFILE_FILE=${4:-}
 
-  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+  # Hash the profile patch's content, so that changing a profile re-creates its clusters.
+  # Clusters without a profile keep their existing hash.
+  PROFILE_PATCH_HASH=""
+  if [ -n "$EKSCTL_PATCH_PROFILE_FILE" ]; then
+    PROFILE_PATCH_HASH="-$(sha256sum < "$EKSCTL_PATCH_PROFILE_FILE" | cut -d' ' -f1)"
+  fi
+
+  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}${PROFILE_PATCH_HASH}" | sha256sum | cut -d' ' -f1
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
@@ -65,8 +73,10 @@ function eksctl_create_cluster() {
   AMI_FAMILY=${11}
   K8S_VERSION=${12}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
+  EKSCTL_PATCH_PROFILE_FILE=${14:-}
+  PRE_DELETE_HOOK=${15:-}
 
-  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" "${EKSCTL_PATCH_PROFILE_FILE}")
 
   # Check if cluster exists and matches our specs
   if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
@@ -77,7 +87,7 @@ function eksctl_create_cluster() {
     fi
 
     echo "Existing cluster ${CLUSTER_NAME} is either too old or doesn't match specifications. Re-creating..."
-    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "true"
+    eksctl_delete_cluster "$BIN" "$CLUSTER_NAME" "$REGION" "true" "$PRE_DELETE_HOOK"
   fi
 
   create_log_group_if_absent "${CLUSTER_NAME}" "${REGION}" "${CW_LOG_RETENTION_DAYS}"
@@ -91,7 +101,6 @@ function eksctl_create_cluster() {
     --with-oidc \
     --zones $ZONES \
     --version $K8S_VERSION \
-    --tags ClusterSpecHash=${CLUSTER_SPEC_HASH} \
     --dry-run > $CLUSTER_FILE
 
   CLUSTER_FILE_TMP="${CLUSTER_FILE}.tmp"
@@ -100,6 +109,11 @@ function eksctl_create_cluster() {
 
   if [ -n "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" ]; then
     ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_SELINUX_ENFORCING_FILE)" -o yaml > $CLUSTER_FILE_TMP
+    mv $CLUSTER_FILE_TMP $CLUSTER_FILE
+  fi
+
+  if [ -n "$EKSCTL_PATCH_PROFILE_FILE" ]; then
+    ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_PROFILE_FILE)" -o yaml > $CLUSTER_FILE_TMP
     mv $CLUSTER_FILE_TMP $CLUSTER_FILE
   fi
 
@@ -116,6 +130,10 @@ function eksctl_create_cluster() {
   ${BIN} create accessentry --cluster ${CLUSTER_NAME} --region ${REGION} --principal-arn ${READ_ONLY_ARN} --type STANDARD
   aws eks associate-access-policy --region ${REGION} --cluster-name ${CLUSTER_NAME} --principal-arn ${READ_ONLY_ARN} \
     --policy-arn arn:${AWS_PARTITION}:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy --access-scope type=cluster
+
+  # Only once the cluster is fully created, so that one that failed to come up doesn't match and gets re-created.
+  CLUSTER_ARN=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${REGION}" --query 'cluster.arn' --output text)
+  aws eks tag-resource --region "${REGION}" --resource-arn "${CLUSTER_ARN}" --tags ClusterSpecHash=${CLUSTER_SPEC_HASH}
 }
 
 function eksctl_delete_cluster() {
@@ -123,6 +141,8 @@ function eksctl_delete_cluster() {
   CLUSTER_NAME=${2}
   REGION=${3}
   FORCE=${4:-false}
+  # Function to run before deleting an existing cluster, e.g. to remove resources that would keep it from being deleted.
+  PRE_DELETE_HOOK=${5:-}
 
   STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
   if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
@@ -132,6 +152,7 @@ function eksctl_delete_cluster() {
       aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
     fi
     eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
+    eksctl_delete_leftover_cf_stacks "${CLUSTER_NAME}" "${REGION}"
     return 0
   fi
 
@@ -141,6 +162,9 @@ function eksctl_delete_cluster() {
     return 0
   fi
 
+  if [ -n "$PRE_DELETE_HOOK" ]; then
+    "$PRE_DELETE_HOOK"
+  fi
 
   aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
   ${BIN} delete cluster "${CLUSTER_NAME}" --wait --disable-nodegroup-eviction
@@ -254,6 +278,21 @@ function eksctl_delete_cluster_cf_stack() {
     fi
 
     aws cloudformation wait stack-delete-complete --region ${REGION} --stack-name ${STACK_NAME}
+}
+
+# Deletes the cluster's other stacks, which eksctl leaves behind when it fails to delete the cluster's own stack,
+# e.g. its Karpenter stack, which it deletes after that one.
+function eksctl_delete_leftover_cf_stacks() {
+    CLUSTER_NAME=${1}
+    REGION=${2}
+
+    STACKS=$(aws cloudformation describe-stacks --region ${REGION} \
+        --query "Stacks[?starts_with(StackName, 'eksctl-${CLUSTER_NAME}-')].StackName" --output text)
+    for STACK in ${STACKS}; do
+        aws cloudformation update-termination-protection --no-enable-termination-protection --region ${REGION} --stack-name ${STACK}
+        aws cloudformation delete-stack --region ${REGION} --stack-name ${STACK}
+        aws cloudformation wait stack-delete-complete --region ${REGION} --stack-name ${STACK}
+    done
 }
 
 function delete_security_group() {
