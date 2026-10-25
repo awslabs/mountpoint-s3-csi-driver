@@ -693,6 +693,11 @@ func TestDaemonsetMounter(t *testing.T) {
 				{"non-running pod", []runtime.Object{
 					mounterPod("mounter-pending", corev1.PodPending),
 				}, mounter.ErrNoRunningMounterPod},
+				{"running pod being deleted", []runtime.Object{func() *corev1.Pod {
+					pod := mounterPod("mounter-deleting", corev1.PodRunning)
+					pod.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+					return pod
+				}()}, mounter.ErrNoRunningMounterPod},
 			}
 
 			for _, tt := range tests {

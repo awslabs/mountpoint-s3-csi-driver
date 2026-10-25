@@ -136,8 +136,9 @@ two or more entries each must say which nodes it applies to.
 {{- $selections := list }}
 {{- $unnamed := 0 }}
 {{- range $m := $entries }}
-{{- if lt (int $m.maxVolumesPerNode) 0 }}
-{{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 0" }}
+{{- /* On the raw value, since int turns anything that isn't a whole number into 0, which means no limit. */}}
+{{- if not (regexMatch "^[0-9]+$" (toString $m.maxVolumesPerNode)) }}
+{{- fail (printf "daemonsetMounters[%s].maxVolumesPerNode must be a whole number >= 0, got %v" ($m.name | default "") $m.maxVolumesPerNode) }}
 {{- end }}
 {{- if $m.name }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $m.name) }}

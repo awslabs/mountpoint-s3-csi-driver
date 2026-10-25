@@ -19,7 +19,7 @@
 // Background (StartCommDirWatch -> checkCommDir):
 //
 //	stat(socket) -> healthy? return : tryDiscoverMounter
-//	every 30s: tryDiscoverMounter -> a second mounter pod? log an error, keep using the first
+//	every 30s: tryDiscoverMounter -> more than one mounter pod? log an error, keep using the first
 package mounter
 
 import (
@@ -72,7 +72,7 @@ const (
 	commDirStaleCheckInterval = 1 * time.Second
 	commDirDiscoveryTimeout   = 60 * time.Second
 	commDirRediscoveryTimeout = 15 * time.Second
-	// mounterPodCheckInterval is how often a running node pod lists mounter pods to catch a second one on its node.
+	// mounterPodCheckInterval is how often a running node pod lists mounter pods to catch more than one on its node.
 	mounterPodCheckInterval = 30 * time.Second
 
 	// cleanupInterval is how often the periodic cleanup job runs.
@@ -1267,7 +1267,7 @@ func (dm *DaemonsetMounter) StartCommDirWatch(stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		case <-podCheck.C:
-			dm.checkForSecondMounter()
+			dm.checkForMultipleMounterPods()
 			continue
 		case <-ticker.C:
 		case <-dm.rediscoverCh:
@@ -1295,7 +1295,7 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	mounter, err := dm.tryDiscoverMounter(ctx, false)
+	mounter, err := dm.tryDiscoverMounter(ctx, true)
 	if err != nil {
 		klog.V(4).Infof("DaemonsetMounter: rediscovery failed: %v", err)
 		return false
@@ -1314,8 +1314,8 @@ func (dm *DaemonsetMounter) MounterMaxVolumesPerNode() (int64, bool) {
 	return m.maxVolumes, true
 }
 
-// checkForSecondMounter logs an error if a second mounter pod is running on this node, and keeps the mounter it has.
-func (dm *DaemonsetMounter) checkForSecondMounter() {
+// checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.
+func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
 	if _, err := dm.tryDiscoverMounter(ctx, false); errors.Is(err, ErrMultipleMounterPods) {
@@ -1478,7 +1478,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 
 // tryDiscoverMounter performs a single attempt to find the secondary mounter pod on this node and
 // resolve its comm dir, as seen from the primary daemonset, and whether it has a cache volume.
-// With pickOne, a second running mounter pod is logged and one is picked, rather than returned as an error.
+// With pickOne, more than one running mounter pod is logged and one is picked, rather than returned as an error.
 func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context, pickOne bool) (*mounterPod, error) {
 	pods, err := dm.clientset.CoreV1().Pods(mounterNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: mounterPodLabel,
@@ -1491,7 +1491,8 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context, pickOne bool
 	var running []corev1.Pod
 	var names []string
 	for _, pod := range pods.Items {
-		if pod.Status.Phase == corev1.PodRunning {
+		// A deleting mounter stays Running while its Mountpoints exit, so it would count as another one.
+		if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp == nil {
 			running = append(running, pod)
 			names = append(names, pod.Name)
 		}

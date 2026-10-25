@@ -22,7 +22,9 @@ func TestMounterEntriesRejectInvalidValues(t *testing.T) {
 		expectedErrContains string
 	}{
 		{"no entries", `daemonsetMounters: []`, "daemonsetMounters must have at least one entry"},
-		{"negative limit on a later entry", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {name: b, nodeSelector: {x: "2"}, maxVolumesPerNode: -1, memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be >= 0"},
+		{"negative limit on a later entry", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {name: b, nodeSelector: {x: "2"}, maxVolumesPerNode: -1, memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
+		{"limit that isn't a number", `daemonsetMounters: [{maxVolumesPerNode: "abc", memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
+		{"decimal limit", `daemonsetMounters: [{maxVolumesPerNode: 4.5, memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
 		{"invalid name", `daemonsetMounters: [{name: Big_Mem, nodeSelector: {x: "1"}, ` + entry + `}]`, `name "Big_Mem" must be lowercase letters`},
 		{"repeated name", `daemonsetMounters: [{name: a, nodeSelector: {x: "1"}, ` + entry + `}, {name: a, nodeSelector: {x: "2"}, ` + entry + `}]`, `two entries are named "a"`},
 		{"two unnamed", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {nodeSelector: {x: "2"}, ` + entry + `}]`, "at most one entry may leave out name"},

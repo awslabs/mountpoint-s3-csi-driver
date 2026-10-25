@@ -1,7 +1,6 @@
 package mounter
 
 import (
-	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -11,21 +10,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/klog/v2"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
 // Tests for a node with two running mounter pods, which happens when two mounter entries match it.
 // They capture klog's process-global output, so none may call t.Parallel.
 
-func TestCheckForSecondMounterLogsAndKeepsMounter(t *testing.T) {
+func TestCheckForMultipleMounterPodsLogsAndKeepsMounter(t *testing.T) {
 	first, second := runningMounterPod("mounter-first", 1), runningMounterPod("mounter-second", 2)
 	dm := overlapDM(t, first, second)
 	dm.mounter.Store(&mounterPod{commDir: dm.commDirOf(*first)})
-	logs := captureKlog(t)
+	logs := testutil.CaptureKlog(t)
 
-	dm.checkForSecondMounter()
+	dm.checkForMultipleMounterPods()
 
 	assert.Contains(t, logs.String(), "multiple running mounter pods found on node test-node (expected exactly 1, got 2: mounter-first, mounter-second)")
 	assert.Equals(t, dm.commDirOf(*first), dm.mounter.Load().commDir)
@@ -37,7 +36,7 @@ func TestDiscoverMounterPicksMounterInUse(t *testing.T) {
 	dm := overlapDM(t, older, inUse)
 	entry, _ := dm.mountMap.GetOrCreate("pv-1")
 	entry.CommDir = dm.commDirOf(*inUse)
-	logs := captureKlog(t)
+	logs := testutil.CaptureKlog(t)
 
 	assert.NoError(t, dm.DiscoverMounter(context.Background()))
 
@@ -51,6 +50,15 @@ func TestDiscoverMounterPicksOldestWithNoMounts(t *testing.T) {
 	dm := overlapDM(t, newer, older)
 
 	assert.NoError(t, dm.DiscoverMounter(context.Background()))
+
+	assert.Equals(t, dm.commDirOf(*older), dm.mounter.Load().commDir)
+}
+
+func TestRediscoveryPicksAMounterWhenItsOwnIsGone(t *testing.T) {
+	newer, older := runningMounterPod("mounter-a", 2), runningMounterPod("mounter-b", 1)
+	dm := overlapDM(t, newer, older)
+
+	assert.Equals(t, true, dm.checkCommDir())
 
 	assert.Equals(t, dm.commDirOf(*older), dm.mounter.Load().commDir)
 }
@@ -75,18 +83,4 @@ func runningMounterPod(name string, createdMinute int) *corev1.Pod {
 		Spec:   corev1.PodSpec{NodeName: "test-node"},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
-}
-
-// captureKlog redirects klog's output into the returned buffer for the rest of t. SetOutput alone
-// captures nothing: logtostderr defaults true and klog short-circuits to os.Stderr before the sink.
-func captureKlog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	klog.LogToStderr(false)
-	klog.SetOutput(&buf)
-	t.Cleanup(func() {
-		klog.SetOutput(nil)
-		klog.LogToStderr(true)
-	})
-	return &buf
 }
