@@ -79,7 +79,7 @@ sidecars:
   livenessProbe:
     image:
       repository: public.ecr.aws/csi-components/livenessprobe
-      tag: v2.20.0-eksbuild.2
+      tag: v2.20.0-eksbuild.3
       pullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: /csi
