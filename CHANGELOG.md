@@ -1,3 +1,11 @@
+# v2.9.2
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.2/README.md)
+
+### Notable changes
+* Update Go to 1.27.3 ([#1011](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1011))
+* Update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.3 and livenessprobe:v2.20.0-eksbuild.3 ([#1016](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1016))
+
 # v2.9.1
 
 [Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.1/README.md)
