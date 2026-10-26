@@ -159,7 +159,7 @@ spec:
               cpu: 10m
               memory: 40Mi
         - name: liveness-probe
-          image: public.ecr.aws/csi-components/livenessprobe:v2.20.0-eksbuild.2
+          image: public.ecr.aws/csi-components/livenessprobe:v2.20.0-eksbuild.3
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true
