@@ -115,19 +115,27 @@ func Recv(ctx context.Context, sockPath string) (Options, error) {
 	if err != nil {
 		return Options{}, fmt.Errorf("failed to listen unix socket %s: %w", sockPath, err)
 	}
-	defer l.Close()
 
-	// `l.Accept` does not respect `ctx`'s deadline, we need to call `ul.SetDeadline` to ensure `l.Accept` has a deadline.
-	if deadline, ok := ctx.Deadline(); ok {
-		ul := l.(*net.UnixListener)
-		err := ul.SetDeadline(deadline)
-		if err != nil {
-			return Options{}, fmt.Errorf("failed to set deadline on unix socket %s: %w", sockPath, err)
+	// Close the listener when ctx is canceled to unblock Accept,
+	// or when Recv completes normally. Ensures exactly one Close call
+	// and no goroutine leak.
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			l.Close()
+		case <-done:
+			l.Close()
 		}
-	}
+	}()
 
 	conn, err := l.Accept()
 	if err != nil {
+		if ctx.Err() != nil {
+			return Options{}, ctx.Err()
+		}
 		return Options{}, fmt.Errorf("failed to accept connection from unix socket %s: %w", sockPath, err)
 	}
 
