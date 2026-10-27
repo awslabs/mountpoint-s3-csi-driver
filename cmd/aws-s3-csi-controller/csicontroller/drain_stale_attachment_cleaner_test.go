@@ -172,3 +172,59 @@ func TestDrainStaleAttachmentCleaner(t *testing.T) {
 		})
 	})
 }
+
+func TestDrainStaleAttachmentCleanerDeletesEmptyS3PA(t *testing.T) {
+	// Left behind when a reconciler teardown is interrupted after emptying the S3PA
+	for name, attachments := range map[string]map[string][]crdv2.WorkloadAttachment{
+		"no Mountpoint Pods":               {},
+		"Mountpoint Pod with no workloads": {"mp-1": {}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s3pa := newS3PA("s3pa-empty", attachments)
+			c, cleaner := newDrainCleaner(t, s3pa)
+
+			// Kept on the first pass, and again if it changed since then
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+			assert.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa))
+			s3pa.Labels = map[string]string{"changed": "true"}
+			assert.NoError(t, c.Update(ctx, s3pa))
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+
+			// Deleted once it is still unchanged on the next pass
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PADeleted(t, c, s3pa.Name)
+		})
+	}
+}
+
+func newS3PA(name string, attachments map[string][]crdv2.WorkloadAttachment) *crdv2.MountpointS3PodAttachment {
+	return &crdv2.MountpointS3PodAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: crdv2.MountpointS3PodAttachmentSpec{
+			NodeName:                   testNode,
+			PersistentVolumeName:       "test-pv",
+			VolumeID:                   "test-vol-id",
+			MountpointS3PodAttachments: attachments,
+		},
+	}
+}
+
+func assertS3PAExists(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	if err := c.Get(context.Background(), client.ObjectKey{Name: name}, &crdv2.MountpointS3PodAttachment{}); err != nil {
+		t.Errorf("expected S3PodAttachment %q to exist, got error: %v", name, err)
+	}
+}
+
+func assertS3PADeleted(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	err := c.Get(context.Background(), client.ObjectKey{Name: name}, &crdv2.MountpointS3PodAttachment{})
+	if err == nil {
+		t.Errorf("expected S3PodAttachment %q to be deleted, but it still exists", name)
+	} else if !apierrors.IsNotFound(err) {
+		t.Errorf("unexpected error checking S3PodAttachment %q: %v", name, err)
+	}
+}

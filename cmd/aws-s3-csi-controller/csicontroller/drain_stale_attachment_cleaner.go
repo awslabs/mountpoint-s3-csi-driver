@@ -2,6 +2,7 @@ package csicontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -38,11 +39,17 @@ const (
 type DrainStaleAttachmentCleaner struct {
 	client.Client
 	mountpointNamespace string
+	// Already-empty S3PodAttachments (UID to resourceVersion) seen on the previous pass and on this pass
+	emptyBefore, emptyNow map[types.UID]string
 }
 
 // NewDrainStaleAttachmentCleaner creates a DrainStaleAttachmentCleaner.
 func NewDrainStaleAttachmentCleaner(c client.Client, mountpointNamespace string) *DrainStaleAttachmentCleaner {
-	return &DrainStaleAttachmentCleaner{Client: c, mountpointNamespace: mountpointNamespace}
+	return &DrainStaleAttachmentCleaner{
+		Client:              c,
+		mountpointNamespace: mountpointNamespace,
+		emptyNow:            map[types.UID]string{},
+	}
 }
 
 // Start runs the periodic cleanup loop until the context is cancelled. Satisfies manager.Runnable.
@@ -94,6 +101,9 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 	if err := cm.List(ctx, s3paList); err != nil {
 		return err
 	}
+
+	cm.emptyBefore, cm.emptyNow = cm.emptyNow, map[types.UID]string{}
+
 	for i := range s3paList.Items {
 		if err := cm.cleanupStaleWorkloads(ctx, &s3paList.Items[i], existingPods); err != nil {
 			log.Error(err, "Error cleaning up S3PodAttachment", "s3pa", s3paList.Items[i].Name)
@@ -119,6 +129,12 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 //     S3PA is updated in place.
 func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
+	// Only delete an already-empty S3PodAttachment if it was unchanged since the previous pass, to avoid racing the reconciler
+	if !hasWorkloads(s3pa) && cm.emptyBefore[s3pa.UID] != s3pa.ResourceVersion {
+		cm.emptyNow[s3pa.UID] = s3pa.ResourceVersion
+		return nil
+	}
+
 	modified := false
 	now := time.Now().UTC()
 
@@ -147,10 +163,20 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 		}
 	}
 
-	if modified {
-		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			return cm.deleteS3PodAttachment(ctx, s3pa)
+	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
+	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
+		reason := cleanerReasonEmptyOnArrival
+		if modified {
+			reason = cleanerReasonEmptiedByCleaner
 		}
+		if err := cm.deleteS3PodAttachment(ctx, s3pa, reason, log); err != nil {
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reason, err)
+		}
+		return nil
+	}
+
+	// Update the S3PodAttachment if modified
+	if modified {
 		return cm.Update(ctx, s3pa)
 	}
 	return nil
@@ -238,8 +264,12 @@ func (cm *DrainStaleAttachmentCleaner) addNeedsUnmountAnnotation(ctx context.Con
 
 // deleteS3PodAttachment deletes the S3PA with a resourceVersion precondition so a concurrent
 // modification causes a 409 Conflict (retried next sweep) rather than a lost update.
-func (cm *DrainStaleAttachmentCleaner) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
-	return cm.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
+func (cm *DrainStaleAttachmentCleaner) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
+	if err := cm.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
+		return err
+	}
+	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
+	return nil
 }
 
 // isInMountpointNamespace reports whether `pod` is in the Mountpoint namespace.
