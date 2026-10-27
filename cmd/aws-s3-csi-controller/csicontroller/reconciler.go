@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -176,8 +177,8 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		priorityClassKind = mppod.PreemptingPriorityClass
 	}
 
-	volumes, hasUnboundPVCs, err := r.getWorkloadVolumes(ctx, pod)
-	requeue := hasUnboundPVCs
+	volumes, hasUnboundS3PVCs, err := r.getWorkloadVolumes(ctx, pod)
+	requeue := hasUnboundS3PVCs
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -235,9 +236,9 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 
 	if needsHeadroomForMountpointPod &&
 		len(volumes) == numHeadroomPods &&
-		!hasUnboundPVCs {
-		// No S3 backed PVCs are unbound (requeue=false), spawned all Headroom Pods needed, now ungate the Workload Pod,
-		// so it can get scheduled (alongside Headroom Pods)
+		!hasUnboundS3PVCs {
+		// All statically provisioned (S3-backed) PVCs are bound and have headroom pods.
+		// Ungate the Workload Pod so it can get scheduled alongside the Headroom Pods.
 		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
 		if err != nil {
 			return reconcile.Result{}, err
@@ -273,14 +274,14 @@ func (r *Reconciler) getWorkloadVolumes(
 			continue
 		}
 
-		// If PVC has no bound PVs yet, `getBoundPVForPodClaim` will return `errPVCIsNotBoundToAPV`.
-		// In this case we'll just return `reconcile.Result{Requeue: true}` here, which will bubble up to the
-		// original `Reconcile` call and will cause a retry for this Pod with an exponential backoff.
+		// `getBoundPVForPodClaim` returns `errPVCIsNotBoundToAPV` if the PVC isn't bound yet and we should
+		// wait for it, and `errSkipUnboundPVC` if it isn't bound yet and we shouldn't wait for it.
+		// We only requeue for the former.
 		pvc, pv, err := r.getBoundPVForPodClaim(ctx, workloadPod, podPVC)
 		if err != nil {
 			if errors.Is(err, errPVCIsNotBoundToAPV) {
 				status = Requeue
-			} else {
+			} else if !errors.Is(err, errSkipUnboundPVC) {
 				errs = append(errs, err)
 			}
 			continue
@@ -921,8 +922,15 @@ func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, l
 // to be retried later.
 var errPVCIsNotBoundToAPV = errors.New("PVC is not bound to a PV yet")
 
+// errSkipUnboundPVC is returned for a not-yet-bound PVC that the Workload Pod must not wait for,
+// because waiting is either pointless (the PVC is known not to be backed by the S3 CSI Driver) or
+// would deadlock the Pod (the PVC can only bind once the Pod is scheduled).
+// See [Reconciler.shouldWaitForUnboundPVC].
+var errSkipUnboundPVC = errors.New("not waiting for unbound PVC")
+
 // getBoundPVForPodClaim tries to find bound PV and PVC from given `claim`.
-// It `errPVCIsNotBoundToAPV` if PVC is not bound to a PV yet to be eventually retried.
+// It returns `errPVCIsNotBoundToAPV` if the PVC is not bound to a PV yet and should be waited for (transient, should be retried).
+// It returns `errSkipUnboundPVC` if the PVC is not bound to a PV yet and should not be waited for (should be skipped).
 func (r *Reconciler) getBoundPVForPodClaim(
 	ctx context.Context,
 	pod *corev1.Pod,
@@ -938,9 +946,25 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound || pvc.Spec.VolumeName == "" {
-		log.V(debugLevel).Info("PVC is not bound to a PV yet or has a empty volume name - ignoring",
+		log.V(debugLevel).Info("PVC is not bound to a PV yet",
 			"status", pvc.Status.Phase,
 			"volumeName", pvc.Spec.VolumeName)
+
+		// Only a Workload Pod we're holding scheduling-gated can deadlock against a PVC that binds on
+		// scheduling, so without the headroom feature we wait for any unbound PVC, as we did before.
+		// This also keeps the StorageClass lookup - and the RBAC permission it needs - behind the flag.
+		if r.isHeadroomForMountpointPodsFeatureEnabled() {
+			shouldWait, checkErr := r.shouldWaitForUnboundPVC(ctx, pvc)
+			if checkErr != nil {
+				return nil, nil, fmt.Errorf("Failed to determine whether to wait for unbound PVC: %w", checkErr)
+			}
+			if !shouldWait {
+				log.V(debugLevel).Info("Not waiting for unbound PVC - it either isn't backed by the S3 CSI Driver, " +
+					"or can only bind once the Workload Pod is scheduled")
+				return nil, nil, errSkipUnboundPVC
+			}
+		}
+
 		return nil, nil, errPVCIsNotBoundToAPV
 	}
 
@@ -957,6 +981,59 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	}
 
 	return pvc, pv, nil
+}
+
+// shouldWaitForUnboundPVC returns whether the Workload Pod should keep waiting for the given
+// not-yet-bound `pvc` to bind, rather than being ungated without headroom reserved for it.
+//
+// We only skip a PVC when it can't bind until the Workload Pod is scheduled, i.e. when its
+// StorageClass uses `WaitForFirstConsumer`. Waiting for one of those deadlocks the Workload Pod: the
+// PVC only binds once the Pod is scheduled, and the Pod stays scheduling-gated until the PVC binds
+// (see https://github.com/awslabs/mountpoint-s3-csi-driver/issues/855).
+//
+// This deliberately doesn't look at the StorageClass `provisioner`. `WaitForFirstConsumer` delays
+// binding whatever the provisioner is, so waiting would deadlock the Pod even for a PVC that does
+// turn out to be S3-backed. Skipping it only costs the headroom reservation for that one volume,
+// which is a degradation, whereas waiting never recovers.
+//
+// Everything else is waited for, because it can bind without the Pod being scheduled: a PVC with no
+// StorageClass (which is how S3 volumes are statically provisioned), one naming a StorageClass that
+// doesn't exist, or one using `Immediate` binding. Once it binds, its PV tells us whether it's
+// S3-backed.
+//
+// TODO: This needs to be revisited once we support dynamic provisioning.
+func (r *Reconciler) shouldWaitForUnboundPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+	if pvc.Spec.VolumeName != "" {
+		// The PVC is pre-bound to a PV, which the PV controller binds as soon as that PV exists,
+		// regardless of the binding mode. So there's no deadlock to avoid and the PV decides.
+		pv := &corev1.PersistentVolume{}
+		if err := r.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
+			if apierrors.IsNotFound(err) {
+				// The referenced PV doesn't exist yet, so we can't classify the PVC. Wait for it - the
+				// Workload Pod can't run until this PVC binds either way.
+				return true, nil
+			}
+			return false, fmt.Errorf("failed to get PV %q referenced by PVC %s/%s: %w",
+				pvc.Spec.VolumeName, pvc.Namespace, pvc.Name, err)
+		}
+		return extractCSISpecFromPV(pv) != nil, nil
+	}
+
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
+		return true, nil
+	}
+
+	sc := &storagev1.StorageClass{}
+	if err := r.Get(ctx, types.NamespacedName{Name: *pvc.Spec.StorageClassName}, sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			// The PV controller treats a missing StorageClass as `Immediate` binding.
+			return true, nil
+		}
+		return false, fmt.Errorf("failed to get StorageClass %q for PVC %s/%s: %w",
+			*pvc.Spec.StorageClassName, pvc.Namespace, pvc.Name, err)
+	}
+
+	return sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer, nil
 }
 
 // findIRSAServiceAccountRole retrieves the IAM role ARN associated with a pod's service account
