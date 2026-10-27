@@ -1687,9 +1687,7 @@ func (p *testPod) succeed() {
 	p.Status.Phase = corev1.PodSucceeded
 	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
 
-	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
-		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
-	})
+	p.waitForPhaseOrDeletion(corev1.PodSucceeded)
 }
 
 // fail simulates `testPod` to be failed.
@@ -1697,9 +1695,25 @@ func (p *testPod) fail() {
 	p.Status.Phase = corev1.PodFailed
 	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
 
-	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
-		g.Expect(pod.Status.Phase).To(Equal(corev1.PodFailed))
-	})
+	p.waitForPhaseOrDeletion(corev1.PodFailed)
+}
+
+// waitForPhaseOrDeletion waits until `testPod` reports `phase`, or has already been deleted.
+// The controller deletes completed Mountpoint Pods right away, so the pod can disappear
+// before we get a chance to observe its new phase.
+func (p *testPod) waitForPhaseOrDeletion(phase corev1.PodPhase) {
+	GinkgoHelper()
+
+	key := types.NamespacedName{Name: p.GetName(), Namespace: p.GetNamespace()}
+	Eventually(func(g Gomega) {
+		pod := &corev1.Pod{}
+		err := k8sClient.Get(ctx, key, pod)
+		if apierrors.IsNotFound(err) {
+			return
+		}
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pod.Status.Phase).To(Equal(phase))
+	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
 }
 
 // annotate adds given `key` and `value` as a annotation to `testPod`.
