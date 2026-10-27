@@ -1239,7 +1239,7 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 
 	var lastErr error
 	err := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
-		mounter, err := dm.tryDiscoverMounter(ctx, true)
+		mounter, err := dm.tryDiscoverMounter(ctx)
 		if err == nil {
 			dm.mounter.Store(mounter)
 			return true, nil
@@ -1295,7 +1295,7 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	mounter, err := dm.tryDiscoverMounter(ctx, true)
+	mounter, err := dm.tryDiscoverMounter(ctx)
 	if err != nil {
 		klog.V(4).Infof("DaemonsetMounter: rediscovery failed: %v", err)
 		return false
@@ -1318,7 +1318,7 @@ func (dm *DaemonsetMounter) MounterMaxVolumesPerNode() (int64, bool) {
 func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	if _, err := dm.tryDiscoverMounter(ctx, false); errors.Is(err, ErrMultipleMounterPods) {
+	if _, err := dm.tryDiscoverMounter(ctx); errors.Is(err, ErrMultipleMounterPods) {
 		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err)
 	}
 }
@@ -1478,8 +1478,8 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 
 // tryDiscoverMounter performs a single attempt to find the secondary mounter pod on this node and
 // resolve its comm dir, as seen from the primary daemonset, and whether it has a cache volume.
-// With pickOne, more than one running mounter pod is logged and one is picked, rather than returned as an error.
-func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context, pickOne bool) (*mounterPod, error) {
+// With more than one running mounter pod, it returns the one this node's mounts use, or an error if they use none.
+func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod, error) {
 	pods, err := dm.clientset.CoreV1().Pods(mounterNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: mounterPodLabel,
 		FieldSelector: "spec.nodeName=" + dm.nodeID,
@@ -1500,10 +1500,11 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context, pickOne bool
 
 	if len(running) > 1 {
 		err := fmt.Errorf("%w on node %s (expected exactly 1, got %d: %s)", ErrMultipleMounterPods, dm.nodeID, len(running), strings.Join(names, ", "))
-		if !pickOne {
+		inUse := dm.mounterInUse(running)
+		if inUse == nil {
 			return nil, err
 		}
-		running = []corev1.Pod{dm.mounterInUse(running)}
+		running = []corev1.Pod{*inUse}
 		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
 	}
 	if len(running) == 0 {
@@ -1561,8 +1562,8 @@ func (dm *DaemonsetMounter) checkImageMatch(mounter *mounterPod) error {
 		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace)
 }
 
-// mounterInUse returns the pod whose comm dir this node's mounts use, or else the oldest pod.
-func (dm *DaemonsetMounter) mounterInUse(pods []corev1.Pod) corev1.Pod {
+// mounterInUse returns the pod whose comm dir this node's mounts use, or nil if none.
+func (dm *DaemonsetMounter) mounterInUse(pods []corev1.Pod) *corev1.Pod {
 	inUse := map[string]bool{}
 	dm.mountMap.Range(func(_ string, entry *MountEntry) bool {
 		entry.mu.Lock()
@@ -1570,16 +1571,12 @@ func (dm *DaemonsetMounter) mounterInUse(pods []corev1.Pod) corev1.Pod {
 		inUse[entry.CommDir] = true
 		return true
 	})
-	oldest := pods[0]
 	for _, pod := range pods {
 		if inUse[dm.commDirOf(pod)] {
-			return pod
-		}
-		if pod.CreationTimestamp.Before(&oldest.CreationTimestamp) {
-			oldest = pod
+			return &pod
 		}
 	}
-	return oldest
+	return nil
 }
 
 // commDirOf returns the mounter pod's comm dir as seen from this node pod.

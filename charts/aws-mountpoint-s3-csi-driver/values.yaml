@@ -253,7 +253,8 @@ daemonsetMounters:
   # default entry.
   #
   # Make sure no node matches two entries. If one does, its node pod logs an error and keeps
-  # using one mounter, the one this node's mounts already use, and the other mounter is unused.
+  # using the mounter this node's mounts already use, and the other mounter is unused. If the
+  # mounts use neither, new mounts on that node fail until only one entry matches it.
   #
   # Entries for a Karpenter NodePool, giving nodes with 64GiB of memory or more a higher limit.
   # Each mount gets about 1Gi in both: (4Gi - 64Mi) / 4 and (32Gi - 64Mi) / 32.

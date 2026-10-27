@@ -117,6 +117,13 @@ func teardownSafeFramework(f *framework.Framework) *framework.Framework {
 // upgrade upgrades the release to values, the complete user-supplied set, and waits until the driver runs them.
 func (r *driverRelease) upgrade(ctx context.Context, f *framework.Framework, values map[string]any) {
 	GinkgoHelper()
+	r.upgradeOnly(ctx, values)
+	restartDriverPods(ctx, f)
+}
+
+// upgradeOnly upgrades the release to values without replacing any driver pod, as a customer's helm upgrade does.
+func (r *driverRelease) upgradeOnly(ctx context.Context, values map[string]any) {
+	GinkgoHelper()
 	values = maps.Clone(values)
 	values[e2eUpgradedKey] = true
 	up := action.NewUpgrade(r.helm)
@@ -126,7 +133,6 @@ func (r *driverRelease) upgrade(ctx context.Context, f *framework.Framework, val
 	// Not Wait: Helm would wait for every mounter pod to be updated, which an OnDelete DaemonSet never does by itself.
 	_, err := up.RunWithContext(ctx, r.name, r.chart, values)
 	framework.ExpectNoError(err, "upgrading release %q", r.name)
-	restartDriverPods(ctx, f)
 }
 
 // restartDriverPods replaces the driver pods so they run the release as it is now.

@@ -114,27 +114,24 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 		})
 
 		Context("with a third entry that also matches node A", func() {
-			BeforeAll(func(ctx context.Context) {
+			It("keeps node A's mounter in use, logging the overlap", func(ctx context.Context) {
+				running, runningPV := writerOnNode(ctx, f, config, pattern, nodeA)
+				servedBy := servingMounter(ctx, f, nodeA, runningPV)
+
 				// A different rule from first's, as two identical selections are rejected at install, and first's limit, so node A
 				// advertises 3 whichever mounter it picks.
 				extra := map[string]any{"name": "extra", "maxVolumesPerNode": 3, "resources": nodeAResources,
 					"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}
-				// The restart starts node A's node pod with two mounters running, so it has to pick one.
-				release.upgrade(ctx, f, withMounterEntries(release, first(), rest(), extra))
-			})
+				// Only the node pod rolls, as its rules change, so node A's new node pod starts while a mount uses first's mounter.
+				release.upgradeOnly(ctx, withMounterEntries(release, first(), rest(), extra))
+				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
+				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
 
-			It("keeps node A's node pod running and registered, logging the overlap", func(ctx context.Context) {
-				// The upgrade already waited for every node pod to be Ready, so node A's did not crash-loop on two mounters.
 				Expect(mountersOn(ctx, f, nodeA)).To(HaveLen(2))
 				Expect(getCSINodeLimits(ctx, f, nodeA, driverName)).To(Equal(3))
 				Eventually(ctx, func(ctx context.Context) bool {
 					return verifyCSINodeLogs(ctx, f, nodeA, "multiple running mounter pods found")
 				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(BeTrue())
-			})
-
-			It("sends every mount on node A to the same mounter", func(ctx context.Context) {
-				running, runningPV := writerOnNode(ctx, f, config, pattern, nodeA)
-				servedBy := servingMounter(ctx, f, nodeA, runningPV)
 
 				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(servedBy))

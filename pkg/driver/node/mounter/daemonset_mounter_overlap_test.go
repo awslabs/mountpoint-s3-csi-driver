@@ -44,23 +44,20 @@ func TestDiscoverMounterPicksMounterInUse(t *testing.T) {
 	assert.Contains(t, logs.String(), "Using mounter-b")
 }
 
-func TestDiscoverMounterPicksOldestWithNoMounts(t *testing.T) {
-	// Listed in name order, so the newer pod comes first.
-	newer, older := runningMounterPod("mounter-a", 2), runningMounterPod("mounter-b", 1)
-	dm := overlapDM(t, newer, older)
+func TestDiscoverMounterFailsWithNoMounterInUse(t *testing.T) {
+	dm := overlapDM(t, runningMounterPod("mounter-a", 1), runningMounterPod("mounter-b", 2))
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
 
-	assert.NoError(t, dm.DiscoverMounter(context.Background()))
-
-	assert.Equals(t, dm.commDirOf(*older), dm.mounter.Load().commDir)
+	assert.ErrorIs(t, dm.DiscoverMounter(ctx), ErrMultipleMounterPods)
+	assert.Equals(t, (*mounterPod)(nil), dm.mounter.Load())
 }
 
-func TestRediscoveryPicksAMounterWhenItsOwnIsGone(t *testing.T) {
-	newer, older := runningMounterPod("mounter-a", 2), runningMounterPod("mounter-b", 1)
-	dm := overlapDM(t, newer, older)
+func TestRediscoveryPicksNoMounterWhenItsOwnIsGone(t *testing.T) {
+	dm := overlapDM(t, runningMounterPod("mounter-a", 1), runningMounterPod("mounter-b", 2))
 
-	assert.Equals(t, true, dm.checkCommDir())
-
-	assert.Equals(t, dm.commDirOf(*older), dm.mounter.Load().commDir)
+	assert.Equals(t, false, dm.checkCommDir())
+	assert.Equals(t, (*mounterPod)(nil), dm.mounter.Load())
 }
 
 func overlapDM(t *testing.T, pods ...*corev1.Pod) *DaemonsetMounter {
