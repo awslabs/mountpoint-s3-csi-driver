@@ -33,6 +33,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -79,6 +81,14 @@ const (
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
 
+const (
+	// csiNodeImageEnv carries this CSI node's own image reference. The chart renders it with the same
+	// helper as the s3-plugin and mounter container images, so it equals the CSI node's `image:`.
+	csiNodeImageEnv = "CSI_NODE_IMAGE"
+	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
+	mounterContainerName = "mounter"
+)
+
 // Exported for error matching in tests and NodePublishVolume callers.
 var (
 	ErrCommDirNotReady        = errors.New("mounter pod not yet discovered or stale")
@@ -93,6 +103,9 @@ type mounterPod struct {
 	commDir string
 	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
 	hasCacheVolume bool
+	// image is the mounter container's `image:` ("" if the container is missing). It is fixed for the
+	// pod's lifetime; a new mounter pod gets a new comm dir, which triggers re-discovery.
+	image string
 }
 
 // mountSyscallFunc performs the FUSE mount and returns the fd. Injectable for testing.
@@ -141,6 +154,9 @@ type DaemonsetMounter struct {
 	// Used during the V2->V3 upgrade to resolve the committed IAM role ARN for a legacy
 	// V2 Mountpoint Pod. May be nil when legacy V2 support is disabled.
 	s3paCache client.Reader
+
+	// ownImage is this CSI node's image reference, from CSI_NODE_IMAGE. Empty disables the image check.
+	ownImage string
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
@@ -148,7 +164,12 @@ type DaemonsetMounter struct {
 // in which case the default implementations are used.
 func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *mpmounter.Mounter,
 	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc, kubernetesVersion string, variant cluster.Variant) *DaemonsetMounter {
+	ownImage := os.Getenv(csiNodeImageEnv)
+	if ownImage == "" {
+		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / s3-csi-daemonset-mounter image check is disabled", csiNodeImageEnv)
+	}
 	return &DaemonsetMounter{
+		ownImage:          ownImage,
 		clientset:         clientset,
 		nodeID:            nodeID,
 		kubeletPath:       util.ContainerKubeletPath(),
@@ -266,6 +287,12 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	mounter := dm.mounter.Load()
 	if mounter == nil {
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
+	}
+
+	// Refuse every V3 publish (new mount, bind to a running one, and republish, which refreshes
+	// credentials) while this CSI node and the mounter run different images, before anything is written.
+	if err := dm.checkImageMatch(mounter); err != nil {
+		return err
 	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
@@ -1446,13 +1473,44 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	podUID := string(running[0].UID)
 	commDir := filepath.Join(dm.kubeletPath, "pods", podUID, "volumes", "kubernetes.io~empty-dir", CommVolumeName)
 	hasCacheVolume := mounterPodHasCacheVolume(running[0])
+	image := mounterPodImage(running[0])
 
-	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t",
-		running[0].Name, podUID, commDir, hasCacheVolume)
+	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t, image: %s",
+		running[0].Name, podUID, commDir, hasCacheVolume, image)
 	return &mounterPod{
 		commDir:        commDir,
 		hasCacheVolume: hasCacheVolume,
+		image:          image,
 	}, nil
+}
+
+// mounterPodImage returns the mounter container's `image:`, or "" if the pod has no such container.
+func mounterPodImage(pod corev1.Pod) string {
+	for _, c := range pod.Spec.Containers {
+		if c.Name == mounterContainerName {
+			return c.Image
+		}
+	}
+	return ""
+}
+
+// checkImageMatch returns nil if this CSI node and the mounter run the same image reference, or a
+// FailedPrecondition error naming both and the fix. Both images come from the same chart value, so
+// they differ only when one of the two pods on this node was recreated after an upgrade or rollback.
+func (dm *DaemonsetMounter) checkImageMatch(mounter *mounterPod) error {
+	if dm.ownImage == "" || dm.ownImage == mounter.image {
+		return nil
+	}
+	return status.Errorf(codes.FailedPrecondition,
+		"image mismatch on node %[1]s: s3-csi-node runs %[2]q but s3-csi-daemonset-mounter runs %[3]q, "+
+			"so an upgrade or rollback is incomplete on this node. New mounts and credential refresh are refused, "+
+			"and running mounts lose S3 access when their credentials expire. "+
+			"Complete the upgrade or rollback by following the upgrade procedure for this node: "+
+			"`kubectl cordon %[1]s`, "+
+			"`kubectl drain %[1]s --ignore-daemonsets --delete-emptydir-data`, "+
+			"`kubectl delete pod -n %[4]s -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' --field-selector spec.nodeName=%[1]s` "+
+			"so both pods are recreated on the same image, then `kubectl uncordon %[1]s`",
+		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace)
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.
