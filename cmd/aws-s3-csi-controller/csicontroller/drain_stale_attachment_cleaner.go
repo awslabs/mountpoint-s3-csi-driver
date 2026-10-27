@@ -39,17 +39,11 @@ const (
 type DrainStaleAttachmentCleaner struct {
 	client.Client
 	mountpointNamespace string
-	// Already-empty S3PodAttachments (UID to resourceVersion) seen on the previous pass and on this pass
-	emptyBefore, emptyNow map[types.UID]string
 }
 
 // NewDrainStaleAttachmentCleaner creates a DrainStaleAttachmentCleaner.
 func NewDrainStaleAttachmentCleaner(c client.Client, mountpointNamespace string) *DrainStaleAttachmentCleaner {
-	return &DrainStaleAttachmentCleaner{
-		Client:              c,
-		mountpointNamespace: mountpointNamespace,
-		emptyNow:            map[types.UID]string{},
-	}
+	return &DrainStaleAttachmentCleaner{Client: c, mountpointNamespace: mountpointNamespace}
 }
 
 // Start runs the periodic cleanup loop until the context is cancelled. Satisfies manager.Runnable.
@@ -101,9 +95,6 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 	if err := cm.List(ctx, s3paList); err != nil {
 		return err
 	}
-
-	cm.emptyBefore, cm.emptyNow = cm.emptyNow, map[types.UID]string{}
-
 	for i := range s3paList.Items {
 		if err := cm.cleanupStaleWorkloads(ctx, &s3paList.Items[i], existingPods); err != nil {
 			log.Error(err, "Error cleaning up S3PodAttachment", "s3pa", s3paList.Items[i].Name)
@@ -129,12 +120,6 @@ func (cm *DrainStaleAttachmentCleaner) RunCleanup(ctx context.Context) error {
 //     S3PA is updated in place.
 func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, existingPods map[string]*corev1.Pod) error {
 	log := logf.FromContext(ctx).WithValues("s3pa", s3pa.Name)
-	// Only delete an already-empty S3PodAttachment if it was unchanged since the previous pass, to avoid racing the reconciler
-	if !hasWorkloads(s3pa) && cm.emptyBefore[s3pa.UID] != s3pa.ResourceVersion {
-		cm.emptyNow[s3pa.UID] = s3pa.ResourceVersion
-		return nil
-	}
-
 	modified := false
 	now := time.Now().UTC()
 
@@ -163,7 +148,8 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 		}
 	}
 
-	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
+	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. a V2 reconciler teardown
+	// interrupted by the upgrade).
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
 		reason := cleanerReasonEmptyOnArrival
 		if modified {

@@ -184,16 +184,6 @@ func TestDrainStaleAttachmentCleanerDeletesEmptyS3PA(t *testing.T) {
 			s3pa := newS3PA("s3pa-empty", attachments)
 			c, cleaner := newDrainCleaner(t, s3pa)
 
-			// Kept on the first pass, and again if it changed since then
-			assert.NoError(t, cleaner.RunCleanup(ctx))
-			assertS3PAExists(t, c, s3pa.Name)
-			assert.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa))
-			s3pa.Labels = map[string]string{"changed": "true"}
-			assert.NoError(t, c.Update(ctx, s3pa))
-			assert.NoError(t, cleaner.RunCleanup(ctx))
-			assertS3PAExists(t, c, s3pa.Name)
-
-			// Deleted once it is still unchanged on the next pass
 			assert.NoError(t, cleaner.RunCleanup(ctx))
 			assertS3PADeleted(t, c, s3pa.Name)
 		})
@@ -209,13 +199,6 @@ func newS3PA(name string, attachments map[string][]crdv2.WorkloadAttachment) *cr
 			VolumeID:                   "test-vol-id",
 			MountpointS3PodAttachments: attachments,
 		},
-	}
-}
-
-func assertS3PAExists(t *testing.T, c client.Client, name string) {
-	t.Helper()
-	if err := c.Get(context.Background(), client.ObjectKey{Name: name}, &crdv2.MountpointS3PodAttachment{}); err != nil {
-		t.Errorf("expected S3PodAttachment %q to exist, got error: %v", name, err)
 	}
 }
 
