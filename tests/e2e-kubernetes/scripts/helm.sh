@@ -90,9 +90,10 @@ function helm_install_driver() {
   # First, as on clusters provisioning nodes on demand (e.g. EKS Auto Mode), the daemonsets' pods only appear
   # once a node gets provisioned for the controller.
   $KUBECTL_BIN rollout status deployment s3-csi-controller -n kube-system --timeout=5m --kubeconfig $KUBECONFIG
-  $KUBECTL_BIN rollout status daemonset s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
-  # Wait for pod readiness (rollout status doesn't support OnDelete strategy)
+  # Wait for pod readiness: rollout status doesn't support OnDelete, which both daemonsets use in daemonset mode.
+  # The mounter first, as s3-csi-node exits if it finds no mounter on its node at startup.
   $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-daemonset-mounter -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
+  $KUBECTL_BIN wait --for=condition=Ready pods -l app=s3-csi-node -n kube-system --timeout=60s --kubeconfig $KUBECONFIG
   $KUBECTL_BIN get pods -A --kubeconfig $KUBECONFIG
   echo "s3-csi-node-image: $($KUBECTL_BIN get daemonset s3-csi-node -n kube-system -o jsonpath="{$.spec.template.spec.containers[:1].image}" --kubeconfig $KUBECONFIG)"
 
