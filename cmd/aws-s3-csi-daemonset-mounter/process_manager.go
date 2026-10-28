@@ -204,11 +204,15 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// TODO if we add process to ensure Mountpoint exited, this should not be needed.
 	os.Remove(filepath.Join(pm.commDir, mountId+errorFileExt))
 
-	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: remove it.
+	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: refuse NPV, and remove it in goroutine.
 	if pm.cacheDir != "" {
-		if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
-			klog.Errorf("Failed to remove leftover cache directory %s: %v", mountCacheDir, err)
-			return pm.unlockAndClose(fuseDev, fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid))
+		if _, err := os.Lstat(filepath.Join(pm.cacheDir, mountCacheDir)); !errors.Is(err, fs.ErrNotExist) {
+			go func() {
+				if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
+					klog.Errorf("Failed to remove leftover cache directory %s: %v", mountCacheDir, err)
+				}
+			}()
+			return pm.unlockAndClose(fuseDev, fmt.Errorf("refusing to launch mount %s: the previous cache of UID %d is still being removed", mountId, options.Uid))
 		}
 	}
 	if cached {
