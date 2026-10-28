@@ -453,9 +453,11 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 	const dirName = "uid-65536"
 
 	cachedOptions := func(t *testing.T, args ...string) mountoptions.Options {
-		dev := mountertest.OpenDevNull(t)
+		// Launch owns the fd, so it gets a duplicate: the cleanup closing the original must not close a number the background removal reused.
+		fd, err := syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+		assert.NoError(t, err)
 		return mountoptions.Options{
-			Fd:         int(dev.Fd()),
+			Fd:         fd,
 			BucketName: "my-bucket",
 			Args:       append([]string{"--cache"}, args...),
 			Uid:        mountoptions.UIDRangeStart,
@@ -486,7 +488,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		pm.Shutdown()
 	})
 
-	t.Run("removes what its UID left behind before an uncached launch too", func(t *testing.T) {
+	t.Run("refuses an uncached launch while the cache its UID left behind is removed, then launches once it is gone", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		// What a killed Mountpoint of an earlier mount as this UID left behind, and another UID's.
@@ -497,17 +499,27 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		options := cachedOptions(t)
 		options.Args = nil
 
-		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", options))
-
-		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		if err := pm.Launch(mountId, "/usr/bin/mount-s3", options); err == nil {
+			t.Fatal("expected Launch to refuse while a leftover of its UID remains")
+		}
+		leftoverGone := false
+		// 2s only bounds the failing case.
+		for deadline := time.Now().Add(2 * time.Second); !leftoverGone && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			_, err := os.Lstat(filepath.Join(cacheDir, dirName))
+			leftoverGone = errors.Is(err, fs.ErrNotExist)
+		}
+		assert.Equals(t, true, leftoverGone)
 		_, err := os.Stat(filepath.Join(cacheDir, "uid-65537"))
 		assert.NoError(t, err)
+
+		options.Fd = cachedOptions(t).Fd
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", options))
 
 		fr.handles[0].Exit(0, "")
 		pm.Shutdown()
 	})
 
-	t.Run("fails without starting Mountpoint when what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
+	t.Run("refuses without starting Mountpoint while what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		createUnremovableCacheEntry(t, cacheDir, dirName)
@@ -517,9 +529,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected Launch to refuse while a leftover of its UID remains")
 		}
-		assert.Contains(t, err.Error(), "failed to remove the leftover cache directory of UID 65536")
-		// The error reaches this mount's pod events, so the removal's own error goes to the log only.
-		assert.Equals(t, false, strings.Contains(err.Error(), "permission denied"))
+		assert.Contains(t, err.Error(), "refusing to launch mount mount-123: the previous cache of UID 65536 is still being removed")
 		assert.Equals(t, 0, len(fr.handles))
 		assertMountReleased(t, pm, options.Fd, 0)
 	})
@@ -588,7 +598,8 @@ func assertMountReleased(t *testing.T, pm *ProcessManager, fd int, running int) 
 	defer pm.mu.Unlock()
 	assert.Equals(t, running, len(pm.processes))
 	assert.Equals(t, running, len(pm.uids))
-	assert.ErrorIs(t, syscall.Fstat(fd, &syscall.Stat_t{}), syscall.EBADF)
+	fdTarget, _ := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
+	assert.Equals(t, false, fdTarget == os.DevNull)
 }
 
 func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
@@ -726,6 +737,7 @@ func TestProcessManager_Launch_DuplicateUID_Rejected(t *testing.T) {
 	// The error reaches mount-b's pod events, so it must not name the other mount.
 	assert.Equals(t, false, strings.Contains(err.Error(), "mount-a"))
 	// The UID check must come before the removal of that UID's directory.
+	assert.Contains(t, err.Error(), "already in use by another mount")
 	_, err = os.Stat(cachedBlock)
 	assert.NoError(t, err)
 
