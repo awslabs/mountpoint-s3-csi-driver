@@ -155,9 +155,11 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 		if modified {
 			reason = cleanerReasonEmptiedByCleaner
 		}
-		if err := cm.deleteS3PodAttachment(ctx, s3pa, reason, log); err != nil {
-			return fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reason, err)
+		if err := cm.deleteS3PodAttachment(ctx, s3pa); err != nil {
+			// RunCleanup logs this error with the S3PA name, so only the reason is added here.
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment (%s): %w", reason, err)
 		}
+		log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
 		return nil
 	}
 
@@ -250,12 +252,8 @@ func (cm *DrainStaleAttachmentCleaner) addNeedsUnmountAnnotation(ctx context.Con
 
 // deleteS3PodAttachment deletes the S3PA with a resourceVersion precondition so a concurrent
 // modification causes a 409 Conflict (retried next sweep) rather than a lost update.
-func (cm *DrainStaleAttachmentCleaner) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
-	if err := cm.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
-		return err
-	}
-	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
-	return nil
+func (cm *DrainStaleAttachmentCleaner) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
+	return cm.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
 }
 
 // isInMountpointNamespace reports whether `pod` is in the Mountpoint namespace.
