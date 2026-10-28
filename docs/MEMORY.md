@@ -31,10 +31,10 @@ Whichever strategy you use:
 
 The target at which throughput stops improving depends on the instance type and the workload, so there is no single recommended value. On smaller instances, network bandwidth or CPU is often already the limit at the default target of 1008 MiB, while on high-bandwidth instances a larger target can raise throughput substantially. Benchmark your own workload before settling on a value.
 
-Two other related settings matter for throughput:
+Two other related points matter for throughput:
 
 * Each Mountpoint process independently detects the node's full network bandwidth and sizes its request concurrency for it, so several busy mounts on one node all compete for the same link. If several mounts are busy at once, consider partitioning the bandwidth explicitly with [`--maximum-throughput-gbps`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-mountpoint-performance) in each PV's `mountOptions`.
-* Mountpoint detects the node's bandwidth by reading its instance type from [IMDS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html), and uses 10 Gbps if IMDS is unreachable. The mounter doesn't use the host network, so it can reach IMDS only if the node's IMDS hop limit is 2 or greater. If it isn't and the node is faster than 10 Gbps, set `--maximum-throughput-gbps` in the PV's `mountOptions` rather than raising the hop limit, which would also expose the node's IAM credentials to all Pods on the node. Volumes using [Pod-Level Credentials](CONFIGURATION.md#pod-level-credentials) never query IMDS, so on such nodes set `--maximum-throughput-gbps` on them whatever the hop limit. To check the bandwidth each mount detected, see [Verifying the configuration](#verifying-the-configuration).
+* Mountpoint uses 10 Gbps if it doesn't recognize the node's instance type, for example one newer than the Mountpoint release bundled with the driver. If so, set `--maximum-throughput-gbps` in the PV's `mountOptions`. To check the bandwidth each mount detected, see [Verifying the configuration](#verifying-the-configuration).
 
 ## The `equalSplit` strategy
 
@@ -75,7 +75,9 @@ Work in this order:
      kubectl get s3pa -o json | jq -r '.items[].spec.nodeName' | sort | uniq -c | sort -rn | head
      ```
    * Prefer the smallest number that fits, because a lower value means a larger share for each volume.
-2. **Pick a per-mount target.** As a rough guide from tests with parallel sequential reads and writes: on a `t3.xlarge`, raising the target above the default 1008 MiB didn't increase throughput; on a 100 Gbps `c6in.16xlarge`, one mount reached about 37 Gbps at 2 GiB and 65–70 Gbps at 4–6 GiB, and throughput plateaued above that.
+2. **Pick a per-mount target.** As a rough guide from tests with parallel sequential reads and writes:
+   * **Small instances:** on a `t3.xlarge` (up to 5 Gbps), raising the target above the default 1008 MiB didn't increase throughput, because the instance's network bandwidth was already the limit.
+   * **Large instances:** on a 100 Gbps `c6in.16xlarge`, one mount reached about 37 Gbps at 2 GiB and 65–70 Gbps at 4–6 GiB, and throughput plateaued above that.
 3. **Compute the request:** `requests.memory = 64 MiB + in-memory cache size + (target × maxVolumesPerNode)`.
 4. **Check that it fits** alongside your workloads on the smallest node type in the cluster, remembering that it is reserved on every node.
 
