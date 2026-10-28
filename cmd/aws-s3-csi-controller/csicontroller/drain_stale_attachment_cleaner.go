@@ -156,7 +156,6 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 			reason = cleanerReasonEmptiedByCleaner
 		}
 		if err := cm.deleteS3PodAttachment(ctx, s3pa); err != nil {
-			// RunCleanup logs this error with the S3PA name, so only the reason is added here.
 			return fmt.Errorf("Failed to delete MountpointS3PodAttachment (%s): %w", reason, err)
 		}
 		log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
