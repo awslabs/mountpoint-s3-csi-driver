@@ -29,9 +29,9 @@ const errorFileExt = ".error"
 // cacheVolumePerm lets a Mountpoint reach its own cache directory but not create or list entries beside it.
 const cacheVolumePerm = fs.FileMode(0711)
 
-// mountCacheDirPerm closes a mount's cache directory to every UID but the one its Mountpoint runs as;
+// perPvCacheDirPerm closes a PV's cache directory to every UID but the one its Mountpoint runs as;
 // the mounter overrides it with CAP_DAC_OVERRIDE.
-const mountCacheDirPerm = fs.FileMode(0700)
+const perPvCacheDirPerm = fs.FileMode(0700)
 
 // ProcessManager tracks and manages Mountpoint child processes.
 type ProcessManager struct {
@@ -147,13 +147,13 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	for args.Has(mountpoint.ArgCache) {
 		args.Remove(mountpoint.ArgCache)
 	}
-	mountCacheDir := mountCacheDirName(options.Uid)
+	perPvCacheDir := perPvCacheDirName(options.Uid)
 	if cached {
 		if pm.cacheDir == "" {
 			fuseDev.Close()
 			return fmt.Errorf("refusing to launch mount %s: it requests a cache, but this container has no cache volume", mountId)
 		}
-		args.Set(mountpoint.ArgCache, filepath.Join(pm.cacheDir, mountCacheDir))
+		args.Set(mountpoint.ArgCache, filepath.Join(pm.cacheDir, perPvCacheDir))
 	}
 
 	if targetMiB := pm.memory.targetFor(mountId, args); targetMiB > 0 {
@@ -189,7 +189,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// Hold lock across duplicate check and process start to prevent races.
 	pm.mu.Lock()
 	if _, exists := pm.uids[mountId]; exists {
-		return pm.unlockAndClose(fuseDev, fmt.Errorf("mount %s still has a Mountpoint process, which may be exiting or removing its cache", mountId))
+		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("mount %s still has a Mountpoint process, which may be exiting or removing its cache", mountId))
 	}
 
 	// Reject used UID, or else two mounts would be able to access cache of each other.
@@ -198,7 +198,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		// Don't expose other mounts' PV name / mount ID in the error: handleConnection writes it to the error file, s3-csi-node returns it
 		// as the NodePublishVolume error, and the kubelet shows it as a FailedMount event to anyone who can read the workload namespace's events.
 		klog.Errorf("Refusing to launch mount %s with UID %d already in use by mount %s", mountId, options.Uid, other.mountId)
-		return pm.unlockAndClose(fuseDev, fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid))
+		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid))
 	}
 	// Delete any error files that earlier Mountpoint of this PV wrote after node deletes error files.
 	// TODO if we add process to ensure Mountpoint exited, this should not be needed.
@@ -206,25 +206,25 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: remove it.
 	if pm.cacheDir != "" {
-		if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
-			klog.Errorf("Failed to remove leftover cache directory %s: %v", mountCacheDir, err)
-			return pm.unlockAndClose(fuseDev, fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid))
+		if err := pm.removeCacheVolumeEntry(perPvCacheDir); err != nil {
+			klog.Errorf("Failed to remove leftover cache directory %s: %v", perPvCacheDir, err)
+			return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid))
 		}
 	}
 	if cached {
-		if err := pm.createMountCacheDir(mountCacheDir, options.Uid); err != nil {
-			return pm.unlockAndClose(fuseDev, err)
+		if err := pm.createPerPvCacheDir(perPvCacheDir, options.Uid); err != nil {
+			return pm.releaseLockAndCloseFuseDev(fuseDev, err)
 		}
 	}
 
 	handle, err := pm.runner.Start(cmd)
 	if err != nil {
 		if cached {
-			if rmErr := pm.removeCacheVolumeEntry(mountCacheDir); rmErr != nil {
+			if rmErr := pm.removeCacheVolumeEntry(perPvCacheDir); rmErr != nil {
 				klog.Errorf("Failed to remove cache directory of mount %s after a failed start: %v", mountId, rmErr)
 			}
 		}
-		return pm.unlockAndClose(fuseDev, fmt.Errorf("failed to start Mountpoint: %w", err))
+		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("failed to start Mountpoint: %w", err))
 	}
 
 	// Child has its own copy of the FD (kernel dup'd it during fork/exec).
@@ -241,7 +241,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 
 		// Before freeing mountId and the UID, so a relaunch cannot create the directory this then removes.
 		if cached {
-			if err := pm.removeCacheVolumeEntry(mountCacheDir); err != nil {
+			if err := pm.removeCacheVolumeEntry(perPvCacheDir); err != nil {
 				klog.Errorf("Failed to remove cache directory of mount %s: %v", mountId, err)
 			}
 		}
@@ -265,13 +265,13 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	return nil
 }
 
-// mountCacheDirName names the cache directory of the Mountpoint running as uid.
-func mountCacheDirName(uid uint32) string {
+// perPvCacheDirName names the cache directory of the Mountpoint running as uid.
+func perPvCacheDirName(uid uint32) string {
 	return fmt.Sprintf("uid-%d", uid)
 }
 
-// unlockAndClose gives up the lock and the FUSE device of a launch that fails under the lock, and returns err.
-func (pm *ProcessManager) unlockAndClose(fuseDev *os.File, err error) error {
+// releaseLockAndCloseFuseDev releases the lock and closes the FUSE device of a launch that fails under the lock, and returns err passed.
+func (pm *ProcessManager) releaseLockAndCloseFuseDev(fuseDev *os.File, err error) error {
 	pm.mu.Unlock()
 	fuseDev.Close()
 	return err
@@ -281,7 +281,7 @@ func (pm *ProcessManager) unlockAndClose(fuseDev *os.File, err error) error {
 // Note Mountpoint also removes its own cache when it exits cleanly.
 func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 	// We guard escapes and partial cache delete attempts by checking the cacheDir and entryName, and returning error if something is wrong.
-	// Defensive: Names come from mountCacheDirName or from listing the cache volume; so only a new caller could lead to these problems.
+	// Defensive: Names come from perPvCacheDirName or from listing the cache volume; so only a new caller could lead to these problems.
 	if pm.cacheDir == "" || entryName == "" || entryName == "." || entryName == ".." || strings.ContainsRune(entryName, filepath.Separator) {
 		return fmt.Errorf("refusing to remove cache directory %q in %q: not a cache volume and a plain directory name", entryName, pm.cacheDir)
 	}
@@ -294,10 +294,10 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 	return nil
 }
 
-// createMountCacheDir creates a mount's cache directory, owned by the UID its Mountpoint runs as. Mountpoint writes ./mountpoint-cache inside it.
-func (pm *ProcessManager) createMountCacheDir(mountCacheDir string, uid uint32) error {
-	path := filepath.Join(pm.cacheDir, mountCacheDir)
-	if err := os.Mkdir(path, mountCacheDirPerm); err != nil {
+// createPerPvCacheDir creates a PV's cache directory, owned by the UID its Mountpoint runs as. Mountpoint writes ./mountpoint-cache inside it.
+func (pm *ProcessManager) createPerPvCacheDir(perPvCacheDir string, uid uint32) error {
+	path := filepath.Join(pm.cacheDir, perPvCacheDir)
+	if err := os.Mkdir(path, perPvCacheDirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory %q: %w", path, err)
 	}
 	if err := pm.chownWithDefault(path, int(uid), int(uid)); err != nil {

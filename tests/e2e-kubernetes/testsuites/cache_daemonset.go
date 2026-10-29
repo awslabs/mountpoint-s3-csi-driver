@@ -183,13 +183,13 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 					checkWriteToPathSucceed(ctx, f, m.pod, path, ioFileSize, seed)
 					waitAndAssertMountpointCachedBlocks(ctx, f, m, path)
 
-					By("Checking /cache belongs to root and the mount's directory to the mount's UID alone")
+					By("Checking /cache belongs to root and the PV's directory to the mount's UID alone")
 					stat, stderr, err := execInMounterPod(ctx, f, m.node, "stat -c '%n %a %u %g' "+cacheMountPath+" "+m.cacheDir)
 					framework.ExpectNoError(err, "stat in the mounter on node %s: %s", m.node, stderr)
 					Expect(strings.TrimSpace(stat)).To(Equal(fmt.Sprintf("%s 711 0 0\n%s 700 %d %d", cacheMountPath, m.cacheDir, m.uid, m.uid)))
 
 					// The mounter holds CAP_DAC_OVERRIDE to remove cache directories, so use another UID to simulate a different mount's Mountpoint
-					By("Confirming another UID cannot read inside the mount's cache or credential directory")
+					By("Confirming another UID cannot read inside the PV's cache or credential directory")
 					otherUID := m.uid + 1
 					for _, dir := range []string{m.cacheDir, filepath.Join("/comm", m.vol.Pv.Name)} {
 						out, stderr, err := execInMounterPod(ctx, f, m.node,
@@ -269,7 +269,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 						"from a %d MiB memory request and cache %v, from a mounter running with %v", requestMiB, tc.helm, mounterArgs)
 				})
 
-				It("removes the mount's cache directory when its last consumer unmounts", func(ctx context.Context) {
+				It("removes the PV's cache directory when its last consumer unmounts", func(ctx context.Context) {
 					m := mountCachedVolume(ctx, f, config, pattern, tc.nodeSelector, nil)
 					Expect(cacheDirExists(ctx, f, m)).To(BeTrue(), "the mounter created no %s on node %s", m.cacheDir, m.node)
 
@@ -540,7 +540,7 @@ func mountpointArgs(ctx context.Context, f *framework.Framework, m cachedMount) 
 	return strings.Split(strings.TrimSuffix(cmdline, "\x00"), "\x00")
 }
 
-// cacheDirExists reports whether the mount's cache directory exists; its command always exits 0, so a failed exec never
+// cacheDirExists reports whether the PV's cache directory exists; its command always exits 0, so a failed exec never
 // reads as absent.
 func cacheDirExists(ctx context.Context, f *framework.Framework, m cachedMount) (bool, error) {
 	cmd := fmt.Sprintf("if [ -e %s ]; then echo present; else echo absent; fi", m.cacheDir)
@@ -551,7 +551,7 @@ func cacheDirExists(ctx context.Context, f *framework.Framework, m cachedMount) 
 	return strings.TrimSpace(stdout) == "present", nil
 }
 
-// waitAndAssertCacheDirReclaimed waits for the mounter to remove the mount's cache directory, which it does once the mount's
+// waitAndAssertCacheDirReclaimed waits for the mounter to remove the PV's cache directory, which it does once the mount's
 // Mountpoint exits, so possibly after NodeUnpublishVolume has returned.
 func waitAndAssertCacheDirReclaimed(ctx context.Context, f *framework.Framework, m cachedMount) {
 	GinkgoHelper()

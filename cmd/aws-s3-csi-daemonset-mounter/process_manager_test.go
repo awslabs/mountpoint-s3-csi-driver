@@ -462,7 +462,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 			Gid:        mountoptions.UIDRangeStart}
 	}
 
-	t.Run("creates the mount's directory, owned by its UID and closed to every other, and points Mountpoint at it whatever --cache the request carried", func(t *testing.T) {
+	t.Run("creates the PV's directory, owned by its UID and closed to every other, and points Mountpoint at it whatever --cache the request carried", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		chowns := recordChowns(pm)
@@ -470,16 +470,16 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		options := cachedOptions(t, "--cache=/elsewhere", "--cache=/other")
 		// Not the fixtures' 65536, so the name is shown to follow the launch's UID.
 		options.Uid, options.Gid = 65537, 65537
-		mountCacheDir := filepath.Join(cacheDir, "uid-65537")
+		perPvCacheDir := filepath.Join(cacheDir, "uid-65537")
 
 		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", options))
 
-		fi, err := os.Lstat(mountCacheDir)
+		fi, err := os.Lstat(perPvCacheDir)
 		assert.NoError(t, err)
 		assert.Equals(t, true, fi.IsDir())
 		assert.Equals(t, fs.FileMode(0700), fi.Mode().Perm())
-		assert.Equals(t, [2]int{65537, 65537}, chowns[mountCacheDir])
-		assert.Equals(t, []string{"--cache=" + mountCacheDir, "--foreground"}, fr.handles[0].cmd.Args[3:])
+		assert.Equals(t, [2]int{65537, 65537}, chowns[perPvCacheDir])
+		assert.Equals(t, []string{"--cache=" + perPvCacheDir, "--foreground"}, fr.handles[0].cmd.Args[3:])
 		assert.Equals(t, []string{"--cache", "--cache=/elsewhere", "--cache=/other"}, options.Args)
 
 		fr.handles[0].Exit(0, "")
@@ -556,10 +556,10 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 	t.Run("removes the directory and its contents once Mountpoint exits, before freeing the mount", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
-		mountCacheDir := filepath.Join(cacheDir, dirName)
+		perPvCacheDir := filepath.Join(cacheDir, dirName)
 		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
 		// A killed Mountpoint leaves its blocks behind; a clean exit would have removed mountpoint-cache itself.
-		blockDir := filepath.Join(mountCacheDir, "mountpoint-cache", "V2", "ab")
+		blockDir := filepath.Join(perPvCacheDir, "mountpoint-cache", "V2", "ab")
 		assert.NoError(t, os.MkdirAll(blockDir, 0700))
 		assert.NoError(t, os.WriteFile(filepath.Join(blockDir, "block"), []byte("x"), 0600))
 
@@ -569,7 +569,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		dirGone := false
 		// 2s only bounds the failing case.
 		for deadline := time.Now().Add(2 * time.Second); !dirGone && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			_, err := os.Lstat(mountCacheDir)
+			_, err := os.Lstat(perPvCacheDir)
 			dirGone = errors.Is(err, fs.ErrNotExist)
 		}
 		pm.mu.Unlock()
@@ -756,7 +756,7 @@ func TestProcessManager_RemoveCacheVolumeEntry(t *testing.T) {
 			{name: "the volume root itself", entry: "."},
 			{name: "the parent of the volume root", entry: ".."},
 			{name: "a path escaping the volume root", entry: "../sibling"},
-			{name: "a subdirectory of a mount's cache", entry: "uid-65536/mountpoint-cache/V2"},
+			{name: "a subdirectory of a PV's cache", entry: "uid-65536/mountpoint-cache/V2"},
 		}
 
 		for _, testCase := range testCases {
