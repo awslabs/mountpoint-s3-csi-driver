@@ -470,6 +470,26 @@ There are potential race conditions on node startup (especially when a node is f
 
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
+On Kubernetes 1.37 and later, you can [have the scheduler wait for the driver](#prevent-scheduling-on-nodes-without-the-driver) instead of tainting nodes.
+
+## Prevent scheduling on nodes without the driver
+On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off a node until the Mountpoint CSI Driver has registered there. This prevents the same node startup race as the [startup taint](#configure-node-startup-taint), but you don't need to taint your nodes. To enable it, set the Helm value `node.preventPodSchedulingIfMissing` to `true`:
+
+```sh
+helm upgrade --install aws-mountpoint-s3-csi-driver \
+    --namespace kube-system \
+    --set node.preventPodSchedulingIfMissing=true \
+    aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
+```
+
+The chart then sets [`preventPodSchedulingIfMissing`](https://kubernetes.io/docs/concepts/storage/storage-limits/) on the `s3.csi.aws.com` CSIDriver object. While the driver isn't registered on any suitable node, the Pod stays `Pending` with `s3.csi.aws.com CSI driver is not installed on the node`, and the scheduler places it as soon as the driver registers. Pods that use S3 volumes also stay off nodes the driver doesn't run on, such as the EKS Hybrid Nodes that `node.affinity` excludes by default, instead of getting stuck in `ContainerCreating` there.
+
+The field relies on the `VolumeLimitScaling` feature gate, which is enabled by default from Kubernetes 1.37, so keep using the startup taint on older clusters. You can use both together: the driver removes the taint only after it has registered, so both wait for the same thing.
+
+If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, the default from Cluster Autoscaler 1.37. Node groups that scale from zero also need the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag on the Auto Scaling group or EKS managed node group, with `s3.csi.aws.com` in its comma-separated value. Without the tag, Cluster Autoscaler doesn't scale those node groups up for Pods that use S3 volumes. See the [Cluster Autoscaler AWS documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md) for details. Karpenter needs no extra configuration.
+
+To turn it off, set `node.preventPodSchedulingIfMissing` back to `false`.
+
 ## Cross-account bucket access
 Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
