@@ -123,6 +123,14 @@ func TestMounterEntriesDefaultInstall(t *testing.T) {
 	assert.Equals(t, "4", daemonSets["s3-csi-daemonset-mounter"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
 }
 
+func TestMounterEntriesQuoteNodeSelectorValues(t *testing.T) {
+	// Unquoted, these render as a bool and a number, which a nodeSelector can't hold.
+	manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{nodeSelector: {gpu: true, zone: 1}, `+entry+`}]`)
+	assert.NoError(t, err)
+	assert.Contains(t, manifest, `gpu: "true"`)
+	assert.Contains(t, manifest, `zone: "1"`)
+}
+
 // The two default node.affinity rules: not Fargate, hybrid or Auto Mode, or Auto Mode outside the system NodePool.
 const (
 	notSpecial    = "eks.amazonaws.com/compute-type NotIn fargate,hybrid,auto"

@@ -136,8 +136,9 @@ spec:
         {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- with $mounter.nodeSelector }}
-        {{- toYaml . | nindent 8 }}
+        {{- /* Quoted, as node.yaml's rules are, since a nodeSelector takes only strings. */}}
+        {{- range $k, $v := $mounter.nodeSelector }}
+        {{ $k }}: {{ toString $v | quote }}
         {{- end }}
       priorityClassName: system-node-critical
       {{- $exprLists := ternary (list $mounter.matchExpressions) (list) (not (empty $mounter.matchExpressions)) }}
