@@ -108,6 +108,7 @@ func main() {
 	mountpointPath := filepath.Join(*mountpointBinDir, mountpointBin)
 
 	pm := NewProcessManager(*commDir, *cacheDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit, cacheLimit)
+	pm.maxVolumesPerNode = *maxVolumesPerNode
 
 	// Handle shutdown signals: terminate all MP processes gracefully
 	stop := make(chan struct{})
@@ -136,10 +137,15 @@ func serve(pm *ProcessManager, sockPath, mountpointPath string, stop <-chan stru
 
 	// Clean up cache directories after startup, to remove any leftover cache directories from previous mounter pod crash.
 	if err := pm.emptyCacheVolume(); err != nil {
-		// Log error only: A directory that cannot be removed fails only the next launch as its UID (and not the whole mounter pod),
-		// which retries the removal, to limit blast radius of a failed cleanup.
-		klog.Errorf("Some leftover cache directories remain: %v", err)
+		// Not fatal, to limit the blast radius of a failed cleanup: each directory left is marked for the cache cleaner, which
+		// keeps its UID and volume slot taken while it retries the removal in the background.
+		klog.Errorf("Some leftover cache directories remain, marking them for the cache cleaner: %v", err)
+		if err := pm.markLeftoverCacheDirs(); err != nil {
+			return err
+		}
 	}
+	// Stopped by stop, before pm.Shutdown below waits for it.
+	pm.StartCacheCleaner(stop, cacheCleanupInterval)
 
 	// Remove stale socket file if it exists
 	os.Remove(sockPath)

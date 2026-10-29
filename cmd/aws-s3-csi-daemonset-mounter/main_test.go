@@ -60,6 +60,17 @@ func TestServe(t *testing.T) {
 		<-done
 	})
 
+	t.Run("marks the UID of a per-PV cache directory the startup cleanup cannot remove, so it stays taken", func(t *testing.T) {
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
+		createUnremovableCacheEntry(t, cacheDir, "uid-65540")
+		stop, done := startServing(t, pm)
+
+		assertCleanupPending(t, pm, 65540, "")
+
+		close(stop)
+		<-done
+	})
+
 	t.Run("empties the cache volume after stopping", func(t *testing.T) {
 		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
 		stop, done := startServing(t, pm)

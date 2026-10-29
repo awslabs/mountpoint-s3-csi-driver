@@ -486,42 +486,64 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		pm.Shutdown()
 	})
 
-	t.Run("removes what its UID left behind before an uncached launch too", func(t *testing.T) {
-		fr := &fakeProcessRunner{}
-		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
-		// What a killed Mountpoint of an earlier mount as this UID left behind, and another UID's.
-		leftoverBlock := filepath.Join(cacheDir, dirName, "mountpoint-cache", "block")
-		assert.NoError(t, os.MkdirAll(filepath.Dir(leftoverBlock), 0700))
-		assert.NoError(t, os.WriteFile(leftoverBlock, []byte("x"), 0600))
-		assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "uid-65537"), 0700))
-		options := cachedOptions(t)
-		options.Args = nil
+	t.Run("a UID with a leftover cache is refused, cached or not, until the cleaner removes it", func(t *testing.T) {
+		for _, cached := range []bool{true, false} {
+			t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+				fr := &fakeProcessRunner{}
+				pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+				// What a killed Mountpoint of an earlier mounter pod left as this UID, and as another, marked as at startup.
+				leftoverBlock := filepath.Join(cacheDir, dirName, "mountpoint-cache", "block")
+				assert.NoError(t, os.MkdirAll(filepath.Dir(leftoverBlock), 0700))
+				assert.NoError(t, os.WriteFile(leftoverBlock, []byte("x"), 0600))
+				assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, "uid-65537"), 0700))
+				assert.NoError(t, pm.markLeftoverCacheDirs())
+				options := cachedOptions(t)
+				if !cached {
+					options.Args = nil
+				}
 
-		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", options))
+				err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
+				if err == nil {
+					t.Fatal("expected Launch to refuse while a leftover of its UID remains")
+				}
+				assert.Contains(t, err.Error(), "refusing to launch mount mount-123: the previous cache of UID 65536 is still being removed")
+				assert.Equals(t, 0, len(fr.handles))
+				// Left for the cleaner: Launch did not remove it while holding the lock, which would block every other mount.
+				_, err = os.Stat(leftoverBlock)
+				assert.NoError(t, err)
+				// Both UIDs stay taken; neither leftover is a mount's, so no mount ID is held.
+				assertMountReleased(t, pm, options.Fd, 2)
 
-		assertNotExist(t, filepath.Join(cacheDir, dirName))
-		_, err := os.Stat(filepath.Join(cacheDir, "uid-65537"))
-		assert.NoError(t, err)
+				pm.cleanPendingCacheDirs()
 
-		fr.handles[0].Exit(0, "")
-		pm.Shutdown()
+				assertNotExist(t, filepath.Join(cacheDir, dirName))
+				assertNotExist(t, filepath.Join(cacheDir, "uid-65537"))
+				assertMountReleased(t, pm, -1, 0)
+				assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+				fr.handles[0].Exit(0, "")
+				pm.Shutdown()
+			})
+		}
 	})
 
-	t.Run("fails without starting Mountpoint when what its UID left behind cannot be removed, and releases the mount", func(t *testing.T) {
+	t.Run("keeps refusing the UID while what it left behind cannot be removed", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		createUnremovableCacheEntry(t, cacheDir, dirName)
-		options := cachedOptions(t)
+		assert.NoError(t, pm.markLeftoverCacheDirs())
 
-		err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
+		pm.cleanPendingCacheDirs()
+
+		assertCleanupPending(t, pm, mountoptions.UIDRangeStart, "")
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t))
 		if err == nil {
-			t.Fatal("expected Launch to refuse while a leftover of its UID remains")
+			t.Fatal("expected Launch to refuse the UID while its cache is still being removed")
 		}
-		assert.Contains(t, err.Error(), "failed to remove the leftover cache directory of UID 65536")
+		assert.Contains(t, err.Error(), "the previous cache of UID 65536 is still being removed")
 		// The error reaches this mount's pod events, so the removal's own error goes to the log only.
 		assert.Equals(t, false, strings.Contains(err.Error(), "permission denied"))
 		assert.Equals(t, 0, len(fr.handles))
-		assertMountReleased(t, pm, options.Fd, 0)
+		pm.Shutdown()
 	})
 
 	t.Run("fails without starting Mountpoint when the cache volume cannot be written to, and releases the mount", func(t *testing.T) {
@@ -551,6 +573,40 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 			t.Fatal("expected Launch to fail when the process cannot start")
 		}
 		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		assertMountReleased(t, pm, -1, 0)
+	})
+
+	t.Run("marks the UID, but frees the mount, when the directory of a Mountpoint that failed to start cannot be removed", func(t *testing.T) {
+		fr := &fakeProcessRunner{startErr: errors.New("fork/exec: no such file")}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		// Make the freshly created directory unremovable, as the chown is the last step of creating it.
+		pm.chownForTesting = func(path string, _, _ int) error {
+			createUnremovableCacheEntry(t, cacheDir, filepath.Base(path))
+			return nil
+		}
+		options := cachedOptions(t)
+
+		if err := pm.Launch(mountId, "/usr/bin/mount-s3", options); err == nil {
+			t.Fatal("expected Launch to fail when the process cannot start")
+		}
+		// The UID and its slot are held, the mount ID is not.
+		assertMountReleased(t, pm, options.Fd, 1)
+		assertCleanupPending(t, pm, mountoptions.UIDRangeStart, "")
+
+		// Another PV on that UID is refused; the same PV's retry on another UID goes ahead.
+		err := pm.Launch("mount-456", "/usr/bin/mount-s3", cachedOptions(t))
+		if err == nil {
+			t.Fatal("expected Launch to refuse the UID while its leftover remains")
+		}
+		assert.Contains(t, err.Error(), "the previous cache of UID 65536 is still being removed")
+		fr.startErr = nil
+		pm.chownForTesting = func(string, int, int) error { return nil }
+		retry := cachedOptions(t)
+		retry.Uid, retry.Gid = 65537, 65537
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", retry))
+
+		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
 	})
 
 	t.Run("removes the directory and its contents once Mountpoint exits, before freeing the mount", func(t *testing.T) {
@@ -579,16 +635,255 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 	})
 }
 
-// assertMountReleased asserts that a failed Launch gave up the lock and the FUSE device fd, and tracks only the running mounts, so a retry can proceed.
-func assertMountReleased(t *testing.T, pm *ProcessManager, fd int, running int) {
+// assertMountReleased asserts that a failed Launch gave up the lock and the FUSE device fd (skipped when fd < 0), and tracks
+// only `taken` UIDs, running or with a cache still to remove, so a retry can proceed. Every mount ID it tracks belongs to one.
+func assertMountReleased(t *testing.T, pm *ProcessManager, fd int, taken int) {
 	t.Helper()
 	if !pm.mu.TryLock() {
 		t.Fatal("the failed launch kept the lock")
 	}
 	defer pm.mu.Unlock()
-	assert.Equals(t, running, len(pm.processes))
-	assert.Equals(t, running, len(pm.uids))
-	assert.ErrorIs(t, syscall.Fstat(fd, &syscall.Stat_t{}), syscall.EBADF)
+	assert.Equals(t, taken, len(pm.processes))
+	withMount := 0
+	for uid, p := range pm.processes {
+		if p.mountId != "" {
+			withMount++
+			assert.Equals(t, uid, pm.uids[p.mountId])
+		}
+	}
+	assert.Equals(t, withMount, len(pm.uids))
+	if fd >= 0 {
+		assert.ErrorIs(t, syscall.Fstat(fd, &syscall.Stat_t{}), syscall.EBADF)
+	}
+}
+
+// assertCleanupPending asserts uid carries the deletion marker, holding mountId ("" for none).
+func assertCleanupPending(t *testing.T, pm *ProcessManager, uid uint32, mountId string) {
+	t.Helper()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	p, ok := pm.processes[uid]
+	assert.Equals(t, true, ok)
+	assert.Equals(t, true, p.cleanupPending)
+	assert.Equals(t, nil, p.handle)
+	assert.Equals(t, mountId, p.mountId)
+	if mountId != "" {
+		assert.Equals(t, uid, pm.uids[mountId])
+	}
+}
+
+// waitFor polls cond until it holds; 2s only bounds the failing case.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); !cond(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+func TestProcessManager_CacheCleanupFailure(t *testing.T) {
+	const mountId = "mount-123"
+	const uid = mountoptions.UIDRangeStart
+	const dirName = "uid-65536"
+	cachedOptions := func(t *testing.T, uid uint32) mountoptions.Options {
+		return mountoptions.Options{Fd: int(mountertest.OpenDevNull(t).Fd()), BucketName: "my-bucket", Args: []string{"--cache"}, Uid: uid, Gid: uid}
+	}
+	// exitWithUnremovableCache launches mountId as uid, leaves a cache it cannot remove, and returns once it has exited.
+	exitWithUnremovableCache := func(t *testing.T, pm *ProcessManager, fr *fakeProcessRunner, cacheDir string) {
+		t.Helper()
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t, uid)))
+		createUnremovableCacheEntry(t, cacheDir, dirName)
+		fr.handles[len(fr.handles)-1].Exit(137, "killed")
+		waitFor(t, "the deletion marker", func() bool {
+			pm.mu.Lock()
+			defer pm.mu.Unlock()
+			return pm.processes[uid].cleanupPending
+		})
+	}
+
+	t.Run("releases nothing: the mount ID, the UID and the slot stay taken while its cache cannot be removed", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+
+		exitWithUnremovableCache(t, pm, fr, cacheDir)
+
+		assertCleanupPending(t, pm, uid, mountId)
+		// The error file is still written, so csi-node sees the failure at once.
+		_, err := os.Stat(filepath.Join(pm.commDir, mountId+errorFileExt))
+		assert.NoError(t, err)
+		// The same PV, even on another UID, is refused until the cache is gone.
+		err = pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t, uid+1))
+		if err == nil {
+			t.Fatal("expected the mount ID to stay taken")
+		}
+		assert.Contains(t, err.Error(), "still has a Mountpoint process, which may be exiting or removing its cache")
+		// Another PV on that UID is refused, without naming the mount.
+		err = pm.Launch("mount-456", "/usr/bin/mount-s3", cachedOptions(t, uid))
+		if err == nil {
+			t.Fatal("expected the UID to stay taken")
+		}
+		assert.Contains(t, err.Error(), "the previous cache of UID 65536 is still being removed")
+		assert.Equals(t, false, strings.Contains(err.Error(), mountId))
+		assert.Equals(t, 1, len(fr.handles))
+		pm.Shutdown()
+	})
+
+	t.Run("the cache cleaner retries in the background and frees the mount ID and the UID once the cache is gone", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		exitWithUnremovableCache(t, pm, fr, cacheDir)
+		stop := make(chan struct{})
+		pm.StartCacheCleaner(stop, 10*time.Millisecond)
+
+		// Still unremovable: a few retries leave it taken.
+		time.Sleep(50 * time.Millisecond)
+		assertCleanupPending(t, pm, uid, mountId)
+
+		assert.NoError(t, os.Chmod(filepath.Join(cacheDir, dirName, "mountpoint-cache"), 0700))
+		waitFor(t, "the cleaner to free the UID", func() bool {
+			pm.mu.Lock()
+			defer pm.mu.Unlock()
+			return len(pm.processes) == 0
+		})
+		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		assertMountReleased(t, pm, -1, 0)
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t, uid)))
+
+		fr.handles[1].Exit(0, "")
+		close(stop)
+		pm.Shutdown()
+	})
+
+	t.Run("Shutdown signals only running Mountpoints, and waits for the cleaner once stopped", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		exitWithUnremovableCache(t, pm, fr, cacheDir)
+		assert.NoError(t, pm.Launch("mount-456", "/usr/bin/mount-s3", cachedOptions(t, uid+1)))
+		stop := make(chan struct{})
+		pm.StartCacheCleaner(stop, time.Hour)
+		go func() {
+			<-fr.handles[1].sigCh
+			fr.handles[1].Exit(0, "")
+		}()
+
+		close(stop)
+		pm.Shutdown() // would panic on the marker's nil handle, or hang on the cleaner
+		assertCleanupPending(t, pm, uid, mountId)
+	})
+}
+
+func TestProcessManager_Launch_MaxVolumesPerNode(t *testing.T) {
+	options := func(t *testing.T, uid uint32) mountoptions.Options {
+		return mountoptions.Options{Fd: int(mountertest.OpenDevNull(t).Fd()), BucketName: "bucket", Uid: uid, Gid: uid}
+	}
+
+	t.Run("refuses a launch beyond maxVolumesPerNode, and launches again once a Mountpoint exits", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm := NewProcessManager(t.TempDir(), "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
+		pm.maxVolumesPerNode = 2
+		assert.NoError(t, pm.Launch("mount-a", "/usr/bin/mount-s3", options(t, 65536)))
+		assert.NoError(t, pm.Launch("mount-b", "/usr/bin/mount-s3", options(t, 65537)))
+
+		third := options(t, 65538)
+		err := pm.Launch("mount-c", "/usr/bin/mount-s3", third)
+		if err == nil {
+			t.Fatal("expected Launch to refuse beyond maxVolumesPerNode")
+		}
+		assert.Contains(t, err.Error(), "refusing to launch mount mount-c: this node already hosts maxVolumesPerNode=2 volumes")
+		assert.Equals(t, 2, len(fr.handles))
+		assertMountReleased(t, pm, third.Fd, 2)
+
+		fr.handles[0].Exit(0, "")
+		waitFor(t, "mount-a to exit", func() bool {
+			pm.mu.Lock()
+			defer pm.mu.Unlock()
+			return len(pm.processes) == 1
+		})
+		assert.NoError(t, pm.Launch("mount-c", "/usr/bin/mount-s3", options(t, 65538)))
+
+		fr.handles[1].Exit(0, "")
+		fr.handles[2].Exit(0, "")
+		pm.Shutdown()
+	})
+
+	t.Run("counts a cache still being removed against maxVolumesPerNode", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		pm.maxVolumesPerNode = 1
+		createUnremovableCacheEntry(t, cacheDir, "uid-65540")
+		assert.NoError(t, pm.markLeftoverCacheDirs())
+
+		err := pm.Launch("mount-a", "/usr/bin/mount-s3", options(t, 65536))
+		if err == nil {
+			t.Fatal("expected Launch to refuse while a leftover takes the only slot")
+		}
+		assert.Contains(t, err.Error(), "this node already hosts maxVolumesPerNode=1 volumes")
+
+		assert.NoError(t, os.Chmod(filepath.Join(cacheDir, "uid-65540", "mountpoint-cache"), 0700))
+		pm.cleanPendingCacheDirs()
+		assert.NoError(t, pm.Launch("mount-a", "/usr/bin/mount-s3", options(t, 65536)))
+
+		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
+	})
+
+	t.Run("does not cap with maxVolumesPerNode 0", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm := NewProcessManager(t.TempDir(), "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
+		for i := range 5 {
+			assert.NoError(t, pm.Launch(fmt.Sprintf("mount-%d", i), "/usr/bin/mount-s3", options(t, uint32(65536+i))))
+		}
+		for _, h := range fr.handles {
+			h.Exit(0, "")
+		}
+		pm.Shutdown()
+	})
+}
+
+func TestProcessManager_MarkLeftoverCacheDirs(t *testing.T) {
+	t.Run("marks the UID of each per-PV cache directory left, and only those", func(t *testing.T) {
+		pm, cacheDir := newProcessManagerWithCache(t, &fakeProcessRunner{}, cacheLimit{strategy: cacheLimitNone})
+		for _, name := range []string{"uid-65540", "uid-70000", "pv-other", "uid-x", "uid-065541"} {
+			assert.NoError(t, os.Mkdir(filepath.Join(cacheDir, name), 0700))
+		}
+
+		assert.NoError(t, pm.markLeftoverCacheDirs())
+
+		assertMountReleased(t, pm, -1, 2)
+		assertCleanupPending(t, pm, 65540, "")
+		assertCleanupPending(t, pm, 70000, "")
+	})
+
+	t.Run("does nothing without a cache volume", func(t *testing.T) {
+		pm := NewProcessManager(t.TempDir(), "", &fakeProcessRunner{}, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
+		assert.NoError(t, pm.markLeftoverCacheDirs())
+		assertMountReleased(t, pm, -1, 0)
+	})
+}
+
+func TestParsePerPvCacheDirName(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		uid  uint32
+		ok   bool
+	}{
+		{"uid-65536", 65536, true},
+		{"uid-0", 0, true},
+		{"uid-4294967295", 4294967295, true},
+		{"uid-4294967296", 0, false}, // overflows uint32
+		{"uid-065536", 0, false},     // not what perPvCacheDirName makes
+		{"uid-+1", 0, false},
+		{"uid-", 0, false},
+		{"uid-x", 0, false},
+		{"pv-1", 0, false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			uid, ok := parsePerPvCacheDirName(testCase.name)
+			assert.Equals(t, testCase.ok, ok)
+			assert.Equals(t, testCase.uid, uid)
+		})
+	}
 }
 
 func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
