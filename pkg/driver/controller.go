@@ -26,12 +26,14 @@ import (
 )
 
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	klog.V(4).Infof("CreateVolume: called with args %#v", req)
+	// The request is not logged: its secrets field may hold credentials.
+	klog.V(4).Infof("CreateVolume: called for volume %q", req.GetName())
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	klog.V(4).Infof("DeleteVolume: called with args: %#v", req)
+	// The request is not logged: its secrets field may hold credentials.
+	klog.V(4).Infof("DeleteVolume: called for volume %q", req.GetVolumeId())
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
@@ -73,7 +75,8 @@ func (d *Driver) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (
 }
 
 func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
-	klog.V(4).Infof("ValidateVolumeCapabilities: called with args %#v", req)
+	// The request is not logged: its secrets field may hold credentials.
+	klog.V(4).Infof("ValidateVolumeCapabilities: called for volume %q", req.GetVolumeId())
 	return &csi.ValidateVolumeCapabilitiesResponse{}, nil
 }
 

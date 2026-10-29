@@ -322,3 +322,68 @@ func TestParseUserEnvFromVolumeContext(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactVolumeContextForLogging(t *testing.T) {
+	testCases := []struct {
+		name      string
+		volumeCtx map[string]string
+		want      map[string]string
+	}{
+		{
+			name: "proxy URL with credentials keeps the host",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "http://user:password@proxy:3128",
+			},
+			want: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "http://REDACTED@proxy:3128",
+			},
+		},
+		{
+			name: "proxy URL with only a user name",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "https://user@proxy.example.com:3128",
+			},
+			want: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "https://REDACTED@proxy.example.com:3128",
+			},
+		},
+		{
+			name: "proxy with credentials but no scheme is replaced entirely",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "user:password@proxy:3128",
+			},
+			want: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "REDACTED",
+			},
+		},
+		{
+			name: "values without credentials are kept",
+			volumeCtx: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "http://proxy:3128",
+				"mountpointEnv.NO_PROXY":    "169.254.169.254,sts.us-east-1.amazonaws.com",
+			},
+			want: map[string]string{
+				"mountpointEnv.HTTPS_PROXY": "http://proxy:3128",
+				"mountpointEnv.NO_PROXY":    "169.254.169.254,sts.us-east-1.amazonaws.com",
+			},
+		},
+		{
+			name: "keys other than Mountpoint environment variables are kept",
+			volumeCtx: map[string]string{
+				"bucketName":                   "amzn-s3-demo-bucket",
+				"mountpointEnvvvv.HTTPS_PROXY": "http://user:password@proxy:3128",
+			},
+			want: map[string]string{
+				"bucketName":                   "amzn-s3-demo-bucket",
+				"mountpointEnvvvv.HTTPS_PROXY": "http://user:password@proxy:3128",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			envprovider.RedactVolumeContextForLogging(testCase.volumeCtx)
+			assert.Equals(t, testCase.want, testCase.volumeCtx)
+		})
+	}
+}

@@ -379,10 +379,12 @@ func podIDFromTargetPath(target string) (string, bool) {
 }
 
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
-// with sensitive fields removed.
+// with sensitive fields removed: secrets are dropped, and so are the service account tokens
+// and any credentials in Mountpoint environment variables from the volume context.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
 	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
+	envprovider.RedactVolumeContextForLogging(safeVolumeContext)
 
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,

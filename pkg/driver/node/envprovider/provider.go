@@ -4,6 +4,7 @@ package envprovider
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -90,6 +91,37 @@ func ParseUserEnvFromVolumeContext(volumeCtx map[string]string) (Environment, er
 		env.Set(envName, value)
 	}
 	return env, nil
+}
+
+// redactedValue replaces credentials removed from log output.
+const redactedValue = "REDACTED"
+
+// RedactVolumeContextForLogging removes credentials from the Mountpoint environment variables a volume
+// context sets (`mountpointEnv.*` keys), in place, so the volume context can be logged.
+//
+// A proxy URL may carry credentials as `user:password@`, which Mountpoint uses for proxy basic authentication.
+// The user info is replaced and the rest of the URL is kept, as the proxy host helps troubleshooting.
+func RedactVolumeContextForLogging(volumeCtx map[string]string) {
+	for key, value := range volumeCtx {
+		if strings.HasPrefix(key, mountpointEnvPrefix) {
+			volumeCtx[key] = redactURLCredentials(value)
+		}
+	}
+}
+
+// redactURLCredentials replaces the user info of a URL. A value with an `@` that does not parse as a URL with
+// a host, such as `user:password@proxy:3128` without a scheme, is replaced entirely, as its credentials cannot
+// be told apart from the rest.
+func redactURLCredentials(value Value) Value {
+	if !strings.Contains(value, "@") {
+		return value
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.User == nil || u.Host == "" {
+		return redactedValue
+	}
+	u.User = url.User(redactedValue)
+	return u.String()
 }
 
 // List returns a sorted slice of environment variables in "KEY=VALUE" format.
