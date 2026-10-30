@@ -304,7 +304,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	for args.Has(mountpoint.ArgCache) {
 		args.Remove(mountpoint.ArgCache)
 	}
-	// The mounter picks the mount's directory
+	// The mounter picks the PV's directory
 	if caches {
 		args.Set(mountpoint.ArgCache, mountpoint.ArgNoValue)
 	}
