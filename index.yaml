@@ -2,6 +2,29 @@ apiVersion: v1
 entries:
   aws-mountpoint-s3-csi-driver:
   - apiVersion: v2
+    created: "2026-10-30T16:23:01.055001774Z"
+    description: A Helm chart for installing the Mountpoint for Amazon S3 CSI Driver.
+      This CSI driver allows your Kubernetes applications to access S3 objects through
+      a file system interface. Install via the Helm repository at https://awslabs.github.io/mountpoint-s3-csi-driver
+      — do not install directly from a GitHub branch.
+    digest: fc66f3fd2e747f5f9d4735e468329c100f9f34a87e38751f810446745ebe3d28
+    home: https://github.com/awslabs/mountpoint-s3-csi-driver
+    keywords:
+    - aws
+    - mountpoint
+    - s3
+    - csi
+    kubeVersion: '>=1.31.0-0'
+    maintainers:
+    - name: AWS S3
+      url: https://github.com/awslabs/mountpoint-s3-csi-driver
+    name: aws-mountpoint-s3-csi-driver
+    sources:
+    - https://github.com/awslabs/mountpoint-s3-csi-driver
+    urls:
+    - https://github.com/awslabs/mountpoint-s3-csi-driver/releases/download/helm-chart-aws-mountpoint-s3-csi-driver-2.9.2/aws-mountpoint-s3-csi-driver-2.9.2.tgz
+    version: 2.9.2
+  - apiVersion: v2
     created: "2026-10-26T15:01:32.020747052Z"
     description: A Helm chart for installing the Mountpoint for Amazon S3 CSI Driver.
       This CSI driver allows your Kubernetes applications to access S3 objects through
@@ -753,4 +776,4 @@ entries:
     urls:
     - https://github.com/awslabs/mountpoint-s3-csi-driver/releases/download/helm-chart-aws-mountpoint-s3-csi-driver-1.0.0/aws-mountpoint-s3-csi-driver-1.0.0.tgz
     version: 1.0.0
-generated: "2026-10-26T15:01:32.020958461Z"
+generated: "2026-10-30T16:23:01.055308435Z"
