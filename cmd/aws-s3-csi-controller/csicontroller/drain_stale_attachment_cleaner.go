@@ -2,6 +2,7 @@ package csicontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -147,10 +148,22 @@ func (cm *DrainStaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context
 		}
 	}
 
-	if modified {
-		if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-			return cm.deleteS3PodAttachment(ctx, s3pa)
+	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. a V2 reconciler teardown
+	// interrupted by the upgrade).
+	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
+		reason := cleanerReasonEmptyOnArrival
+		if modified {
+			reason = cleanerReasonEmptiedByCleaner
 		}
+		if err := cm.deleteS3PodAttachment(ctx, s3pa); err != nil {
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment (%s): %w", reason, err)
+		}
+		log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
+		return nil
+	}
+
+	// Update the S3PodAttachment if modified
+	if modified {
 		return cm.Update(ctx, s3pa)
 	}
 	return nil
