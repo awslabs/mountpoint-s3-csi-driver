@@ -137,17 +137,40 @@ func TestWriteFileOwned(t *testing.T) {
 
 	t.Run("Replaces an existing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(path, []byte("stale"), 0600))
+		// A wider mode than the one written, so a refresh is shown not to inherit it.
+		assert.NoError(t, os.WriteFile(path, []byte("stale"), 0644))
 		assert.NoError(t, util.WriteFileOwned(path, []byte("fresh"), 0400, 0))
 
 		got, err := os.ReadFile(path)
 		assert.NoError(t, err)
 		assert.Equals(t, "fresh", string(got))
+		stat, err := os.Stat(path)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0400), stat.Mode().Perm())
 
 		// No temporary file is left alongside it.
 		entries, err := os.ReadDir(filepath.Dir(path))
 		assert.NoError(t, err)
 		assert.Equals(t, 1, len(entries))
+	})
+
+	t.Run("Keeps the owner when it replaces an existing file", func(t *testing.T) {
+		if os.Getuid() != 0 {
+			t.Skip("changing a file's owner and group needs root")
+		}
+		// A credential refresh rewrites the file; the mount's UID must still own the new one.
+		const uid = uint32(65536)
+		path := filepath.Join(t.TempDir(), "token")
+		assert.NoError(t, util.WriteFileOwned(path, []byte("stale"), 0400, uid))
+		assert.NoError(t, util.WriteFileOwned(path, []byte("fresh"), 0400, uid))
+
+		stat, err := os.Stat(path)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0400), stat.Mode().Perm())
+		sys, ok := stat.Sys().(*syscall.Stat_t)
+		assert.Equals(t, true, ok)
+		assert.Equals(t, uid, sys.Uid)
+		assert.Equals(t, uid, sys.Gid)
 	})
 
 	t.Run("Leaves nothing behind when the path is unwritable", func(t *testing.T) {

@@ -885,6 +885,7 @@ func TestCleanupOrphans(t *testing.T) {
 		expectEntryGone   bool // map entry removed
 		expectMetaGone    bool // meta file removed
 		expectMetaPresent bool // meta file must remain — a surviving entry relies on it to rebuild the map after a CSI node restart
+		expectCommGone    bool // the volume's credential directory and error file in kubeletPath/comm removed
 		expectRefCount    int  // asserted when the entry survives
 	}{
 		{
@@ -901,6 +902,7 @@ func TestCleanupOrphans(t *testing.T) {
 			mountInfo:       func(_, _ string) []mountutils.MountInfo { return nil },
 			expectEntryGone: true,
 			expectMetaGone:  true,
+			expectCommGone:  true,
 		},
 		{
 			// Healthy source: a tracked target the kernel no longer shows is dropped
@@ -1028,6 +1030,12 @@ func TestCleanupOrphans(t *testing.T) {
 				// A surviving entry must keep its meta file — RebuildMountMap relies on it
 				// to recover this mount after a CSI node restart.
 				assert.NoError(t, statErr(MetaFileName(kubeletPath, volumeID)))
+			}
+			if tt.expectCommGone {
+				// An orphan's credentials and error file must not outlive it.
+				commDir := filepath.Join(kubeletPath, "comm")
+				assert.Equals(t, true, os.IsNotExist(statErr(filepath.Join(commDir, volumeID))))
+				assert.Equals(t, true, os.IsNotExist(statErr(filepath.Join(commDir, volumeID+".error"))))
 			}
 		})
 	}

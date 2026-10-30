@@ -553,6 +553,31 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		assertNotExist(t, filepath.Join(cacheDir, dirName))
 	})
 
+	t.Run("recreates the PV's directory, owned by its UID and closed to every other, when the mount is launched again", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		perPvCacheDir := filepath.Join(cacheDir, dirName)
+
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+		// The first Mountpoint leaves a block behind and its directory's mode drifts, then it is killed.
+		assert.NoError(t, os.WriteFile(filepath.Join(perPvCacheDir, "block"), []byte("x"), 0600))
+		assert.NoError(t, os.Chmod(perPvCacheDir, 0755))
+		fr.handles[0].Exit(137, "")
+		pm.Shutdown()
+
+		chowns := recordChowns(pm)
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+
+		fi, err := os.Lstat(perPvCacheDir)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0700), fi.Mode().Perm())
+		assert.Equals(t, [2]int{mountoptions.UIDRangeStart, mountoptions.UIDRangeStart}, chowns[perPvCacheDir])
+		assertNotExist(t, filepath.Join(perPvCacheDir, "block"))
+
+		fr.handles[1].Exit(0, "")
+		pm.Shutdown()
+	})
+
 	t.Run("removes the directory and its contents once Mountpoint exits, before freeing the mount", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
@@ -1020,9 +1045,15 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	fr.handles[0].Exit(1, "credential error")
 	pm.Shutdown()
 
-	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-abc.error"))
+	errPath := filepath.Join(commDir, "mount-abc.error")
+	errBytes, err := os.ReadFile(errPath)
 	assert.NoError(t, err)
 	assert.Equals(t, "credential error", string(errBytes))
+	// The file carries Mountpoint's stderr, so only its owner, root, may read it.
+	fi, err := os.Stat(errPath)
+	assert.NoError(t, err)
+	assert.Equals(t, errorFilePerm, fi.Mode().Perm())
+	assert.Equals(t, fs.FileMode(0600), errorFilePerm)
 }
 
 func TestProcessManager_Launch_RemovesAnEarlierErrorFile(t *testing.T) {
