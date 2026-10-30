@@ -87,7 +87,9 @@ func (d *s3Driver) CreateVolume(ctx context.Context, config *framework.PerTestCo
 
 	var bucketName string
 	var deleteBucket s3client.DeleteBucketFunc
-	if config.Prefix == custom_testsuites.S3ExpressTestIdentifier {
+	if bucketOptions, ok := custom_testsuites.BucketOptionsFromContext(ctx); ok {
+		bucketName, deleteBucket = d.client.CreateStandardBucketWithTags(ctx, bucketOptions.Tags, bucketOptions.ABAC)
+	} else if config.Prefix == custom_testsuites.S3ExpressTestIdentifier {
 		bucketName, deleteBucket = d.client.CreateDirectoryBucket(ctx)
 	} else {
 		bucketName, deleteBucket = d.client.CreateStandardBucket(ctx)

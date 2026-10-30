@@ -24,6 +24,14 @@ import (
 // It is public in order to be modified from test binary which receives region to use as a flag.
 var DefaultRegion string
 
+// ClusterTagKey is the bucket tag key `docs/iam/cluster-tag-policy.json` compares with the caller's cluster name.
+const ClusterTagKey = "eks:eks-cluster-name"
+
+// ClusterName is the name of the cluster under test. If set, created buckets are tagged for it,
+// so the CSI Driver can access them with `docs/iam/cluster-tag-policy.json`.
+// It is public in order to be modified from test binary which receives cluster name to use as a flag.
+var ClusterName string
+
 // See https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-networking.html#s3-express-endpoints
 var expressAZs = map[string]string{
 	"us-east-1":  "use1-az4",
@@ -69,22 +77,49 @@ func NewWithRegion(region string) *Client {
 	return &Client{region: region, client: s3.NewFromConfig(cfg)}
 }
 
-// CreateStandardBucket creates a new standard S3 bucket with a random name,
-// and returns the bucket name and a clean up function.
+// ClusterTags returns the tags that mark a bucket as owned by the cluster under test, or nil if `ClusterName` is not set.
+func ClusterTags() []types.Tag {
+	if ClusterName == "" {
+		return nil
+	}
+	return []types.Tag{{Key: aws.String(ClusterTagKey), Value: aws.String(ClusterName)}}
+}
+
+// CreateStandardBucket creates a new standard S3 bucket with a random name, tagged for the cluster under test
+// and with attribute-based access control (ABAC) enabled, and returns the bucket name and a clean up function.
 func (c *Client) CreateStandardBucket(ctx context.Context) (string, DeleteBucketFunc) {
+	return c.CreateStandardBucketWithTags(ctx, ClusterTags(), true)
+}
+
+// CreateStandardBucketWithTags creates a new standard S3 bucket with a random name and given `tags`,
+// enables attribute-based access control (ABAC) on it if `abac` is true, and returns the bucket name and a clean up function.
+// S3 evaluates bucket tags in IAM policies only if ABAC is enabled.
+func (c *Client) CreateStandardBucketWithTags(ctx context.Context, tags []types.Tag, abac bool) (string, DeleteBucketFunc) {
 	bucketName := c.randomBucketName("")
 
 	input := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}
 
+	if c.region != "us-east-1" || len(tags) > 0 {
+		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{Tags: tags}
+	}
 	if c.region != "us-east-1" {
-		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
-			LocationConstraint: types.BucketLocationConstraint(c.region),
-		}
+		input.CreateBucketConfiguration.LocationConstraint = types.BucketLocationConstraint(c.region)
 	}
 
-	return bucketName, c.create(ctx, input)
+	deleteBucket := c.create(ctx, input)
+
+	if abac {
+		_, err := c.client.PutBucketAbac(ctx, &s3.PutBucketAbacInput{
+			Bucket:     aws.String(bucketName),
+			AbacStatus: &types.AbacStatus{Status: types.BucketAbacStatusEnabled},
+		})
+		framework.ExpectNoError(err, "Failed to enable ABAC on S3 bucket %s", bucketName)
+		framework.Logf("S3 Bucket %s ABAC enabled", bucketName)
+	}
+
+	return bucketName, deleteBucket
 }
 
 // expressAZ returns the S3 Express availability zone for the client's region.
@@ -98,7 +133,8 @@ func (c *Client) expressAZ() string {
 }
 
 // CreateDirectoryBucket creates a new directory S3 bucket with a random name (by following
-// "Directory bucket naming rules") and returns the bucket name and a clean up function.
+// "Directory bucket naming rules"), tagged for the cluster under test, and returns the bucket name and a clean up function.
+// Directory buckets evaluate tags in IAM policies by default.
 func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucketFunc) {
 	regionAz := c.expressAZ()
 	if regionAz == "" {
@@ -124,6 +160,7 @@ func (c *Client) CreateDirectoryBucket(ctx context.Context) (string, DeleteBucke
 				DataRedundancy: types.DataRedundancySingleAvailabilityZone,
 				Type:           types.BucketTypeDirectory,
 			},
+			Tags: ClusterTags(),
 		},
 	})
 }

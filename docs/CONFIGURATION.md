@@ -95,10 +95,22 @@ See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/p
 ## AWS Credentials
 
 The driver requires IAM permissions to access your Amazon S3 bucket.
-We recommend using [Mountpoint's suggested IAM permission policy](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#iam-permissions).
-Alternatively, you can use the AWS managed policy AmazonS3FullAccess, available at ARN
-`arn:aws:iam::aws:policy/AmazonS3FullAccess`, but this managed policy grants more permissions than needed for the
-Mountpoint CSI driver. For more details on creating a policy and an IAM role, review
+
+The tag-based policy in [`docs/iam/cluster-tag-policy.json`](./iam/cluster-tag-policy.json), used with EKS Pod
+Identity, provides the best isolation and is the recommended policy.
+That policy only allows the driver access to buckets tagged for the driver's own cluster, so the workloads of one cluster cannot reach
+another cluster's buckets in the same account. See [Cluster tag isolation](./CLUSTER_TAG_ISOLATION.md).
+
+When a workload needs specific buckets, for example a bucket that several clusters share, you can create a custom
+policy that names those buckets and attach it to the same role. See
+[Mountpoint's suggested IAM permission policy](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#iam-permissions)
+for an example. IAM policies are additive: a role with both policies can access its cluster's tagged buckets and the
+buckets the custom policy names.
+
+If your driver's role uses the AWS managed policy `AmazonS3FullAccess`, which allows every bucket in the account,
+see [Existing clusters](./CLUSTER_TAG_ISOLATION.md#existing-clusters) to migrate off it.
+
+For more details on creating a policy and an IAM role, review
 ["Creating an IAM policy"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-policy) and
 ["Creating an IAM role"](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html#s3-create-iam-role) from the
 EKS User Guide.

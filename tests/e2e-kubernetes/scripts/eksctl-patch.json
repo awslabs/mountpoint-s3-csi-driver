@@ -3,39 +3,21 @@
     "op": "add",
     "path": "/managedNodeGroups/0/iam/attachPolicyARNs",
     "value": [
-      "arn:aws:iam::aws:policy/AmazonS3FullAccess",
       "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
       "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
       "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
-      "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-      "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+      "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
     ]
   },
   {
     "op": "add",
-    "path": "/managedNodeGroups/0/iam/attachPolicy",
-    "value": {
-      "Version": "2012-10-17",
-      "Statement": [
-        {
-          "Effect": "Allow",
-          "Action": ["s3express:*"],
-          "Resource": "*"
-        }
-      ]
-    }
+    "path": "/managedNodeGroups/0/disablePodIMDS",
+    "value": true
   },
   {
     "op": "add",
     "path": "/addons",
     "value": []
-  },
-  {
-    "op": "add",
-    "path": "/addons/-",
-    "value": {
-      "name": "amazon-cloudwatch-observability"
-    }
   },
   {
     "op": "add",
@@ -48,7 +30,28 @@
     "op": "add",
     "path": "/addons/-",
     "value": {
-      "name": "aws-ebs-csi-driver"
+      "name": "amazon-cloudwatch-observability",
+      "podIdentityAssociations": [
+        {
+          "namespace": "amazon-cloudwatch",
+          "serviceAccountName": "cloudwatch-agent",
+          "permissionPolicyARNs": ["arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"]
+        }
+      ]
+    }
+  },
+  {
+    "op": "add",
+    "path": "/addons/-",
+    "value": {
+      "name": "aws-ebs-csi-driver",
+      "podIdentityAssociations": [
+        {
+          "namespace": "kube-system",
+          "serviceAccountName": "ebs-csi-controller-sa",
+          "permissionPolicyARNs": ["arn:aws:iam::aws:policy/AmazonEBSCSIDriverPolicyV2"]
+        }
+      ]
     }
   },
   {

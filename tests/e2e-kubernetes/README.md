@@ -26,6 +26,22 @@ ACTION=uninstall_driver tests/e2e-kubernetes/scripts/run.sh
 ACTION=delete_cluster tests/e2e-kubernetes/scripts/run.sh
 ```
 
+## Credentials on eksctl clusters
+
+On eksctl clusters, the CSI Driver gets its credentials through [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html),
+with the tag-based policy [`docs/iam/cluster-tag-policy.json`](../../docs/iam/cluster-tag-policy.json):
+
+* `create_cluster` creates the IAM role `aws-s3-csi-e2e-<cluster name>` (see `scripts/pod-identity.sh`), sets its
+  policies to `CSI_DRIVER_POD_IDENTITY_POLICY_FILES` (by default `docs/iam/cluster-tag-policy.json`) on every run, and
+  associates it with `kube-system/s3-csi-driver-sa`. `delete_cluster` deletes the role with the cluster.
+* Pods can't reach IMDS (`disablePodIMDS`), and the node role has no S3 permissions, so Mountpoint can't fall back to
+  the node role. The EBS CSI Driver and CloudWatch Observability add-ons get their own EKS Pod Identity roles. Tests
+  relying on IMDS, such as instance profile credentials, are skipped (`IMDS_AVAILABLE=false`).
+* The tests tag every bucket they create with `eks:eks-cluster-name=<cluster name>`, and enable attribute-based
+  access control (ABAC) on general purpose buckets, so the policy allows them. The `clustertag` tests check that
+  buckets tagged for another cluster, untagged buckets and buckets without ABAC fail to mount.
+* The cluster still has an IAM OIDC provider, which only the IRSA credential tests use.
+
 ## Prerequisites
 To run command above its expected that you have AWS credentials in ENVs with the following policies attached:
 ```
@@ -40,6 +56,9 @@ AmazonSSMReadOnlyAccess
 AWSCloudFormationFullAccess
 EksAllAccess (non-managed see below, and https://eksctl.io/usage/minimum-iam-policies/)
 ```
+
+The tests also create directory buckets, tagged for the cluster, which needs `s3express:CreateBucket` and
+`s3express:TagResource` (`AmazonS3FullAccess` covers `s3:*` only).
 
 ### EksAllAccess
 ```
