@@ -3,12 +3,17 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
 )
@@ -154,4 +159,217 @@ func (t *s3CSIResourceCleanupDaemonsetTestSuite) DefineTests(driver storageframe
 			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
 		}).WithTimeout(cleanupObserveTimeout).WithPolling(cleanupObservePoll).Should(gomega.Equal(0))
 	})
+
+	// With requiresRepublish, a container restart in a pod whose Mountpoint died must still see an I/O
+	// error, never an empty directory that would silently hide the lost mount (writes would land in the
+	// node's disk). Only this mount's Mountpoint is killed, so the mounter pod and its /comm survive, and
+	// the cleanup job's reclaim of the dead source is observable there.
+	// Not Serial: it kills only its own mount's Mountpoint, which no parallel spec shares.
+	ginkgo.It("should keep failing I/O, not show an empty directory, when a workload container restarts after its Mountpoint dies", func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, resource)
+		pvName := resource.Pv.Name
+
+		// Exits 1 once the marker appears, so the kubelet restarts the container (restartPolicy OnFailure).
+		// The marker is in the container's own filesystem, so the restarted container starts without it.
+		// The delay lets the exec that creates the marker return before the container goes away, as an exec
+		// into a container that exits under it can hang.
+		const restartMarker = "/tmp/restart-me"
+		ginkgo.By("Creating a workload whose container exits when asked to")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline,
+			fmt.Sprintf("while [ ! -e %s ]; do sleep 1; done; sleep 3; exit 1", restartMarker))
+		pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer deletePodsInOrder(ctx, f, []*v1.Pod{pod})
+		targetNode := pod.Spec.NodeName
+
+		checkWriteToPathSucceedEventually(ctx, f, pod, "/mnt/volume1/before.txt", 1024, time.Now().UTC().UnixNano())
+		uid := statPath(ctx, f, targetNode, filepath.Join(commDirHostPath(ctx, f, targetNode), pvName)).uid
+
+		ginkgo.By(fmt.Sprintf("Killing only this mount's Mountpoint (UID %d)", uid))
+		pid := mountpointProcessRunningAs(ctx, f, targetNode, uid).pid
+		_, stderr, err := execInMounterPod(ctx, f, targetNode, "kill -9 "+pid)
+		framework.ExpectNoError(err, "killing Mountpoint pid %s: %s", pid, stderr)
+		assertPodIOFails(ctx, f, pod, e2epod.VolumeMountPath1)
+
+		ginkgo.By("Making the workload container exit, so the kubelet restarts it over the dead mount")
+		triggerContainerExit(ctx, f, pod, restartMarker)
+		restartedAt := time.Now()
+
+		// One loop for both waits, to keep the spec short: the kubelet's restart attempts (with back-off) are
+		// checked on every poll while the periodic cleanup reclaims the dead source. Each attempt, and the
+		// requiresRepublish calls meanwhile, is a chance for a remount over the target to race it.
+		ginkgo.By("Watching the restarts until the cleanup job reclaims the dead source: each restart must be refused or see failing I/O, never an empty directory")
+		refused, startedWithFailingIO := 0, 0
+		reclaimed := false
+		deadline := restartedAt.Add(cleanupObserveTimeout)
+		for !(reclaimed && time.Since(restartedAt) >= minRestartObservation) {
+			if time.Now().After(deadline) {
+				ginkgo.Fail(fmt.Sprintf("within %v, reclaimed=%v and restarts observed for %v (refused %d, started %d)",
+					cleanupObserveTimeout, reclaimed, time.Since(restartedAt).Round(time.Second), refused, startedWithFailingIO))
+			}
+			current, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+			framework.ExpectNoError(err)
+			state := current.Status.ContainerStatuses[0].State
+			switch {
+			case state.Running != nil:
+				// Had the dead mount been replaced by an empty directory, the container would start and list it.
+				assertPodIOFails(ctx, f, current, e2epod.VolumeMountPath1)
+				startedWithFailingIO++
+			case state.Waiting != nil && state.Waiting.Reason == "CreateContainerError":
+				// The kubelet cannot bind-mount a dead FUSE mount into a new container, so it does not start.
+				gomega.Expect(state.Waiting.Message).To(gomega.ContainSubstring("transport endpoint is not connected"),
+					"the container must be refused because its volume's mount is dead, got: %s", state.Waiting.Message)
+				refused++
+			}
+			if !reclaimed {
+				reclaimed = countFuseMountsForVolume(ctx, f, targetNode, pvName) == 0
+			}
+			time.Sleep(restartObservePoll)
+		}
+		framework.Logf("Over %v: %d observation(s) of a refused restart, %d of a started container with failing I/O",
+			time.Since(restartedAt).Round(time.Second), refused, startedWithFailingIO)
+		gomega.Expect(refused+startedWithFailingIO).To(gomega.BeNumerically(">", 0),
+			"observed no restart outcome for pod %s, so nothing was checked", pod.Name)
+
+		// The workload still runs, so no unpublish fires: only the periodic cleanup reclaimed the dead source,
+		// and it must have said so and removed the mount's credentials.
+		ginkgo.By("Checking the cleanup job logged the reclaim and removed the mount's credentials")
+		gomega.Eventually(ctx, func(ctx context.Context) bool {
+			return verifyCSINodeLogs(ctx, f, targetNode, fmt.Sprintf("for volume %s is dead, cleaning up", pvName)) ||
+				verifyCSINodeLogs(ctx, f, targetNode, fmt.Sprintf("for volume %s not in mount table, cleaning up", pvName))
+		}).WithTimeout(time.Minute).WithPolling(cleanupObservePoll).Should(gomega.BeTrue(),
+			"csi-node must log the reclaim of volume %s's dead source", pvName)
+		credDir := filepath.Join(commDirHostPath(ctx, f, targetNode), pvName)
+		_, err = execInCSINodePod(ctx, f, targetNode, fmt.Sprintf("test ! -e %q", credDir))
+		framework.ExpectNoError(err, "the reclaimed mount's credential directory %s must be removed", credDir)
+	})
+
+	// csi-node dying while the kubelet's NodePublishVolume is in flight must not leave host residue: once the
+	// kubelet's retry completes there is one source, one Mountpoint, and a credential directory owned by that
+	// Mountpoint's UID, and unpublishing afterwards removes all of it.
+	// The kill is sent once csi-node has written the mount's credential directory and before the kubelet has
+	// seen the publish succeed. Mountpoint starts within a few hundred milliseconds, so the bind mount may
+	// complete before csi-node exits; the retry then takes the already-mounted path. Hitting the gap between
+	// the credentials and the bind mount every time would need fault injection in the driver. The log records
+	// which path a run took.
+	// Serial: it kills the node's csi-node pod, which every other spec on the node relies on.
+	ginkgo.It("should leave no residue when csi-node is killed during a publish", ginkgo.Serial, func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, resource)
+		pvName := resource.Pv.Name
+		bucketName := resource.Pv.Spec.CSI.VolumeHandle
+
+		ginkgo.By("Creating a workload without waiting for it to start")
+		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+		pod, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod)
+		framework.ExpectNoError(err)
+		defer deletePodsInOrder(ctx, f, []*v1.Pod{pod})
+
+		var targetNode string
+		gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
+			current, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+			if err != nil {
+				return "", err
+			}
+			targetNode = current.Spec.NodeName
+			return targetNode, nil
+		}).WithTimeout(time.Minute).WithPolling(time.Second).ShouldNot(gomega.BeEmpty())
+
+		ginkgo.By("Waiting for the publish to write the mount's credential directory")
+		gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
+			return queryCredentialDirStatus(ctx, f, targetNode, pvName)
+		}).WithTimeout(f.Timeouts.PodStart).WithPolling(250 * time.Millisecond).Should(gomega.Equal("EXISTS"))
+
+		// Recorded only to say in the log whether the kill really interrupted the publish; the assertions
+		// below must hold either way.
+		before, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		framework.ExpectNoError(err)
+		framework.Logf("Killing csi-node with the workload in phase %s", before.Status.Phase)
+
+		ginkgo.By(fmt.Sprintf("Killing the csi-node pod on node %s during the publish", targetNode))
+		killCSINodePodOnNode(ctx, f, targetNode)
+		waitForCSINodePodReady(ctx, f, targetNode)
+		waitForCSINodePodStable(ctx, f, targetNode)
+
+		ginkgo.By("Waiting for the kubelet's retried publish to start the workload")
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name, f.Timeouts.PodStart))
+		if verifyCSINodeLogs(ctx, f, targetNode, fmt.Sprintf("kubernetes.io~csi/%s/mount is already mounted", pvName)) {
+			framework.Logf("The bind mount completed before csi-node exited; the retry took the already-mounted path")
+		} else {
+			framework.Logf("The kill interrupted the publish before the bind mount; the retry mounted afresh")
+		}
+		toWrite := 1024
+		seed := time.Now().UTC().UnixNano()
+		checkWriteToPathSucceedEventually(ctx, f, pod, "/mnt/volume1/after-kill.txt", toWrite, seed)
+		checkReadFromPathSucceedEventually(ctx, f, pod, "/mnt/volume1/after-kill.txt", toWrite, seed)
+
+		ginkgo.By("Checking the retry left one source and one Mountpoint, not a duplicate from the interrupted attempt")
+		dumpMountTable(ctx, f, targetNode, "after csi-node kill")
+		dumpMountpointProcesses(ctx, f, targetNode, "after csi-node kill")
+		gomega.Expect(countFuseMountsForVolume(ctx, f, targetNode, pvName)).To(gomega.Equal(1),
+			"expected exactly 1 FUSE source mount for volume %s after the retried publish", pvName)
+		gomega.Eventually(ctx, func(ctx context.Context) int {
+			return countMountpointProcessesForVolume(ctx, f, targetNode, bucketName)
+		}).WithTimeout(time.Minute).WithPolling(5*time.Second).Should(gomega.Equal(1),
+			"expected exactly 1 mount-s3 process for bucket %s after the retried publish", bucketName)
+
+		ginkgo.By("Checking the credential directory belongs to the UID the Mountpoint runs as")
+		credDirPath := filepath.Join(commDirHostPath(ctx, f, targetNode), pvName)
+		credDir := statPath(ctx, f, targetNode, credDirPath)
+		gomega.Expect(credDir.mode).To(gomega.Equal(expectedCredDirMode))
+		gomega.Expect(credDir.uid).To(gomega.And(
+			gomega.BeNumerically(">=", mountoptions.UIDRangeStart),
+			gomega.BeNumerically("<=", mountoptions.UIDRangeEnd),
+		), "credential directory for %s must belong to an allocated UID", pvName)
+		gomega.Expect(credDir.gid).To(gomega.Equal(credDir.uid))
+		// Fails if the retry re-used a directory chowned to the interrupted attempt's UID while Mountpoint
+		// runs as another, as Mountpoint could then not read its credentials.
+		mountpointProcessRunningAs(ctx, f, targetNode, credDir.uid)
+		gomega.Expect(checkMetaFileExists(ctx, f, targetNode, pvName)).To(gomega.BeTrue(),
+			"the retried publish must persist the mount's metadata for volume %s", pvName)
+
+		ginkgo.By("Deleting the workload and checking the unpublish removes every trace of the mount")
+		deletePodsInOrder(ctx, f, []*v1.Pod{pod})
+		gomega.Eventually(ctx, func(ctx context.Context) int {
+			return countFuseMountsForVolume(ctx, f, targetNode, pvName)
+		}).WithTimeout(cleanupObserveTimeout).WithPolling(cleanupObservePoll).Should(gomega.Equal(0),
+			"the source mount for volume %s must be removed", pvName)
+		gomega.Eventually(ctx, func(ctx context.Context) int {
+			return countMountpointProcessesForVolume(ctx, f, targetNode, bucketName)
+		}).WithTimeout(time.Minute).WithPolling(5*time.Second).Should(gomega.Equal(0),
+			"the Mountpoint for bucket %s must exit", bucketName)
+		gomega.Eventually(ctx, func(ctx context.Context) bool {
+			return checkMetaFileExists(ctx, f, targetNode, pvName)
+		}).WithTimeout(time.Minute).WithPolling(5*time.Second).Should(gomega.BeFalse(),
+			"the metadata for volume %s must be removed", pvName)
+		checkCredentialDirRemoved(ctx, f, targetNode, pvName)
+	})
+}
+
+// The restart watch runs at least minRestartObservation, which spans several of the kubelet's restart attempts,
+// and until the cleanup job has reclaimed the dead source (at most one cleanupInterval).
+const (
+	minRestartObservation = time.Minute
+	restartObservePoll    = 5 * time.Second
+)
+
+// triggerContainerExit makes the pod's container exit by creating `marker`, which its command waits for, and
+// returns once the kubelet has recorded the exit.
+func triggerContainerExit(ctx context.Context, f *framework.Framework, pod *v1.Pod, marker string) {
+	triggered := time.Now().Add(-time.Second)
+	// The container exits right after, so the exec may report an error; the recorded exit is the check.
+	_, _, _ = e2epod.ExecCommandInContainerWithFullOutput(f, pod.Name, pod.Spec.Containers[0].Name, "/bin/sh", "-c", "touch "+marker)
+
+	gomega.Eventually(ctx, func(ctx context.Context) error {
+		current, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		last := current.Status.ContainerStatuses[0].LastTerminationState.Terminated
+		if last == nil || last.FinishedAt.Time.Before(triggered) {
+			return fmt.Errorf("container of pod %s has not exited since it was asked to", pod.Name)
+		}
+		return nil
+	}).WithTimeout(f.Timeouts.PodStart).WithPolling(2 * time.Second).Should(gomega.Succeed())
 }
