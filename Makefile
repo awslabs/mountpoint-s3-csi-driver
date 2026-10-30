@@ -34,7 +34,7 @@ IMAGE?=$(REGISTRY)/${IMAGE_NAME}
 TAG?=$(GIT_COMMIT)
 FORCE_BUILD?=false
 
-DOCKERFILE?="Dockerfile"
+DOCKERFILE?="Dockerfile.local"
 
 OS?=linux
 ARCH?=amd64

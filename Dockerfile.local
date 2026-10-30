@@ -5,7 +5,7 @@
 # Configuration
 #
 ARG MOUNTPOINT_REPOSITORY="https://github.com/awslabs/mountpoint-s3"
-ARG MOUNTPOINT_BRANCH="main"
+ARG MOUNTPOINT_BRANCH="vendor-fuser-0.17"
 ARG MOUNTPOINT_VERSION="unreleased"
 ARG MOUNTPOINT_BUILD_ARGS="" # e.g., --features express_cache
 
