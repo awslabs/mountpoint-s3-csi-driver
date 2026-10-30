@@ -142,7 +142,39 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 				"Mountpoint pid %s must hold no effective capabilities", c.pid)
 			gomega.Expect(c.capAmb).To(gomega.Equal("0000000000000000"),
 				"Mountpoint pid %s must hold no ambient capabilities", c.pid)
+
+			// Inherited from the mounter's `allowPrivilegeEscalation: false`: even a setuid binary cannot
+			// give the process back what the UID transition took.
+			gomega.Expect(c.noNewPrivs).To(gomega.Equal("1"),
+				"Mountpoint pid %s must run with no_new_privs set", c.pid)
 		}
+	})
+
+	// Holding no capabilities, with every UID set to the mount's, a Mountpoint cannot switch back to
+	// root. Checked by a process with exactly a Mountpoint's identity, as setpriv gives it from the mounter.
+	ginkgo.It("should not let a mount's UID regain root", func(ctx context.Context) {
+		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, resource)
+		pvName := resource.Pv.Name
+
+		targetNode, pods := createPodsOnSameNode(ctx, f, 1, resource)
+		defer deletePodsInOrder(ctx, f, pods)
+
+		ginkgo.By("Waiting for the mount to be serving")
+		gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
+			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
+		}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.Equal(1))
+		uid := statPath(ctx, f, targetNode, filepath.Join(commDirHostPath(ctx, f, targetNode), pvName)).uid
+
+		ginkgo.By(fmt.Sprintf("Attempting to switch from the mount's UID %d back to root", uid))
+		asMount := fmt.Sprintf("setpriv --reuid=%d --regid=%d --clear-groups", uid, uid)
+		// The inner setpriv runs only setpriv itself, which the mounter image has (the specs above use it),
+		// so a failure here is the switch being refused, not a missing binary.
+		out, stderr, err := execInMounterPod(ctx, f, targetNode, asMount+" setpriv --reuid=0 --regid=0 --clear-groups setpriv --dump")
+		gomega.Expect(err).To(gomega.HaveOccurred(),
+			"UID %d must not be able to switch to root; got output %q", uid, out)
+		gomega.Expect(stderr).To(gomega.ContainSubstring("Operation not permitted"),
+			"UID %d must be refused by the kernel, but the failure was: %q", uid, stderr)
 	})
 
 	// The UID isolates nothing unless the filesystem agrees: shared paths root-owned and closed,
@@ -247,6 +279,27 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			gomega.Expect(st.mode).To(gomega.Equal(expectedCredFileMode),
 				"credential file %s must be read-only to its owner", file)
 		}
+
+		// The modes only isolate if another mount's Mountpoint is actually refused. A second, real mount on
+		// the node gives a UID the allocator really handed out, rather than a guessed one.
+		ginkgo.By("Starting a second mount on the same node, to read the first mount's tokens as its UID")
+		other := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, other)
+		otherPods := createPodOnNode(ctx, f, targetNode, other)
+		defer deletePodsInOrder(ctx, f, otherPods)
+		otherUID := statPath(ctx, f, targetNode, filepath.Join(commDirHostPath(ctx, f, targetNode), other.Pv.Name)).uid
+		gomega.Expect(otherUID).ToNot(gomega.Equal(credDir.uid), "the two mounts must have different UIDs")
+
+		asOther := fmt.Sprintf("setpriv --reuid=%d --regid=%d --clear-groups", otherUID, otherUID)
+		for _, file := range files {
+			tokenPath := fmt.Sprintf("/comm/%s/%s", pvName, file)
+			ginkgo.By(fmt.Sprintf("Confirming UID %d cannot open %s", otherUID, tokenPath))
+			out, stderr, err := execInMounterPod(ctx, f, targetNode, asOther+" cat "+tokenPath)
+			gomega.Expect(err).To(gomega.HaveOccurred(),
+				"UID %d must not be able to read another mount's credential file %s; got output %q", otherUID, tokenPath, out)
+			gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"),
+				"UID %d must be refused by the kernel, but the failure was: %q", otherUID, stderr)
+		}
 	})
 
 	// The modes asserted above only matter if the kernel enforces them. The mounter runs as root, so it is subject to
@@ -301,6 +354,9 @@ type mountpointProcessCreds struct {
 	capPrm string
 	capEff string
 	capAmb string
+	// noNewPrivs is "1" when the kernel refuses the process any privilege gain through exec, such as
+	// a setuid binary or file capabilities.
+	noNewPrivs string
 }
 
 // uid returns the effective UID, which equals the others once the assertions below have run.
@@ -348,7 +404,7 @@ func mountpointProcessCredentials(ctx context.Context, f *framework.Framework, n
 	// `-H` prefixes every line with its /proc path, so each line carries the pid it belongs to and
 	// can be parsed on its own. Processes come and go while the glob expands, so a non-zero exit is
 	// not treated as fatal; an empty result is, via the caller's retry.
-	const cmd = `grep -H -E '^(Name|Uid|Gid|Groups|CapPrm|CapEff|CapAmb):' /proc/[0-9]*/status 2>/dev/null`
+	const cmd = `grep -H -E '^(Name|Uid|Gid|Groups|CapPrm|CapEff|CapAmb|NoNewPrivs):' /proc/[0-9]*/status 2>/dev/null`
 
 	stdout, stderr, err := execInMounterPod(ctx, f, nodeName, cmd)
 	if err != nil && stdout == "" {
@@ -397,6 +453,8 @@ func mountpointProcessCredentials(ctx context.Context, f *framework.Framework, n
 			cur.capEff = fields[1]
 		case "CapAmb:":
 			cur.capAmb = fields[1]
+		case "NoNewPrivs:":
+			cur.noNewPrivs = fields[1]
 		}
 	}
 
