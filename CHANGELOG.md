@@ -2,6 +2,35 @@
 
 ### Notable changes
 * Add support for Kubernetes 1.37.
+
+# v2.9.2
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.2/README.md)
+
+### Notable changes
+* Update Go to 1.27.3 ([#1011](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1011))
+* Update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.4 and livenessprobe:v2.20.0-eksbuild.4 ([#1016](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1016), [#1018](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1018))
+
+# v2.9.1
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.1/README.md)
+
+### Notable changes
+* Log the reason when the controller deletes a MountpointS3PodAttachment ([#998](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/998))
+* Update Go to 1.27.2 ([#997](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/997))
+* Update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.1 and livenessprobe:v2.20.0-eksbuild.1 ([#1002](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1002))
+
+# v2.9.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.9.0/README.md)
+
+### Notable changes
+* Add `controller.replicaCount` to helm ([#902](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/902) by @iamhaseebn)
+* Improve dead mount health check ([#921](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/921) by @wxy-phylo)
+* Fix reconciler not updating mount creation expectations when a mount is quickly unmounted ([#917](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/917) by @saikpr)
+* Delete already-empty S3PAs in stale cleaner ([#976](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/976) by @tadiwa-aizen)
+* Update sidecar images to csi-node-driver-registrar:v2.17.0-eksbuild.7 & livenessprobe:v2.19.0-eksbuild.7 ([#965](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/965))
+* Update Go to 1.27.1 ([#964](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/964))
 * Support Mountpoint [version 1.24.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.24.0) ([#922](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/922))
   * Mountpoint now supports setting a target for total memory usage via the `--memory-target` CLI argument. This target is not a guaranteed limit but Mountpoint manages the memory available for data buffers to stay within the target: under memory pressure it slows down I/O, reclaims buffers it no longer needs and reduces prefetching. See [the configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage). ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
   * **Breaking**: Mountpoint now limits how many files can be open for writing at the same time, derived from `--memory-target` and `--write-part-size`. Once the limit is reached, opening a file for writing fails with `ENOMEM` until an existing write file handle is closed. See [the configuration documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#maximum-number-of-files-open-for-writing) for how the limit is calculated. ([#1936](https://github.com/awslabs/mountpoint-s3/pull/1936))
