@@ -201,6 +201,24 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 			return false, nil
 		})
 		framework.ExpectNoError(err)
+
+		// The condition is on the pod; an operator watching events must also be told why it is pending.
+		ginkgo.By("Checking the scheduler reported the overcommit as a Warning event")
+		gomega.Eventually(ctx, func(ctx context.Context) error {
+			events, err := f.ClientSet.CoreV1().Events(f.Namespace.Name).List(ctx, metav1.ListOptions{
+				FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + extraPod.Name,
+			})
+			if err != nil {
+				return err
+			}
+			reg := regexp.MustCompile(`max.+volume.+count`)
+			for _, event := range events.Items {
+				if event.Type == v1.EventTypeWarning && event.Reason == "FailedScheduling" && reg.MatchString(event.Message) {
+					return nil
+				}
+			}
+			return fmt.Errorf("no Warning FailedScheduling event naming the volume limit for pod %s among %d event(s)", extraPod.Name, len(events.Items))
+		}).WithTimeout(f.Timeouts.PodStart).WithPolling(5 * time.Second).Should(gomega.Succeed())
 	})
 
 	// Verifies that the scheduler's volumeHandle dedup works correctly:
