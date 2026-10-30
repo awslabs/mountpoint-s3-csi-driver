@@ -18,6 +18,7 @@ export REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${BASE_DIR}"/eksctl.sh
 source "${BASE_DIR}"/helm.sh
+source "${BASE_DIR}"/pod-identity.sh
 
 TEST_DIR=${BASE_DIR}/../csi-test-artifacts
 BIN_DIR=${TEST_DIR}/bin
@@ -28,7 +29,8 @@ EKSCTL_BIN=${BIN_DIR}/eksctl
 KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
-IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
+# eksctl clusters block pod access to IMDS (see `eksctl-patch.json`), and the CSI Driver uses EKS Pod Identity.
+IMDS_AVAILABLE=${IMDS_AVAILABLE:-false}
 ARCH=${ARCH:-x86}
 AMI_FAMILY=${AMI_FAMILY:-AmazonLinux2}
 SELINUX_MODE=${SELINUX_MODE:-}
@@ -52,7 +54,9 @@ fi
 
 KUBECONFIG=${KUBECONFIG:-"${TEST_DIR}/${CLUSTER_NAME}.kubeconfig"}
 
-ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')} # excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
+# Only regular availability zones: EKS can't create control plane subnets in Local Zones or Wavelength Zones,
+# which accounts may have opted in to. Excluding us-east-1e, see: https://github.com/eksctl-io/eksctl/issues/817
+ZONES=${AWS_AVAILABILITY_ZONES:-$(aws ec2 describe-availability-zones --region ${REGION} --filters Name=zone-type,Values=availability-zone | jq -c '.AvailabilityZones[].ZoneName' | grep -v "us-east-1e" | tr '\n' ',' | sed 's/"//g' | sed 's/.$//')}
 NODE_COUNT=${NODE_COUNT:-3}
 if [[ "${ARCH}" == "x86" ]]; then
   INSTANCE_TYPE_DEFAULT=c5.large
@@ -73,6 +77,11 @@ fi
 
 CI_ROLE_ARN=${CI_ROLE_ARN:-""}
 CSI_DRIVER_IRSA_ROLE_ARN=${CSI_DRIVER_IRSA_ROLE_ARN:-}
+
+# IAM role the CSI Driver uses through EKS Pod Identity on eksctl clusters, see `pod-identity.sh`.
+# The `aws-s3-csi-e2e-` prefix lets `scripts/delete-e2e-roles.sh` clean up leaked roles.
+CSI_DRIVER_POD_IDENTITY_ROLE_NAME=${CSI_DRIVER_POD_IDENTITY_ROLE_NAME:-"aws-s3-csi-e2e-${CLUSTER_NAME}"}
+CSI_DRIVER_POD_IDENTITY_POLICY_FILES=${CSI_DRIVER_POD_IDENTITY_POLICY_FILES:-"${BASE_DIR}/../../../docs/iam/cluster-tag-policy.json"}
 
 mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
@@ -103,6 +112,11 @@ function install_tools() {
 
 function create_cluster() {
   if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+    # Policies are set on every run, so they're updated on re-used clusters too.
+    CSI_DRIVER_POD_IDENTITY_ROLE_ARN=$(pod_identity_create_role "${CSI_DRIVER_POD_IDENTITY_ROLE_NAME}")
+    read -r -a POLICY_FILES <<< "${CSI_DRIVER_POD_IDENTITY_POLICY_FILES}"
+    pod_identity_set_policies "${CSI_DRIVER_POD_IDENTITY_ROLE_NAME}" "${POLICY_FILES[@]}"
+
     eksctl_create_cluster \
       "$CLUSTER_NAME" \
       "$REGION" \
@@ -116,7 +130,9 @@ function create_cluster() {
       "$INSTANCE_TYPE" \
       "$AMI_FAMILY" \
       "$K8S_VERSION_EKSCTL" \
-      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE"
+      "$EKSCTL_PATCH_SELINUX_ENFORCING_FILE" \
+      "$CSI_DRIVER_POD_IDENTITY_ROLE_ARN" \
+      "$NODE_COUNT"
   fi
 }
 
@@ -126,7 +142,8 @@ function delete_cluster() {
       "$EKSCTL_BIN" \
       "$CLUSTER_NAME" \
       "$REGION" \
-      "${FORCE:-}"
+      "${FORCE:-}" \
+      "$CSI_DRIVER_POD_IDENTITY_ROLE_NAME"
   fi
 }
 
@@ -169,6 +186,9 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
     "${KUBECONFIG}" \
     "${CSI_DRIVER_IRSA_ROLE_ARN}" \
     "${CLUSTER_TYPE}"
+  if [[ "${CLUSTER_TYPE}" == "eksctl" ]]; then
+    pod_identity_wait_for_credentials "${KUBECTL_BIN}" "${KUBECONFIG}"
+  fi
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes

@@ -1,6 +1,7 @@
 # Unreleased
 
 ### Notable changes
+* Add a tag-based IAM policy for EKS Pod Identity that limits the driver to S3 buckets tagged for its own EKS cluster, recommended as the default. Policies that name specific buckets, for example buckets shared between clusters, can be added alongside it. See [Cluster tag isolation](docs/CLUSTER_TAG_ISOLATION.md).
 
 # v2.9.2
 
