@@ -1,0 +1,82 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListBucketsTaggedForThisCluster",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": [
+        "arn:*:s3:::*",
+        "arn:*:s3:*:*:accesspoint/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/eks:eks-cluster-name": "${aws:PrincipalTag/eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:PrincipalTag/eks-cluster-arn": "arn:*:eks:${aws:RequestedRegion}:*:cluster/*"
+        }
+      }
+    },
+    {
+      "Sid": "ObjectsInBucketsTaggedForThisCluster",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:*:s3:::*/*",
+        "arn:*:s3:*:*:accesspoint/*/object/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/eks:eks-cluster-name": "${aws:PrincipalTag/eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:PrincipalTag/eks-cluster-arn": "arn:*:eks:${aws:RequestedRegion}:*:cluster/*"
+        }
+      }
+    },
+    {
+      "Sid": "DirectoryBucketSessionsTaggedForThisCluster",
+      "Effect": "Allow",
+      "Action": "s3express:CreateSession",
+      "Resource": [
+        "arn:*:s3express:*:*:bucket/*",
+        "arn:*:s3express:*:*:accesspoint/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/eks:eks-cluster-name": "${aws:PrincipalTag/eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:PrincipalTag/eks-cluster-arn": "arn:*:eks:${aws:RequestedRegion}:*:cluster/*"
+        }
+      }
+    },
+    {
+      "Sid": "SseKmsKeysTaggedForThisClusterThroughS3",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:*:kms:*:*:key/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/eks:eks-cluster-name": "${aws:PrincipalTag/eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:PrincipalTag/eks-cluster-arn": "arn:*:eks:${aws:RequestedRegion}:*:cluster/*",
+          "kms:ViaService": [
+            "s3.*.amazonaws.com",
+            "s3express.*.amazonaws.com"
+          ]
+        }
+      }
+    }
+  ]
+}
