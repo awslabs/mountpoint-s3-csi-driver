@@ -39,6 +39,7 @@ func init() {
 	flag.Parse()
 
 	s3client.DefaultRegion = BucketRegion
+	s3client.ClusterName = ClusterName
 	custom_testsuites.DefaultRegion = BucketRegion
 	custom_testsuites.ClusterName = ClusterName
 	custom_testsuites.ClusterType = ClusterType
@@ -121,6 +122,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3TaintRemovalTestSuite,
 	custom_testsuites.InitS3CSIEvictionOrderTestSuite,
 	custom_testsuites.InitS3ProxyTestSuite,
+	custom_testsuites.InitS3ClusterTagTestSuite,
 }
 
 func getCSITestSuites() []func() framework.TestSuite {

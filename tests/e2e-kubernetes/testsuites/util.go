@@ -281,6 +281,31 @@ func deletePodIdentityAssociations(ctx context.Context, sa *v1.ServiceAccount) {
 	}
 }
 
+// podIdentityAssociationRoleARN returns the role ARN of the Pod Identity Association of given Service Account,
+// or an empty string if it has none.
+func podIdentityAssociationRoleARN(ctx context.Context, sa *v1.ServiceAccount) string {
+	eksClient := eks.NewFromConfig(awsConfig(ctx))
+
+	listOutput, listErr := eksClient.ListPodIdentityAssociations(ctx, &eks.ListPodIdentityAssociationsInput{
+		ClusterName:    &ClusterName,
+		Namespace:      &sa.Namespace,
+		ServiceAccount: &sa.Name,
+	})
+	framework.ExpectNoError(listErr)
+
+	if len(listOutput.Associations) == 0 {
+		return ""
+	}
+
+	// A Service Account can only have one association, and the summary does not include the role.
+	describeOutput, describeErr := eksClient.DescribePodIdentityAssociation(ctx, &eks.DescribePodIdentityAssociationInput{
+		ClusterName:   &ClusterName,
+		AssociationId: listOutput.Associations[0].AssociationId,
+	})
+	framework.ExpectNoError(describeErr)
+	return *describeOutput.Association.RoleArn
+}
+
 func csiDriverPod(ctx context.Context, f *framework.Framework) *v1.Pod {
 	ds := csiDriverDaemonSet(ctx, f)
 	client := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace)
