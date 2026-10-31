@@ -1,6 +1,7 @@
 # Unreleased
 
 ### Notable changes
+* Add support for Kubernetes 1.37.
 
 # v2.9.2
 
