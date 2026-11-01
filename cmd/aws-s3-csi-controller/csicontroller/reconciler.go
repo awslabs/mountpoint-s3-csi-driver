@@ -39,6 +39,18 @@ const (
 	DontRequeue = false
 )
 
+// Reasons a MountpointS3PodAttachment is deleted, passed to deleteS3PodAttachment and logged as the
+// "reason" field. Grouped by the caller that deletes the S3PA.
+const (
+	// Reconciler-driven deletions.
+	reconcilerReasonNoMountpointPods = "reconciler removed the last workload"
+	reconcilerReasonDuplicate        = "duplicate S3PodAttachment that never referenced any Mountpoint Pod"
+
+	// Stale-attachment-cleaner-driven deletions.
+	cleanerReasonEmptyOnArrival   = "cleaner found the S3PodAttachment already empty (likely an interrupted reconciler teardown)"
+	cleanerReasonEmptiedByCleaner = "cleaner removed the last stale workload"
+)
+
 // A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
 type Reconciler struct {
 	mountpointPodConfig  mppod.Config
@@ -481,9 +493,9 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		log.Info("Deleting duplicate MountpointS3PodAttachment that references no Mountpoint Pods", "s3pa", s3pa.Name)
-		if err := r.deleteS3PodAttachment(ctx, s3pa); err != nil {
-			return nil, fmt.Errorf("failed to delete duplicate %q referencing no Mountpoint Pods: %w", s3pa.Name, err)
+		s3paLog := log.WithValues("s3pa", s3pa.Name)
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, s3paLog); err != nil {
+			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
 		}
 	}
 
@@ -704,17 +716,15 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
-		err := r.deleteS3PodAttachment(ctx, s3pa)
+		err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonNoMountpointPods, log)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
-			log.Error(err, "Failed to delete MountpointS3PodAttachment")
+			log.Error(err, "Failed to delete MountpointS3PodAttachment", "reason", reconcilerReasonNoMountpointPods)
 			return Requeue, err
 		}
-		log.Info("Deleted MountpointS3PodAttachment as it no longer has any attached Mountpoint Pods")
 		if r.s3paExpectations.isPending(fieldFilters) {
 			// Clear stale creation expectations to prevent indefinite waiting.
 			log.Info("Clearing stale creation expectation for deleted MountpointS3PodAttachment")
@@ -773,11 +783,9 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		return nil, err
 	}
 	s3pa := &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "s3pa-",
-			Labels: map[string]string{
-				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
-			},
+		GenerateName: "s3pa-",
+		Labels: map[string]string{
+			LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 		},
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,
@@ -817,8 +825,12 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 // S3PA was modified since the caller read it; the caller can then retry/requeue.
 // Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
 // not accidentally skipped.
-func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
-	return r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
+	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
+		return err
+	}
+	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
+	return nil
 }
 
 // spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.

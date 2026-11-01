@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
@@ -154,6 +155,54 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			// 6. Test basic file operations
 			framework.Logf("Testing file operations on pod %s", pod.Name)
 			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
+		})
+
+		It("should evict a workload on a NoExecute taint but keep the driver pods serving it", func(ctx context.Context) {
+			if !isDaemonsetMounterMode(ctx, f) {
+				Skip("the shared mounter only exists in daemonset mode")
+			}
+			node := getCSIDriverNode(ctx, f)
+			mounter, err := podOnNode(ctx, f, mounterPodLabel, node.Name)
+			framework.ExpectNoError(err)
+			csiNode, err := podOnNode(ctx, f, csiNodePodLabel, node.Name)
+			framework.ExpectNoError(err)
+
+			// 1. Run two workloads sharing a live mount on the node; only the second tolerates the taint below
+			taint := v1.Taint{Key: "s3.csi.aws.com/e2e-evict", Effect: v1.TaintEffectNoExecute}
+			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
+			deferCleanup(vol.CleanupResource)
+			runPod := func(tolerations ...v1.Toleration) *v1.Pod {
+				pod := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": node.Name},
+					[]*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
+				pod.Spec.Tolerations = tolerations
+				pod, err := createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+				framework.ExpectNoError(err)
+				deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
+				return pod
+			}
+			pod := runPod()
+			tolerant := runPod(v1.Toleration{Key: taint.Key, Operator: v1.TolerationOpExists, Effect: taint.Effect})
+
+			// 2. Taint the node with a key the first workload doesn't tolerate (the driver tolerates every taint by default)
+			e2enode.AddOrUpdateTaintOnNode(ctx, f.ClientSet, node.Name, taint)
+			deferCleanup(func(ctx context.Context) error {
+				e2enode.RemoveTaintOffNode(ctx, f.ClientSet, node.Name, taint)
+				return nil
+			})
+
+			// 3. The workload is evicted, while the driver pods serving its mount are neither evicted nor restarted
+			framework.ExpectNoError(e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name, f.Timeouts.PodDelete))
+			for _, driverPod := range []*v1.Pod{mounter, csiNode} {
+				p, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).Get(ctx, driverPod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "driver pod %s was removed", driverPod.Name)
+				gomega.Expect(p.DeletionTimestamp).To(gomega.BeNil(), "driver pod %s is being evicted", driverPod.Name)
+				for i, status := range p.Status.ContainerStatuses {
+					gomega.Expect(status.RestartCount).To(gomega.Equal(driverPod.Status.ContainerStatuses[i].RestartCount), "container %s in driver pod %s restarted", status.Name, driverPod.Name)
+				}
+			}
+
+			// 4. The shared mount still serves the workload that stayed
+			checkBasicFileOperations(ctx, tolerant, e2epod.VolumeMountPath1)
 		})
 	})
 }

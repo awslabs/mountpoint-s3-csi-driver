@@ -40,19 +40,18 @@ func parseMemoryLimitStrategy(value string) (memoryLimitStrategy, error) {
 }
 
 // containerMemoryRequestBytes returns this container's memory request, or 0 when none is declared.
-func containerMemoryRequestBytes() int64 {
+func containerMemoryRequestBytes() (int64, error) {
 	value := os.Getenv(memoryRequestEnvName)
 	if value == "" {
-		return 0
+		return 0, nil
 	}
 
 	quantity, err := resource.ParseQuantity(value)
 	if err != nil {
-		klog.Errorf("Ignoring unparseable %s=%q, expected a memory quantity: %v", memoryRequestEnvName, value, err)
-		return 0
+		return 0, fmt.Errorf("%s=%q is not a parseable memory quantity: %w", memoryRequestEnvName, value, err)
 	}
 
-	return quantity.Value()
+	return quantity.Value(), nil
 }
 
 // memoryLimit is the resolved `--memory-target` policy for every Mountpoint this container hosts.
@@ -64,7 +63,8 @@ type memoryLimit struct {
 // newMemoryLimit resolves the strategy once at startup, logging the inputs it used so `kubectl logs`
 // can answer why a mount was sized the way it was. An error means no mount on this node can be served,
 // so the caller is expected to exit rather than accept a config it cannot honour.
-func newMemoryLimit(strategy memoryLimitStrategy, requestBytes int64, maxVolumesPerNode int64) (memoryLimit, error) {
+// tmpfsBytes is a Memory-medium cache volume's size, since the kernel charges its pages to this container.
+func newMemoryLimit(strategy memoryLimitStrategy, requestBytes, tmpfsBytes, maxVolumesPerNode int64) (memoryLimit, error) {
 	if strategy == memoryLimitNone {
 		klog.Infof("memoryLimitStrategy=%s: %s is left to each PV's mountOptions.",
 			strategy, mountpoint.ArgMemoryTarget)
@@ -86,27 +86,35 @@ func newMemoryLimit(strategy memoryLimitStrategy, requestBytes int64, maxVolumes
 			mountpoint.ArgMemoryTarget)
 	}
 
-	budgetMiB := requestBytes/bytesPerMiB - mounterOverheadMiB
+	tmpfsMiB := tmpfsBytes / bytesPerMiB
+	budgetMiB := requestBytes/bytesPerMiB - tmpfsMiB - mounterOverheadMiB
+
+	tmpfsReserved, tmpfsRemedy := "", ""
+	if tmpfsMiB > 0 {
+		tmpfsReserved = fmt.Sprintf(" and the %d MiB tmpfs cache volume", tmpfsMiB)
+		tmpfsRemedy = ", or lower daemonsetMounters[].cache.emptyDir.sizeLimit as it uses medium Memory"
+	}
 	if budgetMiB <= 0 {
 		return memoryLimit{}, fmt.Errorf("this container's %s of %d bytes is at or below the %d MiB "+
-			"reserved for the mounter process itself, leaving nothing for Mountpoint. Raise "+
-			"daemonsetMounters[].%s", requestField, requestBytes, mounterOverheadMiB, requestField)
+			"reserved for the mounter process itself%s, leaving nothing for Mountpoint. Raise "+
+			"daemonsetMounters[].%s%s",
+			requestField, requestBytes, mounterOverheadMiB, tmpfsReserved, requestField, tmpfsRemedy)
 	}
 
 	shareMiB := budgetMiB / maxVolumesPerNode
 	if shareMiB < mountpoint.MinMemoryTargetMiB {
 		return memoryLimit{}, fmt.Errorf("this container's %s (%d bytes, %d MiB after reserving %d MiB "+
-			"for the mounter process) divided by maxVolumesPerNode=%d gives %d MiB per Mountpoint, below "+
+			"for the mounter process%s) divided by maxVolumesPerNode=%d gives %d MiB per Mountpoint, below "+
 			"Mountpoint's minimum %s of %d MiB. Raise daemonsetMounters[].%s or lower "+
-			"daemonsetMounters[].maxVolumesPerNode",
-			requestField, requestBytes, budgetMiB, mounterOverheadMiB, maxVolumesPerNode, shareMiB,
-			mountpoint.ArgMemoryTarget, mountpoint.MinMemoryTargetMiB, requestField)
+			"daemonsetMounters[].maxVolumesPerNode%s",
+			requestField, requestBytes, budgetMiB, mounterOverheadMiB, tmpfsReserved, maxVolumesPerNode, shareMiB,
+			mountpoint.ArgMemoryTarget, mountpoint.MinMemoryTargetMiB, requestField, tmpfsRemedy)
 	}
 
 	klog.Infof("memoryLimitStrategy=%s: each Mountpoint gets %s=%d (this container's %s of %d bytes, "+
-		"minus %d MiB for the mounter process, divided by maxVolumesPerNode=%d).",
+		"minus %d MiB for the mounter process%s, divided by maxVolumesPerNode=%d).",
 		memoryLimitEqualSplit, mountpoint.ArgMemoryTarget, shareMiB, requestField, requestBytes,
-		mounterOverheadMiB, maxVolumesPerNode)
+		mounterOverheadMiB, tmpfsReserved, maxVolumesPerNode)
 	return memoryLimit{strategy: strategy, shareMiB: shareMiB}, nil
 }
 

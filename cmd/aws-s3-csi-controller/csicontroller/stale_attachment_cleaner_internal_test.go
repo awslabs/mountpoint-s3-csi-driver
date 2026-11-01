@@ -70,7 +70,7 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			fsGroup := int64(1000)
 
 			pv := &corev1.PersistentVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: testPVName},
+				Name: testPVName,
 				Spec: corev1.PersistentVolumeSpec{
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
@@ -83,11 +83,9 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 				},
 			}
 			workloadPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "workload",
-					Namespace: testCase.workloadNS,
-					UID:       "workload-uid",
-				},
+				Name:      "workload",
+				Namespace: testCase.workloadNS,
+				UID:       "workload-uid",
 				Spec: corev1.PodSpec{
 					NodeName:           testNodeName,
 					ServiceAccountName: testCase.workloadSA,
@@ -108,10 +106,8 @@ func TestStaleAttachmentCleanerClearsCreationExpectationWhenAttachmentIsObserved
 			s3pa.Spec.WorkloadServiceAccountName = testCase.workloadSA
 			s3pa.Spec.WorkloadServiceAccountIAMRoleARN = testCase.workloadRole
 			mountpointPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      mountpointPodName,
-					Namespace: testPodConfig().Namespace,
-				},
+				Name:      mountpointPodName,
+				Namespace: testPodConfig().Namespace,
 			}
 
 			objects := []client.Object{s3pa, mountpointPod}
@@ -148,9 +144,9 @@ func TestStaleAttachmentCleanerPreservesReplacementExpectation(t *testing.T) {
 	for _, replacementName := range []string{"s3pa-replacement", "s3pa-stale"} {
 		t.Run(replacementName, func(t *testing.T) {
 			// The cleaner retains a snapshot of an attachment that reconciliation already replaced.
-			stale := newS3PA("s3pa-stale", nil)
+			stale := newS3PA("s3pa-stale", activeAttachments())
 			stale.UID = "stale-uid"
-			replacement := newS3PA(replacementName, nil)
+			replacement := newS3PA(replacementName, activeAttachments())
 			replacement.UID = "replacement-uid"
 			_, reconciler := newReconcilerWithObjects(t, replacement)
 			fieldFilters := fieldFiltersForS3PodAttachment(replacement)
@@ -174,23 +170,23 @@ func TestStaleAttachmentCleanerPreservesReplacementExpectation(t *testing.T) {
 
 func TestStaleAttachmentCleanerDoesNotAllowCreationAfterEmptyCacheRead(t *testing.T) {
 	workloadPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
-		Spec:       corev1.PodSpec{NodeName: testNodeName, SecurityContext: &corev1.PodSecurityContext{}},
-		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+		Name: "workload", Namespace: "default",
+		Spec:   corev1.PodSpec{NodeName: testNodeName, SecurityContext: &corev1.PodSecurityContext{}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: testPVName},
+		Name: testPVName,
 		Spec: corev1.PersistentVolumeSpec{
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{Driver: mountpointCSIDriverName, VolumeHandle: testVolumeID},
 			},
 		},
 	}
-	s3pa := newS3PA("s3pa-pending", nil)
+	s3pa := newS3PA("s3pa-pending", activeAttachments())
 	s3pa.UID = "pending-uid"
 	s3pa.Spec.AuthenticationSource = credentialprovider.AuthenticationSourceDriver
 	serviceAccount := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: defaultServiceAccount, Namespace: workloadPod.Namespace},
+		Name: defaultServiceAccount, Namespace: workloadPod.Namespace,
 	}
 
 	var reconciler *Reconciler
@@ -225,4 +221,39 @@ func TestStaleAttachmentCleanerDoesNotAllowCreationAfterEmptyCacheRead(t *testin
 	assert.Equals(t, true, observed)
 	assert.Equals(t, 0, createCalls)
 	assert.Equals(t, false, reconciler.s3paExpectations.isPending(fieldFilters))
+}
+
+func TestStaleAttachmentCleanerDeletesEmptyS3PA(t *testing.T) {
+	// Left behind when a reconciler teardown is interrupted after emptying the S3PA
+	for name, attachments := range map[string]map[string][]crdv2.WorkloadAttachment{
+		"no Mountpoint Pods":               {},
+		"Mountpoint Pod with no workloads": {"mp-1": {}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s3pa := newS3PA("s3pa-empty", attachments)
+			c, reconciler := newReconcilerWithObjects(t, s3pa)
+			cleaner := NewStaleAttachmentCleaner(reconciler)
+
+			// Kept on the first pass, and again if it changed since then
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+			assert.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(s3pa), s3pa))
+			s3pa.Labels = map[string]string{"changed": "true"}
+			assert.NoError(t, c.Update(ctx, s3pa))
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PAExists(t, c, s3pa.Name)
+
+			// Deleted once it is still unchanged on the next pass
+			assert.NoError(t, cleaner.RunCleanup(ctx))
+			assertS3PADeleted(t, c, s3pa.Name)
+		})
+	}
+}
+
+// activeAttachments returns attachments for a workload that is too new to be considered stale, as every real S3PA has one.
+func activeAttachments() map[string][]crdv2.WorkloadAttachment {
+	return map[string][]crdv2.WorkloadAttachment{
+		"mp-active": {{WorkloadPodUID: "active-uid", AttachmentTime: metav1.NewTime(time.Now().UTC())}},
+	}
 }

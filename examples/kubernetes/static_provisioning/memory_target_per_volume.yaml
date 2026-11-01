@@ -1,0 +1,121 @@
+# Two volumes with different memory targets: one read at high throughput, one used only for
+# uploading logs.
+#
+# Per-volume targets only take effect when the driver is installed with memoryLimitStrategy "none".
+# Under the default "equalSplit", each volume gets an equal share of the mounter's memory request
+# instead, and these targets are ignored with a warning. Install the driver with:
+#
+#   daemonsetMounters:
+#     - maxVolumesPerNode: 2
+#       memoryLimitStrategy: none
+#       resources:
+#         requests:
+#           memory: "6720Mi" # 64Mi for the mounter process + 6144Mi + 512Mi
+#           cpu: "500m"
+#       logLevel: 4
+#
+# With the same request, "equalSplit" would give each volume (6720 - 64) / 2 = 3328Mi: about half of
+# what the reader gets here, and 6.5 times what the logs volume needs.
+#
+# Each volume runs at most one Mountpoint process per node however many Pods use it, so a node never
+# needs more than the sum of the two targets. To add a volume, set its memory-target, add that target
+# to the request, and raise maxVolumesPerNode.
+#
+# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md#setting---memory-target-per-volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-pv-reader
+spec:
+  capacity:
+    storage: 1200Gi # ignored, required
+  accessModes:
+    - ReadOnlyMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc-reader # Name of your PVC
+  mountOptions:
+    - region us-east-1
+    - memory-target 6144 # MiB. More memory gives higher read throughput, up to the node's network bandwidth
+  csi:
+    driver: s3.csi.aws.com # required
+    volumeHandle: s3-csi-driver-volume-reader # must be unique
+    volumeAttributes:
+      bucketName: s3-csi-driver
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-pvc-reader
+spec:
+  accessModes:
+    - ReadOnlyMany # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi # Ignored, required
+  volumeName: s3-pv-reader # Name of your PV
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-pv-logs
+spec:
+  capacity:
+    storage: 1200Gi # ignored, required
+  accessModes:
+    - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc-logs # Name of your PVC
+  mountOptions:
+    - region us-east-1
+    - memory-target 512 # MiB, the minimum.
+  csi:
+    driver: s3.csi.aws.com # required
+    volumeHandle: s3-csi-driver-volume-logs # must be unique
+    volumeAttributes:
+      bucketName: s3-csi-driver-logs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-pvc-logs
+spec:
+  accessModes:
+    - ReadWriteMany # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi # Ignored, required
+  volumeName: s3-pv-logs # Name of your PV
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-app
+spec:
+  containers:
+    - name: app
+      image: ubuntu
+      command: ["/bin/sh"]
+      args: ["-c", "ls /data; tail -f /dev/null"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+    - name: log-uploader
+      image: ubuntu
+      command: ["/bin/sh"]
+      args: ["-c", "echo 'Hello from the container!' > /logs/$(date -u +%Y%m%dT%H%M%SZ).log; tail -f /dev/null"]
+      volumeMounts:
+        - name: logs
+          mountPath: /logs
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: s3-pvc-reader
+    - name: logs
+      persistentVolumeClaim:
+        claimName: s3-pvc-logs

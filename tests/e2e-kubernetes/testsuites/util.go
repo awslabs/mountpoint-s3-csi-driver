@@ -125,9 +125,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 	normalizedOptions.Set(mountpoint.ArgDebugCRT, mountpoint.ArgNoValue)
 
 	pv := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
+		Name: pvName,
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: *pvSource,
 			StorageClassName:       "", // for static provisioning
@@ -144,10 +142,8 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 		},
 	}
 	pvc := &v1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: f.Namespace.Name,
-		},
+		Name:      pvcName,
+		Namespace: f.Namespace.Name,
 		Spec: v1.PersistentVolumeClaimSpec{
 			StorageClassName: new(""), // for static provisioning
 			VolumeName:       pvName,
@@ -361,7 +357,7 @@ func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.Serv
 	framework.Logf("Creating ServiceAccount")
 
 	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
-	sa, err := client.Create(ctx, &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{GenerateName: f.BaseName + "-sa-"}}, metav1.CreateOptions{})
+	sa, err := client.Create(ctx, &v1.ServiceAccount{GenerateName: f.BaseName + "-sa-"}, metav1.CreateOptions{})
 	framework.ExpectNoError(err)
 
 	framework.ExpectNoError(waitForKubernetesObject(ctx, framework.GetObject(client.Get, sa.Name, metav1.GetOptions{})))
@@ -528,7 +524,7 @@ func execInPodOnNode(ctx context.Context, f *framework.Framework, label, contain
 
 // execInCSINodePod runs `cmd` in the csi-node pod on `nodeName`.
 //
-// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter it
+// csi-node is the right observer for the per-mount paths: it is privileged, so unlike the mounter (without a cache) it
 // can read a directory owned by a mount's UID, and it is the component that applied that ownership.
 func execInCSINodePod(ctx context.Context, f *framework.Framework, nodeName, cmd string) (string, error) {
 	stdout, _, err := execInPodOnNode(ctx, f, csiNodePodLabel, csiNodeContainerName, nodeName, cmd)

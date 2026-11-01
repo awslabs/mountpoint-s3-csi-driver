@@ -14,12 +14,12 @@
 //     the FUSE file descriptor via SCM_RIGHTS (Unix domain socket ancillary data).
 //  2. The mounter receives the options, spawns a Mountpoint child process with the FUSE fd,
 //     and closes the connection.
-//  3. If the Mountpoint process exits with a non-zero code, its stderr is written to
-//     <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
+//  3. If the mounter refuses a request with a valid mount-id, or the Mountpoint process exits with a non-zero
+//     code, the reason or its stderr is written to <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
 //     The driver is responsible for removing this file during Unmount.
 //
 // The mount-id (Options.VolumeId) must be unique per active mount (e.g. <WorkloadPodId>-<VolumeId>
-// or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected.
+// or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected, and so is a UID a running Mountpoint holds.
 //
 // Note: if Mountpoint crashes with non-zero exit after the driver has already completed Unmount,
 // a small .error file may be left behind. This is bounded by the number of such rare race
@@ -29,6 +29,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -45,14 +46,22 @@ var (
 	recvTimeout             = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
 	stderrCapacity          = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
 	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
-	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitNone),
+	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitEqualSplit),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
 			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")
+	cacheLimitStrategyFlag = flag.String("cache-limit-strategy", "",
+		"How to size each Mountpoint's --max-cache-size when this container has a cache volume: \"equalSplit\" to divide it between "+
+			"max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions. Unset when it has none")
+	cacheMediumFlag = flag.String("cache-medium", "",
+		"The cache volume's emptyDir medium; \"Memory\" makes it a tmpfs charged to this container's memory")
+	cacheDir = flag.String("cache-dir", "", "The cache volume's mount path, or \"\" when this container has none")
 )
 
 const (
 	mountSockName = "mount.sock"
 	mountpointBin = "mount-s3"
+
+	logStatusInterval = 30 * time.Second
 )
 
 func main() {
@@ -64,38 +73,89 @@ func main() {
 		klog.Fatalf("Invalid --memory-limit-strategy: %v", err)
 	}
 
-	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, containerMemoryRequestBytes(), *maxVolumesPerNode)
+	memoryRequestBytes, err := containerMemoryRequestBytes()
+	if err != nil {
+		klog.Fatalf("Invalid memory request: %v", err)
+	}
+	cacheVolumeBytes, err := cacheCapacityBytes()
+	if err != nil {
+		klog.Fatalf("Invalid cache volume size: %v", err)
+	}
+
+	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, memoryRequestBytes,
+		tmpfsCacheBytes(*cacheMediumFlag, cacheVolumeBytes), *maxVolumesPerNode)
 	if err != nil {
 		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
 	}
 
+	// The chart passes --cache-limit-strategy only with a cache volume; without one no mount here caches, so there is nothing to limit.
+	cacheLimit := cacheLimit{strategy: cacheLimitNone}
+	if *cacheLimitStrategyFlag == "" && (*cacheDir != "" || cacheVolumeBytes > 0 || *cacheMediumFlag != "") {
+		klog.Fatalf("This container has a cache volume (--cache-dir, %s or --cache-medium is set) but no --cache-limit-strategy", cacheCapacityEnvName)
+	}
+	if *cacheLimitStrategyFlag != "" {
+		cacheLimitStrategy, err := parseCacheLimitStrategy(*cacheLimitStrategyFlag)
+		if err != nil {
+			klog.Fatalf("Invalid --cache-limit-strategy: %v", err)
+		}
+		cacheLimit, err = newCacheLimit(cacheLimitStrategy, cacheVolumeBytes, *maxVolumesPerNode)
+		if err != nil {
+			klog.Fatalf("Invalid Mountpoint cache configuration: %v", err)
+		}
+	}
+
 	sockPath := filepath.Join(*commDir, mountSockName)
 	mountpointPath := filepath.Join(*mountpointBinDir, mountpointBin)
+
+	pm := NewProcessManager(*commDir, *cacheDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit, cacheLimit)
+
+	// Handle shutdown signals: terminate all MP processes gracefully
+	stop := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigCh
+		klog.Infof("Received signal %s, closing listener", sig)
+		close(stop)
+	}()
+
+	// Periodic observability: log number of tracked and actual child processes
+	go pm.LogStatusPeriodically(logStatusInterval)
+
+	if err := serve(pm, sockPath, mountpointPath, stop); err != nil {
+		klog.Fatalf("%v", err)
+	}
+}
+
+// serve secures and empties the cache volume, handles mount requests on sockPath until stop closes,
+// then stops every Mountpoint and empties the cache volume again.
+func serve(pm *ProcessManager, sockPath, mountpointPath string, stop <-chan struct{}) error {
+	if err := pm.secureCacheVolume(); err != nil {
+		return err
+	}
+
+	// Clean up cache directories after startup, to remove any leftover cache directories from previous mounter pod crash.
+	if err := pm.emptyCacheVolume(); err != nil {
+		// Log error only: A directory that cannot be removed fails only the next launch as its UID (and not the whole mounter pod),
+		// which retries the removal, to limit blast radius of a failed cleanup.
+		klog.Errorf("Some leftover cache directories remain: %v", err)
+	}
 
 	// Remove stale socket file if it exists
 	os.Remove(sockPath)
 
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
-		klog.Fatalf("Failed to listen on %s: %v", sockPath, err)
+		return fmt.Errorf("failed to listen on %s: %w", sockPath, err)
 	}
 	defer listener.Close()
 
 	klog.Infof("Listening on %s, mountpoint binary: %s", sockPath, mountpointPath)
 
-	pm := NewProcessManager(*commDir, &defaultProcessRunner{stderrCapacity: *stderrCapacity}, memoryLimit)
-
-	// Handle shutdown signals: terminate all MP processes gracefully
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
-		sig := <-sigCh
-		klog.Infof("Received signal %s, closing listener", sig)
+		<-stop
 		listener.Close()
 	}()
-
-	// Periodic observability: log number of tracked and actual child processes
-	go pm.LogStatusPeriodically(30 * time.Second)
 
 	// Accept loop — sequential, kernel backlog queues concurrent requests
 	for {
@@ -114,4 +174,12 @@ func main() {
 	}
 
 	pm.Shutdown()
+
+	// Cleanup cache directories again before exit.
+	// TODO: a large cache may take longer to remove than the default termination grace period, to evaluate and add eviction test with cache.
+	// Exit non-zero, so a cache volume the mounter cannot clean shows in the pod's status, not only in a log.
+	if err := pm.emptyCacheVolume(); err != nil {
+		return fmt.Errorf("some cache directories could not be removed: %w", err)
+	}
+	return nil
 }

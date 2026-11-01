@@ -99,6 +99,10 @@ type ProvideContext struct {
 	// MountKind indicates whether the mount is managed by systemd, pod mounter or daemonset mounter
 	MountKind MountKind
 
+	// Uid is the UID that must own the credentials written for this mount, or zero to leave them
+	// owned by csi-node.
+	Uid uint32
+
 	// The following values are provided from CSI volume context.
 	AuthenticationSource     AuthenticationSource
 	PodNamespace             string
@@ -145,6 +149,15 @@ func (ctx *ProvideContext) IsSystemDMountpoint() bool {
 // IsPodMountpoint returns true if this context is managed by pod mounter.
 func (ctx *ProvideContext) IsPodMountpoint() bool {
 	return ctx.MountKind == MountKindPod
+}
+
+// FilePerm returns the mode this mount's credential files must carry: owner-only once they belong to
+// the mount, group-readable while csi-node owns them and a Mountpoint Pod reads them as another user.
+func (ctx *ProvideContext) FilePerm() fs.FileMode {
+	if ctx.Uid != 0 {
+		return IsolatedCredentialFilePerm
+	}
+	return CredentialFilePerm
 }
 
 // ToCleanupCtx constructs CleanupContext from ProvideContext.

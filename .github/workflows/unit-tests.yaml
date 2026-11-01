@@ -22,6 +22,10 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    - name: Run helm unit tests
+      run: |
+        ./scripts/helm-unit-tests.sh
+
     - name: Set up Go
       uses: actions/setup-go@v7
       with:

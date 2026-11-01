@@ -255,25 +255,21 @@ func mppodConfig(headroomPodsEnabled bool) mppod.Config {
 func newWorkloadPod() *corev1.Pod {
 	uid := uuid.New().String()
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "workload-" + uid[:8],
-			Namespace: "default",
-			UID:       types.UID(uid),
-		},
+		Name:      "workload-" + uid[:8],
+		Namespace: "default",
+		UID:       types.UID(uid),
 	}
 }
 
 func newHeadroomPod(workloadPodUID string) *corev1.Pod {
 	uid := uuid.New().String()
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "hr-pod-" + uid[:8],
-			Namespace: mountpointNamespace,
-			Labels: map[string]string{
-				mppod.LabelHeadroomForPod: workloadPodUID,
-			},
-			UID: types.UID(uid),
+		Name:      "hr-pod-" + uid[:8],
+		Namespace: mountpointNamespace,
+		Labels: map[string]string{
+			mppod.LabelHeadroomForPod: workloadPodUID,
 		},
+		UID: types.UID(uid),
 	}
 }
 

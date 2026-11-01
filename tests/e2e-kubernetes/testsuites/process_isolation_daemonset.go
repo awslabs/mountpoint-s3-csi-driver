@@ -4,22 +4,19 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
-)
-
-// The UID range the driver allocates from, mirroring pkg/driver/node/mounter.UIDRange{Start,End}.
-const (
-	uidRangeStart = 65536
-	uidRangeEnd   = 131071
 )
 
 // Expected modes on the paths the mounter and Mountpoint share, mirroring the driver's constants.
@@ -121,8 +118,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			ginkgo.By(fmt.Sprintf("Checking Mountpoint pid %s (uid %d)", c.pid, c.uid()))
 
 			gomega.Expect(c.uid()).To(gomega.And(
-				gomega.BeNumerically(">=", uidRangeStart),
-				gomega.BeNumerically("<=", uidRangeEnd),
+				gomega.BeNumerically(">=", mountoptions.UIDRangeStart),
+				gomega.BeNumerically("<=", mountoptions.UIDRangeEnd),
 			), "Mountpoint pid %s must run under an allocated UID, got %v", c.pid, c.uids)
 
 			// Every UID and GID, not just the effective ones: a process that switched only those keeps
@@ -163,8 +160,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
 		}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.Equal(1))
 
-		// Observed from csi-node, which is privileged and applied this ownership. The mounter cannot read
-		// these paths itself, holding no CAP_DAC_OVERRIDE.
+		// Observed from csi-node, which is privileged and applied this ownership. WITHOUT A CACHE the mounter
+		// cannot read these paths itself, holding no CAP_DAC_OVERRIDE. (But with a cache, it can)
 		commDir := commDirHostPath(ctx, f, targetNode)
 
 		ginkgo.By("Checking the shared comm directory and mount socket are root-owned and closed")
@@ -183,8 +180,8 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		credDir := statPath(ctx, f, targetNode, credDirPath)
 		gomega.Expect(credDir.mode).To(gomega.Equal(expectedCredDirMode))
 		gomega.Expect(credDir.uid).To(gomega.And(
-			gomega.BeNumerically(">=", uidRangeStart),
-			gomega.BeNumerically("<=", uidRangeEnd),
+			gomega.BeNumerically(">=", mountoptions.UIDRangeStart),
+			gomega.BeNumerically("<=", mountoptions.UIDRangeEnd),
 		), "credential directory for %s must belong to an allocated UID", pvName)
 		gomega.Expect(credDir.gid).To(gomega.Equal(credDir.uid))
 
@@ -252,10 +249,9 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		}
 	})
 
-	// The modes asserted above only matter if the kernel enforces them. The mounter runs as root but
-	// holds no CAP_DAC_OVERRIDE, so it is subject to the same permission checks as any other user:
-	// being refused here means any other UID is refused too.
-	ginkgo.It("should deny the mounter itself access to a mount's credential directory", func(ctx context.Context) {
+	// The modes asserted above only matter if the kernel enforces them. The mounter runs as root, so it is subject to
+	// the same permission checks as any other user unless it holds CAP_DAC_OVERRIDE, which the chart grants with a cache.
+	ginkgo.It("should deny the mounter access to a mount's credential directory unless it holds CAP_DAC_OVERRIDE", func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		pvName := resource.Pv.Name
@@ -263,23 +259,34 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 		targetNode, pods := createPodsOnSameNode(ctx, f, 1, resource)
 		defer deletePodsInOrder(ctx, f, pods)
 
+		// The running pod, not the DaemonSet: it is OnDelete, so a pod can run an older template's capabilities.
+		mounter, err := podOnNode(ctx, f, mounterPodLabel, targetNode)
+		framework.ExpectNoError(err)
+		dacOverride := slices.Contains(mounter.Spec.Containers[0].SecurityContext.Capabilities.Add, v1.Capability("DAC_OVERRIDE"))
+
 		ginkgo.By("Waiting for the mount to be serving")
 		gomega.Eventually(ctx, func(ctx context.Context) (int, error) {
 			return countFuseMountsForVolume(ctx, f, targetNode, pvName), nil
 		}).WithTimeout(mountpointProcessTimeout).WithPolling(mountpointProcessPoll).Should(gomega.Equal(1))
 
 		// /comm is 0711 so root may traverse it; the directory itself is 0700 and owned by the mount.
-		ginkgo.By("Confirming the mounter can reach but not read the credential directory")
+		ginkgo.By("Confirming the mounter can reach the credential directory")
 		mode, stderr, err := execInMounterPod(ctx, f, targetNode, fmt.Sprintf("stat -c '%%a' /comm/%s", pvName))
 		framework.ExpectNoError(err, "the mounter should be able to stat the credential directory via 0711 /comm: %s", stderr)
 		gomega.Expect(strings.TrimSpace(mode)).To(gomega.Equal(expectedCredDirMode))
 
-		// The denial itself, not merely an error: a mistyped path or a missing `ls` would also error.
 		out, stderr, err := execInMounterPod(ctx, f, targetNode, fmt.Sprintf("ls -A /comm/%s", pvName))
-		gomega.Expect(err).To(gomega.HaveOccurred(),
-			"the mounter must not be able to list %s; got output %q", pvName, out)
-		gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"),
-			"the mounter must be refused by the kernel, but the failure was: %q", stderr)
+		if dacOverride {
+			ginkgo.By("Confirming the mounter, which holds CAP_DAC_OVERRIDE, can list the credential directory")
+			framework.ExpectNoError(err, "the mounter holds CAP_DAC_OVERRIDE, so it should be able to list %s: %s", pvName, stderr)
+		} else {
+			ginkgo.By("Confirming the mounter, which holds no CAP_DAC_OVERRIDE, cannot list the credential directory")
+			// The denial itself, not merely an error: a mistyped path or a missing `ls` would also error.
+			gomega.Expect(err).To(gomega.HaveOccurred(),
+				"the mounter must not be able to list %s; got output %q", pvName, out)
+			gomega.Expect(stderr).To(gomega.ContainSubstring("Permission denied"),
+				"the mounter must be refused by the kernel, but the failure was: %q", stderr)
+		}
 	})
 }
 

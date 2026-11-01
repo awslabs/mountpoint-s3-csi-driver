@@ -1,0 +1,66 @@
+# A pool of nodes Karpenter provisions only for the pods targeting it with the `e2e.s3.csi.aws.com/pool` label and
+# taint, e.g. the scheduling tests' (`tests/e2e-kubernetes/testsuites/scheduling.go`).
+# `profile.sh` substitutes CLUSTER_NAME and NODE_ROLE_NAME before applying it.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: s3-csi-e2e
+spec:
+  # The `system` nodegroup's role, so that the CloudWatch agent can ship these nodes' logs as well.
+  # The driver doesn't use it: it gets its credentials from EKS Pod Identity.
+  role: "${NODE_ROLE_NAME}"
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        alpha.eksctl.io/cluster-name: "${CLUSTER_NAME}"
+  securityGroupSelectorTerms:
+    - tags:
+        aws:eks:cluster-name: "${CLUSTER_NAME}"
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: s3-csi-e2e-default
+spec:
+  template:
+    metadata:
+      labels:
+        e2e.s3.csi.aws.com/pool: default
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: s3-csi-e2e
+      taints:
+        - key: e2e.s3.csi.aws.com/pool
+          value: default
+          effect: NoSchedule
+      # The driver removes it once it's ready on the node. Workloads shouldn't land on a node before then.
+      startupTaints:
+        - key: s3.csi.aws.com/agent-not-ready
+          effect: NoExecute
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        # Keep the 4 GiB c*.large types, the cheapest: the mounter's default 4Gi memory request doesn't fit on them,
+        # so they check that Karpenter accounts for the mounter.
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["4"]
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["large", "xlarge", "2xlarge"]
+  limits:
+    cpu: 32
+  # No `disruption`: like most NodePools, it consolidates nodes once they're empty or underutilized.

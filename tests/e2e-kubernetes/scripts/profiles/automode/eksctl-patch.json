@@ -1,0 +1,47 @@
+[
+  {
+    "op": "remove",
+    "path": "/managedNodeGroups"
+  },
+  {
+    "op": "replace",
+    "path": "/addons",
+    "value": [
+      {
+        "name": "amazon-cloudwatch-observability",
+        "useDefaultPodIdentityAssociations": true,
+        "configurationValues": "{\"manager\":{\"nodeSelector\":{\"karpenter.sh/nodepool\":\"system\"},\"tolerations\":[{\"key\":\"CriticalAddonsOnly\",\"operator\":\"Exists\"}]}}"
+      }
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/autoModeConfig",
+    "value": {
+      "enabled": true
+    }
+  },
+  {
+    "op": "add",
+    "path": "/iam/podIdentityAssociations",
+    "value": [
+      {
+        "namespace": "kube-system",
+        "serviceAccountName": "s3-csi-driver-sa",
+        "permissionPolicyARNs": [
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        ],
+        "permissionPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3express:*"],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

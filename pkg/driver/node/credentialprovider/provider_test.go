@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -1375,9 +1375,43 @@ func serviceAccountTokens(t *testing.T, tokens tokens) string {
 }
 
 func serviceAccount(name, namespace string, annotations map[string]string) *v1.ServiceAccount {
-	return &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+	return &v1.ServiceAccount{
 		Name:        name,
 		Namespace:   namespace,
-		Annotations: annotations,
-	}}
+		Annotations: annotations}
+}
+
+func TestProvideWritesCredentialsWithTheModeForTheirOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		uid      uint32
+		wantPerm fs.FileMode
+	}{
+		{name: "owned by a mount", uid: 65536, wantPerm: credentialprovider.IsolatedCredentialFilePerm},
+		{name: "owned by csi-node", uid: 0, wantPerm: credentialprovider.CredentialFilePerm},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.uid != 0 && os.Getuid() != 0 {
+				t.Skip("handing a file to another UID needs root")
+			}
+			setEnvForContainerCredentials(t)
+			writePath := t.TempDir()
+
+			provider := credentialprovider.New(nil, dummyRegionProvider)
+			_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
+				AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+				WritePath:            writePath,
+				EnvPath:              testEnvPath,
+				WorkloadPodID:        testPodID,
+				VolumeID:             testVolumeID,
+				MountKind:            credentialprovider.MountKindDaemonset,
+				Uid:                  tc.uid,
+			})
+			assert.NoError(t, err)
+
+			stat, err := os.Stat(filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
+			assert.NoError(t, err)
+			assert.Equals(t, tc.wantPerm, stat.Mode().Perm())
+		})
+	}
 }

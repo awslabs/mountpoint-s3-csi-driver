@@ -16,6 +16,12 @@ metadata:
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
+  {{- if eq .Values.experimental.mounterMode "daemonset" }}
+  updateStrategy:
+    # OnDelete, matching the mounter DaemonSet: a helm upgrade or rollback changes the template but
+    # moves no pod, so both pods on a node move to the new version together when the node is recycled.
+    type: OnDelete
+  {{- end }}
   selector:
     matchLabels:
       app: s3-csi-node
@@ -133,6 +139,10 @@ spec:
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
+            # Same helper as this container's and the mounter's `image:`, so the CSI node can refuse mounts
+            # and credential refresh while the mounter on its node runs a different image.
+            - name: CSI_NODE_IMAGE
+              value: {{ include "csiDriverImageName" . }}
             - name: MAX_VOLUMES_PER_NODE
               value: "{{ $mounter.maxVolumesPerNode }}"
             {{- end }}

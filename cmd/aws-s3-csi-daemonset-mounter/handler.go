@@ -40,5 +40,6 @@ func handleConnection(conn *net.UnixConn, mountpointPath string, pm *ProcessMana
 	err = pm.Launch(mountId, mountpointPath, options) // ownership of options.Fd is transferred here
 	if err != nil {
 		klog.Errorf("Failed to launch Mountpoint for mount %s: %v", mountId, err)
+		pm.writeErrorFile(mountId, []byte(err.Error()))
 	}
 }

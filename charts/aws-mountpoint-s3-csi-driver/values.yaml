@@ -58,12 +58,23 @@ node:
                 values:
                   - fargate
                   - hybrid
+                  - auto
+          # EKS Auto Mode nodes, except the built-in system NodePool (CriticalAddonsOnly).
+          - matchExpressions:
+              - key: eks.amazonaws.com/compute-type
+                operator: In
+                values:
+                  - auto
+              - key: karpenter.sh/nodepool
+                operator: NotIn
+                values:
+                  - system
 
 sidecars:
   nodeDriverRegistrar:
     image:
       repository: public.ecr.aws/csi-components/csi-node-driver-registrar
-      tag: v2.17.0-eksbuild.7
+      tag: v2.18.0-eksbuild.1
       pullPolicy: IfNotPresent
     env:
       - name: KUBE_NODE_NAME
@@ -79,7 +90,7 @@ sidecars:
   livenessProbe:
     image:
       repository: public.ecr.aws/csi-components/livenessprobe
-      tag: v2.19.0-eksbuild.7
+      tag: v2.20.0-eksbuild.1
       pullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: /csi
@@ -97,6 +108,8 @@ controller:
     # Specifies whether a service account should be created
     create: true
     name: s3-csi-driver-controller-sa
+  # Only one controller is active at once, even with higher `replicaCount`s.
+  replicaCount: 1
 
 mountpointPod:
   # NOTE: `namespace` is still required in daemonset (V3) mode — the drain-only controller uses it to
@@ -172,6 +185,8 @@ daemonsetMounters:
     # All Mountpoint processes on a node share the mounter container's memory, so an unbounded one
     # can OOM-kill every mount on the node.
     #
+    # See more in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md
+    #
     #   "equalSplit" — the mounter reserves 64Mi of resources.requests.memory for its own process and
     #                  divides the rest equally by maxVolumesPerNode, so the defaults below give each
     #                  of 4 Mountpoint processes (4Gi - 64Mi) / 4 = 1008Mi. resources.requests.memory
@@ -188,10 +203,49 @@ daemonsetMounters:
       requests:
         memory: "4Gi"
         cpu: "500m"
+    # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
+    # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: enabled`
+    # in its volumeAttributes, and cache.limitStrategy decides how much of the volume it gets.
+    # Set either emptyDir or ephemeral cache type.
+    #
+    # cache.limitStrategy decides how each Mountpoint process gets its --max-cache-size, which
+    # bounds how much of the cache volume it may fill. All of them share that one volume.
+    #
+    #   "equalSplit" - the mounter divides 95% of the cache volume equally by maxVolumesPerNode, so
+    #                  a 4Gi volume gives each of 4 Mountpoint processes 972Mi. Recommended. The volume's size is
+    #                  required, as is a non-zero maxVolumesPerNode, and a `max-cache-size` in a
+    #                  PV's mountOptions is ignored with a warning.
+    #   "none"       - --max-cache-size is left to each PV's mountOptions, and we recommend setting it
+    #                  on every PV that caches to prevent unbounded cache growth, before applying this
+    #                  strategy.
+
+    # A cache on the node's disk:
+    # cache:
+    #   emptyDir:
+    #     sizeLimit: "2Gi"
+    #   limitStrategy: equalSplit
+
+    # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
+    # memoryLimitStrategy=equalSplit divides only what it leaves: raise resources.requests.memory by sizeLimit.
+    # Always set sizeLimit: under cache.limitStrategy=none it is optional, but an unbounded tmpfs can get the
+    # mounter OOM-killed, taking every mount on the node with it.
+    # cache:
+    #   emptyDir:
+    #     sizeLimit: "1Gi"
+    #     medium: "Memory"
+    #   limitStrategy: equalSplit
+
+    # A cache in an EBS volume:
+    # cache:
+    #   ephemeral:
+    #     storageClassName: gp3
+    #     resourceRequests: 10Gi
+    #   limitStrategy: equalSplit
+
     # Log verbosity (--v) of the mounter process. Optional; defaults to 4 when omitted.
     logLevel: 4
     podLabels: {}
-    # The mounter inherits the node pod's tolerations (node.tolerateAllTaints /
-    # node.defaultTolerations / node.tolerations); it has no toleration field of its own.
-    affinity: {}
+    # The mounter inherits the node pod's nodeSelector, affinity and tolerations (node.nodeSelector,
+    # node.affinity, node.tolerateAllTaints, node.defaultTolerations, node.tolerations), so both
+    # DaemonSets target the same nodes; it has no such fields of its own.
     imagePullSecrets: []

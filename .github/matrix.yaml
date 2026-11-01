@@ -3,6 +3,10 @@
 # an old release.
 matrix:
   cluster-type: ["eksctl"]
+  # The profile in `tests/e2e-kubernetes/scripts/profiles` the cluster is created from, none for the regular cells.
+  # It's listed here so that the profiles' cells in "include" differ from the regular ones in an original value:
+  # otherwise, GitHub would merge each of them into the regular cell with the same values, rather than add it.
+  cluster-profile: [""]
   arch: ["x86", "arm"]
   family:
     [
@@ -17,6 +21,29 @@ matrix:
     # field rather than trying to exclude all other variants.
     - family: "AmazonLinux2023"
       selinux-mode: "enforcing"
+    # Cells with `tests` run those tests instead of the regular ones (see `workflows/e2e-tests.yaml`).
+    # The scheduling tests run on a cluster per profile, whose autoscaler provisions the nodes the tests run on.
+    # They check scheduling, not node images, so a single OS/arch/Kubernetes combination is enough. When bumping its
+    # `kubernetes-version`, check that each profile's autoscaler supports it (see `profiles/<profile>`).
+    # Release branches don't have the profiles, so don't backport these.
+    - cluster-type: "eksctl"
+      cluster-profile: "karpenter"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
+    - cluster-type: "eksctl"
+      cluster-profile: "cas"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
+    - cluster-type: "eksctl"
+      cluster-profile: "automode"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
   exclude:
     # Ubuntu2404 is only supported on EKS >= 1.33.
     # See https://eksctl.io/usage/custom-ami-support/?h=ubuntu#setting-the-node-ami-family.

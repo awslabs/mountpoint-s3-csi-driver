@@ -41,6 +41,9 @@ jobs:
   build_matrix:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
+    with:
+      # The upgrade tests replace the regular tests, on their cells.
+      regular_tests_only: ${{ inputs.run_upgrade_tests }}
     permissions:
       contents: read
   build:
@@ -93,6 +96,7 @@ jobs:
     env:
       AWS_REGION: "${{ vars.AWS_REGION }}"
       CLUSTER_TYPE: "${{ matrix.cluster-type }}"
+      CLUSTER_PROFILE: "${{ matrix.cluster-profile }}"
       ARCH: "${{ matrix.arch }}"
       AMI_FAMILY: "${{ matrix.family }}"
       TAG: "untested_${{ inputs.ref }}"
@@ -145,7 +149,8 @@ jobs:
           tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
         env:
-          ACTION: "${{ inputs.run_upgrade_tests && 'run_upgrade_tests' || 'run_tests' }}"
+          # A cell's `tests` in `.github/matrix.yaml` selects other tests than the regular ones.
+          ACTION: "${{ inputs.run_upgrade_tests && 'run_upgrade_tests' || matrix.tests == 'scheduling' && 'run_scheduling_tests' || 'run_tests' }}"
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Post e2e cleanup

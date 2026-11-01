@@ -4,6 +4,7 @@ This document covers how to configure the CSI driver: be it through driver insta
 
 Most Mountpoint-specific configuration can be found in [the Mountpoint documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md) and should be specified as `mountOptions`.
 One notable exception is for Mountpoint's local data caching, which should be specified using volume attributes. See the dedicated [Mountpoint S3 CSI driver caching documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md) for more information on cache configuration.
+Mountpoint's memory usage is configured through the driver's Helm values. See the dedicated [Mountpoint S3 CSI driver memory documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md) for how to size it.
 
 ## Static Provisioning
 
@@ -54,15 +55,6 @@ spec:
       # ephemeral cache options (both required if `cache: ephemeral`):
       cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
       cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
-
-      # ----- RESOURCE CONFIGURATION -----
-      # Optional: Configure Mountpoint container resource requests/limits
-      # Note: Specifying `ResourcesRequests` is currently not recommended since it may lead to failures like those described in
-      # [Scheduler problems with v2 #543](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/543)
-      mountpointContainerResourcesRequestsCpu: 500m
-      mountpointContainerResourcesRequestsMemory: 1Gi
-      mountpointContainerResourcesLimitsCpu: 500m
-      mountpointContainerResourcesLimitsMemory: 1Gi
 
       # ----- ENVIRONMENT VARIABLE CONFIGURATION -----
       # Optional: Pass extra environment variables to the mount-s3 process. Default: none.
@@ -468,6 +460,8 @@ policies to `Value.node.tolerations` to configure customized toleration for node
 The mounter DaemonSet inherits these same `node.*` settings, so you configure tolerations once for both driver pods.
 
 Whatever tolerations you give the driver, make sure your workloads are never more tolerant of a `NoExecute` taint than the driver is. Because the driver serves your mounts, a workload that out-tolerates it keeps running after the driver is evicted, on a mount that no longer works.
+
+Prefer giving the driver every toleration your workloads have, with no `tolerationSeconds` limit. If you must use `tolerationSeconds` for a `NoExecute` taint, set the driver's value longer than your workloads' `tolerationSeconds` plus their `terminationGracePeriodSeconds`. That keeps the driver running until your workloads have stopped and their volumes are unmounted; if the driver is evicted first, those mounts are not cleaned up.
 
 ## Configure node startup taint
 There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
