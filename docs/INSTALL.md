@@ -114,6 +114,9 @@ helm upgrade --install aws-mountpoint-s3-csi-driver \
 kubectl apply -k "github.com/awslabs/mountpoint-s3-csi-driver/deploy/kubernetes/overlays/stable/"
 ```
 
+The Kustomize manifests include the node ValidatingAdmissionPolicy (`admissionregistration.k8s.io/v1`), so they need
+Kubernetes 1.30 or later.
+
 > [!WARNING]
 > Using a GitHub branch (`main`, `release-X.Y`, or any other) to deploy the CSI Driver is not supported. Charts in the GitHub repository may contain upcoming features incompatible with the currently released stable version of the CSI Driver image.
 

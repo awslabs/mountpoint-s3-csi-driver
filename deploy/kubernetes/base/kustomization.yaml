@@ -9,3 +9,4 @@ resources:
   - node.yaml
   - serviceaccount-csi-controller.yaml
   - serviceaccount-csi-node.yaml
+  - validatingadmissionpolicy-csi-node.yaml
