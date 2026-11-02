@@ -91,16 +91,16 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		ginkgo.DeferCleanup(cleanup)
 	})
 
-	f.It("should scale out workloads beyond a node's volume limit without overcommitting any node", f.WithSerial(), func(ctx context.Context) {
+	driverName := driver.GetDriverInfo().Name
+
+	// scaleOut runs twice as many workloads on the pool as limit, the volume limit its nodes should have, and checks that
+	// the autoscaler provisions nodes that each have limit and mount no more.
+	scaleOut := func(ctx context.Context, limit int) {
 		waitForEmptyNodePool(ctx, f)
 		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
 
-		driverName := driver.GetDriverInfo().Name
-		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
-		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
-		framework.ExpectNoError(err)
 		workloads := 2 * limit
 
 		ginkgo.By(fmt.Sprintf("Creating %d workloads with a volume each, twice as many as a node can mount", workloads))
@@ -134,6 +134,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			inUse, err := countS3VolumesOnNode(ctx, f, node, driverName)
 			framework.ExpectNoError(err)
 			framework.Logf("Node %s mounts %d of %d volumes", node, inUse, nodeLimit)
+			gomega.Expect(nodeLimit).To(gomega.Equal(limit), "node %s's volume limit", node)
 			gomega.Expect(inUse).To(gomega.BeNumerically("<=", nodeLimit),
 				"node %s mounts %d volumes, more than its limit of %d", node, inUse, nodeLimit)
 			waitForMounterPodReady(ctx, f, node)
@@ -146,6 +147,28 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			checkWriteToPathSucceed(ctx, f, pod, path, 1024, seed)
 			checkReadFromPathSucceed(ctx, f, pod, path, 1024, seed)
 		}
+	}
+
+	f.It("should scale out workloads beyond a node's volume limit without overcommitting any node", f.WithSerial(), func(ctx context.Context) {
+		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
+		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
+		framework.ExpectNoError(err)
+		scaleOut(ctx, limit)
+	})
+
+	f.It("should scale out workloads by the volume limit of their nodes' own mounter entry", f.WithSerial(), func(ctx context.Context) {
+		if !isDaemonsetMounterMode(ctx, f) {
+			e2eskipper.Skipf("mounter entries are DaemonSets, which only exist in daemonset mode")
+		}
+		release := setUpDriverRelease(ctx, f)
+		// Not the chart's default, which the other nodes keep, so the pool's nodes are seen to take their own entry's.
+		poolLimit := 2
+		// The other nodes' entry keeps the unnamed DaemonSet, and both DaemonSets are OnDelete, so only the pool's new
+		// nodes run the new templates.
+		release.upgradeOnly(ctx, withMounterEntries(release,
+			map[string]any{"matchExpressions": []any{map[string]any{"key": nodePoolKey, "operator": "DoesNotExist"}}},
+			map[string]any{"name": "pool", "nodeSelector": map[string]any{nodePoolKey: nodePoolValue}, "maxVolumesPerNode": poolLimit}))
+		scaleOut(ctx, poolLimit)
 	})
 }
 
