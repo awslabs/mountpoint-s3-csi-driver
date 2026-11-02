@@ -1,7 +1,9 @@
 # Unreleased
 
 ### Notable changes
+* Limit the CSI driver's service account to removing the `s3.csi.aws.com/agent-not-ready` taint from the Node its pod runs on, with a ValidatingAdmissionPolicy. Set `node.validatingAdmissionPolicy.enabled=false` to not install it.
 * Add support for Kubernetes 1.37.
+* Drop support for Kubernetes 1.31.
 * Add support for Ubuntu 26.04 on Kubernetes 1.35+.
 * Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver doesn't run. It doesn't replace the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details.
 * Support Mountpoint [version 1.25.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.25.0) ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
