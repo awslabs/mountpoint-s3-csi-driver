@@ -119,6 +119,7 @@ var CSITestSuites = []func() framework.TestSuite{
 	custom_testsuites.InitS3CSICacheTestSuite,
 	custom_testsuites.InitS3CSIPodSharingTestSuite,
 	custom_testsuites.InitS3TaintRemovalTestSuite,
+	custom_testsuites.InitS3NodePolicyTestSuite,
 	custom_testsuites.InitS3CSIEvictionOrderTestSuite,
 	custom_testsuites.InitS3ProxyTestSuite,
 }
