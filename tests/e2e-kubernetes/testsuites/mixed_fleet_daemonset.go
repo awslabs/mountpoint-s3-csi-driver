@@ -122,9 +122,10 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 				// advertises 3 whichever mounter it picks.
 				extra := map[string]any{"name": "extra", "maxVolumesPerNode": 3, "resources": nodeAResources,
 					"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}
-				// Only the node pod rolls, as its rules change, so node A's new node pod starts while a mount uses first's mounter.
 				release.upgradeOnly(ctx, withMounterEntries(release, first(), rest(), extra))
 				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
+				// The node pod is OnDelete, so deleting it starts node A's new node pod while a mount uses first's mounter.
+				deletePods(ctx, f, csiNodePodLabel)
 				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
 
 				Expect(mountersOn(ctx, f, nodeA)).To(HaveLen(2))
