@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	storageutil "k8s.io/kubectl/pkg/util/storage"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -996,41 +997,32 @@ func (r *Reconciler) getBoundPVForPodClaim(
 // turn out to be S3-backed. Skipping it only costs the headroom reservation for that one volume,
 // which is a degradation, whereas waiting never recovers.
 //
-// Everything else is waited for, because it can bind without the Pod being scheduled: a PVC with no
-// StorageClass (which is how S3 volumes are statically provisioned), one naming a StorageClass that
-// doesn't exist, or one using `Immediate` binding. Once it binds, its PV tells us whether it's
-// S3-backed.
+// Everything else is waited for, because it can bind without the Pod being scheduled: a PVC pre-bound
+// to a PV via `spec.volumeName`, a PVC with no StorageClass (which is how S3 volumes are statically
+// provisioned), one naming a StorageClass that doesn't exist, or one using `Immediate` binding. Once
+// it binds, its PV tells us whether it's S3-backed.
 //
 // TODO: This needs to be revisited once we support dynamic provisioning.
 func (r *Reconciler) shouldWaitForUnboundPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
 	if pvc.Spec.VolumeName != "" {
-		// The PVC is pre-bound to a PV, which the PV controller binds as soon as that PV exists,
-		// regardless of the binding mode. So there's no deadlock to avoid and the PV decides.
-		pv := &corev1.PersistentVolume{}
-		if err := r.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
-			if apierrors.IsNotFound(err) {
-				// The referenced PV doesn't exist yet, so we can't classify the PVC. Wait for it - the
-				// Workload Pod can't run until this PVC binds either way.
-				return true, nil
-			}
-			return false, fmt.Errorf("failed to get PV %q referenced by PVC %s/%s: %w",
-				pvc.Spec.VolumeName, pvc.Namespace, pvc.Name, err)
-		}
-		return extractCSISpecFromPV(pv) != nil, nil
+		// Pre-bound PVCs bind as soon as their PV exists, whatever the binding mode, and the
+		// scheduler won't schedule the Pod before that anyway, so waiting can't deadlock.
+		return true, nil
 	}
 
-	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
+	storageClassName := storageutil.GetPersistentVolumeClaimClass(pvc)
+	if storageClassName == "" {
 		return true, nil
 	}
 
 	sc := &storagev1.StorageClass{}
-	if err := r.Get(ctx, types.NamespacedName{Name: *pvc.Spec.StorageClassName}, sc); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: storageClassName}, sc); err != nil {
 		if apierrors.IsNotFound(err) {
 			// The PV controller treats a missing StorageClass as `Immediate` binding.
 			return true, nil
 		}
 		return false, fmt.Errorf("failed to get StorageClass %q for PVC %s/%s: %w",
-			*pvc.Spec.StorageClassName, pvc.Namespace, pvc.Name, err)
+			storageClassName, pvc.Namespace, pvc.Name, err)
 	}
 
 	return sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer, nil

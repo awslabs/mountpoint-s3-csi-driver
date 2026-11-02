@@ -1451,33 +1451,6 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(hrPod2.Pod)
 		})
 
-		It("should ungate pod when non-S3 PVC is unbound (WaitForFirstConsumer)", func() {
-			// Simulates a workload pod with both S3 PVCs (bound) and an EBS PVC
-			// that uses WaitForFirstConsumer (unbound until pod is scheduled).
-			// The pod should be ungated after headroom pods are created for S3 PVCs,
-			// without waiting for the non-S3 PVC to bind.
-			s3Vol := createVolume()
-			s3Vol.bind()
-
-			// Create EBS volume but do NOT bind it — simulates WaitForFirstConsumer.
-			// Here the PVC does reference its PV, so the PV's CSI driver identifies it as non-S3.
-			ebsVol := createVolume(withCSIDriver(ebsCSIDriver))
-
-			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsVol.pvc), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
-
-			// Headroom pod should be created for the S3 volume
-			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
-			verifyHeadroomPodFor(pod, s3Vol, hrPod)
-
-			// Pod should be ungated — the unbound EBS PVC should NOT block ungating
-			pod.waitUntilSchedulingUngated()
-
-			pod.runOn(testNode)
-
-			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, s3Vol, pod)
-			waitForObjectToDisappear(hrPod.Pod)
-		})
-
 		It("should ungate pod when a dynamically provisioned non-S3 PVC is unbound (WaitForFirstConsumer)", func() {
 			// Same deadlock as above, but with what a real `WaitForFirstConsumer` PVC actually looks
 			// like before its Workload Pod is scheduled: `Pending`, with an empty `spec.volumeName`
@@ -1846,12 +1819,9 @@ func (v *testVolume) bind() {
 	v.pv.Status.Phase = corev1.VolumeBound
 	Expect(k8sClient.Status().Update(ctx, v.pv)).To(Succeed())
 
-	// `createVolume` already points the PVC at the PV via `spec.volumeName`, but PVCs created
-	// directly by tests might not - and there's no PV controller in envtest to populate it for us.
-	if v.pvc.Spec.VolumeName == "" {
-		v.pvc.Spec.VolumeName = v.pv.Name
-		Expect(k8sClient.Update(ctx, v.pvc)).To(Succeed())
-	}
+	// There's no PV controller in envtest to populate `spec.volumeName` for us.
+	v.pvc.Spec.VolumeName = v.pv.Name
+	Expect(k8sClient.Update(ctx, v.pvc)).To(Succeed())
 
 	v.pvc.Status.Phase = corev1.ClaimBound
 	Expect(k8sClient.Status().Update(ctx, v.pvc)).To(Succeed())
@@ -2003,11 +1973,6 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "Failed to create PV")
-
-	// For static provisioning, PVC references the PV via spec.volumeName from creation.
-	// This must be set after PV creation (so pv.Name is populated) but before PVC creation.
-	pvc.Spec.VolumeName = pv.Name
-
 	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create PVC")
 
 	waitForObject(pv)
