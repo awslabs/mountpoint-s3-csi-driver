@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
@@ -210,7 +211,7 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		}
 		// Don't expose other mounts' PV name / mount ID in the error: handleConnection writes it to the error file, s3-csi-node returns it
 		// as the NodePublishVolume error, and the kubelet shows it as a FailedMount event to anyone who can read the workload namespace's events.
-		klog.Errorf("Refusing to launch mount %s with UID %d already in use by mount %s", mountId, options.Uid, other.mountId)
+		klog.Errorf("[%s] Refusing to launch with UID %d, already in use by mount %s", mountId, options.Uid, other.mountId)
 		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid))
 	}
 
@@ -225,17 +226,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// No leftover check here: every cache directory left behind (by an exited Mountpoint, a failed start, or the startup cleanup)
 	// keeps its UID marked cleanupPending, refused above, until the cache cleaner removes it.
 	if cached {
-		if err := pm.createPerPvCacheDir(perPvCacheDir, options.Uid); err != nil {
+		if err := pm.createPerPvCacheDir(mountId, perPvCacheDir, options.Uid); err != nil {
 			return pm.releaseLockAndCloseFuseDev(fuseDev, err)
 		}
 	}
 
-	handle, err := pm.runner.Start(cmd)
+	handle, err := pm.runner.Start(mountId, cmd)
 	if err != nil {
 		if cached {
 			// Mountpoint never ran, so the directory is empty and quick to remove here.
 			if rmErr := pm.removeCacheVolumeEntry(perPvCacheDir); rmErr != nil {
-				klog.Errorf("Failed to remove cache directory of mount %s after a failed start, marking UID %d for the cache cleaner: %v",
+				klog.Errorf("[%s] Failed to remove cache directory after a failed start, marking UID %d for the cache cleaner: %v",
 					mountId, options.Uid, rmErr)
 				pm.holdForCacheCleanup(options.Uid)
 			}
@@ -250,10 +251,10 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	pm.uids[mountId] = options.Uid
 	pm.mu.Unlock()
 
-	klog.Infof("Launched Mountpoint for mount %s as UID %d (pid %d)", mountId, options.Uid, handle.Pid())
+	klog.Infof("[%s] Launched Mountpoint as UID %d (pid %d)", mountId, options.Uid, handle.Pid())
 
 	pm.wg.Go(func() {
-		exitCode, stderr := handle.Wait()
+		status, stderr := handle.Wait()
 
 		// Before freeing the UID, so a relaunch cannot create the directory this then removes.
 		var cleanupErr error
@@ -261,16 +262,20 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 			cleanupErr = pm.removeCacheVolumeEntry(perPvCacheDir)
 		}
 
+		var reason string
+		if status.failed() {
+			reason = exitReason(status, stderr, pm.memory.strategy)
+		}
 		pm.mu.Lock()
 		// Before freeing mountId, so a relaunch's removal of a stale error file always comes after this write.
-		if exitCode != 0 {
-			pm.writeErrorFile(mountId, stderr)
+		if status.failed() {
+			pm.writeErrorFile(mountId, reason)
 		}
 		// The mount ID is freed either way: no Mountpoint of this PV is left, so its next mount can go ahead on another UID.
 		delete(pm.uids, mountId)
 		if cleanupErr != nil {
 			// The UID and its volume slot stay taken, until the cache cleaner removes its directory.
-			klog.Errorf("Failed to remove cache directory of mount %s, keeping UID %d and its volume slot taken for the cache cleaner: %v",
+			klog.Errorf("[%s] Failed to remove cache directory, keeping UID %d and its volume slot taken for the cache cleaner: %v",
 				mountId, options.Uid, cleanupErr)
 			pm.holdForCacheCleanup(options.Uid)
 		} else {
@@ -278,10 +283,11 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		}
 		pm.mu.Unlock()
 
-		if exitCode != 0 {
-			klog.Errorf("Mountpoint for mount %s (UID %d) exited with code %d", mountId, options.Uid, exitCode)
+		if status.failed() {
+			// Its full stderr is above, each line prefixed with [mountId].
+			klog.Errorf("[%s] Mountpoint (UID %d) %s", mountId, options.Uid, status)
 		} else {
-			klog.Infof("Mountpoint for mount %s (UID %d) exited cleanly", mountId, options.Uid)
+			klog.Infof("[%s] Mountpoint (UID %d) exited cleanly", mountId, options.Uid)
 		}
 	})
 
@@ -433,20 +439,20 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 // createPerPvCacheDir creates a PV's cache directory, owned by the UID its Mountpoint runs as. Mountpoint writes ./mountpoint-cache inside it.
 // If the directory can't be handed to uid, it is removed, or, if that fails too, uid is held for the cache cleaner, so no
 // directory is left untracked to block uid's next mount. Caller holds pm.mu.
-func (pm *ProcessManager) createPerPvCacheDir(perPvCacheDir string, uid uint32) error {
+func (pm *ProcessManager) createPerPvCacheDir(mountId, perPvCacheDir string, uid uint32) error {
 	path := filepath.Join(pm.cacheDir, perPvCacheDir)
 	if err := os.Mkdir(path, perPvCacheDirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory %q: %w", path, err)
 	}
 	if err := pm.chownWithDefault(path, int(uid), int(uid)); err != nil {
 		if rmErr := os.Remove(path); rmErr != nil {
-			klog.Errorf("Failed to remove cache directory %s after failing to hand it to UID %d, keeping the UID for the cache cleaner: %v", path, uid, rmErr)
+			klog.Errorf("[%s] Failed to remove cache directory %s after failing to hand it to UID %d, keeping the UID for the cache cleaner: %v", mountId, path, uid, rmErr)
 			pm.holdForCacheCleanup(uid)
 		}
 		return fmt.Errorf("failed to hand cache directory %q to UID %d: %w", path, uid, err)
 	}
 
-	klog.V(4).Infof("Created cache directory %s", path)
+	klog.V(4).Infof("[%s] Created cache directory %s", mountId, path)
 	return nil
 }
 
@@ -463,13 +469,13 @@ func (pm *ProcessManager) chownWithDefault(path string, uid, gid int) error {
 	return dir.Chown(uid, gid)
 }
 
-// writeErrorFile reports a mount failure to the driver, whose waitForMount polls for this file — the
-// only reply channel on the otherwise one-way mount socket.
-func (pm *ProcessManager) writeErrorFile(mountId string, content []byte) {
+// writeErrorFile reports a mount failure to the driver, whose waitForMount polls for this file, the
+// only reply channel on the otherwise one-way mount socket. The driver returns it as the NodePublishVolume
+// error, so [errorfile.Write] formats it as one short line and writes it atomically.
+func (pm *ProcessManager) writeErrorFile(mountId string, msg string) {
 	errPath := filepath.Join(pm.commDir, mountId+errorFileExt)
-	// TODO(vlaad): write error file atomically (open,write,rename)
-	if err := os.WriteFile(errPath, content, errorFilePerm); err != nil {
-		klog.Errorf("Failed to write error file for mount %s: %v", mountId, err)
+	if err := errorfile.Write(errPath, msg, errorFilePerm); err != nil {
+		klog.Errorf("[%s] Failed to write error file: %v", mountId, err)
 	}
 }
 
@@ -480,7 +486,7 @@ func (pm *ProcessManager) Shutdown() {
 		if p.cleanupPending {
 			continue // no process left; serve's emptyCacheVolume removes its directory
 		}
-		klog.Infof("Sending SIGTERM to Mountpoint for mount %s (pid %d)", p.mountId, p.handle.Pid())
+		klog.Infof("[%s] Sending SIGTERM to Mountpoint (pid %d)", p.mountId, p.handle.Pid())
 		p.handle.Signal(syscall.SIGTERM)
 	}
 	pm.mu.Unlock()
@@ -494,25 +500,32 @@ type prefixWriter struct {
 	prefix string
 }
 
+// prefixWriteMu serializes the prefixWriters of all mounts: they share this container's stdout and
+// stderr, and a line must never be split between two mounts' tokens.
+var prefixWriteMu sync.Mutex
+
 func newPrefixWriter(w io.Writer, mountId string) *prefixWriter {
 	return &prefixWriter{w: w, prefix: fmt.Sprintf("[%s] ", mountId)}
 }
 
+// Write prefixes every line of p and writes them with a single Write, so concurrent Mountpoints and klog
+// (whose lines are single writes too) do not interleave within a line. A line that reaches it across two
+// Writes (a partial pipe read) is still prefixed as two lines.
 func (pw *prefixWriter) Write(p []byte) (int, error) {
+	var out bytes.Buffer
 	lines := bytes.Split(p, []byte("\n"))
 	for i, line := range lines {
 		if len(line) == 0 && i == len(lines)-1 {
 			break
 		}
-		if _, err := pw.w.Write([]byte(pw.prefix)); err != nil {
-			return 0, err
-		}
-		if _, err := pw.w.Write(line); err != nil {
-			return 0, err
-		}
-		if _, err := pw.w.Write([]byte("\n")); err != nil {
-			return 0, err
-		}
+		out.WriteString(pw.prefix)
+		out.Write(line)
+		out.WriteByte('\n')
+	}
+	prefixWriteMu.Lock()
+	defer prefixWriteMu.Unlock()
+	if _, err := pw.w.Write(out.Bytes()); err != nil {
+		return 0, err
 	}
 	return len(p), nil
 }

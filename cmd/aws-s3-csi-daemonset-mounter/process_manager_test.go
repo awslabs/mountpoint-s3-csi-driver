@@ -26,7 +26,7 @@ type fakeProcessHandle struct {
 	pid      int
 	cmd      *exec.Cmd
 	extraFds []uintptr // captured at Start time before close
-	exitCode int
+	status   exitStatus
 	stderr   []byte
 	done     chan struct{}
 	sigCh    chan os.Signal
@@ -34,9 +34,9 @@ type fakeProcessHandle struct {
 
 func (h *fakeProcessHandle) Pid() int { return h.pid }
 
-func (h *fakeProcessHandle) Wait() (int, []byte) {
+func (h *fakeProcessHandle) Wait() (exitStatus, []byte) {
 	<-h.done
-	return h.exitCode, h.stderr
+	return h.status, h.stderr
 }
 
 func (h *fakeProcessHandle) Signal(sig os.Signal) error {
@@ -46,7 +46,14 @@ func (h *fakeProcessHandle) Signal(sig os.Signal) error {
 
 // Exit makes Wait() return with the given code and stderr.
 func (h *fakeProcessHandle) Exit(code int, stderr string) {
-	h.exitCode = code
+	h.status = exitStatus{code: code}
+	h.stderr = []byte(stderr)
+	close(h.done)
+}
+
+// Kill makes Wait() return as if the process was killed by sig, with the given stderr.
+func (h *fakeProcessHandle) Kill(sig syscall.Signal, stderr string) {
+	h.status = exitStatus{code: -1, signal: sig}
 	h.stderr = []byte(stderr)
 	close(h.done)
 }
@@ -58,7 +65,7 @@ type fakeProcessRunner struct {
 	startErr error // when set, Start fails instead of spawning
 }
 
-func (r *fakeProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
+func (r *fakeProcessRunner) Start(mountId string, cmd *exec.Cmd) (ProcessHandle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.startErr != nil {
@@ -1028,7 +1035,7 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 	// Error file written for mount-a, not for mount-b
 	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-a.error"))
 	assert.NoError(t, err)
-	assert.Equals(t, "oom killed", string(errBytes))
+	assert.Equals(t, "Mountpoint exited with code 1: oom killed", string(errBytes))
 
 	_, err = os.ReadFile(filepath.Join(commDir, "mount-b.error"))
 	assert.Equals(t, true, os.IsNotExist(err))
@@ -1415,7 +1422,7 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 
 	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-abc.error"))
 	assert.NoError(t, err)
-	assert.Equals(t, "credential error", string(errBytes))
+	assert.Equals(t, "Mountpoint exited with code 1: credential error", string(errBytes))
 }
 
 func TestProcessManager_Launch_RemovesAnEarlierErrorFile(t *testing.T) {
