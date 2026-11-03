@@ -1703,22 +1703,20 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	credCtx := credentialprovider.ProvideContext{
 		VolumeID:      volumeID,
 		WorkloadPodID: "pod-uid-123",
-		PodNamespace:  "team-a",
 	}
-	// kubelet sends the pod name because the CSIDriver sets podInfoOnMount.
-	volumeCtx := map[string]string{"csi.storage.k8s.io/pod.name": "trainer-0"}
+	// kubelet sends the pod identity because the CSIDriver sets podInfoOnMount.
+	volumeCtx := map[string]string{
+		"csi.storage.k8s.io/pod.namespace": "team-a",
+		"csi.storage.k8s.io/pod.name":      "trainer-0",
+		"csi.storage.k8s.io/pod.uid":       "pod-uid-123",
+	}
 
 	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, volumeCtx, mountpoint.Args{}, "", nil)
 
 	// Aborted is non-final for kubelet: the volume stays in its actual state, so
 	// NodeUnpublishVolume is still called when the pod is deleted.
 	assert.Equals(t, codes.Aborted, status.Code(err))
-	msg := status.Convert(err).Message()
-	for _, want := range []string{volumeID, "team-a/trainer-0", "pod-uid-123", "recreate"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error message %q does not contain %q", msg, want)
-		}
-	}
+	assertDeadTargetMessage(t, status.Convert(err).Message(), volumeID, "team-a/trainer-0 (pod-uid-123)")
 
 	// No meta file should exist — Mount bailed before writing anything.
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)

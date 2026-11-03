@@ -242,6 +242,14 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
+	// Extract PV name from target path
+	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount.
+	parsedTarget, err := targetpath.Parse(target)
+	if err != nil {
+		return fmt.Errorf("failed to parse target path %q: %w", target, err)
+	}
+	volumeID := parsedTarget.VolumeID // This is the PV name
+
 	// Check target health
 	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
 	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
@@ -252,16 +260,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
 	}
 	if targetState == TargetDead {
-		return deadTargetError(target, credentialCtx, volumeCtx)
+		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead mount (Mountpoint not connected), returning Aborted", target, volumeID)
+		return deadTargetError(volumeID, parsedTarget.PodID, volumeCtx)
 	}
-
-	// Extract PV name from target path
-	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount.
-	parsedTarget, err := targetpath.Parse(target)
-	if err != nil {
-		return fmt.Errorf("failed to parse target path %q: %w", target, err)
-	}
-	volumeID := parsedTarget.VolumeID // This is the PV name
 
 	// Handle legacy mounts — only for healthy mounted targets that are NOT already tracked
 	// as V3 mounts. A target tracked in the V3 MountMap is a V3 republish and must skip the
@@ -323,28 +324,38 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 }
 
 // deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited
-// (ENOTCONN), typically because the s3-csi-daemonset-mounter pod on this node restarted. Nothing can
-// repair the pod's existing bind mount in place, so the workload pod has to be recreated.
+// (ENOTCONN), for example because the mounter pod serving it on this node restarted (the
+// s3-csi-daemonset-mounter pod, or a legacy V2 Mountpoint Pod). Nothing can repair the pod's existing
+// bind mount in place, so the workload pod has to be recreated.
 //
 // The code is Aborted because kubelet treats it as non-final: the volume keeps its state in kubelet's
 // actual state of world (and the mount directory is not removed), so NodeUnpublishVolume still runs
 // when the pod is deleted and unmounts the dead target. kubelet records the message as a FailedMount
 // Warning Event on the workload pod. Mount bails before touching any state, so a republish of a dead
 // target never churns credentials or the shared source.
-func deadTargetError(target string, credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string) error {
-	pvName := credentialCtx.VolumeID
-	if parsed, err := targetpath.Parse(target); err == nil {
-		pvName = parsed.VolumeID
+//
+// The action comes first so a truncated Event still carries it. Nothing is logged here at Error level:
+// the gRPC interceptor already logs the returned error.
+func deadTargetError(pvName, targetPodUID string, volumeCtx map[string]string) error {
+	// Pod identity comes from podInfoOnMount; the UID falls back to the one in the target path.
+	uid := volumeCtx[volumecontext.CSIPodUID]
+	if uid == "" {
+		uid = targetPodUID
 	}
-	pod := "with UID " + credentialCtx.WorkloadPodID
-	if name := volumeCtx[volumecontext.CSIPodName]; name != "" && credentialCtx.PodNamespace != "" {
-		pod = fmt.Sprintf("%s/%s (%s)", credentialCtx.PodNamespace, name, credentialCtx.WorkloadPodID)
+	namespace, name := volumeCtx[volumecontext.CSIPodNamespace], volumeCtx[volumecontext.CSIPodName]
+	var pod string
+	switch {
+	case namespace != "" && name != "":
+		pod = fmt.Sprintf("%s/%s (%s)", namespace, name, uid)
+	case namespace != "":
+		pod = fmt.Sprintf("with UID %s in namespace %s", uid, namespace)
+	default:
+		pod = "with UID " + uid
 	}
 	// TODO: once the last Mountpoint exit reason for a volume is kept, name it here instead of "likely".
-	msg := fmt.Sprintf("Mountpoint for volume %s serving pod %s has stopped, likely because the "+
-		"s3-csi-daemonset-mounter pod on this node restarted or Mountpoint exited; "+
-		"delete and recreate this pod to remount the volume", pvName, pod)
-	klog.Errorf("DaemonsetMounter: %s (target %s)", msg, target)
+	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to remount the volume. "+
+		"Volume %s, pod %s. Likely cause: the Mountpoint process exited, for example because the mounter "+
+		"pod serving it on this node restarted", pvName, pod)
 	return status.Error(codes.Aborted, msg)
 }
 
