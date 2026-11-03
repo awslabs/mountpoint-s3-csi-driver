@@ -21,22 +21,20 @@ import (
 const (
 	// csiNodeImageEnv is the s3-plugin env var the CSI node compares with the mounter's image.
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
-	// imageMismatchMessage is the start of the error the CSI node returns on a mismatch.
+	// imageMismatchMessage is the start of the warning the CSI node logs on a mismatch.
 	imageMismatchMessage = "image mismatch on node"
 	// republishTimeout covers the kubelet's periodic republish (requiresRepublish), which follows its
 	// pod sync, about once a minute.
 	republishTimeout = 5 * time.Minute
-	// remountTimeout covers the kubelet's mount retry backoff once the skew is gone.
-	remountTimeout = 5 * time.Minute
 )
 
 type s3CSIImageSkewDaemonsetTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo
 }
 
-// InitS3CSIImageSkewDaemonsetTestSuite checks what a workload sees while s3-csi-node and the mounter on
-// its node run different images: a new mount and the credential refresh of a running one are refused
-// with a FailedMount event, and both recover once the two pods match again.
+// InitS3CSIImageSkewDaemonsetTestSuite checks what a workload sees while s3-csi-node is newer than the mounter on its
+// node, the state every node is in after an upgrade until it is recycled: new mounts and the credential refresh of a
+// running one are served, and the CSI node logs a warning naming both images.
 func InitS3CSIImageSkewDaemonsetTestSuite() storageframework.TestSuite {
 	return &s3CSIImageSkewDaemonsetTestSuite{
 		tsInfo: storageframework.TestSuiteInfo{
@@ -73,7 +71,7 @@ func (t *s3CSIImageSkewDaemonsetTestSuite) DefineTests(driver storageframework.T
 		})
 
 		// Serial: it recreates the s3-csi-node pod on one node, which every mount there depends on.
-		ginkgo.It("should refuse a new mount and credential refresh while the images differ, and recover once they match", ginkgo.Serial, func(ctx context.Context) {
+		ginkgo.It("should serve new mounts and credential refresh while the images differ, and warn", ginkgo.Serial, func(ctx context.Context) {
 			ginkgo.By("Mounting a volume in a workload while the images match")
 			running := createVolumeResourceWithMountOptions(ctx, config, pattern, nil)
 			ginkgo.DeferCleanup(running.CleanupResource)
@@ -92,41 +90,48 @@ func (t *s3CSIImageSkewDaemonsetTestSuite) DefineTests(driver storageframework.T
 			restore := skewCSINodeImage(ctx, f, nodeName)
 			ginkgo.DeferCleanup(restore)
 
-			ginkgo.By("Credential refresh: waiting for a FailedMount event on the running workload")
-			logMismatchEvent(ctx, f, runningPod, republishTimeout)
+			ginkgo.By("Credential refresh: waiting for the CSI node to log the mismatch warning on a republish")
+			gomega.Eventually(ctx, func(ctx context.Context) bool {
+				return verifyCSINodeLogs(ctx, f, nodeName, imageMismatchMessage)
+			}).WithTimeout(republishTimeout).WithPolling(10*time.Second).Should(gomega.BeTrue(),
+				"s3-csi-node on %s should log %q while the images differ", nodeName, imageMismatchMessage)
 
-			ginkgo.By("The running workload still serves its files: the mount itself is untouched")
+			ginkgo.By("The running workload keeps serving its files, and has no FailedMount")
 			pod, err := f.ClientSet.CoreV1().Pods(runningPod.Namespace).Get(ctx, runningPod.Name, metav1.GetOptions{})
 			framework.ExpectNoError(err)
 			gomega.Expect(pod.Status.Phase).To(gomega.Equal(v1.PodRunning))
 			checkReadFromPathSucceedEventually(ctx, f, runningPod, file, toWrite, seed)
+			expectNoMismatchFailedMount(ctx, f, runningPod)
 
-			ginkgo.By("New mount: creating a workload with another volume on the same node")
+			ginkgo.By("New mount: a workload with another volume on the same node starts")
 			fresh := createVolumeResourceWithMountOptions(ctx, config, pattern, nil)
 			ginkgo.DeferCleanup(fresh.CleanupResource)
-			freshPod, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name,
+			freshPod, err := createPod(ctx, f.ClientSet, f.Namespace.Name,
 				e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": nodeName},
 					[]*v1.PersistentVolumeClaim{fresh.Pvc}, admissionapi.LevelBaseline, ""))
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, freshPod) })
-
-			ginkgo.By("New mount: waiting for a FailedMount event on the new workload")
-			logMismatchEvent(ctx, f, freshPod, 2*time.Minute)
-			pod, err = f.ClientSet.CoreV1().Pods(freshPod.Namespace).Get(ctx, freshPod.Name, metav1.GetOptions{})
-			framework.ExpectNoError(err)
-			gomega.Expect(pod.Status.Phase).To(gomega.Equal(v1.PodPending), "the new workload must not start while the images differ")
-
-			ginkgo.By(fmt.Sprintf("Recreating the s3-csi-node pod on %s with the original %s", nodeName, csiNodeImageEnv))
-			restore(ctx)
-
-			ginkgo.By("The new workload mounts once the images match")
-			framework.ExpectNoError(e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, freshPod.Name, freshPod.Namespace, remountTimeout))
-			freshFile := "/mnt/volume1/after-skew.txt"
+			freshFile := "/mnt/volume1/during-skew.txt"
 			freshSeed := time.Now().UTC().UnixNano()
 			checkWriteToPathSucceedEventually(ctx, f, freshPod, freshFile, toWrite, freshSeed)
-			checkReadFromPathSucceedEventually(ctx, f, runningPod, file, toWrite, seed)
+			expectNoMismatchFailedMount(ctx, f, freshPod)
 		})
 	})
+}
+
+// expectNoMismatchFailedMount fails if pod has a FailedMount event naming the image mismatch, which would mean the
+// CSI node refused it instead of only warning.
+func expectNoMismatchFailedMount(ctx context.Context, f *framework.Framework, pod *v1.Pod) {
+	ginkgo.GinkgoHelper()
+	events, err := f.ClientSet.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + pod.Name,
+	})
+	framework.ExpectNoError(err)
+	for _, event := range events.Items {
+		if event.Reason == "FailedMount" && strings.Contains(event.Message, imageMismatchMessage) {
+			framework.Failf("pod %s was refused on an image mismatch: %s", pod.Name, event.Message)
+		}
+	}
 }
 
 // skewCSINodeImage recreates only the s3-csi-node pod on nodeName with a CSI_NODE_IMAGE that differs
@@ -161,33 +166,6 @@ func skewCSINodeImage(ctx context.Context, f *framework.Framework, nodeName stri
 		expectCSINodePodImageEnv(ctx, cleanupF, nodeName, originalImage)
 		updateCSINodeDaemonSet(ctx, cleanupF, func(ds *appsv1.DaemonSet) { ds.Spec.UpdateStrategy = originalStrategy })
 	}
-}
-
-// logMismatchEvent waits for a FailedMount event on pod naming the image mismatch, and logs every
-// FailedMount event the pod has, so the run shows exactly what a user sees.
-func logMismatchEvent(ctx context.Context, f *framework.Framework, pod *v1.Pod, timeout time.Duration) {
-	ginkgo.GinkgoHelper()
-	var found *v1.Event
-	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
-		events, err := f.ClientSet.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{
-			FieldSelector: "involvedObject.name=" + pod.Name,
-		})
-		if err != nil {
-			return false, err
-		}
-		for i := range events.Items {
-			if events.Items[i].Reason == "FailedMount" && strings.Contains(events.Items[i].Message, imageMismatchMessage) {
-				found = &events.Items[i]
-				return true, nil
-			}
-		}
-		return false, nil
-	}).WithTimeout(timeout).WithPolling(5*time.Second).Should(gomega.BeTrue(),
-		"no FailedMount event containing %q on pod %s", imageMismatchMessage, pod.Name)
-
-	framework.Logf("Event on pod %s: type=%s reason=%s count=%d\n  message: %s",
-		pod.Name, found.Type, found.Reason, found.Count, found.Message)
-	gomega.Expect(found.Message).To(gomega.ContainSubstring("FailedPrecondition"))
 }
 
 // csiNodeImageEnvValue returns CSI_NODE_IMAGE from the s3-plugin container of ds's template.

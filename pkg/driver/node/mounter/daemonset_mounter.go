@@ -34,8 +34,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -90,6 +88,9 @@ const (
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
 	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
 	mounterContainerName = "mounter"
+	// imageMismatchWarnInterval is how often a mismatch is logged at most. The kubelet republishes every mounted
+	// volume about once a minute, so logging on every request would flood the log.
+	imageMismatchWarnInterval = 10 * time.Minute
 )
 
 // Exported for error matching in tests and NodePublishVolume callers.
@@ -168,6 +169,8 @@ type DaemonsetMounter struct {
 
 	// ownImage is this CSI node's image reference, from CSI_NODE_IMAGE. Empty disables the image check.
 	ownImage string
+	// lastImageMismatchWarning is when an image mismatch was last logged, in Unix nanoseconds; 0 if never.
+	lastImageMismatchWarning atomic.Int64
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
@@ -300,11 +303,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
 	}
 
-	// Refuse every V3 publish (new mount, bind to a running one, and republish, which refreshes
-	// credentials) while this CSI node and the mounter run different images, before anything is written.
-	if err := dm.checkImageMatch(mounter); err != nil {
-		return err
-	}
+	// Warn, never refuse, while this CSI node and the mounter run different images: they differ until the node is
+	// recycled after an upgrade or rollback, and the two stay compatible across releases.
+	dm.warnOnImageMismatch(mounter)
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
 	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
@@ -1592,23 +1593,35 @@ func mounterPodImage(pod corev1.Pod) string {
 	return ""
 }
 
-// checkImageMatch returns nil if this CSI node and the mounter run the same image reference, or a
-// FailedPrecondition error naming both and the fix. Both images come from the same chart value, so
-// they differ only when one of the two pods on this node was recreated after an upgrade or rollback.
-func (dm *DaemonsetMounter) checkImageMatch(mounter *mounterPod) error {
+// imageMismatchWarning returns a warning naming both images and how to bring the mounter up to date, or "" if
+// this CSI node and the mounter run the same image reference (or the check is off). Both images come from the same
+// chart value, so they differ only when the node hasn't been recycled since an upgrade or rollback.
+func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
 	if dm.ownImage == "" || dm.ownImage == mounter.image {
-		return nil
+		return ""
 	}
-	return status.Errorf(codes.FailedPrecondition,
-		"image mismatch on node %[1]s: s3-csi-node runs %[2]q but s3-csi-daemonset-mounter runs %[3]q, "+
-			"so an upgrade or rollback is incomplete on this node. New mounts and credential refresh are refused, "+
-			"and running mounts lose S3 access when their credentials expire. "+
-			"Complete the upgrade or rollback by following the upgrade procedure for this node: "+
-			"`kubectl cordon %[1]s`, "+
-			"`kubectl drain %[1]s --ignore-daemonsets --delete-emptydir-data`, "+
-			"`kubectl delete pod -n %[4]s -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' --field-selector spec.nodeName=%[1]s` "+
-			"so both pods are recreated on the same image, then `kubectl uncordon %[1]s`",
-		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace)
+	return fmt.Sprintf(
+		"image mismatch on node %s: s3-csi-node runs %q, s3-csi-daemonset-mounter runs %q. Mounts are still served. "+
+			"Recycle this node by following the upgrade procedure so both pods run the same image.",
+		dm.nodeID, dm.ownImage, mounter.image)
+}
+
+// warnOnImageMismatch logs imageMismatchWarning, at most once per imageMismatchWarnInterval. It never fails a
+// request. Safe for concurrent use.
+func (dm *DaemonsetMounter) warnOnImageMismatch(mounter *mounterPod) {
+	warning := dm.imageMismatchWarning(mounter)
+	if warning == "" {
+		return
+	}
+	now := time.Now().UnixNano()
+	last := dm.lastImageMismatchWarning.Load()
+	if last != 0 && time.Duration(now-last) < imageMismatchWarnInterval {
+		return
+	}
+	// Only the caller that wins the swap logs, so concurrent requests log once.
+	if dm.lastImageMismatchWarning.CompareAndSwap(last, now) {
+		klog.Warning(warning)
+	}
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.

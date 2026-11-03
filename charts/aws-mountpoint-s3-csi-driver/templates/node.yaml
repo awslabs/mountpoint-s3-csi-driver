@@ -32,10 +32,11 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   {{- if eq .Values.experimental.mounterMode "daemonset" }}
+  # Rolls automatically, unlike the mounter (OnDelete): restarting the CSI node doesn't break running mounts, and a
+  # V2 -> V3 upgrade needs every V2 CSI node replaced, since the V3 controller no longer creates V2 Mountpoint Pods.
+  # Until a node is recycled its CSI node can be newer than its mounter, which is supported and logged as a warning.
   updateStrategy:
-    # OnDelete, matching the mounter DaemonSet: a helm upgrade or rollback changes the template but
-    # moves no pod, so both pods on a node move to the new version together when the node is recycled.
-    type: OnDelete
+    type: RollingUpdate
   {{- end }}
   selector:
     matchLabels:
@@ -147,8 +148,8 @@ spec:
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
-            # Same helper as this container's and the mounter's `image:`, so the CSI node can refuse mounts
-            # and credential refresh while the mounter on its node runs a different image.
+            # Same helper as this container's and the mounter's `image:`, so the CSI node can warn while the
+            # mounter on its node runs a different image (the node hasn't been recycled since an upgrade or rollback).
             - name: CSI_NODE_IMAGE
               value: {{ include "csiDriverImageName" . }}
             {{- end }}

@@ -1,23 +1,16 @@
 package mounter_test
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
+	"context"
+	"sync"
 	"testing"
 
-	"github.com/golang/mock/gomock"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
-	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
-	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -30,116 +23,111 @@ const (
 // only thing that reads it.
 func (testCtx *dmTestCtx) setMounterPodImage(image string) {
 	testCtx.t.Helper()
+	testCtx.setMounterPodContainers([]corev1.Container{{Name: "mounter", Image: image}})
+}
 
+// setMounterPodContainers replaces the mounter pod's containers, then re-runs discovery.
+func (testCtx *dmTestCtx) setMounterPodContainers(containers []corev1.Container) {
+	testCtx.t.Helper()
 	pods := testCtx.client.CoreV1().Pods("kube-system")
 	list, err := pods.List(testCtx.ctx, metav1.ListOptions{})
 	assert.NoError(testCtx.t, err)
 	assert.Equals(testCtx.t, 1, len(list.Items))
 
 	pod := &list.Items[0]
-	pod.Spec.Containers = []corev1.Container{{Name: "mounter", Image: image}}
+	pod.Spec.Containers = containers
 	_, err = pods.Update(testCtx.ctx, pod, metav1.UpdateOptions{})
 	assert.NoError(testCtx.t, err)
 	assert.NoError(testCtx.t, testCtx.dm.DiscoverMounter(testCtx.ctx))
 }
 
-// useStrictCredProvider replaces the DaemonsetMounter with one whose credential provider fails the
-// test on any call, so a test can prove nothing was written.
-func (testCtx *dmTestCtx) useStrictCredProvider() {
-	testCtx.t.Helper()
-
-	strict := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(testCtx.t))
-	testCtx.dm = mounter.NewDaemonsetMounter(testCtx.client, testCtx.nodeName,
-		mpmounter.NewWithMount(testCtx.mount), strict,
-		func(string, mpmounter.MountOptions) (int, error) {
-			testCtx.t.Fatal("FUSE mount attempted despite an image mismatch")
-			return 0, nil
-		}, func(string, string) error {
-			testCtx.t.Fatal("bind mount attempted despite an image mismatch")
-			return nil
-		}, nil, "", cluster.DefaultKubernetes)
-	testCtx.installOwnershipRecorders()
+// countingProvider counts the credentials it provides, so a test can tell a refresh happened.
+type countingProvider struct {
+	mu    sync.Mutex
+	calls int
 }
 
-func assertImageMismatch(t *testing.T, err error) {
-	t.Helper()
-	assert.Equals(t, codes.FailedPrecondition, status.Code(err))
-	if !strings.Contains(err.Error(), imageA) || !strings.Contains(err.Error(), imageB) {
-		t.Fatalf("error should name both images, got: %v", err)
-	}
-	// The fix, in order, for this node.
-	for _, step := range []string{
-		"upgrade or rollback is incomplete",
-		"kubectl cordon test-node",
-		"kubectl drain test-node --ignore-daemonsets",
-		"kubectl delete pod",
-		"--field-selector spec.nodeName=test-node",
-		"kubectl uncordon test-node",
-	} {
-		if !strings.Contains(err.Error(), step) {
-			t.Fatalf("error should contain %q, got: %v", step, err)
-		}
-	}
+func (p *countingProvider) Provide(context.Context, credentialprovider.ProvideContext) (envprovider.Environment, credentialprovider.AuthenticationSource, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil
 }
 
+func (p *countingProvider) Cleanup(credentialprovider.CleanupContext) error { return nil }
+
+func (p *countingProvider) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+// After an upgrade the CSI node rolls automatically while the mounter waits for the node to be recycled, so the
+// two run different images on every node until then. That is supported: the CSI node only warns.
 func TestDaemonsetMounterImageCheck(t *testing.T) {
 	t.Run("Mounts when the CSI node and mounter images match", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageA)
 		testCtx := setupDM(t)
 		testCtx.setMounterPodImage(imageA)
-
 		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
 	})
 
-	t.Run("Refuses a new mount on mismatch before writing anything", func(t *testing.T) {
+	t.Run("Mounts when the CSI node is newer than the mounter", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageB)
 		testCtx := setupDM(t)
-		testCtx.useStrictCredProvider()
 		testCtx.setMounterPodImage(imageA)
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+	})
 
+	t.Run("Refreshes credentials of a running mount when the images differ", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", imageB)
+		testCtx := setupDM(t)
+		provider := &countingProvider{}
+		testCtx.useCredProvider(provider)
+		testCtx.setMounterPodImage(imageA)
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, 1, provider.count())
+
+		// The kubelet's republish of the mounted target refreshes its credentials.
 		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
 			testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
-		assertImageMismatch(t, err)
-
-		// No meta file, so nothing was recorded for this mount.
-		metaDir := filepath.Join(testCtx.kubeletPath, "plugins", "s3.csi.aws.com", "meta")
-		entries, _ := os.ReadDir(metaDir)
-		assert.Equals(t, 0, len(entries))
+		assert.NoError(t, err)
+		assert.Equals(t, 2, provider.count())
 	})
 
-	t.Run("Refuses credential refresh of a mounted target on mismatch", func(t *testing.T) {
-		t.Setenv("CSI_NODE_IMAGE", imageB)
-		testCtx := setupDM(t)
-		testCtx.useStrictCredProvider()
-		testCtx.setMounterPodImage(imageA)
-
-		// A healthy, already-mounted target makes this a republish (credential refresh).
-		target := testCtx.targetPath(testCtx.podUID)
-		assert.NoError(t, os.MkdirAll(target, 0755))
-		assert.NoError(t, testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil))
-
-		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target,
-			testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
-		assertImageMismatch(t, err)
-	})
-
-	t.Run("Refuses when the mounter pod has no mounter container", func(t *testing.T) {
+	t.Run("Mounts when the mounter is newer than the CSI node", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageA)
 		testCtx := setupDM(t)
-		testCtx.useStrictCredProvider()
-		assert.NoError(t, testCtx.dm.DiscoverMounter(testCtx.ctx))
-
-		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
-			credentialprovider.ProvideContext{WorkloadPodID: testCtx.podUID, VolumeID: testCtx.volumeID},
-			nil, mountpoint.ParseArgs(nil), "", nil)
-		assert.Equals(t, codes.FailedPrecondition, status.Code(err))
+		testCtx.setMounterPodImage(imageB)
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
 	})
 
-	t.Run("Check is off when CSI_NODE_IMAGE is unset", func(t *testing.T) {
+	t.Run("Mounts when the mounter pod has no mounter container", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", imageA)
+		testCtx := setupDM(t)
+		testCtx.setMounterPodContainers([]corev1.Container{{Name: "something-else", Image: imageA}})
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+	})
+
+	t.Run("Mounts when CSI_NODE_IMAGE is unset", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", "")
 		testCtx := setupDM(t)
 		testCtx.setMounterPodImage(imageA)
-
 		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
 	})
+}
+
+// isMountedAt reports whether the fake mounter has a mount at path.
+func (testCtx *dmTestCtx) isMountedAt(path string) bool {
+	for _, mp := range testCtx.mount.MountPoints {
+		if mp.Path == path {
+			return true
+		}
+	}
+	return false
 }
