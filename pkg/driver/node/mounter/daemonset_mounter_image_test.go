@@ -2,9 +2,12 @@ package mounter_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -15,8 +18,10 @@ import (
 )
 
 const (
-	imageA = "registry.example/aws-mountpoint-s3-csi-driver:v3.0.0"
-	imageB = "registry.example/aws-mountpoint-s3-csi-driver:v3.1.0"
+	imageA  = "registry.example/aws-mountpoint-s3-csi-driver:v3.0.0"
+	imageB  = "registry.example/aws-mountpoint-s3-csi-driver:v3.1.0"
+	imageC  = "registry.example/aws-mountpoint-s3-csi-driver:v3.2.0"
+	imageV4 = "registry.example/aws-mountpoint-s3-csi-driver:v4.0.0"
 )
 
 // setMounterPodImage sets the mounter pod's `mounter` container image, then re-runs discovery, the
@@ -62,8 +67,9 @@ func (p *countingProvider) count() int {
 	return p.calls
 }
 
-// After an upgrade the CSI node rolls automatically while the mounter waits for the node to be recycled, so the
-// two run different images on every node until then. That is supported: the CSI node only warns.
+// After an upgrade or rollback the CSI node rolls automatically while the mounter waits for the node to be
+// recycled, so the two run different images until then. An older mounter of the same major, or one at most one
+// minor newer, is supported with a warning. Other skews refuse new mounts and credential refreshes.
 func TestDaemonsetMounterImageCheck(t *testing.T) {
 	t.Run("Mounts when the CSI node and mounter images match", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageA)
@@ -102,6 +108,81 @@ func TestDaemonsetMounterImageCheck(t *testing.T) {
 		testCtx := setupDM(t)
 		testCtx.setMounterPodImage(imageB)
 		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+	})
+
+	t.Run("Mounts when the image tags aren't versions", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", "registry.example:5000/aws-mountpoint-s3-csi-driver:0ce80c4")
+		testCtx := setupDM(t)
+		testCtx.setMounterPodImage("registry.example:5000/aws-mountpoint-s3-csi-driver:1793109")
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+	})
+
+	t.Run("Mounts when tags carry a suffix and a digest", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", "registry.example:5000/aws-mountpoint-s3-csi-driver:v3.0.0-eksbuild.1")
+		testCtx := setupDM(t)
+		testCtx.setMounterPodImage("registry.example:5000/aws-mountpoint-s3-csi-driver:v3.1.2-eksbuild.1@sha256:abc")
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+	})
+
+	for _, tc := range []struct{ name, csiNode, mounter string }{
+		{"Mounts when only the patch versions differ", imageB, "registry.example/aws-mountpoint-s3-csi-driver:v3.1.2"},
+		{"Mounts when the mounter is several minors older", "registry.example/aws-mountpoint-s3-csi-driver:v3.5.0", imageA},
+		{"Mounts when an image with a registry port has no tag", imageA, "registry.example:5000/aws-mountpoint-s3-csi-driver"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CSI_NODE_IMAGE", tc.csiNode)
+			testCtx := setupDM(t)
+			testCtx.setMounterPodImage(tc.mounter)
+			testCtx.mountAndServe(testCtx.podUID, nil)
+			assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+		})
+	}
+
+	t.Run("Tells the operator which version to upgrade to when the mounter is too new", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", imageA)
+		testCtx := setupDM(t)
+		testCtx.setMounterPodImage(imageC)
+		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+			testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
+		assert.Equals(t, true, strings.Contains(err.Error(), "Upgrade the CSI driver to v3.1 or newer"))
+	})
+
+	for _, tc := range []struct{ name, csiNode, mounter string }{
+		{"Refuses a new mount when the mounter is two minors newer", imageA, imageC},
+		{"Refuses a new mount when the major versions differ", imageA, imageV4},
+		{"Refuses a new mount when the mounter is an older major", imageV4, imageA},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CSI_NODE_IMAGE", tc.csiNode)
+			testCtx := setupDM(t)
+			testCtx.setMounterPodImage(tc.mounter)
+			err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+				testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
+			assert.Equals(t, codes.FailedPrecondition, status.Code(err))
+			assert.Equals(t, true, strings.Contains(err.Error(), "image mismatch on node"))
+			assert.Equals(t, false, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
+		})
+	}
+
+	t.Run("Refuses to refresh credentials of a running mount when the skew isn't supported", func(t *testing.T) {
+		t.Setenv("CSI_NODE_IMAGE", imageA)
+		testCtx := setupDM(t)
+		provider := &countingProvider{}
+		testCtx.useCredProvider(provider)
+		testCtx.setMounterPodImage(imageA)
+		testCtx.mountAndServe(testCtx.podUID, nil)
+		assert.Equals(t, 1, provider.count())
+
+		// The mounter is replaced by one two minors newer, e.g. after rolling the CSI node back two releases.
+		testCtx.setMounterPodImage(imageC)
+		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+			testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
+		assert.Equals(t, codes.FailedPrecondition, status.Code(err))
+		assert.Equals(t, 1, provider.count())
+		// The running mount itself stays in place.
 		assert.Equals(t, true, testCtx.isMountedAt(testCtx.targetPath(testCtx.podUID)))
 	})
 

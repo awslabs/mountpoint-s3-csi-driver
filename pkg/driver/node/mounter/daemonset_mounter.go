@@ -34,8 +34,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -91,6 +94,10 @@ const (
 	// imageMismatchWarnInterval is how often a mismatch is logged at most. The kubelet republishes every mounted
 	// volume about once a minute, so logging on every request would flood the log.
 	imageMismatchWarnInterval = 10 * time.Minute
+	// maxMounterMinorsAhead is how many minor versions the mounter may be newer than this CSI node: one, the
+	// skew a one-minor rollback leaves until the node is recycled. An older mounter of the same major is
+	// always supported.
+	maxMounterMinorsAhead = 1
 )
 
 // Exported for error matching in tests and NodePublishVolume callers.
@@ -303,9 +310,14 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
 	}
 
-	// Warn, never refuse, while this CSI node and the mounter run different images: they differ until the node is
-	// recycled after an upgrade or rollback, and the two stay compatible across releases.
-	dm.warnOnImageMismatch(mounter)
+	// This CSI node and the mounter run different images until the node is recycled after an upgrade or
+	// rollback. Outside the supported skew, refuse both new mounts and credential refreshes.
+	if msg, supported := dm.checkImageSkew(mounter); msg != "" {
+		if !supported {
+			return status.Error(codes.FailedPrecondition, msg)
+		}
+		dm.warnOnImageMismatch(msg)
+	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
 	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
@@ -1593,26 +1605,51 @@ func mounterPodImage(pod corev1.Pod) string {
 	return ""
 }
 
-// imageMismatchWarning returns a warning naming both images and how to bring the mounter up to date, or "" if
-// this CSI node and the mounter run the same image reference (or the check is off). Both images come from the same
-// chart value, so they differ only when the node hasn't been recycled since an upgrade or rollback.
-func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
+// checkImageSkew compares this CSI node's image with the mounter's against the skew policy:
+//   - an older mounter of the same major version is supported;
+//   - a newer mounter is supported up to maxMounterMinorsAhead minor versions (a one-minor rollback);
+//   - anything else, including a different major version, is not.
+//
+// It returns "" if the images match or the check is off. Otherwise it returns a message for the operator, and
+// whether the skew is supported. Tags that aren't versions (e.g. a commit SHA) can't be compared, so they are
+// supported. Both images come from the same chart value, so they differ only when the node hasn't been recycled
+// since an upgrade or rollback.
+func (dm *DaemonsetMounter) checkImageSkew(mounter *mounterPod) (msg string, supported bool) {
 	if dm.ownImage == "" || dm.ownImage == mounter.image {
-		return ""
+		return "", true
 	}
-	return fmt.Sprintf(
-		"image mismatch on node %s: s3-csi-node runs %q, s3-csi-daemonset-mounter runs %q. Mounts are still served. "+
-			"Recycle this node by following the upgrade procedure so both pods run the same image.",
+	prefix := fmt.Sprintf("image mismatch on node %s: s3-csi-node runs %q, s3-csi-daemonset-mounter runs %q. ",
 		dm.nodeID, dm.ownImage, mounter.image)
+	const recycle = "Recycle this node by following the upgrade procedure so both pods run the same image."
+
+	own, ownOK := imageVersion(dm.ownImage)
+	mnt, mntOK := imageVersion(mounter.image)
+	switch {
+	case !ownOK || !mntOK || (own.Major() == mnt.Major() && mnt.Minor() <= own.Minor()+maxMounterMinorsAhead):
+		return prefix + "Mounts are still served. " + recycle, true
+	case own.Major() != mnt.Major():
+		return prefix + "Different major versions aren't supported, so new mounts are refused. " + recycle, false
+	default:
+		return prefix + fmt.Sprintf("The mounter may be at most %d minor version newer, so new mounts are refused. "+
+			"Upgrade the CSI driver to v%d.%d or newer, or recycle this node by following the upgrade procedure.",
+			maxMounterMinorsAhead, mnt.Major(), mnt.Minor()-maxMounterMinorsAhead), false
+	}
 }
 
-// warnOnImageMismatch logs imageMismatchWarning, at most once per imageMismatchWarnInterval. It never fails a
-// request. Safe for concurrent use.
-func (dm *DaemonsetMounter) warnOnImageMismatch(mounter *mounterPod) {
-	warning := dm.imageMismatchWarning(mounter)
-	if warning == "" {
-		return
+// imageVersion parses the version in image's tag, e.g. 3.1 from "repo/driver:v3.1.0-eksbuild.1". It returns
+// false if the image has no tag or the tag isn't a version, e.g. a commit SHA.
+func imageVersion(image string) (*utilversion.Version, bool) {
+	ref, _, _ := strings.Cut(image, "@") // drop a digest
+	colon := strings.LastIndexByte(ref, ':')
+	if colon < 0 || colon < strings.LastIndexByte(ref, '/') {
+		return nil, false // no tag; a ':' before the last '/' is a registry port
 	}
+	v, err := utilversion.ParseGeneric(ref[colon+1:])
+	return v, err == nil
+}
+
+// warnOnImageMismatch logs warning, at most once per imageMismatchWarnInterval. Safe for concurrent use.
+func (dm *DaemonsetMounter) warnOnImageMismatch(warning string) {
 	now := time.Now().UnixNano()
 	last := dm.lastImageMismatchWarning.Load()
 	if last != 0 && time.Duration(now-last) < imageMismatchWarnInterval {
