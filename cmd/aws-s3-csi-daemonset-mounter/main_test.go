@@ -65,7 +65,7 @@ func TestServe(t *testing.T) {
 		createUnremovableCacheEntry(t, cacheDir, "uid-65540")
 		stop, done := startServing(t, pm)
 
-		assertCleanupPending(t, pm, 65540, "")
+		assertCleanupPending(t, pm, 65540)
 
 		close(stop)
 		<-done
