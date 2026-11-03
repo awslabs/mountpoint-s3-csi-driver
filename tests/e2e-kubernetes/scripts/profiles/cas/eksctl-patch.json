@@ -86,7 +86,7 @@
     "path": "/managedNodeGroups/-",
     "value": {
       "name": "pool-big",
-      "instanceType": "r5.large",
+      "instanceType": "r5.xlarge",
       "minSize": 0,
       "desiredCapacity": 0,
       "maxSize": 2,
