@@ -32,9 +32,7 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   {{- if eq .Values.experimental.mounterMode "daemonset" }}
-  # Rolls automatically, unlike the mounter (OnDelete): restarting the CSI node doesn't break running mounts, and a
-  # V2 -> V3 upgrade needs every V2 CSI node replaced, since the V3 controller no longer creates V2 Mountpoint Pods.
-  # Until a node is recycled its CSI node can be newer than its mounter, which is supported and logged as a warning.
+  # Rolls automatically, unlike the mounter (OnDelete): restarting the CSI node doesn't break running mounts.
   updateStrategy:
     type: RollingUpdate
   {{- end }}
