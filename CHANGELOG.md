@@ -2,6 +2,7 @@
 
 ### Notable changes
 * Add support for Kubernetes 1.37.
+* Add support for Ubuntu 26.04 on Kubernetes 1.35+.
 
 # v2.9.2
 
