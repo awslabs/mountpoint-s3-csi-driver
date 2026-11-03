@@ -118,7 +118,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 
 		ginkgo.By("Waiting for the autoscaler to provision nodes for all of them")
 		// Autoscalers might only learn a node's volume limit once it has joined, and provision one node at a time.
-		pods = waitForPodsRunning(ctx, f, pods, time.Duration(max(workloads/limit, 1))*nodeProvisionTimeout)
+		pods = waitForPodsRunning(ctx, f, pods, time.Duration((workloads+limit-1)/limit)*nodeProvisionTimeout)
 		nodes := podNodes(pods)
 		framework.Logf("All %d workloads run after %v, on %d node(s)", workloads, time.Since(start).Round(time.Second), len(nodes))
 
@@ -169,51 +169,56 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
 		small, big := sizeSelectors(ctx, f)
 		pool := map[string]any{nodePoolKey: nodePoolValue}
-		// The other nodes' entry keeps the unnamed DaemonSet, and both DaemonSets are OnDelete, so only the pool's new
-		// nodes run the new templates.
+		// The other nodes' entry keeps the unnamed DaemonSet, and the driver's DaemonSets are OnDelete, so only the pool's
+		// new nodes run the new templates.
 		release.upgradeOnly(ctx, withMounterEntries(release,
 			map[string]any{"matchExpressions": []any{map[string]any{"key": nodePoolKey, "operator": "DoesNotExist"}}},
 			map[string]any{"name": "small", "nodeSelector": pool, "matchExpressions": small, "maxVolumesPerNode": 2,
 				"resources": map[string]any{"requests": map[string]any{"memory": "2Gi"}}},
 			map[string]any{"name": "big", "nodeSelector": pool, "matchExpressions": big, "maxVolumesPerNode": 4,
-				"resources": map[string]any{"requests": map[string]any{"memory": "6Gi"}}}))
+				"resources": map[string]any{"requests": map[string]any{"memory": "10Gi"}}}))
 
-		// The 256Mi workloads go on the cheapest nodes, small ones: Cluster Autoscaler only tells its nodegroups apart by how
-		// much of a node the workloads would leave unused. A 6Gi workload doesn't fit a small node with its 2Gi mounter, so
-		// the autoscaler has to count the big mounter to launch a big node that fits both. The first phase's workloads stay
-		// until the test ends, so the second phase's nodes are new ones.
+		// The 256Mi workloads request something so that Cluster Autoscaler, which ranks its nodegroups by what the workloads
+		// leave unused, picks the small one. A 6.5Gi workload fits neither an 8GiB node beside the 2Gi small mounter nor a
+		// 16GiB one beside the 10Gi big mounter, so only an autoscaler counting each node's own mounter launches a 32GiB one.
+		// Fails on Karpenter until kubernetes-sigs/karpenter#3474 is fixed: it counts neither mounter.
 		for _, phase := range []struct {
 			entry            string
 			workloads, limit int
 			memory           string
-		}{{"small", 4, 2, "256Mi"}, {"big", 2, 4, "6Gi"}} {
+		}{{"small", 4, 2, "256Mi"}, {"big", 1, 4, "6.5Gi"}} {
 			for _, node := range scaleOut(ctx, phase.workloads, phase.limit, phase.memory) {
-				gomega.Expect(mountersOn(ctx, f, node)[0].OwnerReferences[0].Name).To(gomega.Equal(mounterDaemonSetName+"-"+phase.entry),
-					"node %s's mounter", node)
+				mounters := mountersOn(ctx, f, node)
+				gomega.Expect(mounters).To(gomega.HaveLen(1), "mounters on node %s", node)
+				gomega.Expect(mounters[0].OwnerReferences[0].Name).To(gomega.Equal(mounterDaemonSetName+"-"+phase.entry), "node %s's mounter", node)
 			}
 		}
 	})
 }
 
-// sizeSelectors returns matchExpressions for the pool's small and big nodes, by a label the cluster's autoscaler knows
-// before it launches a node. Cluster Autoscaler only knows the instance type, of its profile's two pool nodegroups.
+// sizeSelectors returns matchExpressions for the pool's small (under 16GiB) and big nodes, by a label the cluster's
+// autoscaler knows before it launches a node. Cluster Autoscaler only knows the instance type, of the two pool nodegroups
+// in `scripts/profiles/cas/eksctl-patch.json`.
 func sizeSelectors(ctx context.Context, f *framework.Framework) (small, big []any) {
 	memory := func(key string) ([]any, []any) {
 		return []any{map[string]any{"key": key, "operator": "Lt", "values": []any{"16384"}}},
 			[]any{map[string]any{"key": key, "operator": "Gt", "values": []any{"16383"}}}
 	}
-	autoMode, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "eks.amazonaws.com/compute-type=auto"})
+	autoMode, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "eks.amazonaws.com/compute-type=auto", Limit: 1})
 	framework.ExpectNoError(err)
 	if len(autoMode.Items) > 0 {
 		return memory("eks.amazonaws.com/instance-memory")
 	}
-	if _, err := f.ClientSet.CoreV1().Namespaces().Get(ctx, "karpenter", metav1.GetOptions{}); err == nil {
+	// Karpenter's own API group, which Auto Mode doesn't serve.
+	if _, err := f.ClientSet.Discovery().ServerResourcesForGroupVersion("karpenter.k8s.aws/v1"); err == nil {
 		return memory("karpenter.k8s.aws/instance-memory")
+	} else if !apierrors.IsNotFound(err) {
+		framework.ExpectNoError(err)
 	}
 	instanceType := func(t string) []any {
 		return []any{map[string]any{"key": "node.kubernetes.io/instance-type", "operator": "In", "values": []any{t}}}
 	}
-	return instanceType("m5.large"), instanceType("r5.large")
+	return instanceType("m5.large"), instanceType("r5.xlarge")
 }
 
 // targetNodePool makes a pod run on the pool's nodes.
