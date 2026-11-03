@@ -1672,9 +1672,11 @@ func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 }
 
 // TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that when Mount is called with a
-// corrupted target (ENOTCONN), it returns nil without creating a meta file. This is the
-// churn-prevention invariant: a corrupted target causes an early bail, leaving cleanup to
-// the periodic job rather than churning mount/creds every republish.
+// corrupted target (ENOTCONN), it fails with a non-final Aborted error naming the volume and
+// the workload pod, without creating a meta file. This is the churn-prevention invariant: a
+// corrupted target causes an early bail, leaving cleanup to NodeUnpublishVolume and the periodic
+// job rather than churning mount/creds every republish. The error is what kubelet turns into a
+// FailedMount Warning Event on the workload pod.
 func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	kubeletPath := t.TempDir()
 	const volumeID = "pv-corrupted-target"
@@ -1701,12 +1703,22 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	credCtx := credentialprovider.ProvideContext{
 		VolumeID:      volumeID,
 		WorkloadPodID: "pod-uid-123",
+		PodNamespace:  "team-a",
 	}
+	// kubelet sends the pod name because the CSIDriver sets podInfoOnMount.
+	volumeCtx := map[string]string{"csi.storage.k8s.io/pod.name": "trainer-0"}
 
-	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, volumeCtx, mountpoint.Args{}, "", nil)
 
-	// Mount should return nil (nothing to do, corrupted target).
-	assert.NoError(t, err)
+	// Aborted is non-final for kubelet: the volume stays in its actual state, so
+	// NodeUnpublishVolume is still called when the pod is deleted.
+	assert.Equals(t, codes.Aborted, status.Code(err))
+	msg := status.Convert(err).Message()
+	for _, want := range []string{volumeID, "team-a/trainer-0", "pod-uid-123", "recreate"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q does not contain %q", msg, want)
+		}
+	}
 
 	// No meta file should exist — Mount bailed before writing anything.
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)

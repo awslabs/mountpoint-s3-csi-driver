@@ -743,6 +743,12 @@ func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
 			wantCode: codes.InvalidArgument,
 		},
 		{
+			// A dead target must stay non-final for kubelet, so NodeUnpublishVolume still runs.
+			name:     "a dead target's Aborted reaches the kubelet as Aborted",
+			mountErr: status.Error(codes.Aborted, "Mountpoint for volume test-pv-name serving pod ns/name (pod-uid) has stopped"),
+			wantCode: codes.Aborted,
+		},
+		{
 			name:     "a plain mount failure is Internal",
 			mountErr: errors.New("failed to send mount options"),
 			wantCode: codes.Internal,
