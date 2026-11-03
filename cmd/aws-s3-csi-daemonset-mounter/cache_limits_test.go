@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 
-	"k8s.io/klog/v2"
-
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -245,21 +243,6 @@ func TestCacheLimitMaxCacheSizeFor(t *testing.T) {
 	}
 }
 
-// captureKlog redirects klog's output into the returned buffer for the rest of t. SetOutput alone
-// captures nothing: logtostderr defaults true and klog short-circuits to os.Stderr before the sink.
-// The sink is process-global, so no test that uses this may call t.Parallel.
-func captureKlog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	klog.LogToStderr(false)
-	klog.SetOutput(&buf)
-	t.Cleanup(func() {
-		klog.SetOutput(nil)
-		klog.LogToStderr(true)
-	})
-	return &buf
-}
-
 // The warnings are what tells an operator a PV's own size was overridden, or that nothing bounds it.
 func TestCacheLimitWarnings(t *testing.T) {
 	const cacheArg = "--cache=/cache/vol-test"
@@ -306,7 +289,7 @@ func TestCacheLimitWarnings(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := captureKlog(t)
+			logs := testutil.CaptureKlog(t)
 			tc.newLimit(t).maxCacheSizeFor("vol-test", mountpoint.ParseArgs(tc.args))
 			if tc.wantWarn == "" {
 				// klog prefixes each line with its severity; newCacheLimit's own info line is expected.
