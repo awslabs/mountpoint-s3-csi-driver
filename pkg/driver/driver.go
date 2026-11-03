@@ -62,12 +62,11 @@ const (
 )
 
 var (
-	mountpointPodNamespace   = os.Getenv("MOUNTPOINT_NAMESPACE")
-	mounterMode              = os.Getenv("MOUNTER_MODE")
-	mounterModeDaemonset     = "daemonset"
-	maxVolumesPerNodeEnvName = "MAX_VOLUMES_PER_NODE"
-	podWatcherResyncPeriod   = time.Minute
-	scheme                   = runtime.NewScheme()
+	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+	mounterMode            = os.Getenv("MOUNTER_MODE")
+	mounterModeDaemonset   = "daemonset"
+	podWatcherResyncPeriod = time.Minute
+	scheme                 = runtime.NewScheme()
 )
 
 func init() {
@@ -165,21 +164,18 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			dm.SetS3PACache(s3paCache)
 		}
 
-		maxVolumesPerNode, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
-		if err != nil {
-			return nil, err
-		}
-		if maxVolumesPerNode < 0 {
-			return nil, fmt.Errorf("%s must be >= 0, got %d", maxVolumesPerNodeEnvName, maxVolumesPerNode)
+		maxVolumesPerNode, ok := dm.MounterMaxVolumesPerNode()
+		if !ok {
+			return nil, fmt.Errorf("mounter pod on this node has no valid %s label", mounter.MounterMaxVolumesLabel)
 		}
 		if maxVolumesPerNode == 0 {
 			klog.Warningf("%s is 0: volume limit is disabled (unbounded). The scheduler will not "+
 				"limit the number of S3 volumes per node, which may lead to resource exhaustion "+
 				"(memory OOM, or disk exhaustion when cache is enabled) on s3-csi-daemonset-mounter.",
-				maxVolumesPerNodeEnvName)
+				mounter.MounterMaxVolumesLabel)
 		}
 
-		nodeServer = node.NewS3NodeServer(nodeID, dm, int64(maxVolumesPerNode))
+		nodeServer = node.NewS3NodeServer(nodeID, dm, maxVolumesPerNode)
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
