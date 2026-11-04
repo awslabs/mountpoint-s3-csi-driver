@@ -1606,7 +1606,7 @@ func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
 	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
 		"Mounts are still served. To run the same image in both pods, recycle this node: "+
 		"`kubectl cordon %[1]s`, "+
-		"`kubectl drain %[1]s --ignore-daemonsets --delete-emptydir-data`, "+
+		"`kubectl drain %[1]s --ignore-daemonsets`, "+
 		"`kubectl delete pod -n %[4]s -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' --field-selector spec.nodeName=%[1]s`, "+
 		"then `kubectl uncordon %[1]s`.",
 		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace)
