@@ -120,7 +120,7 @@ The S3 CSI driver includes a feature to prevent this race condition by using nod
 
 For EKS managed node groups, add the taint to your node group configuration (more details in [this documentation](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)). For self-managed nodes, [apply the taint using kubectl](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/) when nodes join the cluster.
 
-On Kubernetes 1.37 and later, if the error occurs on nodes the CSI Driver doesn't run on, such as EKS Hybrid Nodes, you can [keep Pods that use S3 volumes off those nodes](./CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver).
+On Kubernetes 1.37 and later, if the error occurs on nodes the CSI Driver doesn't run on, you can [keep Pods that use S3 volumes off those nodes](./CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver).
 
 ## My Pod is stuck at `Pending` with "s3.csi.aws.com CSI driver is not installed on the node"
 

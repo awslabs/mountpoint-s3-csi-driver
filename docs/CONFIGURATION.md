@@ -471,7 +471,7 @@ There are potential race conditions on node startup (especially when a node is f
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
 ## Prevent scheduling on nodes without the driver
-On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off nodes where the Mountpoint CSI Driver isn't registered, such as the EKS Hybrid Nodes that `node.affinity` excludes by default. Otherwise, these Pods can be scheduled on such nodes and get stuck in `ContainerCreating`. This adds to the [startup taint](#configure-node-startup-taint) rather than replacing it, so keep using the taint to handle the node startup race. To enable it, set the Helm value `node.preventPodSchedulingIfMissing` to `true`:
+On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off nodes where the Mountpoint CSI Driver isn't registered, such as nodes that `node.affinity` or `node.nodeSelector` exclude. Otherwise, these Pods can be scheduled on such nodes and get stuck in `ContainerCreating`. This adds to the [startup taint](#configure-node-startup-taint) rather than replacing it, so keep using the taint to handle the node startup race. To enable it, set the Helm value `node.preventPodSchedulingIfMissing` to `true`:
 
 ```sh
 helm upgrade --install aws-mountpoint-s3-csi-driver \
