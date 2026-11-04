@@ -59,10 +59,11 @@ node:
                   - fargate
                   - hybrid
   # Set to true to make the scheduler place Pods that use S3 volumes only on nodes where the CSI Driver
-  # has registered, so they wait in Pending instead of getting stuck in ContainerCreating on a node that
-  # is still starting the driver or doesn't run it. Sets `preventPodSchedulingIfMissing` on the CSIDriver
-  # object, which takes effect on Kubernetes 1.37 and later. If you use Cluster Autoscaler, check the
-  # requirements first, or it may stop scaling up for these Pods:
+  # has registered, so they wait in Pending instead of getting stuck in ContainerCreating on nodes the
+  # driver doesn't run on, such as EKS Hybrid Nodes. This adds to the node startup taint rather than
+  # replacing it. Sets `preventPodSchedulingIfMissing` on the CSIDriver object, which takes effect on
+  # Kubernetes 1.37 and later. If you use Cluster Autoscaler, check the requirements first, or it may
+  # stop scaling up for these Pods:
   # https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver
   preventPodSchedulingIfMissing: false
 

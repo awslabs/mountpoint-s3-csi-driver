@@ -3,7 +3,7 @@
 ### Notable changes
 * Add support for Kubernetes 1.37.
 * Add support for Ubuntu 26.04 on Kubernetes 1.35+.
-* Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver isn't registered, without needing the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details.
+* Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver isn't registered, such as EKS Hybrid Nodes. It doesn't replace the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details.
 
 # v2.9.2
 
