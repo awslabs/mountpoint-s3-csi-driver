@@ -110,11 +110,13 @@ func (u *PodUnmounter) CleanupDanglingMounts() error {
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				klog.Infof("Found a dangling Mountpoint mount %q, cleaning up", mpPodName)
+				unlockMountpointPod := lockMountpointPod(mpPodName)
 				if _, err := u.unmountAndRemoveMountpointSource(source); err != nil {
 					klog.Errorf("Failed to unmount and remove Mountpoint %q: %v", source, err)
 				} else {
 					klog.Infof("Successfully cleaned dangling Mountpoint mount %q", mpPodName)
 				}
+				unlockMountpointPod()
 				continue
 			}
 
