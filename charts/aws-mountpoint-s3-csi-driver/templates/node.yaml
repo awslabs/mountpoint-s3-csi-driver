@@ -31,11 +31,6 @@ metadata:
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
-  {{- if eq .Values.experimental.mounterMode "daemonset" }}
-  # Rolls automatically, unlike the mounter (OnDelete): restarting the CSI node doesn't break running mounts.
-  updateStrategy:
-    type: RollingUpdate
-  {{- end }}
   selector:
     matchLabels:
       app: s3-csi-node
