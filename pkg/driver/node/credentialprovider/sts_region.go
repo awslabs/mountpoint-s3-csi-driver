@@ -29,32 +29,32 @@ var errUnknownRegion = errors.New("credentialprovider: pod-level: unknown region
 func (p *Provider) stsRegion(provideCtx ProvideContext) (string, error) {
 	region := provideCtx.StsRegion
 	if region != "" {
-		klog.V(5).Infof("credentialprovider: pod-level: Detected STS region %s from volume context", region)
+		klog.V(4).Infof("credentialprovider: pod-level: Detected STS region %s from volume context", region)
 		return region, nil
 	}
 
 	region = provideCtx.BucketRegion
 	if region != "" {
-		klog.V(5).Infof("credentialprovider: pod-level: Detected STS region %s from S3 bucket region", region)
+		klog.V(4).Infof("credentialprovider: pod-level: Detected STS region %s from S3 bucket region", region)
 		return region, nil
 	}
 
 	region = os.Getenv(envprovider.EnvRegion)
 	if region != "" {
-		klog.V(5).Infof("credentialprovider: pod-level: Detected STS region %s from `AWS_REGION` env variable", region)
+		klog.V(4).Infof("credentialprovider: pod-level: Detected STS region %s from `AWS_REGION` env variable", region)
 		return region, nil
 	}
 
 	region = os.Getenv(envprovider.EnvDefaultRegion)
 	if region != "" {
-		klog.V(5).Infof("credentialprovider: pod-level: Detected STS region %s from `AWS_DEFAULT_REGION` env variable", region)
+		klog.V(4).Infof("credentialprovider: pod-level: Detected STS region %s from `AWS_DEFAULT_REGION` env variable", region)
 		return region, nil
 	}
 
 	// We're ignoring the error here, makes a call to IMDS only once and logs the error in case of error
 	region, _ = p.regionFromIMDS()
 	if region != "" {
-		klog.V(5).Infof("credentialprovider: pod-level: Detected STS region %s from IMDS", region)
+		klog.V(4).Infof("credentialprovider: pod-level: Detected STS region %s from IMDS", region)
 		return region, nil
 	}
 
@@ -69,16 +69,17 @@ var RegionFromIMDSOnce = sync.OnceValues(func() (string, error) {
 
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		klog.V(5).Infof("credentialprovider: pod-level: Failed to create config for IMDS client: %v", err)
+		klog.V(4).Infof("credentialprovider: pod-level: Failed to create config for IMDS client: %v", err)
 		return "", fmt.Errorf("could not create config for imds client: %w", err)
 	}
 
 	client := imds.NewFromConfig(cfg)
 	output, err := client.GetRegion(ctx, &imds.GetRegionInput{})
 	if err != nil {
-		klog.V(5).Infof("credentialprovider: pod-level: Failed to get region from IMDS: %v", err)
+		klog.V(4).Infof("credentialprovider: pod-level: Failed to get region from IMDS: %v", err)
 		return "", fmt.Errorf("failed to get region from imds: %w", err)
 	}
+	klog.V(4).Infof("Received from IMDS: %s", output.Region)
 
 	return output.Region, nil
 })
