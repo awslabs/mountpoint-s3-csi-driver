@@ -2,6 +2,7 @@ package csicontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -167,7 +168,14 @@ func (cm *StaleAttachmentCleaner) cleanupStaleWorkloads(ctx context.Context, s3p
 
 	// Delete the S3PodAttachment once it has no Mountpoint Pods, even if it was already empty (e.g. an interrupted reconciler teardown)
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		return cm.reconciler.deleteS3PodAttachment(ctx, s3pa)
+		reason := cleanerReasonEmptyOnArrival
+		if modified {
+			reason = cleanerReasonEmptiedByCleaner
+		}
+		if err := cm.reconciler.deleteS3PodAttachment(ctx, s3pa, reason, log); err != nil {
+			return fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reason, err)
+		}
+		return nil
 	}
 
 	// Update the S3PodAttachment if modified

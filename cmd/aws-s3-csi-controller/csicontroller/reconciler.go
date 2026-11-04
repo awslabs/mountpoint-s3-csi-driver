@@ -9,9 +9,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	storageutil "k8s.io/kubectl/pkg/util/storage"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,6 +39,18 @@ const (
 const (
 	Requeue     = true
 	DontRequeue = false
+)
+
+// Reasons a MountpointS3PodAttachment is deleted, passed to deleteS3PodAttachment and logged as the
+// "reason" field. Grouped by the caller that deletes the S3PA.
+const (
+	// Reconciler-driven deletions.
+	reconcilerReasonNoMountpointPods = "reconciler removed the last workload"
+	reconcilerReasonDuplicate        = "duplicate S3PodAttachment that never referenced any Mountpoint Pod"
+
+	// Stale-attachment-cleaner-driven deletions.
+	cleanerReasonEmptyOnArrival   = "cleaner found the S3PodAttachment already empty (likely an interrupted reconciler teardown)"
+	cleanerReasonEmptiedByCleaner = "cleaner removed the last stale workload"
 )
 
 // A Reconciler reconciles Mountpoint Pods by watching other workload Pods thats using S3 CSI Driver.
@@ -164,8 +178,8 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 		priorityClassKind = mppod.PreemptingPriorityClass
 	}
 
-	volumes, hasUnboundPVCs, err := r.getWorkloadVolumes(ctx, pod)
-	requeue := hasUnboundPVCs
+	volumes, hasUnboundS3PVCs, err := r.getWorkloadVolumes(ctx, pod)
+	requeue := hasUnboundS3PVCs
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -223,9 +237,9 @@ func (r *Reconciler) reconcileWorkloadPod(ctx context.Context, pod *corev1.Pod) 
 
 	if needsHeadroomForMountpointPod &&
 		len(volumes) == numHeadroomPods &&
-		!hasUnboundPVCs {
-		// No S3 backed PVCs are unbound (requeue=false), spawned all Headroom Pods needed, now ungate the Workload Pod,
-		// so it can get scheduled (alongside Headroom Pods)
+		!hasUnboundS3PVCs {
+		// All statically provisioned (S3-backed) PVCs are bound and have headroom pods.
+		// Ungate the Workload Pod so it can get scheduled alongside the Headroom Pods.
 		err = r.ungateHeadroomSchedulingGateForWorkloadPod(ctx, pod, log)
 		if err != nil {
 			return reconcile.Result{}, err
@@ -261,14 +275,14 @@ func (r *Reconciler) getWorkloadVolumes(
 			continue
 		}
 
-		// If PVC has no bound PVs yet, `getBoundPVForPodClaim` will return `errPVCIsNotBoundToAPV`.
-		// In this case we'll just return `reconcile.Result{Requeue: true}` here, which will bubble up to the
-		// original `Reconcile` call and will cause a retry for this Pod with an exponential backoff.
+		// `getBoundPVForPodClaim` returns `errPVCIsNotBoundToAPV` if the PVC isn't bound yet and we should
+		// wait for it, and `errSkipUnboundPVC` if it isn't bound yet and we shouldn't wait for it.
+		// We only requeue for the former.
 		pvc, pv, err := r.getBoundPVForPodClaim(ctx, workloadPod, podPVC)
 		if err != nil {
 			if errors.Is(err, errPVCIsNotBoundToAPV) {
 				status = Requeue
-			} else {
+			} else if !errors.Is(err, errSkipUnboundPVC) {
 				errs = append(errs, err)
 			}
 			continue
@@ -481,9 +495,9 @@ func (r *Reconciler) recoverFromDuplicateS3PodAttachments(ctx context.Context, d
 	}
 
 	for _, s3pa := range noMountpointPods {
-		log.Info("Deleting duplicate MountpointS3PodAttachment that references no Mountpoint Pods", "s3pa", s3pa.Name)
-		if err := r.deleteS3PodAttachment(ctx, s3pa); err != nil {
-			return nil, fmt.Errorf("failed to delete duplicate %q referencing no Mountpoint Pods: %w", s3pa.Name, err)
+		s3paLog := log.WithValues("s3pa", s3pa.Name)
+		if err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonDuplicate, s3paLog); err != nil {
+			return nil, fmt.Errorf("Failed to delete MountpointS3PodAttachment %q (%s): %w", s3pa.Name, reconcilerReasonDuplicate, err)
 		}
 	}
 
@@ -704,17 +718,15 @@ func (r *Reconciler) removeWorkloadFromS3PodAttachment(ctx context.Context, s3pa
 
 	// Delete MountpointS3PodAttachment if map is empty
 	if len(s3pa.Spec.MountpointS3PodAttachments) == 0 {
-		log.Info("MountpointS3PodAttachment has zero Mountpoint Pods. Will delete it")
-		err := r.deleteS3PodAttachment(ctx, s3pa)
+		err := r.deleteS3PodAttachment(ctx, s3pa, reconcilerReasonNoMountpointPods, log)
 		if err != nil {
 			if apierrors.IsConflict(err) {
 				log.Info("Failed to delete MountpointS3PodAttachment due to resource conflict, requeuing")
 				return Requeue, nil
 			}
-			log.Error(err, "Failed to delete MountpointS3PodAttachment")
+			log.Error(err, "Failed to delete MountpointS3PodAttachment", "reason", reconcilerReasonNoMountpointPods)
 			return Requeue, err
 		}
-		log.Info("Deleted MountpointS3PodAttachment as it no longer has any attached Mountpoint Pods")
 		if r.s3paExpectations.isPending(fieldFilters) {
 			// Clear stale creation expectations to prevent indefinite waiting.
 			log.Info("Clearing stale creation expectation for deleted MountpointS3PodAttachment")
@@ -773,11 +785,9 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		return nil, err
 	}
 	s3pa := &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "s3pa-",
-			Labels: map[string]string{
-				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
-			},
+		GenerateName: "s3pa-",
+		Labels: map[string]string{
+			LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 		},
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,
@@ -817,8 +827,12 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 // S3PA was modified since the caller read it; the caller can then retry/requeue.
 // Always use this instead of a bare r.Delete(ctx, s3pa) so the precondition is
 // not accidentally skipped.
-func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment) error {
-	return r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion})
+func (r *Reconciler) deleteS3PodAttachment(ctx context.Context, s3pa *crdv2.MountpointS3PodAttachment, reason string, log logr.Logger) error {
+	if err := r.Delete(ctx, s3pa, client.Preconditions{ResourceVersion: &s3pa.ResourceVersion}); err != nil {
+		return err
+	}
+	log.Info("Deleted MountpointS3PodAttachment", "reason", reason)
+	return nil
 }
 
 // spawnMountpointPod spawns a new Mountpoint Pod for given `workloadPod` and volume.
@@ -909,8 +923,15 @@ func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, l
 // to be retried later.
 var errPVCIsNotBoundToAPV = errors.New("PVC is not bound to a PV yet")
 
+// errSkipUnboundPVC is returned for a not-yet-bound PVC that the Workload Pod must not wait for,
+// because waiting is either pointless (the PVC is known not to be backed by the S3 CSI Driver) or
+// would deadlock the Pod (the PVC can only bind once the Pod is scheduled).
+// See [Reconciler.shouldWaitForUnboundPVC].
+var errSkipUnboundPVC = errors.New("not waiting for unbound PVC")
+
 // getBoundPVForPodClaim tries to find bound PV and PVC from given `claim`.
-// It `errPVCIsNotBoundToAPV` if PVC is not bound to a PV yet to be eventually retried.
+// It returns `errPVCIsNotBoundToAPV` if the PVC is not bound to a PV yet and should be waited for (transient, should be retried).
+// It returns `errSkipUnboundPVC` if the PVC is not bound to a PV yet and should not be waited for (should be skipped).
 func (r *Reconciler) getBoundPVForPodClaim(
 	ctx context.Context,
 	pod *corev1.Pod,
@@ -926,9 +947,25 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound || pvc.Spec.VolumeName == "" {
-		log.V(debugLevel).Info("PVC is not bound to a PV yet or has a empty volume name - ignoring",
+		log.V(debugLevel).Info("PVC is not bound to a PV yet",
 			"status", pvc.Status.Phase,
 			"volumeName", pvc.Spec.VolumeName)
+
+		// Only a Workload Pod we're holding scheduling-gated can deadlock against a PVC that binds on
+		// scheduling, so without the headroom feature we wait for any unbound PVC, as we did before.
+		// This also keeps the StorageClass lookup - and the RBAC permission it needs - behind the flag.
+		if r.isHeadroomForMountpointPodsFeatureEnabled() {
+			shouldWait, checkErr := r.shouldWaitForUnboundPVC(ctx, pvc)
+			if checkErr != nil {
+				return nil, nil, fmt.Errorf("Failed to determine whether to wait for unbound PVC: %w", checkErr)
+			}
+			if !shouldWait {
+				log.V(debugLevel).Info("Not waiting for unbound PVC - it either isn't backed by the S3 CSI Driver, " +
+					"or can only bind once the Workload Pod is scheduled")
+				return nil, nil, errSkipUnboundPVC
+			}
+		}
+
 		return nil, nil, errPVCIsNotBoundToAPV
 	}
 
@@ -945,6 +982,50 @@ func (r *Reconciler) getBoundPVForPodClaim(
 	}
 
 	return pvc, pv, nil
+}
+
+// shouldWaitForUnboundPVC returns whether the Workload Pod should keep waiting for the given
+// not-yet-bound `pvc` to bind, rather than being ungated without headroom reserved for it.
+//
+// We only skip a PVC when it can't bind until the Workload Pod is scheduled, i.e. when its
+// StorageClass uses `WaitForFirstConsumer`. Waiting for one of those deadlocks the Workload Pod: the
+// PVC only binds once the Pod is scheduled, and the Pod stays scheduling-gated until the PVC binds
+// (see https://github.com/awslabs/mountpoint-s3-csi-driver/issues/855).
+//
+// This deliberately doesn't look at the StorageClass `provisioner`. `WaitForFirstConsumer` delays
+// binding whatever the provisioner is, so waiting would deadlock the Pod even for a PVC that does
+// turn out to be S3-backed. Skipping it only costs the headroom reservation for that one volume,
+// which is a degradation, whereas waiting never recovers.
+//
+// Everything else is waited for, because it can bind without the Pod being scheduled: a PVC pre-bound
+// to a PV via `spec.volumeName`, a PVC with no StorageClass (which is how S3 volumes are statically
+// provisioned), one naming a StorageClass that doesn't exist, or one using `Immediate` binding. Once
+// it binds, its PV tells us whether it's S3-backed.
+//
+// TODO: This needs to be revisited once we support dynamic provisioning.
+func (r *Reconciler) shouldWaitForUnboundPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+	if pvc.Spec.VolumeName != "" {
+		// Pre-bound PVCs bind as soon as their PV exists, whatever the binding mode, and the
+		// scheduler won't schedule the Pod before that anyway, so waiting can't deadlock.
+		return true, nil
+	}
+
+	storageClassName := storageutil.GetPersistentVolumeClaimClass(pvc)
+	if storageClassName == "" {
+		return true, nil
+	}
+
+	sc := &storagev1.StorageClass{}
+	if err := r.Get(ctx, types.NamespacedName{Name: storageClassName}, sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			// The PV controller treats a missing StorageClass as `Immediate` binding.
+			return true, nil
+		}
+		return false, fmt.Errorf("failed to get StorageClass %q for PVC %s/%s: %w",
+			storageClassName, pvc.Namespace, pvc.Name, err)
+	}
+
+	return sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer, nil
 }
 
 // findIRSAServiceAccountRole retrieves the IAM role ARN associated with a pod's service account

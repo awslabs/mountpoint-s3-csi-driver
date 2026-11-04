@@ -696,10 +696,8 @@ func createMountpointPod(testCtx *testCtx, opts ...func(*corev1.Pod)) *mountpoin
 	t.Helper()
 
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			UID:  types.UID(testCtx.mpPodUID),
-			Name: testCtx.mpPodName,
-		},
+		UID:  types.UID(testCtx.mpPodUID),
+		Name: testCtx.mpPodName,
 	}
 	for _, opt := range opts {
 		opt(pod)

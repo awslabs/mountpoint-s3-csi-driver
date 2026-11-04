@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,11 @@ var expressAZs = map[string]string{
 
 const s3BucketNameMaxLength = 63
 const s3BucketNamePrefix = "s3-csi-k8s-e2e-"
+
+// processToken returns a token unique to this OS process.
+func processToken() string {
+	return strconv.Itoa(os.Getpid())
+}
 
 // DeleteBucketFunc is a cleanup function thats returned as a result of "Create*Bucket" calls.
 // It clears the content of the bucket if not empty, and then deletes the bucket.
@@ -194,11 +200,16 @@ func (c *Client) delete(ctx context.Context, bucketName string) error {
 	return nil
 }
 
-// randomBucketName generates a random bucket name by using prefix (`s3BucketNamePrefix`) and `suffix`
-// and generating random string for the remaining space according to S3's limit (63 as of today).
+// randomBucketName generates a bucket name of the form
+// "<prefix><processToken>-<random><suffix>", filling the remaining space up to
+// S3's limit (63 as of today) with random characters.
+// Use a per-process token to ensure parallel test runs use different bucket names.
+// Without it, if parallel test processes were launched in the same nanosecond,
+// they could share the same RNG state and produce the same bucket names, and then
+// cause conflicts/bucket owned by you errors.
 func (c *Client) randomBucketName(suffix string) string {
-	prefixLen := len(s3BucketNamePrefix)
-	suffixLen := len(suffix)
-	rand := utilrand.String(s3BucketNameMaxLength - prefixLen - suffixLen)
-	return s3BucketNamePrefix + rand + suffix
+	token := processToken()
+	fixedLen := len(s3BucketNamePrefix) + len(token) + len("-") + len(suffix)
+	rand := utilrand.String(s3BucketNameMaxLength - fixedLen)
+	return s3BucketNamePrefix + token + "-" + rand + suffix
 }

@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -451,10 +452,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -485,11 +484,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-								Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
+							Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -521,10 +518,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -580,16 +575,12 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
@@ -634,32 +625,24 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						ns := &corev1.Namespace{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "ns-",
-							},
+							GenerateName: "ns-",
 						}
 						Expect(k8sClient.Create(ctx, ns)).To(Succeed())
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      sa1.Name,
-								Namespace: ns.Name,
-							},
+							Name:      sa1.Name,
+							Namespace: ns.Name,
 						}
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
 						_, err := controllerutil.CreateOrUpdate(ctx, k8sClient, sa2, func() error { return nil })
 						Expect(err).To(Succeed())
 						pvc2 := &corev1.PersistentVolumeClaim{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "test-pvc",
-								Namespace:    ns.Name,
-							},
+							GenerateName: "test-pvc",
+							Namespace:    ns.Name,
 							Spec: corev1.PersistentVolumeClaimSpec{
 								StorageClassName: vol.pvc.Spec.StorageClassName,
 								AccessModes:      vol.pvc.Spec.AccessModes,
@@ -1043,10 +1026,9 @@ var _ = Describe("Mountpoint Controller", func() {
 
 	Context("Mountpoint Pod Customization", func() {
 		It("should use configured service account name in PV", func() {
-			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+			sa := &corev1.ServiceAccount{
 				Name:      "mount-s3-sa",
-				Namespace: mountpointNamespace,
-			}}
+				Namespace: mountpointNamespace}
 			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 			waitForObject(sa)
 
@@ -1150,10 +1132,8 @@ var _ = Describe("Mountpoint Controller", func() {
 				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
 					Ephemeral: &corev1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-							ObjectMeta: metav1.ObjectMeta{
-								Labels: map[string]string{
-									"s3.csi.aws.com/type": "local-ephemeral-cache",
-								},
+							Labels: map[string]string{
+								"s3.csi.aws.com/type": "local-ephemeral-cache",
 							},
 							Spec: corev1.PersistentVolumeClaimSpec{
 								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -1413,7 +1393,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitForObjectToDisappear(hrPod.Pod)
 		})
 
-		It("should not ungate pod when any PVC is unbound", func() {
+		It("should not ungate pod when any S3 PVC is unbound", func() {
 			vol1 := createVolume()
 			vol1.bind()
 			vol2 := createVolume() // Created but NOT bound
@@ -1424,7 +1404,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
 			verifyHeadroomPodFor(pod, vol1, hrPod1)
 
-			// Pod should NOT be ungated because vol2 is not bound yet
+			// Pod should NOT be ungated because vol2 (S3 PVC) is not bound yet
 			// Verify both that the gate remains and only one headroom pod exists
 			Consistently(func(g Gomega) {
 				var p corev1.Pod
@@ -1442,7 +1422,7 @@ var _ = Describe("Mountpoint Controller", func() {
 			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
 		})
 
-		It("should ungate pod after all PVCs become bound", func() {
+		It("should ungate pod after all S3 PVCs become bound", func() {
 			vol1 := createVolume()
 			vol1.bind()
 			vol2 := createVolume() // Created but NOT bound initially
@@ -1469,6 +1449,116 @@ var _ = Describe("Mountpoint Controller", func() {
 			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, vol2, pod)
 			waitForObjectToDisappear(hrPod1.Pod)
 			waitForObjectToDisappear(hrPod2.Pod)
+		})
+
+		It("should ungate pod when a dynamically provisioned non-S3 PVC is unbound (WaitForFirstConsumer)", func() {
+			// Same deadlock as above, but with what a real `WaitForFirstConsumer` PVC actually looks
+			// like before its Workload Pod is scheduled: `Pending`, with an empty `spec.volumeName`
+			// and no PV at all. Waiting for it to bind would deadlock the pod, since it can only
+			// bind once the pod is scheduled, which requires the gate to be removed first.
+			s3Vol := createVolume()
+			s3Vol.bind()
+
+			ebsPVC := createDynamicallyProvisionedPVC(createWaitForFirstConsumerStorageClass(ebsCSIDriver))
+
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(ebsPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
+			verifyHeadroomPodFor(pod, s3Vol, hrPod)
+
+			// Pod should be ungated — the unbound, PV-less EBS PVC should NOT block ungating
+			pod.waitUntilSchedulingUngated()
+
+			pod.runOn(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPodWithPreemptingPriorityClass(testNode, s3Vol, pod)
+			waitForObjectToDisappear(hrPod.Pod)
+		})
+
+		It("should not ungate pod while a statically provisioned S3 PVC is still binding", func() {
+			// A statically provisioned S3 PVC that's pre-bound from the PV side: `pv.spec.claimRef`
+			// points at the PVC, but the PV controller hasn't populated `pvc.spec.volumeName` yet,
+			// so the PVC is still `Pending`. It has no StorageClass, so it can bind without the pod
+			// being scheduled and we must keep the pod gated until it does - otherwise we'd lose the
+			// requeue and never spawn a Mountpoint Pod for this volume.
+			vol1 := createVolume()
+			vol1.bind()
+
+			bindingPVC := createDynamicallyProvisionedPVC("")
+			createS3PVClaiming(bindingPVC)
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(bindingPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			// Pod should NOT be ungated — the still-binding S3 PVC must hold the gate
+			Consistently(func(g Gomega) {
+				var p corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
+				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
+					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
+				))
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should not ungate pod while a static S3 PVC with no StorageClass has no PV yet", func() {
+			// `storageClassName: ""`, no `volumeName`, and no PV pointing at it yet (e.g. the PV is applied later).
+			// It can still bind statically without the pod being scheduled, so we must wait for it.
+			vol1 := createVolume()
+			vol1.bind()
+
+			staticPVC := createDynamicallyProvisionedPVC("")
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(staticPVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod1 := waitForHeadroomPodForWorkload(pod, vol1)
+			verifyHeadroomPodFor(pod, vol1, hrPod1)
+
+			Consistently(func(g Gomega) {
+				var p corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod.Pod), &p)).To(Succeed())
+				g.Expect(p.Spec.SchedulingGates).To(ContainElement(
+					corev1.PodSchedulingGate{Name: mppod.SchedulingGateReserveHeadroomForMountpointPod},
+				))
+			}, defaultWaitTimeout/2, defaultWaitRetryPeriod).Should(Succeed())
+		})
+
+		It("should ungate pod when an unbound PVC uses a WaitForFirstConsumer StorageClass naming the S3 provisioner", func() {
+			// `WaitForFirstConsumer` delays binding whatever the provisioner is, so the provisioner must not
+			// be part of the decision: waiting here would deadlock the pod even though the StorageClass names
+			// the S3 CSI Driver. We give up the headroom reservation for that volume instead.
+			s3Vol := createVolume()
+			s3Vol.bind()
+
+			wffcS3PVC := createDynamicallyProvisionedPVC(createWaitForFirstConsumerStorageClass(s3CSIDriver))
+
+			pod := createPod(withPVC(s3Vol.pvc), withPVC(wffcS3PVC), withSchedulingGates(mppod.SchedulingGateReserveHeadroomForMountpointPod))
+
+			hrPod := waitForHeadroomPodForWorkload(pod, s3Vol)
+			verifyHeadroomPodFor(pod, s3Vol, hrPod)
+
+			pod.waitUntilSchedulingUngated()
+		})
+	})
+
+	Context("Partially bound PVCs", func() {
+		It("should still spawn Mountpoint Pods for bound volumes if another S3 PVC reports Bound without a volumeName", func() {
+			// A PVC can be observed as `Bound` before `spec.volumeName` has been populated. That must be
+			// treated as "still binding" and retried, rather than as a hard error - a hard error aborts
+			// the whole reconcile, stalling the volumes that are already ready.
+			vol1 := createVolume()
+			vol1.bind()
+
+			stillBinding := createDynamicallyProvisionedPVC("")
+			createS3PVClaiming(stillBinding)
+			stillBinding.Status.Phase = corev1.ClaimBound
+			Expect(k8sClient.Status().Update(ctx, stillBinding)).To(Succeed())
+
+			pod := createPod(withPVC(vol1.pvc), withPVC(stillBinding))
+			pod.schedule(testNode)
+
+			waitAndVerifyS3PodAttachmentAndMountpointPod(testNode, vol1, pod)
 		})
 	})
 
@@ -1570,9 +1660,7 @@ func (p *testPod) succeed() {
 	p.Status.Phase = corev1.PodSucceeded
 	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
 
-	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
-		g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded))
-	})
+	p.waitForPhaseOrDeletion(corev1.PodSucceeded)
 }
 
 // fail simulates `testPod` to be failed.
@@ -1580,9 +1668,25 @@ func (p *testPod) fail() {
 	p.Status.Phase = corev1.PodFailed
 	Expect(k8sClient.Status().Update(ctx, p.Pod)).To(Succeed())
 
-	waitForObject(p.Pod, func(g Gomega, pod *corev1.Pod) {
-		g.Expect(pod.Status.Phase).To(Equal(corev1.PodFailed))
-	})
+	p.waitForPhaseOrDeletion(corev1.PodFailed)
+}
+
+// waitForPhaseOrDeletion waits until `testPod` reports `phase`, or has already been deleted.
+// The controller deletes completed Mountpoint Pods right away, so the pod can disappear
+// before we get a chance to observe its new phase.
+func (p *testPod) waitForPhaseOrDeletion(phase corev1.PodPhase) {
+	GinkgoHelper()
+
+	key := types.NamespacedName{Name: p.GetName(), Namespace: p.GetNamespace()}
+	Eventually(func(g Gomega) {
+		pod := &corev1.Pod{}
+		err := k8sClient.Get(ctx, key, pod)
+		if apierrors.IsNotFound(err) {
+			return
+		}
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pod.Status.Phase).To(Equal(phase))
+	}, defaultWaitTimeout, defaultWaitRetryPeriod).Should(Succeed())
 }
 
 // annotate adds given `key` and `value` as a annotation to `testPod`.
@@ -1623,10 +1727,8 @@ func withPVC(pvc *corev1.PersistentVolumeClaim) podModifier {
 	return func(pod *corev1.Pod) {
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: pvc.Name,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvc.Name,
-				},
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvc.Name,
 			},
 		})
 	}
@@ -1684,10 +1786,8 @@ type podModifier func(*corev1.Pod)
 // createPod creates a new Kubernetes Pod in the control plane with given `modifiers`.
 func createPod(modifiers ...podModifier) *testPod {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    defaultNamespace,
-			GenerateName: "test-pod-",
-		},
+		Namespace:    defaultNamespace,
+		GenerateName: "test-pod-",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
@@ -1719,8 +1819,10 @@ func (v *testVolume) bind() {
 	v.pv.Status.Phase = corev1.VolumeBound
 	Expect(k8sClient.Status().Update(ctx, v.pv)).To(Succeed())
 
+	// There's no PV controller in envtest to populate `spec.volumeName` for us.
 	v.pvc.Spec.VolumeName = v.pv.Name
 	Expect(k8sClient.Update(ctx, v.pvc)).To(Succeed())
+
 	v.pvc.Status.Phase = corev1.ClaimBound
 	Expect(k8sClient.Status().Update(ctx, v.pvc)).To(Succeed())
 
@@ -1730,6 +1832,8 @@ func (v *testVolume) bind() {
 
 	waitForObject(v.pvc, func(g Gomega, pvc *corev1.PersistentVolumeClaim) {
 		g.Expect(pvc.Status.Phase).To(Equal(corev1.ClaimBound))
+		// A bound PVC always references its PV - the reconciler relies on this to resolve the PV.
+		g.Expect(pvc.Spec.VolumeName).To(Equal(v.pv.Name))
 	})
 }
 
@@ -1764,6 +1868,71 @@ func withVolumeHandle(volumeHandle string) volumeModifier {
 	}
 }
 
+// createDynamicallyProvisionedPVC creates a PVC that mimics a dynamically provisioned volume waiting
+// on its provisioner: it has no `spec.volumeName`, no PV, and stays `Pending`. This is what a
+// `WaitForFirstConsumer` PVC looks like before its Workload Pod is scheduled.
+func createDynamicallyProvisionedPVC(storageClassName string) *corev1.PersistentVolumeClaim {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-dynamic-pvc",
+			Namespace:    defaultNamespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &storageClassName,
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pvc)).To(Succeed(), "Failed to create dynamically provisioned PVC")
+	waitForObject(pvc)
+	return pvc
+}
+
+// createWaitForFirstConsumerStorageClass creates a StorageClass using `WaitForFirstConsumer` binding
+// with the given provisioner, and returns its name.
+func createWaitForFirstConsumerStorageClass(provisioner string) string {
+	bindingMode := storagev1.VolumeBindingWaitForFirstConsumer
+	sc := &storagev1.StorageClass{
+		ObjectMeta:        metav1.ObjectMeta{GenerateName: "test-wffc-sc-"},
+		Provisioner:       provisioner,
+		VolumeBindingMode: &bindingMode,
+	}
+	Expect(k8sClient.Create(ctx, sc)).To(Succeed(), "Failed to create StorageClass")
+	waitForObject(sc)
+	return sc.Name
+}
+
+// createS3PVClaiming creates an S3-backed PV whose `spec.claimRef` points at `pvc`, without touching
+// the PVC. This mimics a statically provisioned volume pre-bound from the PV side, before the PV
+// controller has populated `pvc.spec.volumeName`.
+func createS3PVClaiming(pvc *corev1.PersistentVolumeClaim) *corev1.PersistentVolume {
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-pv",
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			// Needs to be empty for static provisioning
+			StorageClassName: "",
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			Capacity:         corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:       s3CSIDriver,
+					VolumeHandle: "test-csi-volume",
+				},
+			},
+			ClaimRef: &corev1.ObjectReference{Name: pvc.Name, Namespace: pvc.Namespace},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pv)).To(Succeed(), "Failed to create PV")
+	waitForObject(pv, func(g Gomega, pv *corev1.PersistentVolume) {
+		g.Expect(pv.Spec.ClaimRef).NotTo(BeNil())
+	})
+	return pv
+}
+
 // createVolume creates a new pair of unbounded PV and PVC.
 func createVolume(modifiers ...volumeModifier) *testVolume {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
@@ -1772,9 +1941,7 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pv",
-		},
+		GenerateName: "test-pv",
 		Spec: corev1.PersistentVolumeSpec{
 			// Needs to be empty for static provisioning
 			StorageClassName: "",
@@ -1790,10 +1957,8 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pvc",
-			Namespace:    defaultNamespace,
-		},
+		GenerateName: "test-pvc",
+		Namespace:    defaultNamespace,
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: new(""),
 			AccessModes:      accessModes,
@@ -1837,10 +2002,8 @@ func waitForHeadroomPodForWorkload(pod *testPod, vol *testVolume) *testPod {
 // waitForMountpointPodWithName waits and returns the Mountpoint Pod scheduled for given `mpPodName`
 func waitForMountpointPodWithName(mpPodName string) *testPod {
 	mountpointPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mpPodName,
-			Namespace: mountpointNamespace,
-		},
+		Name:      mpPodName,
+		Namespace: mountpointNamespace,
 	}
 	waitForObject(mountpointPod)
 	return &testPod{Pod: mountpointPod}
@@ -2196,7 +2359,7 @@ func generateRandomNodeName() string {
 // an empty `MountpointS3PodAttachments` map.
 func newEmptyS3PodAttachment(node string, pv *corev1.PersistentVolume) *crdv2.MountpointS3PodAttachment {
 	return &crdv2.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "s3pa-empty-"},
+		GenerateName: "s3pa-empty-",
 		Spec: crdv2.MountpointS3PodAttachmentSpec{
 			NodeName:                   node,
 			PersistentVolumeName:       pv.Name,

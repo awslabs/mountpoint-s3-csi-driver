@@ -33,8 +33,8 @@ func TestIsPodActive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: tt.deletionTimestamp},
-				Status:     corev1.PodStatus{Phase: tt.phase},
+				DeletionTimestamp: tt.deletionTimestamp,
+				Status:            corev1.PodStatus{Phase: tt.phase},
 			}
 			assert.Equals(t, tt.expect, isPodActive(pod))
 		})
