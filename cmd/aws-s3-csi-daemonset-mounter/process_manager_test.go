@@ -633,6 +633,44 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 
 		pm.Shutdown()
 	})
+
+	t.Run("a directory it fails to hand to the UID is removed, so the UID mounts again", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		pm.chownForTesting = func(string, int, int) error { return errors.New("chown denied") }
+
+		options := cachedOptions(t)
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
+		assert.Contains(t, err.Error(), "failed to hand cache directory")
+		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		assertMountReleased(t, pm, options.Fd, 0)
+
+		pm.chownForTesting = func(string, int, int) error { return nil }
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
+	})
+
+	t.Run("a directory it fails to hand to the UID, and then to remove, holds the UID for the cache cleaner", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		// A file inside the directory makes os.Remove fail, as it only removes an empty directory.
+		pm.chownForTesting = func(path string, _, _ int) error {
+			assert.NoError(t, os.WriteFile(filepath.Join(path, "stray"), []byte("x"), 0600))
+			return errors.New("chown denied")
+		}
+
+		options := cachedOptions(t)
+		err := pm.Launch(mountId, "/usr/bin/mount-s3", options)
+		assert.Contains(t, err.Error(), "failed to hand cache directory")
+		assertMountReleased(t, pm, options.Fd, 1)
+		assertCleanupPending(t, pm, mountoptions.UIDRangeStart)
+
+		pm.cleanPendingCacheDirs()
+		assertNotExist(t, filepath.Join(cacheDir, dirName))
+		assertMountReleased(t, pm, -1, 0)
+		pm.Shutdown()
+	})
 }
 
 // assertMountReleased asserts that a failed Launch gave up the lock and the FUSE device fd (skipped when fd < 0), and tracks
@@ -791,7 +829,9 @@ func TestProcessManager_CacheCleanupFailure(t *testing.T) {
 		}()
 
 		close(stop)
-		pm.Shutdown() // would panic on the marker's nil handle, or hang on the cleaner
+		// Without skipping the cleanupPending entry, which has no process, Shutdown would panic signalling its nil handle;
+		// without stop ending the cache cleaner, it would hang waiting for it.
+		pm.Shutdown()
 		assertCleanupPending(t, pm, uid)
 	})
 }
@@ -813,7 +853,8 @@ func TestProcessManager_Launch_MaxVolumesPerNode(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected Launch to refuse beyond maxVolumesPerNode")
 		}
-		assert.Contains(t, err.Error(), "refusing to launch mount mount-c: this node already hosts maxVolumesPerNode=2 volumes")
+		assert.Contains(t, err.Error(), "refusing to launch mount mount-c: this node already uses all maxVolumesPerNode=2 volume slots "+
+			"(2 running Mountpoint processes, 0 cache directories still being removed)")
 		assert.Equals(t, 2, len(fr.handles))
 		assertMountReleased(t, pm, third.Fd, 2)
 
@@ -841,7 +882,8 @@ func TestProcessManager_Launch_MaxVolumesPerNode(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected Launch to refuse while a leftover takes the only slot")
 		}
-		assert.Contains(t, err.Error(), "this node already hosts maxVolumesPerNode=1 volumes")
+		assert.Contains(t, err.Error(), "this node already uses all maxVolumesPerNode=1 volume slots "+
+			"(0 running Mountpoint processes, 1 cache directories still being removed)")
 
 		assert.NoError(t, os.Chmod(filepath.Join(cacheDir, "uid-65540", "mountpoint-cache"), 0700))
 		pm.cleanPendingCacheDirs()
@@ -876,7 +918,8 @@ func TestProcessManager_Launch_MaxVolumesPerNode(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected Launch to refuse while a leftover and a Mountpoint take both slots")
 		}
-		assert.Contains(t, err.Error(), "this node already hosts maxVolumesPerNode=2 volumes")
+		assert.Contains(t, err.Error(), "this node already uses all maxVolumesPerNode=2 volume slots "+
+			"(1 running Mountpoint processes, 1 cache directories still being removed)")
 		assertCleanupPending(t, pm, 65536)
 
 		fr.handles[1].Exit(0, "")

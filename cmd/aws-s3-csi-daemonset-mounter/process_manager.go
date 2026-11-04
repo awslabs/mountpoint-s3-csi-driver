@@ -288,14 +288,17 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	return nil
 }
 
+// perPvCacheDirPrefix starts the name of every per-PV cache directory, followed by the UID its Mountpoint runs as.
+const perPvCacheDirPrefix = "uid-"
+
 // perPvCacheDirName names the cache directory of the Mountpoint running as uid.
 func perPvCacheDirName(uid uint32) string {
-	return fmt.Sprintf("uid-%d", uid)
+	return perPvCacheDirPrefix + strconv.FormatUint(uint64(uid), 10)
 }
 
 // parsePerPvCacheDirName returns the UID a cache directory named by perPvCacheDirName belongs to.
 func parsePerPvCacheDirName(name string) (uint32, bool) {
-	digits, ok := strings.CutPrefix(name, "uid-")
+	digits, ok := strings.CutPrefix(name, perPvCacheDirPrefix)
 	if !ok {
 		return 0, false
 	}
@@ -311,7 +314,10 @@ func parsePerPvCacheDirName(name string) (uint32, bool) {
 // Mountpoint keeps crashing, each time on a new UID) could pile up and overfill it. Caller holds pm.mu.
 func (pm *ProcessManager) checkVolumeLimit(mountId string) error {
 	if pm.maxVolumesPerNode > 0 && int64(len(pm.processes)) >= pm.maxVolumesPerNode {
-		return fmt.Errorf("refusing to launch mount %s: this node already hosts maxVolumesPerNode=%d volumes", mountId, pm.maxVolumesPerNode)
+		pending := pm.countHeldForCacheCleanup()
+		return fmt.Errorf("refusing to launch mount %s: this node already uses all maxVolumesPerNode=%d volume slots "+
+			"(%d running Mountpoint processes, %d cache directories still being removed)",
+			mountId, pm.maxVolumesPerNode, len(pm.processes)-pending, pending)
 	}
 	return nil
 }
@@ -425,12 +431,18 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 }
 
 // createPerPvCacheDir creates a PV's cache directory, owned by the UID its Mountpoint runs as. Mountpoint writes ./mountpoint-cache inside it.
+// If the directory can't be handed to uid, it is removed, or, if that fails too, uid is held for the cache cleaner, so no
+// directory is left untracked to block uid's next mount. Caller holds pm.mu.
 func (pm *ProcessManager) createPerPvCacheDir(perPvCacheDir string, uid uint32) error {
 	path := filepath.Join(pm.cacheDir, perPvCacheDir)
 	if err := os.Mkdir(path, perPvCacheDirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory %q: %w", path, err)
 	}
 	if err := pm.chownWithDefault(path, int(uid), int(uid)); err != nil {
+		if rmErr := os.Remove(path); rmErr != nil {
+			klog.Errorf("Failed to remove cache directory %s after failing to hand it to UID %d, keeping the UID for the cache cleaner: %v", path, uid, rmErr)
+			pm.holdForCacheCleanup(uid)
+		}
 		return fmt.Errorf("failed to hand cache directory %q to UID %d: %w", path, uid, err)
 	}
 

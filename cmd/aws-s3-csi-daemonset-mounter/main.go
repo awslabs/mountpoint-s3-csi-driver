@@ -45,7 +45,7 @@ var (
 	mountpointBinDir        = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
 	recvTimeout             = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
 	stderrCapacity          = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
-	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of Mountpoint processes this container hosts")
+	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of volume slots this container hosts: running Mountpoint processes plus cache directories still being removed. 0 means no cap")
 	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitEqualSplit),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+
 			"request between max-volumes-per-node Mountpoints, or \"none\" to leave it to the PV mountOptions")

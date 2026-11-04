@@ -23,6 +23,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -275,6 +277,77 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 
 	})
 
+	// The scheduler enforces CSINode's allocatable, but a pod with spec.nodeName set skips the scheduler, and the kubelet
+	// doesn't check volume limits. So the mounter's own --max-volumes-per-node cap is the only guard left for such a pod;
+	// it also covers slots the scheduler can't see, such as a cache directory still being removed.
+	f.It("should refuse a mount beyond the mounter's volume cap when the scheduler is bypassed", f.WithSerial(), func(ctx context.Context) {
+		if !isDaemonsetMounterMode(ctx, f) {
+			ginkgo.Skip("the mounter's volume cap only exists in daemonset mounter mode")
+		}
+		driverInfo := driver.GetDriverInfo()
+
+		ginkgo.By("Picking a node")
+		nodeName := l.config.ClientNodeSelection.Name
+		if nodeName == "" {
+			node, err := e2enode.GetRandomReadySchedulableNode(ctx, f.ClientSet)
+			framework.ExpectNoError(err)
+			nodeName = node.Name
+		}
+
+		ginkgo.By("Reading the volume cap the mounter enforces")
+		volumeCap := mounterVolumeCap(ctx, f, nodeName)
+		if volumeCap == 0 {
+			ginkgo.Skip(fmt.Sprintf("the mounter on %s runs with no volume cap", nodeName))
+		}
+		framework.Logf("The mounter on %s hosts at most %d volumes", nodeName, volumeCap)
+
+		ginkgo.By("Waiting for node to have no pre-existing S3 volumes")
+		waitForNoS3VolumesOnNode(ctx, f, nodeName, driverInfo.Name)
+
+		// One pod per volume, so deleting one frees exactly one slot.
+		ginkgo.By(fmt.Sprintf("Filling the mounter's %d volume slots, scheduling one pod per volume", volumeCap))
+		selection := e2epod.NodeSelection{Name: nodeName}
+		var pods []*v1.Pod
+		for range volumeCap {
+			resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+			l.resources = append(l.resources, resource)
+			pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
+			e2epod.SetNodeSelection(&pod.Spec, selection)
+			pod, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod)
+			framework.ExpectNoError(err)
+			ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, pod)
+			pods = append(pods, pod)
+		}
+		for _, pod := range pods {
+			framework.ExpectNoError(e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name,
+				testSlowMultiplier*f.Timeouts.PodStart))
+		}
+
+		ginkgo.By("Creating a pod with one more volume, bound to the node directly so the scheduler can't hold it back")
+		extraResource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
+		l.resources = append(l.resources, extraResource)
+		extraPod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{extraResource.Pvc}, admissionapi.LevelBaseline, "")
+		extraPod.Spec.NodeName = nodeName
+		extraPod, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, extraPod)
+		framework.ExpectNoError(err)
+		ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, extraPod)
+
+		ginkgo.By("Waiting for the mounter to refuse it, as a FailedMount event naming the cap")
+		refusal := fmt.Sprintf("already uses all maxVolumesPerNode=%d volume slots", volumeCap)
+		gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
+			return podHasFailedMountContaining(ctx, f, extraPod, refusal)
+		}).WithTimeout(f.Timeouts.PodStart).WithPolling(5*time.Second).Should(gomega.BeTrue(),
+			"pod %s should get a FailedMount event containing %q", extraPod.Name, refusal)
+		extraPod, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, extraPod.Name, metav1.GetOptions{})
+		framework.ExpectNoError(err)
+		gomega.Expect(extraPod.Status.Phase).To(gomega.Equal(v1.PodPending))
+
+		ginkgo.By("Freeing one slot: the refused pod mounts on the kubelet's next retry")
+		framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, pods[0]))
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodRunningInNamespace(ctx, f.ClientSet, extraPod.Name, f.Namespace.Name,
+			testSlowMultiplier*f.Timeouts.PodStart))
+	})
+
 	ginkgo.It("should verify that all csinodes have volume limits", func(ctx context.Context) {
 		driverInfo := driver.GetDriverInfo()
 		if !driverInfo.Capabilities[storageframework.CapVolumeLimits] {
@@ -338,6 +411,43 @@ func getCSINodeLimits(ctx context.Context, f *framework.Framework, nodeName, dri
 		return 0, fmt.Errorf("could not get CSINode limit for driver %s: %w", driverName, err)
 	}
 	return limit, nil
+}
+
+// mounterVolumeCap returns the --max-volumes-per-node the mounter on nodeName runs with, 0 meaning no cap. It reads the
+// flag rather than the pod's label, as the flag is what the mounter enforces.
+func mounterVolumeCap(ctx context.Context, f *framework.Framework, nodeName string) int {
+	ginkgo.GinkgoHelper()
+	pod, err := podOnNode(ctx, f, mounterPodLabel, nodeName)
+	framework.ExpectNoError(err)
+	for _, c := range pod.Spec.Containers {
+		if c.Name != mounterContainerName {
+			continue
+		}
+		for _, arg := range c.Args {
+			if value, ok := strings.CutPrefix(arg, "--max-volumes-per-node="); ok {
+				n, err := strconv.Atoi(value)
+				framework.ExpectNoError(err, "parsing %q on mounter pod %s", arg, pod.Name)
+				return n
+			}
+		}
+	}
+	return 0 // the flag's default
+}
+
+// podHasFailedMountContaining reports whether pod has a FailedMount event whose message contains substr.
+func podHasFailedMountContaining(ctx context.Context, f *framework.Framework, pod *v1.Pod, substr string) (bool, error) {
+	events, err := f.ClientSet.CoreV1().Events(pod.Namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + pod.Name,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, event := range events.Items {
+		if event.Reason == "FailedMount" && strings.Contains(event.Message, substr) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // waitForNoS3VolumesOnNode polls until nodeName reports zero S3 volumes for the
