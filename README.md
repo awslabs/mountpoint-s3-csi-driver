@@ -35,13 +35,16 @@ See [Driver Installation](docs/INSTALL.md) for detailed instructions.
 ## Container Images
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
-| v2.8.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.8.0                       |
+| v2.9.2         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.9.2                       |
 
 <details>
 <summary>Previous Images</summary>
 
 | Driver Version | [ECR Public](https://gallery.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver) Image |
 |----------------|---------------------------------------------------------------------------------------------------|
+| v2.9.1         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.9.1                       |
+| v2.9.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.9.0                       |
+| v2.8.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.8.0                       |
 | v2.7.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.7.0                       |
 | v2.6.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.6.0                       |
 | v2.5.0         | public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0                       |
@@ -105,11 +108,11 @@ The following table provides the support status for various distros with regards
 | Distro               | Stable     | Removed | Currently Supported EKS Versions |
 |----------------------|-----------:|--------:|----------------------------------|
 | Amazon Linux 2       |      1.0.0 |   2.8.0 | —                                |
-| Amazon Linux 2023    |      1.0.0 |       — | 1.31 – 1.36                      |
+| Amazon Linux 2023    |      1.0.0 |       — | 1.31 – 1.37                      |
 | Ubuntu 20.04         |      1.0.0 |   2.5.0 | —                                |
 | Ubuntu 22.04         |      1.0.0 |   2.8.0 | —                                |
-| Ubuntu 24.04         |      2.0.0 |       — | 1.33 – 1.36                      |
-| Bottlerocket >1.19.2 |      1.4.0 |       — | 1.31 – 1.36                      |
+| Ubuntu 24.04         |      2.0.0 |       — | 1.31 – 1.37                      |
+| Bottlerocket >1.19.2 |      1.4.0 |       — | 1.31 – 1.37                      |
 
 ## Documentation
 
