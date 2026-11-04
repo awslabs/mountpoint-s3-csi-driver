@@ -141,8 +141,7 @@ spec:
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
-            # Same helper as this container's and the mounter's `image:`, so the CSI node can warn while the
-            # mounter on its node runs a different image (the node hasn't been recycled since an upgrade or rollback).
+            # This container's image, which the CSI node compares with the mounter's to warn about a mismatch.
             - name: CSI_NODE_IMAGE
               value: {{ include "csiDriverImageName" . }}
             {{- end }}
