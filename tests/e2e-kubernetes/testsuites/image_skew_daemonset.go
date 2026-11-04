@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
@@ -74,7 +75,12 @@ func (t *s3CSIImageSkewDaemonsetTestSuite) DefineTests(driver storageframework.T
 
 		// Serial: it recreates the s3-csi-node pod on one node, which every mount there depends on.
 		ginkgo.It("should mount while the images differ, and warn", ginkgo.Serial, func(ctx context.Context) {
-			nodeName := pickConfigSkewNode(ctx, f, config)
+			nodeName := config.ClientNodeSelection.Name // the driver's single node, if pinned
+			if nodeName == "" {
+				node, err := e2enode.GetRandomReadySchedulableNode(ctx, f.ClientSet)
+				framework.ExpectNoError(err)
+				nodeName = node.Name
+			}
 
 			ginkgo.By(fmt.Sprintf("Recreating only the s3-csi-node pod on %s with a different %s", nodeName, csiNodeImageEnv))
 			ginkgo.DeferCleanup(skewCSINodeImage(ctx, f, nodeName))
