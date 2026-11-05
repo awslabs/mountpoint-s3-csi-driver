@@ -41,18 +41,28 @@ type ProcessManager struct {
 	memory          memoryLimit
 	cache           cacheLimit
 	chownForTesting func(path string, uid, gid int) error // unprivileged tests record ownership instead of chown
+	// maxVolumesPerNode caps len(processes), counting UIDs whose cache is still being removed; 0 means no cap.
+	maxVolumesPerNode int64
 
 	mu        sync.Mutex
-	processes map[uint32]mountpointProcess // the UID a Mountpoint runs as -> that Mountpoint; one per UID
-	uids      map[string]uint32            // mountId -> the UID its Mountpoint runs as; added and deleted with processes
-	wg        sync.WaitGroup               // tracks waiter goroutines
+	processes map[uint32]mountpointProcess // the UID a Mountpoint runs as -> that Mountpoint, or its cache still to remove; one per UID
+	uids      map[string]uint32            // mountId -> the UID its Mountpoint runs as; only mounts with a Mountpoint
+	wg        sync.WaitGroup               // tracks waiter and cache cleaner goroutines
 }
 
-// mountpointProcess is a running Mountpoint and the mount it serves.
+// mountpointProcess is a running Mountpoint and the mount it serves, or, with cleanupPending, what is left of an exited one.
 type mountpointProcess struct {
-	mountId string
-	handle  ProcessHandle
+	mountId string        // "" when cleanupPending
+	handle  ProcessHandle // nil when cleanupPending
+	// cleanupPending marks a UID whose Mountpoint has exited but whose cache directory could not be removed yet. The entry keeps
+	// the UID from launching, so no new Mountpoint gets that directory, and counts against maxVolumesPerNode, as the directory
+	// still takes up its share of the cache volume. It holds no mount ID, so the PV can mount again on another UID if there is a
+	// free slot. The cache cleaner removes the directory, then the entry.
+	cleanupPending bool
 }
+
+// cacheCleanupInterval is how often the cache cleaner retries the cache directories it could not remove.
+const cacheCleanupInterval = 30 * time.Second
 
 func NewProcessManager(commDir, cacheDir string, runner ProcessRunner, memory memoryLimit, cache cacheLimit) *ProcessManager {
 	return &ProcessManager{
@@ -195,22 +205,25 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	// Reject used UID, or else two mounts would be able to access cache of each other.
 	// We rely on csi-node's UID allocator moving its cursor on, so the NodePublishVolume retry gets another UID.
 	if other, taken := pm.processes[options.Uid]; taken {
+		if other.cleanupPending {
+			return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("refusing to launch mount %s: the previous cache of UID %d is still being removed", mountId, options.Uid))
+		}
 		// Don't expose other mounts' PV name / mount ID in the error: handleConnection writes it to the error file, s3-csi-node returns it
 		// as the NodePublishVolume error, and the kubelet shows it as a FailedMount event to anyone who can read the workload namespace's events.
 		klog.Errorf("Refusing to launch mount %s with UID %d already in use by mount %s", mountId, options.Uid, other.mountId)
 		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("refusing to launch mount %s: UID %d is already in use by another mount", mountId, options.Uid))
 	}
+
+	if err := pm.checkVolumeLimit(mountId); err != nil {
+		return pm.releaseLockAndCloseFuseDev(fuseDev, err)
+	}
+
 	// Delete any error files that earlier Mountpoint of this PV wrote after node deletes error files.
 	// TODO if we add process to ensure Mountpoint exited, this should not be needed.
 	os.Remove(filepath.Join(pm.commDir, mountId+errorFileExt))
 
-	// Now that we're certain no running Mountpoint has this UID, the remaining cache directory for this UID is a leftover: remove it.
-	if pm.cacheDir != "" {
-		if err := pm.removeCacheVolumeEntry(perPvCacheDir); err != nil {
-			klog.Errorf("Failed to remove leftover cache directory %s: %v", perPvCacheDir, err)
-			return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("failed to remove the leftover cache directory of UID %d, see the mounter log", options.Uid))
-		}
-	}
+	// No leftover check here: every cache directory left behind (by an exited Mountpoint, a failed start, or the startup cleanup)
+	// keeps its UID marked cleanupPending, refused above, until the cache cleaner removes it.
 	if cached {
 		if err := pm.createPerPvCacheDir(perPvCacheDir, options.Uid); err != nil {
 			return pm.releaseLockAndCloseFuseDev(fuseDev, err)
@@ -220,8 +233,11 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	handle, err := pm.runner.Start(cmd)
 	if err != nil {
 		if cached {
+			// Mountpoint never ran, so the directory is empty and quick to remove here.
 			if rmErr := pm.removeCacheVolumeEntry(perPvCacheDir); rmErr != nil {
-				klog.Errorf("Failed to remove cache directory of mount %s after a failed start: %v", mountId, rmErr)
+				klog.Errorf("Failed to remove cache directory of mount %s after a failed start, marking UID %d for the cache cleaner: %v",
+					mountId, options.Uid, rmErr)
+				pm.holdForCacheCleanup(options.Uid)
 			}
 		}
 		return pm.releaseLockAndCloseFuseDev(fuseDev, fmt.Errorf("failed to start Mountpoint: %w", err))
@@ -239,11 +255,10 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	pm.wg.Go(func() {
 		exitCode, stderr := handle.Wait()
 
-		// Before freeing mountId and the UID, so a relaunch cannot create the directory this then removes.
+		// Before freeing the UID, so a relaunch cannot create the directory this then removes.
+		var cleanupErr error
 		if cached {
-			if err := pm.removeCacheVolumeEntry(perPvCacheDir); err != nil {
-				klog.Errorf("Failed to remove cache directory of mount %s: %v", mountId, err)
-			}
+			cleanupErr = pm.removeCacheVolumeEntry(perPvCacheDir)
 		}
 
 		pm.mu.Lock()
@@ -251,8 +266,16 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 		if exitCode != 0 {
 			pm.writeErrorFile(mountId, stderr)
 		}
-		delete(pm.processes, options.Uid)
+		// The mount ID is freed either way: no Mountpoint of this PV is left, so its next mount can go ahead on another UID.
 		delete(pm.uids, mountId)
+		if cleanupErr != nil {
+			// The UID and its volume slot stay taken, until the cache cleaner removes its directory.
+			klog.Errorf("Failed to remove cache directory of mount %s, keeping UID %d and its volume slot taken for the cache cleaner: %v",
+				mountId, options.Uid, cleanupErr)
+			pm.holdForCacheCleanup(options.Uid)
+		} else {
+			delete(pm.processes, options.Uid)
+		}
 		pm.mu.Unlock()
 
 		if exitCode != 0 {
@@ -265,9 +288,122 @@ func (pm *ProcessManager) Launch(mountId string, mountpointPath string, options 
 	return nil
 }
 
+// perPvCacheDirPrefix starts the name of every per-PV cache directory, followed by the UID its Mountpoint runs as.
+const perPvCacheDirPrefix = "uid-"
+
 // perPvCacheDirName names the cache directory of the Mountpoint running as uid.
 func perPvCacheDirName(uid uint32) string {
-	return fmt.Sprintf("uid-%d", uid)
+	return perPvCacheDirPrefix + strconv.FormatUint(uint64(uid), 10)
+}
+
+// parsePerPvCacheDirName returns the UID a cache directory named by perPvCacheDirName belongs to.
+func parsePerPvCacheDirName(name string) (uint32, bool) {
+	digits, ok := strings.CutPrefix(name, perPvCacheDirPrefix)
+	if !ok {
+		return 0, false
+	}
+	uid, err := strconv.ParseUint(digits, 10, 32)
+	if err != nil || perPvCacheDirName(uint32(uid)) != name {
+		return 0, false
+	}
+	return uint32(uid), true
+}
+
+// checkVolumeLimit refuses a launch once this container hosts maxVolumesPerNode volumes (0 means no cap). UIDs held for cache
+// cleanup count, as their directories still take up a share of the cache volume; without them, leftovers (e.g. of a PV whose
+// Mountpoint keeps crashing, each time on a new UID) could pile up and overfill it. Caller holds pm.mu.
+func (pm *ProcessManager) checkVolumeLimit(mountId string) error {
+	if pm.maxVolumesPerNode > 0 && int64(len(pm.processes)) >= pm.maxVolumesPerNode {
+		pending := pm.countHeldForCacheCleanup()
+		return fmt.Errorf("refusing to launch mount %s: this node already uses all maxVolumesPerNode=%d volume slots "+
+			"(%d running Mountpoint processes, %d cache directories still being removed)",
+			mountId, pm.maxVolumesPerNode, len(pm.processes)-pending, pending)
+	}
+	return nil
+}
+
+// holdForCacheCleanup leaves uid, and its volume slot, taken with a deletion marker until the cache cleaner removes its cache
+// directory. It holds no mount ID: the mount that ran as uid, if any, has no Mountpoint left and is free to mount again on
+// another UID. Caller holds pm.mu.
+func (pm *ProcessManager) holdForCacheCleanup(uid uint32) {
+	pm.processes[uid] = mountpointProcess{cleanupPending: true}
+}
+
+// countHeldForCacheCleanup counts the UIDs whose cache directory is still to be removed. Caller holds pm.mu.
+func (pm *ProcessManager) countHeldForCacheCleanup() int {
+	n := 0
+	for _, p := range pm.processes {
+		if p.cleanupPending {
+			n++
+		}
+	}
+	return n
+}
+
+// markLeftoverCacheDirs marks the UID of every cache directory left in the cache volume for the cache cleaner, so a leftover
+// the startup cleanup could not remove holds its UID and its volume slot, and is retried, rather than being left untracked.
+// Other entries take no UID and are left to emptyCacheVolume at exit.
+func (pm *ProcessManager) markLeftoverCacheDirs() error {
+	if pm.cacheDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(pm.cacheDir)
+	if err != nil {
+		return fmt.Errorf("failed to list cache volume %q: %w", pm.cacheDir, err)
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	for _, entry := range entries {
+		if uid, ok := parsePerPvCacheDirName(entry.Name()); ok {
+			pm.holdForCacheCleanup(uid)
+		}
+	}
+	return nil
+}
+
+// StartCacheCleaner retries, every cacheCleanupInterval until stop closes, the cache directories marked cleanupPending, and
+// frees each UID once its directory is gone. Tracked by pm.wg, so close stop before calling Shutdown.
+func (pm *ProcessManager) StartCacheCleaner(stop <-chan struct{}, interval time.Duration) {
+	if pm.cacheDir == "" {
+		return
+	}
+	pm.wg.Go(func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				pm.cleanPendingCacheDirs()
+			}
+		}
+	})
+}
+
+// cleanPendingCacheDirs tries once to remove each marked cache directory. It removes outside the lock, as a large cache takes a
+// while; nothing else touches a marked directory, since its UID cannot launch until the marker is gone.
+func (pm *ProcessManager) cleanPendingCacheDirs() {
+	pm.mu.Lock()
+	var pending []uint32
+	for uid, p := range pm.processes {
+		if p.cleanupPending {
+			pending = append(pending, uid)
+		}
+	}
+	pm.mu.Unlock()
+
+	for _, uid := range pending {
+		dir := perPvCacheDirName(uid)
+		if err := pm.removeCacheVolumeEntry(dir); err != nil {
+			klog.Errorf("Failed to remove cache directory %s, keeping UID %d and its volume slot taken: %v", dir, uid, err)
+			continue
+		}
+		pm.mu.Lock()
+		delete(pm.processes, uid)
+		pm.mu.Unlock()
+		klog.Infof("Removed cache directory %s, freeing UID %d", dir, uid)
+	}
 }
 
 // releaseLockAndCloseFuseDev releases the lock and closes the FUSE device of a launch that fails under the lock, and returns err passed.
@@ -295,12 +431,18 @@ func (pm *ProcessManager) removeCacheVolumeEntry(entryName string) error {
 }
 
 // createPerPvCacheDir creates a PV's cache directory, owned by the UID its Mountpoint runs as. Mountpoint writes ./mountpoint-cache inside it.
+// If the directory can't be handed to uid, it is removed, or, if that fails too, uid is held for the cache cleaner, so no
+// directory is left untracked to block uid's next mount. Caller holds pm.mu.
 func (pm *ProcessManager) createPerPvCacheDir(perPvCacheDir string, uid uint32) error {
 	path := filepath.Join(pm.cacheDir, perPvCacheDir)
 	if err := os.Mkdir(path, perPvCacheDirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory %q: %w", path, err)
 	}
 	if err := pm.chownWithDefault(path, int(uid), int(uid)); err != nil {
+		if rmErr := os.Remove(path); rmErr != nil {
+			klog.Errorf("Failed to remove cache directory %s after failing to hand it to UID %d, keeping the UID for the cache cleaner: %v", path, uid, rmErr)
+			pm.holdForCacheCleanup(uid)
+		}
 		return fmt.Errorf("failed to hand cache directory %q to UID %d: %w", path, uid, err)
 	}
 
@@ -335,6 +477,9 @@ func (pm *ProcessManager) writeErrorFile(mountId string, content []byte) {
 func (pm *ProcessManager) Shutdown() {
 	pm.mu.Lock()
 	for _, p := range pm.processes {
+		if p.cleanupPending {
+			continue // no process left; serve's emptyCacheVolume removes its directory
+		}
 		klog.Infof("Sending SIGTERM to Mountpoint for mount %s (pid %d)", p.mountId, p.handle.Pid())
 		p.handle.Signal(syscall.SIGTERM)
 	}
@@ -379,17 +524,20 @@ func (pm *ProcessManager) LogStatusPeriodically(interval time.Duration) {
 
 		pm.mu.Lock()
 		tracked := len(pm.processes)
+		pendingCleanup := pm.countHeldForCacheCleanup()
 		var mounts []string
 		for uid, p := range pm.processes {
-			mounts = append(mounts, fmt.Sprintf("%s:%d", p.mountId, uid))
+			if !p.cleanupPending {
+				mounts = append(mounts, fmt.Sprintf("%s:%d", p.mountId, uid))
+			}
 		}
 		pm.mu.Unlock()
 
 		actual := countChildProcesses()
 		openFDs := countOpenFDs()
 		goroutines := runtime.NumGoroutine()
-		klog.Infof("Status: tracked=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d cache_limit_strategy=%s cache_share_mib=%d mounts=%v",
-			tracked, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB,
+		klog.Infof("Status: tracked=%d pending_cache_cleanup=%d max_volumes_per_node=%d actual_children=%d open_fds=%d goroutines=%d memory_limit_strategy=%s share_mib=%d cache_limit_strategy=%s cache_share_mib=%d mounts=%v",
+			tracked, pendingCleanup, pm.maxVolumesPerNode, actual, openFDs, goroutines, pm.memory.strategy, pm.memory.shareMiB,
 			pm.cache.strategy, pm.cache.shareMiB, mounts)
 	}
 }
