@@ -31,26 +31,30 @@ func (testCtx *dmTestCtx) setMounterPodImage(image string) {
 }
 
 func TestDaemonsetMounterImageMismatch(t *testing.T) {
-	t.Run("Mounts and warns how to recycle the node when the images differ", func(t *testing.T) {
+	t.Run("Warns once on discovery when the images differ, and still mounts and refreshes credentials", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageB)
 		testCtx := setupDM(t)
-		testCtx.setMounterPodImage(imageA)
 		logs := testutil.CaptureKlog(t)
+		testCtx.setMounterPodImage(imageA) // runs discovery
 
+		assert.Contains(t, logs.String(), "image mismatch on node "+testCtx.nodeName)
+		assert.Contains(t, logs.String(), "-l app=s3-csi-daemonset-mounter --field-selector spec.nodeName="+testCtx.nodeName)
+		assert.Equals(t, false, strings.Contains(logs.String(), "s3-csi-node,"))
+
+		// Mounts don't log it again.
+		logs.Reset()
 		testCtx.mountAndServe(testCtx.podUID, nil) // fails the test if the mount is refused
 		// The kubelet's republish, which refreshes credentials, is served too.
 		assert.NoError(t, testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
 			testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil))
-
-		assert.Contains(t, logs.String(), "image mismatch on node "+testCtx.nodeName)
-		assert.Contains(t, logs.String(), "kubectl cordon "+testCtx.nodeName)
+		assert.Equals(t, false, strings.Contains(logs.String(), "image mismatch"))
 	})
 
-	t.Run("Mounts without a warning when the images match", func(t *testing.T) {
+	t.Run("Doesn't warn when the images match", func(t *testing.T) {
 		t.Setenv("CSI_NODE_IMAGE", imageA)
 		testCtx := setupDM(t)
-		testCtx.setMounterPodImage(imageA)
 		logs := testutil.CaptureKlog(t)
+		testCtx.setMounterPodImage(imageA)
 
 		testCtx.mountAndServe(testCtx.podUID, nil)
 

@@ -88,9 +88,6 @@ const (
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
 	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
 	mounterContainerName = "mounter"
-	// imageMismatchWarnInterval is how often a mismatch is logged at most. The kubelet republishes every mounted
-	// volume about once a minute, so logging on every request would flood the log.
-	imageMismatchWarnInterval = 10 * time.Minute
 )
 
 // Exported for error matching in tests and NodePublishVolume callers.
@@ -169,8 +166,6 @@ type DaemonsetMounter struct {
 
 	// ownImage is this CSI node's image reference, from CSI_NODE_IMAGE. Empty disables the image check.
 	ownImage string
-	// lastImageMismatchWarning is when an image mismatch was last logged, in Unix nanoseconds; 0 if never.
-	lastImageMismatchWarning atomic.Int64
 }
 
 // NewDaemonsetMounter creates a new [DaemonsetMounter].
@@ -301,12 +296,6 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	mounter := dm.mounter.Load()
 	if mounter == nil {
 		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
-	}
-
-	// This CSI node and the mounter run different images until the node is recycled after an upgrade or
-	// rollback. Warn, and keep serving the mount.
-	if msg := dm.imageMismatchWarning(mounter); msg != "" {
-		dm.warnOnImageMismatch(msg)
 	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
@@ -1520,6 +1509,11 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 
 	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t, image: %s",
 		running[0].Name, podUID, commDir, hasCacheVolume, image)
+	// Logged here, as the images can only start or stop matching when one of the two pods is replaced, and either
+	// replacement leads to a (re)discovery.
+	if msg := dm.imageMismatchWarning(image); msg != "" {
+		klog.Warning(msg)
+	}
 	return &mounterPod{
 		commDir:        commDir,
 		hasCacheVolume: hasCacheVolume,
@@ -1595,34 +1589,19 @@ func mounterPodImage(pod corev1.Pod) string {
 	return ""
 }
 
-// imageMismatchWarning returns a warning naming both images and how to recycle the node if this CSI node and the
-// mounter run different images, or "" if they match or the check is off. Both images come from the same chart
-// value, so they differ only when the node hasn't been recycled since an upgrade or rollback. Mounts are still
-// served either way.
-func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
-	if dm.ownImage == "" || dm.ownImage == mounter.image {
+// imageMismatchWarning returns a warning naming both images and how to update the mounter if this CSI node and the
+// mounter (running mounterImage) run different images, or "" if they match or the check is off. The CSI node rolls on
+// an upgrade or rollback while the mounter waits for the node to be recycled, so a mismatch means a mounter from an
+// earlier release. Mounts are still served either way.
+func (dm *DaemonsetMounter) imageMismatchWarning(mounterImage string) string {
+	if dm.ownImage == "" || dm.ownImage == mounterImage {
 		return ""
 	}
 	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
-		"Mounts are still served. To run the same image in both pods, recycle this node: "+
-		"`kubectl cordon %[1]s`, "+
-		"`kubectl drain %[1]s --ignore-daemonsets`, "+
-		"`kubectl delete pod -n %[4]s -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' --field-selector spec.nodeName=%[1]s`, "+
-		"then `kubectl uncordon %[1]s`.",
-		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace)
-}
-
-// warnOnImageMismatch logs warning, at most once per imageMismatchWarnInterval. Safe for concurrent use.
-func (dm *DaemonsetMounter) warnOnImageMismatch(warning string) {
-	now := time.Now().UnixNano()
-	last := dm.lastImageMismatchWarning.Load()
-	if last != 0 && time.Duration(now-last) < imageMismatchWarnInterval {
-		return
-	}
-	// Only the caller that wins the swap logs, so concurrent requests log once.
-	if dm.lastImageMismatchWarning.CompareAndSwap(last, now) {
-		klog.Warning(warning)
-	}
+		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, delete the mounter pod, "+
+		"which temporarily breaks all active mounts on the node: "+
+		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`",
+		dm.nodeID, dm.ownImage, mounterImage, mounterNamespace)
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.
