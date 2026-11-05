@@ -24,7 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
+	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -36,6 +38,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -1306,6 +1309,144 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 		assert.FileNotExists(t, mounter.MetaFileName(testCtx.kubeletPath, testCtx.volumeID))
 		assert.FileNotExists(t, mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID))
 		assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(mounter.UIDRangeStart))
+	})
+
+	// v2 PVs
+	t.Run("A v2 PV mounts on this node's cache, with its deprecated settings warned about once", func(t *testing.T) {
+		disk := corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
+		memory := corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}
+		gp3 := corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+			Spec: corev1.PersistentVolumeClaimSpec{StorageClassName: ptr.To("gp3")},
+		}}}
+
+		for _, testCase := range []struct {
+			name      string
+			nodeCache corev1.VolumeSource
+			volumeCtx map[string]string
+			// wantWarnings holds a part of each warning s3-csi-node logs, in order.
+			wantWarnings []string
+		}{
+			// Another cache type, medium or StorageClass, accepted with what differs named
+			{
+				name:      "an ephemeral PV mounts on a node disk cache",
+				nodeCache: disk,
+				volumeCtx: map[string]string{"cache": "ephemeral", "cacheEphemeralStorageClassName": "gp3"},
+				wantWarnings: []string{
+					`requests cache "ephemeral", but its cache type differs from this node's cache volume, which s3-csi-daemonset-mounter uses instead`,
+					`sets the deprecated volume attributes ["cacheEphemeralStorageClassName"]`,
+				},
+			},
+			{
+				name:      "an emptyDir PV in memory mounts on a node disk cache",
+				nodeCache: disk,
+				volumeCtx: map[string]string{"cache": "emptyDir", "cacheEmptyDirMedium": "Memory"},
+				wantWarnings: []string{
+					`requests cache "emptyDir", but its emptyDir medium differs from this node's cache volume`,
+					`sets the deprecated volume attributes ["cacheEmptyDirMedium"]`,
+				},
+			},
+			{
+				name:         "a disk emptyDir PV mounts on a node cache in memory",
+				nodeCache:    memory,
+				volumeCtx:    map[string]string{"cache": "emptyDir"},
+				wantWarnings: []string{`requests cache "emptyDir", but its emptyDir medium differs from this node's cache volume`},
+			},
+			{
+				name:      "an ephemeral PV of another StorageClass mounts on the node's ephemeral cache",
+				nodeCache: gp3,
+				volumeCtx: map[string]string{"cache": "ephemeral", "cacheEphemeralStorageClassName": "gp2", "cacheEphemeralStorageResourceRequest": "1Gi"},
+				wantWarnings: []string{
+					`requests cache "ephemeral", but its ephemeral StorageClass differs from this node's cache volume`,
+					`sets the deprecated volume attributes ["cacheEphemeralStorageClassName" "cacheEphemeralStorageResourceRequest"]`,
+				},
+			},
+			{
+				name:         "a plain emptyDir PV on a node ephemeral cache is warned only about the cache type mismatch",
+				nodeCache:    gp3,
+				volumeCtx:    map[string]string{"cache": "emptyDir"},
+				wantWarnings: []string{`requests cache "emptyDir", but its cache type differs from this node's cache volume`},
+			},
+			// The node's own cache type
+			{
+				name:         "a plain emptyDir PV on a node disk cache is still warned about",
+				nodeCache:    disk,
+				volumeCtx:    map[string]string{"cache": "emptyDir", "cacheEmptyDirMedium": ""},
+				wantWarnings: []string{`sets the v2 "cache" value "emptyDir". Set it to "enabled"`},
+			},
+			// Sizes
+			{
+				name:         "an emptyDir PV's v2 size is warned about and caps nothing",
+				nodeCache:    disk,
+				volumeCtx:    map[string]string{"cache": "emptyDir", "cacheEmptyDirSizeLimit": "2Gi"},
+				wantWarnings: []string{`sets the deprecated volume attributes ["cacheEmptyDirSizeLimit"]`},
+			},
+			// Misc
+			{
+				name:         "a `cache: enabled` PV is warned about a v2 size it kept",
+				nodeCache:    disk,
+				volumeCtx:    map[string]string{"cache": "enabled", "cacheEmptyDirSizeLimit": "2Gi"},
+				wantWarnings: []string{`sets the deprecated volume attributes ["cacheEmptyDirSizeLimit"]`},
+			},
+			{
+				name:      "a v3 PV is not warned about",
+				nodeCache: disk,
+				volumeCtx: map[string]string{"cache": "enabled"},
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				testCtx := setupDM(t)
+				testCtx.setMounterPodCacheVolume(&corev1.Volume{Name: mounter.CacheVolumeName, VolumeSource: testCase.nodeCache})
+				logs := testutil.CaptureKlog(t)
+
+				got := testCtx.mountAndServe("pod-a-uid", testCase.volumeCtx)
+				gotArgs := mountpoint.ParseArgs(got.Args)
+				assert.Equals(t, true, gotArgs.Has(mountpoint.ArgCache))
+				assert.Equals(t, false, gotArgs.Has(mountpoint.ArgMaxCacheSize))
+
+				klog.Flush()
+				var warnings []string
+				for _, line := range strings.Split(logs.String(), "\n") {
+					if strings.HasPrefix(line, "W") && strings.Contains(line, "NodePublishVolume: volume s3-csi-driver-volume ") {
+						warnings = append(warnings, line)
+					}
+				}
+				if len(warnings) != len(testCase.wantWarnings) {
+					t.Fatalf("expected %d warnings, got %d:\n%s", len(testCase.wantWarnings), len(warnings), strings.Join(warnings, "\n"))
+				}
+				for i, want := range testCase.wantWarnings {
+					assert.Contains(t, warnings[i], want)
+				}
+			})
+		}
+	})
+
+	t.Run("A v2 PV's own max-cache-size reaches the mounter, over its v2 size", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+
+		got := testCtx.mountAndServe("pod-a-uid", map[string]string{"cache": "emptyDir", "cacheEmptyDirSizeLimit": "2Gi"}, "max-cache-size 1945")
+
+		gotArgs := mountpoint.ParseArgs(got.Args)
+		maxCacheSize, _ := gotArgs.Value(mountpoint.ArgMaxCacheSize)
+		assert.Equals(t, "1945", maxCacheSize)
+	})
+
+	t.Run("Warns once per new target, not on republishes", func(t *testing.T) {
+		testCtx := setupDMWithCache(t)
+		logs := testutil.CaptureKlog(t)
+		// The deprecated mount option with a v2 size, so the option's and the attributes' warnings both fire.
+		volumeCtx := map[string]string{"cacheEmptyDirSizeLimit": "2Gi"}
+		const mountOption = "cache /tmp/customer-path"
+
+		testCtx.mountAndServe("pod-a-uid", volumeCtx, mountOption)
+		// A republish, then a pod joining the mount: two new targets to one republish, so the counts tell them apart.
+		for _, podUID := range []string{"pod-a-uid", "pod-b-uid"} {
+			assert.NoError(t, testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(podUID),
+				testCtx.driverProvideCtx(podUID), volumeCtx, mountpoint.ParseArgs([]string{mountOption}), "", nil))
+		}
+
+		klog.Flush()
+		assert.Equals(t, 2, strings.Count(logs.String(), "deprecated `cache` mount option"))
+		assert.Equals(t, 2, strings.Count(logs.String(), "sets the deprecated volume attributes"))
 	})
 
 	// Rediscovery
