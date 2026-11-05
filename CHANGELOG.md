@@ -1,6 +1,7 @@
 # Unreleased
 
 ### Notable changes
+* Limit the CSI driver's service account to removing the `s3.csi.aws.com/agent-not-ready` taint from the Node its pod runs on, with a ValidatingAdmissionPolicy. Set `node.validatingAdmissionPolicy.enabled=false` to not install it.
 * Add support for Kubernetes 1.37.
 * Add support for Ubuntu 26.04 on Kubernetes 1.35+.
 

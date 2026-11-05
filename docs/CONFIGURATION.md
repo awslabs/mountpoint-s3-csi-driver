@@ -470,6 +470,8 @@ There are potential race conditions on node startup (especially when a node is f
 
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
+A ValidatingAdmissionPolicy, `s3-csi-driver-node`, limits the CSI driver's service account to removing the `s3.csi.aws.com/agent-not-ready` taint from the Node its pod runs on. The Helm chart installs it on Kubernetes 1.30 and later; set `node.validatingAdmissionPolicy.enabled=false` to not install it.
+
 ## Cross-account bucket access
 Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.

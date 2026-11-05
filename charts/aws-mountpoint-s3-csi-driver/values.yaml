@@ -36,6 +36,11 @@ node:
     # see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials for more details.
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
+  # Limits the CSI driver's service account to removing the s3.csi.aws.com/agent-not-ready taint from the Node its
+  # pod runs on.
+  # Installed on Kubernetes 1.30 and later.
+  validatingAdmissionPolicy:
+    enabled: true
   podLabels: {}
   nodeSelector: {}
   resources:
