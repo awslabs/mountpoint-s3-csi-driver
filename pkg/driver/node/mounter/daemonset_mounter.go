@@ -1509,8 +1509,6 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 
 	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t, image: %s",
 		running[0].Name, podUID, commDir, hasCacheVolume, image)
-	// Logged here, as the images can only start or stop matching when one of the two pods is replaced, and either
-	// replacement leads to a (re)discovery.
 	if msg := dm.imageMismatchWarning(image); msg != "" {
 		klog.Warning(msg)
 	}
