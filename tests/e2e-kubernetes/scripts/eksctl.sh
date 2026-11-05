@@ -35,9 +35,13 @@ function eksctl_is_cluster_too_old() {
 function eksctl_compute_cluster_spec_hash() {
   NODE_TYPE=${1}
   ZONES=${2}
-  EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${3}
+  EKSCTL_PATCH_FILE=${3}
+  EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${4}
+  NODE_COUNT=${5}
 
-  echo -n "${NODE_TYPE}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" | sha256sum | cut -d' ' -f1
+  # Include the patches' contents, so clusters created with an older config are re-created instead of re-used.
+  PATCH_HASH=$(cat "${EKSCTL_PATCH_FILE}" ${EKSCTL_PATCH_SELINUX_ENFORCING_FILE:+"${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}"} | sha256sum | cut -d' ' -f1)
+  echo -n "${NODE_TYPE}-${NODE_COUNT}-${ZONES}-${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}-${PATCH_HASH}" | sha256sum | cut -d' ' -f1
 }
 
 # Checks whether existing cluster matches with expected specs to decide whether to re-use it.
@@ -65,8 +69,10 @@ function eksctl_create_cluster() {
   AMI_FAMILY=${11}
   K8S_VERSION=${12}
   EKSCTL_PATCH_SELINUX_ENFORCING_FILE=${13}
+  DRIVER_ROLE_ARN=${14}
+  NODE_COUNT=${15}
 
-  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}")
+  CLUSTER_SPEC_HASH=$(eksctl_compute_cluster_spec_hash "${NODE_TYPE}" "${ZONES}" "${EKSCTL_PATCH_FILE}" "${EKSCTL_PATCH_SELINUX_ENFORCING_FILE}" "${NODE_COUNT}")
 
   # Check if cluster exists and matches our specs
   if eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
@@ -87,6 +93,7 @@ function eksctl_create_cluster() {
     --name $CLUSTER_NAME \
     --region $REGION \
     --node-type $NODE_TYPE \
+    --nodes $NODE_COUNT \
     --node-ami-family $AMI_FAMILY \
     --with-oidc \
     --zones $ZONES \
@@ -102,6 +109,11 @@ function eksctl_create_cluster() {
     ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "$(cat $EKSCTL_PATCH_SELINUX_ENFORCING_FILE)" -o yaml > $CLUSTER_FILE_TMP
     mv $CLUSTER_FILE_TMP $CLUSTER_FILE
   fi
+
+  # The CSI Driver gets its credentials through EKS Pod Identity, see `pod-identity.sh`.
+  DRIVER_POD_IDENTITY_PATCH="[{\"op\": \"add\", \"path\": \"/iam/podIdentityAssociations\", \"value\": [{\"namespace\": \"kube-system\", \"serviceAccountName\": \"s3-csi-driver-sa\", \"roleARN\": \"${DRIVER_ROLE_ARN}\"}]}]"
+  ${KUBECTL_BIN} patch -f $CLUSTER_FILE --local --type json --patch "${DRIVER_POD_IDENTITY_PATCH}" -o yaml > $CLUSTER_FILE_TMP
+  mv $CLUSTER_FILE_TMP $CLUSTER_FILE
 
   ${BIN} create cluster -f "${CLUSTER_FILE}" --kubeconfig "${KUBECONFIG}"
 
@@ -123,6 +135,8 @@ function eksctl_delete_cluster() {
   CLUSTER_NAME=${2}
   REGION=${3}
   FORCE=${4:-false}
+  # If set, the CSI Driver's EKS Pod Identity role is deleted with the cluster.
+  DRIVER_ROLE_NAME=${5:-}
 
   STACK_NAME="eksctl-${CLUSTER_NAME}-cluster"
   if ! eksctl_cluster_exists "${BIN}" "${CLUSTER_NAME}"; then
@@ -132,6 +146,9 @@ function eksctl_delete_cluster() {
       aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
     fi
     eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
+    if [ -n "${DRIVER_ROLE_NAME}" ]; then
+      pod_identity_delete_role "${DRIVER_ROLE_NAME}"
+    fi
     return 0
   fi
 
@@ -145,6 +162,10 @@ function eksctl_delete_cluster() {
   aws cloudformation update-termination-protection --no-enable-termination-protection --region "${REGION}" --stack-name "${STACK_NAME}"
   ${BIN} delete cluster "${CLUSTER_NAME}" --wait --disable-nodegroup-eviction
   eksctl_delete_cluster_cf_stack "${CLUSTER_NAME}" "${REGION}"
+
+  if [ -n "${DRIVER_ROLE_NAME}" ]; then
+    pod_identity_delete_role "${DRIVER_ROLE_NAME}"
+  fi
 }
 
 function eksctl_cluster_exists() {

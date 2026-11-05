@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/errors"
+	clientset "k8s.io/client-go/kubernetes"
 	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -355,6 +356,21 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		BeforeAll(func(ctx context.Context) {
 			oidcProvider = oidcProviderForCluster(ctx, f)
 			eksPodIdentityAgentDaemonSet = eksPodIdentityAgentDaemonSetForCluster(ctx, f)
+
+			if eksPodIdentityAgentDaemonSet != nil {
+				// The driver may get its baseline credentials from a Pod Identity association (see `scripts/pod-identity.sh`).
+				// The tests delete it, and a service account can only have one association,
+				// so we restore it once all tests are done.
+				sa := csiDriverServiceAccount(ctx, f)
+				if baselineRoleARN := podIdentityAssociationRoleARN(ctx, sa); baselineRoleARN != "" {
+					framework.Logf("Driver's baseline EKS Pod Identity role ARN: %s", baselineRoleARN)
+					// The framework clears `f.ClientSet` after each test, before this cleanup runs.
+					client := f.ClientSet
+					DeferCleanup(func(ctx context.Context) {
+						restorePodIdentityAssociation(ctx, f, client, sa, baselineRoleARN)
+					})
+				}
+			}
 
 			var afterAllCleanup []func(context.Context) error
 
@@ -1349,6 +1365,54 @@ func createPodIdentityAssociation(ctx context.Context, f *framework.Framework, s
 	return output.Association, func(ctx context.Context) error {
 		return deletePodIdentityAssociation(ctx, sa, output.Association.AssociationId)
 	}
+}
+
+// restorePodIdentityAssociation associates given role with given service account again, and recreates the CSI Driver
+// pods until all of them have EKS Pod Identity credentials. EKS injects the credentials when a pod is created, but only
+// once the association has taken effect. It uses given `client`, since `f.ClientSet` is not set outside of tests.
+func restorePodIdentityAssociation(ctx context.Context, f *framework.Framework, client clientset.Interface, sa *v1.ServiceAccount, roleArn string) {
+	framework.Logf("Restoring Pod Identity Association for ServiceAccount %s with role %s", sa.Name, roleArn)
+	createPodIdentityAssociation(ctx, f, sa, roleArn)
+
+	framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (bool, error) {
+		ds, err := client.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		pods, err := client.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector),
+		})
+		if err != nil {
+			return false, err
+		}
+
+		ready := len(pods.Items) > 0 && int32(len(pods.Items)) == ds.Status.DesiredNumberScheduled
+		for _, pod := range pods.Items {
+			if pod.Status.Phase == v1.PodRunning && hasEKSPodIdentityCredentials(&pod) {
+				continue
+			}
+			ready = false
+			if pod.DeletionTimestamp == nil && !hasEKSPodIdentityCredentials(&pod) {
+				framework.Logf("Recreating CSI Driver pod %s to get EKS Pod Identity credentials", pod.Name)
+				if err := client.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+					return false, err
+				}
+			}
+		}
+		return ready, nil
+	})).WithTimeout(5 * time.Minute).WithPolling(15 * time.Second).Should(gomega.BeTrue())
+}
+
+// hasEKSPodIdentityCredentials returns whether EKS injected Pod Identity credentials into any container of given pod.
+func hasEKSPodIdentityCredentials(pod *v1.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		for _, env := range container.Env {
+			if env.Name == "AWS_CONTAINER_CREDENTIALS_FULL_URI" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func deletePodIdentityAssociation(ctx context.Context, sa *v1.ServiceAccount, associationId *string) error {
