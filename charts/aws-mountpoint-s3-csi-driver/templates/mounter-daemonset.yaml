@@ -107,8 +107,8 @@ metadata:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
 spec:
   updateStrategy:
-    # We use OnDelete strategy because restarting this pod disrupts ALL active mounts on the node.
-    # Mounter pods will continue running the previous version until the pod is manually restarted.
+    # OnDelete, as replacing this pod breaks every active mount on its node. A helm upgrade or rollback leaves each
+    # mounter pod on its previous version until the pod is deleted and recreated.
     type: OnDelete
   selector:
     matchLabels:

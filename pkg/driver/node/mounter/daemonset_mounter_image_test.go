@@ -38,7 +38,14 @@ func TestDaemonsetMounterImageMismatch(t *testing.T) {
 		testCtx.setMounterPodImage(imageA) // runs discovery
 
 		assert.Contains(t, logs.String(), "image mismatch on node "+testCtx.nodeName)
-		assert.Contains(t, logs.String(), "-l app=s3-csi-daemonset-mounter --field-selector spec.nodeName="+testCtx.nodeName)
+		for _, step := range []string{
+			"kubectl cordon " + testCtx.nodeName,
+			"kubectl drain " + testCtx.nodeName + " --ignore-daemonsets",
+			"-l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=" + testCtx.nodeName,
+			"kubectl uncordon " + testCtx.nodeName,
+		} {
+			assert.Contains(t, logs.String(), step)
+		}
 		assert.Equals(t, false, strings.Contains(logs.String(), "s3-csi-node,"))
 
 		// Mounts don't log it again.

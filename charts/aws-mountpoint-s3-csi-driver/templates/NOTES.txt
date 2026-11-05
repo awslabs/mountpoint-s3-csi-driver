@@ -17,10 +17,18 @@ in the current mode. If you did not intend to run outside daemonset mode, set `e
 {{- end }}
 {{- if eq .Values.experimental.mounterMode "daemonset"}}
 
-IMPORTANT: After helm upgrade, mounter pods continue running the previous version (OnDelete strategy) to avoid disrupting active mounts.
+IMPORTANT: After helm upgrade or rollback, s3-csi-node pods are replaced automatically, which does not affect active mounts.
+Mounter pods continue running the previous version (OnDelete strategy) to avoid disrupting active mounts. Until a node's
+mounter pod is replaced, its s3-csi-node logs an image mismatch warning and keeps serving mounts.
 Node recycling (EKS node group update, Karpenter drift/expiration) completes the upgrade seamlessly.
-If node recycling is not feasible, manually delete the mounter pod - this will temporarily break all active mounts on that node:
+If node recycling is not feasible, update the node's mounter in place:
+kubectl cordon <node-name>
+kubectl drain <node-name> --ignore-daemonsets
 kubectl delete pod -n {{ .Release.Namespace }} -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name>
+kubectl uncordon <node-name>
+Deleting the mounter pod without draining the node first breaks all active mounts on that node.
+To see which nodes still run a previous mounter, compare the two pods' images on each node:
+kubectl get pods -n {{ .Release.Namespace }} -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' -o custom-columns='NODE:.spec.nodeName,POD:.metadata.name,IMAGE:.spec.containers[0].image' --sort-by=.spec.nodeName
 {{- else if eq .Values.experimental.mounterMode "pod" }}
 {{- if .Release.IsUpgrade }}
 

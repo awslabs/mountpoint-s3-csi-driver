@@ -1590,17 +1590,17 @@ func mounterPodImage(pod corev1.Pod) string {
 }
 
 // imageMismatchWarning returns a warning naming both images and how to update the mounter if this CSI node and the
-// mounter (running mounterImage) run different images, or "" if they match or the check is off. The CSI node rolls on
-// an upgrade or rollback while the mounter waits for the node to be recycled, so a mismatch means a mounter from an
-// earlier release. Mounts are still served either way.
+// mounter (running mounterImage) run different images, or "" if they match.
 func (dm *DaemonsetMounter) imageMismatchWarning(mounterImage string) string {
 	if dm.ownImage == "" || dm.ownImage == mounterImage {
 		return ""
 	}
 	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
-		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, delete the mounter pod, "+
-		"which temporarily breaks all active mounts on the node: "+
-		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`",
+		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
+		"`kubectl cordon %[1]s`, "+
+		"`kubectl drain %[1]s --ignore-daemonsets`, "+
+		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`, "+
+		"then `kubectl uncordon %[1]s`. Deleting the mounter pod without draining the node first breaks all active mounts on it.",
 		dm.nodeID, dm.ownImage, mounterImage, mounterNamespace)
 }
 
