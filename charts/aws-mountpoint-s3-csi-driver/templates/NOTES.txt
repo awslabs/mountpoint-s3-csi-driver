@@ -27,8 +27,6 @@ kubectl drain <node-name> --ignore-daemonsets
 kubectl delete pod -n {{ .Release.Namespace }} -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name>
 kubectl uncordon <node-name>
 Deleting the mounter pod without draining the node first breaks all active mounts on that node.
-To see which nodes still run a previous mounter, compare the two pods' images on each node:
-kubectl get pods -n {{ .Release.Namespace }} -l 'app in (s3-csi-node,s3-csi-daemonset-mounter)' -o custom-columns='NODE:.spec.nodeName,POD:.metadata.name,IMAGE:.spec.containers[0].image' --sort-by=.spec.nodeName
 {{- else if eq .Values.experimental.mounterMode "pod" }}
 {{- if .Release.IsUpgrade }}
 
