@@ -221,4 +221,14 @@ func TestValidateCacheRequest(t *testing.T) {
 	}
 }
 
+func TestCacheHelpersWithoutNodeCacheOrClaimTemplate(t *testing.T) {
+	// Must not panic. The API server rejects an ephemeral volume without a claim template, but a fake clientset's pod can have one.
+	noClaimTemplate := &corev1.Volume{VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}}
+	cacheVolumeSummary(noClaimTemplate)
+	for _, nodeCache := range []*corev1.Volume{nil, noClaimTemplate} {
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir}, "test-volume-id", nodeCache)
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral}, "test-volume-id", nodeCache)
+	}
+}
+
 // Note: warnDeprecatedCacheSettings, and every warning only on a new target, tested via daemonset_mounter_test.go "A v2 PV mounts on this node's cache, with its deprecated settings warned about once" and "Warns once per new target, not on republishes".
