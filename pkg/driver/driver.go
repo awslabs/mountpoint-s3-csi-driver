@@ -59,6 +59,10 @@ const (
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
+
+	// mounterWaitBeforeServing is how long startup looks for this node's mounter before serving, so the first
+	// mount requests after a restart find it. Keep it well under the liveness probe's budget (about 18s).
+	mounterWaitBeforeServing = 5 * time.Second
 )
 
 var (
@@ -83,6 +87,10 @@ type Driver struct {
 	NodeServer *node.S3NodeServer
 
 	Clientset kubernetes.Interface
+
+	// mounterFound, if set, is closed once this node can mount S3 volumes, which the agent-not-ready
+	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
+	mounterFound <-chan struct{}
 
 	stopCh chan struct{}
 }
@@ -126,6 +134,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var nodeServer *node.S3NodeServer
+	var mounterFound <-chan struct{}
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
@@ -140,15 +149,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
 		}
 
-		if err := dm.DiscoverMounter(context.Background()); err != nil {
-			klog.Fatalf("Failed to discover mounter pod: %v", err)
-		}
-		go dm.StartCommDirWatch(stopCh)
-		go dm.StartPeriodicCleanup(stopCh)
-
 		// V2 legacy support: start PodUnmounter to handle source teardown for V2 Mountpoint Pods
 		// when the controller annotates them with needs-unmount. Also set up the S3PA informer
 		// cache used to resolve the committed IAM role ARN during V2 credential refresh.
+		//
+		// It starts before, and whether or not, this node's mounter is found: the V2 volumes on this node
+		// still need unmounting and credential refresh when no mounter runs here, for example because the
+		// node can't fit it.
 		if util.SupportLegacyPodMounts() {
 			klog.Info("V2 legacy pod mount support enabled — starting PodUnmounter and S3PA cache")
 			podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -164,18 +171,19 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			dm.SetS3PACache(s3paCache)
 		}
 
-		maxVolumesPerNode, ok := dm.MounterMaxVolumesPerNode()
-		if !ok {
-			return nil, fmt.Errorf("mounter pod on this node has no valid %s label", mounter.MounterMaxVolumesLabel)
+		// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
+		ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
+		if err := dm.DiscoverMounter(ctx); err != nil {
+			klog.Warningf("No s3-csi-daemonset-mounter is running on this node yet (%v). Serving the volumes already on this node "+
+				"and failing new S3 mounts until one runs. V3 requires the %s startup taint on nodes, which keeps workloads off "+
+				"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
 		}
-		if maxVolumesPerNode == 0 {
-			klog.Warningf("%s is 0: volume limit is disabled (unbounded). The scheduler will not "+
-				"limit the number of S3 volumes per node, which may lead to resource exhaustion "+
-				"(memory OOM, or disk exhaustion when cache is enabled) on s3-csi-daemonset-mounter.",
-				mounter.MounterMaxVolumesLabel)
-		}
+		cancel()
+		go dm.StartCommDirWatch(stopCh)
+		go dm.StartPeriodicCleanup(stopCh)
 
-		nodeServer = node.NewS3NodeServer(nodeID, dm, maxVolumesPerNode)
+		nodeServer = node.NewS3NodeServer(nodeID, dm, 0)
+		mounterFound = dm.MounterFound()
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -201,11 +209,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}
 
 	return &Driver{
-		Endpoint:   endpoint,
-		NodeID:     nodeID,
-		NodeServer: nodeServer,
-		Clientset:  clientset,
-		stopCh:     stopCh,
+		Endpoint:     endpoint,
+		NodeID:       nodeID,
+		NodeServer:   nodeServer,
+		Clientset:    clientset,
+		mounterFound: mounterFound,
+		stopCh:       stopCh,
 	}, nil
 }
 
@@ -255,11 +264,25 @@ func (d *Driver) Run() error {
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
 
-	// Start taint watcher when gRPC server is ready to accept connections
+	// Start taint watcher when gRPC server is ready to accept connections, and the node can mount
 	if d.Clientset != nil {
-		go node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
+		go d.startTaintWatcherOnceMounting(d.stopCh)
 	}
 	return d.Srv.Serve(listener)
+}
+
+// startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node
+// can mount S3 volumes: right away, or in daemonset mode once its mounter is first found, so a node that
+// the taint keeps workloads off stays that way while its mounter isn't running.
+func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
+	if d.mounterFound != nil {
+		select {
+		case <-d.mounterFound:
+		case <-stopCh:
+			return
+		}
+	}
+	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
 }
 
 func (d *Driver) Stop() {

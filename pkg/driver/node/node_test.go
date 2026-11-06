@@ -1118,6 +1118,22 @@ func TestNodeGetInfo(t *testing.T) {
 			},
 		},
 		{
+			name: "returns the limit a VolumeLimiter mounter decides, at each call",
+			testFunc: func(t *testing.T) {
+				limiter := &limitingMounter{limit: 1}
+				server := node.NewS3NodeServer(testNodeID, limiter, 50)
+
+				resp, err := server.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+				assert.NoError(t, err)
+				assert.Equals(t, int64(1), resp.MaxVolumesPerNode)
+
+				limiter.limit = 4
+				resp, err = server.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+				assert.NoError(t, err)
+				assert.Equals(t, int64(4), resp.MaxVolumesPerNode)
+			},
+		},
+		{
 			name: "returns zero when MaxVolumesPerNode not set (unbounded, for pod mode)",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
@@ -1138,6 +1154,18 @@ func TestNodeGetInfo(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
 	}
+}
+
+var _ node.VolumeLimiter = &limitingMounter{}
+
+// limitingMounter is a mounter that decides the node's volume limit.
+type limitingMounter struct {
+	dummyMounter
+	limit int64
+}
+
+func (m *limitingMounter) VolumeLimit(context.Context) int64 {
+	return m.limit
 }
 
 var _ mounter.Mounter = &dummyMounter{}

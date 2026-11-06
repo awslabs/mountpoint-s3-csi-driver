@@ -257,9 +257,11 @@ daemonsetMounters:
   # mounter this node's mounts use. If it has none, new mounts on that node fail until only one
   # entry matches it.
   #
-  # Renaming an entry, adding a name to the unnamed one, or removing an entry makes helm upgrade
-  # delete that entry's mounter DaemonSet, which breaks every S3 mount on its nodes, even with
-  # OnDelete. Drain those nodes first, then upgrade, then uncordon them.
+  # Any change that makes a node stop matching an entry deletes that node's mounter, which breaks
+  # every S3 mount on it, even with OnDelete. That includes renaming an entry, adding a name to the
+  # unnamed one, removing an entry, giving the unnamed entry a selection when you add a second
+  # one, and changing an entry's nodeSelector or matchExpressions, node.nodeSelector, node.affinity
+  # or a node's labels. Drain the affected nodes first, then upgrade, then uncordon them.
   #
   # Entries for a Karpenter NodePool, giving nodes with 64GiB of memory or more a higher limit.
   # Each mount gets about 1Gi in both: (4Gi - 64Mi) / 4 and (32Gi - 64Mi) / 32.

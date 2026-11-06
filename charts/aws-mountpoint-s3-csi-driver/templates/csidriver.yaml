@@ -13,3 +13,6 @@ spec:
     - audience: "pods.eks.amazonaws.com"
       expirationSeconds: 3600
   requiresRepublish: true
+  {{- if semverCompare ">=1.33.0-0" .Capabilities.KubeVersion.Version }}
+  nodeAllocatableUpdatePeriodSeconds: 10
+  {{- end }}

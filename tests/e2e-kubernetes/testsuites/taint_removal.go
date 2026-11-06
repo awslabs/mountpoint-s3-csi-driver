@@ -137,6 +137,8 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			if v3 {
 				// Without a mounter the node pod never removes the taint
 				gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
+				// but serves the volumes already on the node
+				expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
 				framework.ExpectNoError(restoreMounter(ctx))
 			}
 
@@ -219,7 +221,7 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 			return err
 		}
 		waitForMounterPodReady(ctx, f, nodeName)
-		// Restart the node pod so it doesn't wait out its crash-loop backoff
+		// Restart the node pod so it finds the mounter now, rather than when it next looks for one, and registers its limit
 		killCSIDriverPods(ctx, f)
 		waitForCSIDriverReady(ctx, f)
 		return nil
@@ -228,6 +230,30 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 
 	waitForNoMounterPod(ctx, f, nodeName)
 	return restore
+}
+
+// expectServingWithoutMounter checks that the node pod on nodeName, which has no mounter, runs without restarting and registers
+// the driver with no volume limit, as it does once its wait for a mounter at startup is over.
+func expectServingWithoutMounter(ctx context.Context, f *framework.Framework, nodeName, driverName string) {
+	GinkgoHelper()
+	nodePod, err := podOnNode(ctx, f, csiNodePodLabel, nodeName)
+	framework.ExpectNoError(err)
+	gomega.Expect(nodePod.Status.Phase).To(gomega.Equal(v1.PodRunning), "node pod %s", nodePod.Name)
+	for _, status := range nodePod.Status.ContainerStatuses {
+		gomega.Expect(status.RestartCount).To(gomega.BeZero(), "container %s in node pod %s restarted without a mounter", status.Name, nodePod.Name)
+	}
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
+		csiNode, err := f.ClientSet.StorageV1().CSINodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, d := range csiNode.Spec.Drivers {
+			if d.Name == driverName {
+				return d.Allocatable == nil || d.Allocatable.Count == nil, nil
+			}
+		}
+		return false, nil
+	}).WithTimeout(csiNodeInfoTimeout).WithPolling(5*time.Second).Should(gomega.BeTrue(), "node %s registers %s with no volume limit", nodeName, driverName)
 }
 
 // excludeNode returns a copy of affinity that also keeps pods off nodeName.
