@@ -22,6 +22,7 @@ import (
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -91,25 +92,21 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		ginkgo.DeferCleanup(cleanup)
 	})
 
-	f.It("should scale out workloads beyond a node's volume limit without overcommitting any node", f.WithSerial(), func(ctx context.Context) {
-		waitForEmptyNodePool(ctx, f)
-		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
-		// next run starts from an empty pool again.
-		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
+	driverName := driver.GetDriverInfo().Name
 
-		driverName := driver.GetDriverInfo().Name
-		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
-		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
-		framework.ExpectNoError(err)
-		workloads := 2 * limit
-
-		ginkgo.By(fmt.Sprintf("Creating %d workloads with a volume each, twice as many as a node can mount", workloads))
+	// scaleOut runs workloads on the pool, each requesting memory ("" for none), and checks that the autoscaler provisions
+	// nodes that each have limit, the volume limit their nodes should have, and mount no more. It returns those nodes.
+	scaleOut := func(ctx context.Context, workloads, limit int, memory string) []string {
+		ginkgo.By(fmt.Sprintf("Creating %d workloads with a volume each, on nodes that can each mount %d", workloads, limit))
 		var pods []*v1.Pod
 		for range workloads {
 			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 			l.resources = append(l.resources, vol)
 			pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
 			targetNodePool(&pod.Spec)
+			if memory != "" {
+				pod.Spec.Containers[0].Resources.Requests = v1.ResourceList{v1.ResourceMemory: resource.MustParse(memory)}
+			}
 			pod, err := createPodWithoutWaiting(ctx, f.ClientSet, f.Namespace.Name, pod)
 			framework.ExpectNoError(err)
 			ginkgo.DeferCleanup(e2epod.DeletePodWithWait, f.ClientSet, pod)
@@ -121,7 +118,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 
 		ginkgo.By("Waiting for the autoscaler to provision nodes for all of them")
 		// Autoscalers might only learn a node's volume limit once it has joined, and provision one node at a time.
-		pods = waitForPodsRunning(ctx, f, pods, time.Duration(workloads/limit)*nodeProvisionTimeout)
+		pods = waitForPodsRunning(ctx, f, pods, time.Duration((workloads+limit-1)/limit)*nodeProvisionTimeout)
 		nodes := podNodes(pods)
 		framework.Logf("All %d workloads run after %v, on %d node(s)", workloads, time.Since(start).Round(time.Second), len(nodes))
 
@@ -134,6 +131,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			inUse, err := countS3VolumesOnNode(ctx, f, node, driverName)
 			framework.ExpectNoError(err)
 			framework.Logf("Node %s mounts %d of %d volumes", node, inUse, nodeLimit)
+			gomega.Expect(nodeLimit).To(gomega.Equal(limit), "node %s's volume limit", node)
 			gomega.Expect(inUse).To(gomega.BeNumerically("<=", nodeLimit),
 				"node %s mounts %d volumes, more than its limit of %d", node, inUse, nodeLimit)
 			waitForMounterPodReady(ctx, f, node)
@@ -146,7 +144,81 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 			checkWriteToPathSucceed(ctx, f, pod, path, 1024, seed)
 			checkReadFromPathSucceed(ctx, f, pod, path, 1024, seed)
 		}
+		return nodes
+	}
+
+	f.It("should scale out workloads beyond a node's volume limit without overcommitting any node", f.WithSerial(), func(ctx context.Context) {
+		waitForEmptyNodePool(ctx, f)
+		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
+		// next run starts from an empty pool again.
+		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
+		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
+		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
+		framework.ExpectNoError(err)
+		scaleOut(ctx, 2*limit, limit, "")
 	})
+
+	f.It("should size each node for its own mounter entry, and scale out workloads by that entry's volume limit", f.WithSerial(), func(ctx context.Context) {
+		if !isDaemonsetMounterMode(ctx, f) {
+			e2eskipper.Skipf("mounter entries are DaemonSets, which only exist in daemonset mode")
+		}
+		release := setUpDriverRelease(ctx, f)
+		waitForEmptyNodePool(ctx, f)
+		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
+		// next run starts from an empty pool again.
+		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
+		small, big := sizeSelectors(ctx, f)
+		pool := map[string]any{nodePoolKey: nodePoolValue}
+		// The other nodes' entry keeps the unnamed DaemonSet, and the driver's DaemonSets are OnDelete, so only the pool's
+		// new nodes run the new templates.
+		release.upgradeOnly(ctx, withMounterEntries(release,
+			map[string]any{"matchExpressions": []any{map[string]any{"key": nodePoolKey, "operator": "DoesNotExist"}}},
+			map[string]any{"name": "small", "nodeSelector": pool, "matchExpressions": small, "maxVolumesPerNode": 2,
+				"resources": map[string]any{"requests": map[string]any{"memory": "2Gi"}}},
+			map[string]any{"name": "big", "nodeSelector": pool, "matchExpressions": big, "maxVolumesPerNode": 4,
+				"resources": map[string]any{"requests": map[string]any{"memory": "10Gi"}}}))
+
+		// The 256Mi workloads request something so that Cluster Autoscaler, which ranks its nodegroups by what the workloads
+		// leave unused, picks the small one. A 6.5Gi workload fits neither an 8GiB node beside the 2Gi small mounter nor a
+		// 16GiB one beside the 10Gi big mounter, so only an autoscaler counting each node's own mounter launches a 32GiB one.
+		// Fails on Karpenter until kubernetes-sigs/karpenter#3474 is fixed: it counts neither mounter.
+		for _, phase := range []struct {
+			entry            string
+			workloads, limit int
+			memory           string
+		}{{"small", 4, 2, "256Mi"}, {"big", 1, 4, "6.5Gi"}} {
+			for _, node := range scaleOut(ctx, phase.workloads, phase.limit, phase.memory) {
+				mounters := mountersOn(ctx, f, node)
+				gomega.Expect(mounters).To(gomega.HaveLen(1), "mounters on node %s", node)
+				gomega.Expect(mounters[0].OwnerReferences[0].Name).To(gomega.Equal(mounterDaemonSetName+"-"+phase.entry), "node %s's mounter", node)
+			}
+		}
+	})
+}
+
+// sizeSelectors returns matchExpressions for the pool's small (under 16GiB) and big nodes, by a label the cluster's
+// autoscaler knows before it launches a node. Cluster Autoscaler only knows the instance type, of the two pool nodegroups
+// in `scripts/profiles/cas/eksctl-patch.json`.
+func sizeSelectors(ctx context.Context, f *framework.Framework) (small, big []any) {
+	memory := func(key string) ([]any, []any) {
+		return []any{map[string]any{"key": key, "operator": "Lt", "values": []any{"16384"}}},
+			[]any{map[string]any{"key": key, "operator": "Gt", "values": []any{"16383"}}}
+	}
+	autoMode, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "eks.amazonaws.com/compute-type=auto", Limit: 1})
+	framework.ExpectNoError(err)
+	if len(autoMode.Items) > 0 {
+		return memory("eks.amazonaws.com/instance-memory")
+	}
+	// Karpenter's own API group, which Auto Mode doesn't serve.
+	if _, err := f.ClientSet.Discovery().ServerResourcesForGroupVersion("karpenter.k8s.aws/v1"); err == nil {
+		return memory("karpenter.k8s.aws/instance-memory")
+	} else if !apierrors.IsNotFound(err) {
+		framework.ExpectNoError(err)
+	}
+	instanceType := func(t string) []any {
+		return []any{map[string]any{"key": "node.kubernetes.io/instance-type", "operator": "In", "values": []any{t}}}
+	}
+	return instanceType("m5.large"), instanceType("r5.xlarge")
 }
 
 // targetNodePool makes a pod run on the pool's nodes.
