@@ -46,7 +46,7 @@ func TestVolumeLimit(t *testing.T) {
 
 	t.Run("is none with no mounter, once the startup wait is over", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(100*time.Millisecond, time.Minute, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(100*time.Millisecond, time.Minute)
 
 		start := time.Now()
 		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
@@ -63,7 +63,7 @@ func TestVolumeLimit(t *testing.T) {
 
 	t.Run("waits at startup for a mounter that starts", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute)
 		stopCh := make(chan struct{})
 		defer close(stopCh)
 		go dm.StartCommDirWatch(stopCh)
@@ -86,7 +86,7 @@ func TestVolumeLimit(t *testing.T) {
 
 	t.Run("stops waiting when kubelet gives up", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute)
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
 		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(cancelled))
@@ -94,15 +94,12 @@ func TestVolumeLimit(t *testing.T) {
 		assert.Equals(t, true, dm.limit.advertisedAt.IsZero())
 	})
 
-	t.Run("keeps the limit of a mounter that went away while it is replaced, then is none", func(t *testing.T) {
+	t.Run("keeps the limit of a mounter that went away until another one runs", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 200*time.Millisecond, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		dm.setMounter(&mounterPod{commDir: "old", maxVolumes: 3})
 		dm.setMounter(nil)
 		assert.Equals(t, int64(3), dm.VolumeLimit(ctx))
-
-		time.Sleep(250 * time.Millisecond)
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
 
 		dm.setMounter(&mounterPod{commDir: "new", maxVolumes: 6})
 		assert.Equals(t, int64(6), dm.VolumeLimit(ctx))
@@ -110,10 +107,10 @@ func TestVolumeLimit(t *testing.T) {
 
 	t.Run("keeps only the limit of the mounter that just went away", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, time.Minute, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		dm.setMounter(&mounterPod{commDir: "a", maxVolumes: 5})
 		dm.setMounter(nil)
-		// The next mounter has no valid label, so it has no limit for the grace to keep.
+		// The next mounter has no valid label, so it has no limit to keep.
 		dm.setMounter(&mounterPod{commDir: "b", maxVolumes: -1})
 		dm.setMounter(nil)
 
@@ -122,22 +119,22 @@ func TestVolumeLimit(t *testing.T) {
 
 	t.Run("logs a change once", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, time.Minute)
-		dm.setMounter(&mounterPod{maxVolumes: 3})
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		logs := testutil.CaptureKlog(t)
 
 		dm.VolumeLimit(ctx)
 		dm.VolumeLimit(ctx)
-		dm.setMounter(nil)
+		dm.setMounter(&mounterPod{maxVolumes: 3})
+		dm.VolumeLimit(ctx)
 		dm.VolumeLimit(ctx)
 
-		assert.Equals(t, 1, strings.Count(logs.String(), "advertising a volume limit of 3 for node test-node"))
 		assert.Equals(t, 1, strings.Count(logs.String(), "advertising no volume limit for node test-node: no s3-csi-daemonset-mounter runs on this node"))
+		assert.Equals(t, 1, strings.Count(logs.String(), "advertising a volume limit of 3 for node test-node"))
 	})
 
 	t.Run("logs a new reason for the same limit", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		logs := testutil.CaptureKlog(t)
 
 		dm.VolumeLimit(ctx)
@@ -154,7 +151,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 	t.Run("warns once when kubelet keeps a limit that no longer holds", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, 0)
+		dm.SetVolumeLimitTimingForTesting(0, 0)
 		// Kubelet registered the node pod before its mounter ran, and never asks again.
 		dm.VolumeLimit(ctx)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
@@ -171,13 +168,13 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 	t.Run("warns again when the same limit goes stale again after kubelet caught up", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, 0)
+		dm.SetVolumeLimitTimingForTesting(0, 0)
 		dm.VolumeLimit(ctx)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
 		dm.warnIfVolumeLimitStale()
-		// Kubelet catches up, the mounter goes away and kubelet reads that too, then the mounter is back.
+		// Kubelet catches up, then reads no limit from a replacement mounter labeled 0, then the mounter labeled 4 is back.
 		dm.VolumeLimit(ctx)
-		dm.setMounter(nil)
+		dm.setMounter(&mounterPod{maxVolumes: 0})
 		dm.VolumeLimit(ctx)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
 		logs := testutil.CaptureKlog(t)
@@ -189,7 +186,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 	t.Run("doesn't warn while kubelet re-reads the limit", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, time.Minute)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		dm.VolumeLimit(ctx)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
 		logs := testutil.CaptureKlog(t)
@@ -198,7 +195,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 		dm.warnIfVolumeLimitStale()
 		// Kubelet has the current limit, however long ago it asked.
 		dm.VolumeLimit(ctx)
-		dm.SetVolumeLimitTimingForTesting(0, 0, 0)
+		dm.SetVolumeLimitTimingForTesting(0, 0)
 		dm.warnIfVolumeLimitStale()
 
 		assert.Equals(t, false, strings.Contains(logs.String(), "the volume limit kubelet has"))
@@ -206,7 +203,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 	t.Run("doesn't warn before kubelet first asks", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, 0)
+		dm.SetVolumeLimitTimingForTesting(0, 0)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
 		logs := testutil.CaptureKlog(t)
 
@@ -217,7 +214,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 	t.Run("doesn't warn when kubelet keeps the limit of a mounter that went away", func(t *testing.T) {
 		dm := limitDM(t)
-		dm.SetVolumeLimitTimingForTesting(0, 0, 0)
+		dm.SetVolumeLimitTimingForTesting(0, 0)
 		dm.setMounter(&mounterPod{maxVolumes: 4})
 		dm.VolumeLimit(ctx)
 		dm.setMounter(nil)

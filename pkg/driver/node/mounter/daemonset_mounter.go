@@ -8,8 +8,8 @@
 //
 // The primary daemonset runs whether or not a secondary pod runs on its node, since the volumes already
 // on the node still need unmounting, and those V1 and V2 mounted, credential refresh. Without one, for
-// example when the node can't fit it or pull its image, new mounts fail and the node advertises no volume
-// limit (volume_limit.go).
+// example when the node can't fit it or pull its image, new mounts fail and the node advertises the last
+// secondary's volume limit, or none if no secondary has run (volume_limit.go).
 //
 // Startup (driver.go):
 //
@@ -159,7 +159,6 @@ type DaemonsetMounter struct {
 	limit                     volumeLimitState
 	startedAt                 time.Time
 	limitWaitForMounter       time.Duration
-	lostMounterLimitGrace     time.Duration
 	staleVolumeLimitWarnAfter time.Duration
 
 	// Injectable for testing. nil = use default.
@@ -208,7 +207,6 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 		startedAt:         time.Now(),
 
 		limitWaitForMounter:       defaultLimitWaitForMounter,
-		lostMounterLimitGrace:     defaultLostMounterLimitGrace,
 		staleVolumeLimitWarnAfter: defaultStaleVolumeLimitWarnAfter,
 
 		mountSyscall:      mountSyscall,

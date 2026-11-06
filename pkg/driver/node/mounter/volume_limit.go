@@ -12,11 +12,12 @@ import (
 
 // The volume limit this node pod advertises to the scheduler, through NodeGetInfo.
 //
-// It is the MounterMaxVolumesLabel of this node's mounter. A node pod with no mounter still serves the
-// volumes already on its node, which need unmounting (and those V1 and V2 mounted, credential refresh),
-// so it stays registered, and advertises noMounterVolumeLimit until a mounter runs.
+// It is the MounterMaxVolumesLabel of this node's mounter, kept after the mounter goes away until another
+// one runs. A node pod with no mounter still serves the volumes already on its node, which need unmounting
+// (and those V1 and V2 mounted, credential refresh), so it stays registered, and advertises
+// noMounterVolumeLimit until a mounter runs.
 const (
-	// noMounterVolumeLimit is the limit advertised while no mounter runs on this node: none. The startup
+	// noMounterVolumeLimit is the limit advertised until a mounter runs on this node: none. The startup
 	// taint keeps workloads off new nodes until their mounter runs.
 	noMounterVolumeLimit int64 = 0
 
@@ -24,10 +25,6 @@ const (
 	// noMounterVolumeLimit, so a node pod starting alongside its mounter registers the mounter's limit, the
 	// only one some kubelets read. Kubelet allows NodeGetInfo 2 minutes at registration.
 	defaultLimitWaitForMounter = 60 * time.Second
-
-	// defaultLostMounterLimitGrace is how long the limit of a mounter that went away is still advertised,
-	// so a mounter restart doesn't briefly lift the node's limit.
-	defaultLostMounterLimitGrace = 60 * time.Second
 
 	// defaultStaleVolumeLimitWarnAfter is how long kubelet can keep a limit that no longer holds, without
 	// re-reading it, before this node pod warns that kubelet isn't refreshing it.
@@ -42,11 +39,9 @@ type volumeLimitState struct {
 	found       chan struct{}
 	foundClosed bool
 
-	// lastLimit is the limit of the last mounter discovered with a valid MounterMaxVolumesLabel, if hasLastLimit.
+	// lastLimit is the limit of the last mounter discovered, if it had a valid MounterMaxVolumesLabel (hasLastLimit).
 	lastLimit    int64
 	hasLastLimit bool
-	// lostAt is when the discovered mounter went away: zero while one is discovered, and before the first.
-	lostAt time.Time
 
 	// advertised is the limit NodeGetInfo last returned, and advertisedReason why, at advertisedAt. A zero
 	// advertisedAt means kubelet hasn't asked yet.
@@ -74,11 +69,10 @@ func (dm *DaemonsetMounter) MounterFound() <-chan struct{} {
 	return dm.limit.foundCh()
 }
 
-// SetVolumeLimitTimingForTesting replaces how long VolumeLimit waits for a mounter after startup, how
-// long it keeps the limit of a mounter that went away, and how long a stale limit lasts before a warning.
-func (dm *DaemonsetMounter) SetVolumeLimitTimingForTesting(limitWaitForMounter, lostMounterGrace, staleWarnAfter time.Duration) {
+// SetVolumeLimitTimingForTesting replaces how long VolumeLimit waits for a mounter after startup, and how
+// long a stale limit lasts before a warning.
+func (dm *DaemonsetMounter) SetVolumeLimitTimingForTesting(limitWaitForMounter, staleWarnAfter time.Duration) {
 	dm.limitWaitForMounter = limitWaitForMounter
-	dm.lostMounterLimitGrace = lostMounterGrace
 	dm.staleVolumeLimitWarnAfter = staleWarnAfter
 }
 
@@ -88,14 +82,10 @@ func (dm *DaemonsetMounter) setMounter(m *mounterPod) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	prev := dm.mounter.Swap(m)
+	dm.mounter.Store(m)
 	if m == nil {
-		if prev != nil {
-			s.lostAt = time.Now()
-		}
 		return
 	}
-	s.lostAt = time.Time{}
 	// A mounter with no valid label has no limit to keep once it goes away, so drop any earlier mounter's.
 	s.lastLimit, s.hasLastLimit = m.maxVolumes, m.maxVolumes >= 0
 	if !s.foundClosed {
@@ -106,8 +96,7 @@ func (dm *DaemonsetMounter) setMounter(m *mounterPod) {
 
 // VolumeLimit returns the volume limit to advertise for this node (0 for none): the mounter's
 // MounterMaxVolumesLabel once one runs here, or noMounterVolumeLimit until then. A mounter that goes away
-// keeps its limit for the lostMounterLimitGrace a restart takes. Shortly after startup, it first waits for
-// a mounter.
+// keeps its limit until another one runs. Shortly after startup, it first waits for a mounter.
 func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) int64 {
 	dm.waitForMounterAfterStartup(ctx)
 
@@ -171,8 +160,8 @@ func (dm *DaemonsetMounter) currentVolumeLimit() (int64, string, bool) {
 	s := &dm.limit
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.hasLastLimit && !s.lostAt.IsZero() && time.Since(s.lostAt) < dm.lostMounterLimitGrace {
-		return s.lastLimit, "kept while its s3-csi-daemonset-mounter, which went away, is replaced", false
+	if s.hasLastLimit {
+		return s.lastLimit, "kept from its s3-csi-daemonset-mounter, which went away; new S3 mounts on this node fail until another one runs", false
 	}
 	return noMounterVolumeLimit, "no s3-csi-daemonset-mounter runs on this node, so new S3 mounts on it fail until one does", false
 }
