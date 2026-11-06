@@ -3,10 +3,13 @@ package mounter
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -21,10 +24,11 @@ const (
 	// taint keeps workloads off new nodes until their mounter runs.
 	noMounterVolumeLimit int64 = 0
 
-	// defaultLimitWaitForMounter is how long after startup VolumeLimit waits for a mounter before advertising
-	// noMounterVolumeLimit, so a node pod starting alongside its mounter registers the mounter's limit, the
-	// only one some kubelets read. Kubelet allows NodeGetInfo 2 minutes at registration.
-	defaultLimitWaitForMounter = 60 * time.Second
+	// defaultLimitWaitForMounter is how long VolumeLimit waits for a mounter: once after startup, so a node pod
+	// starting alongside its mounter registers the mounter's limit, the only one some kubelets read, and at
+	// every call on a node that has the startup taint and no mounter yet, before it fails. Kubelet allows
+	// NodeGetInfo 2 minutes at registration.
+	defaultLimitWaitForMounter = 110 * time.Second
 
 	// defaultStaleVolumeLimitWarnAfter is how long kubelet can keep a limit that no longer holds, without
 	// re-reading it, before this node pod warns that kubelet isn't refreshing it.
@@ -52,6 +56,12 @@ type volumeLimitState struct {
 	// staleWarnedFor is the limit the last stale-limit warning was logged for, if staleWarned.
 	staleWarnedFor int64
 	staleWarned    bool
+
+	// startupTaintKey is the taint that keeps workloads off a new node until its mounter runs, if set. It's set
+	// before NodeGetInfo is served, so reading it needs no lock. startupTaintGone is set once the node is seen
+	// without it.
+	startupTaintKey  string
+	startupTaintGone bool
 }
 
 // foundCh returns the channel closed once a mounter is first discovered. Caller must hold s.mu.
@@ -67,6 +77,22 @@ func (dm *DaemonsetMounter) MounterFound() <-chan struct{} {
 	dm.limit.mu.Lock()
 	defer dm.limit.mu.Unlock()
 	return dm.limit.foundCh()
+}
+
+// SetStartupTaintKey sets the key of the taint that keeps workloads off a new node until its mounter runs.
+// Call it before serving NodeGetInfo.
+func (dm *DaemonsetMounter) SetStartupTaintKey(key string) {
+	dm.limit.startupTaintKey = key
+}
+
+// RunningMounterVolumeLimit returns the volume limit VolumeLimit advertises for this node's running mounter,
+// and false while no mounter runs.
+func (dm *DaemonsetMounter) RunningMounterVolumeLimit() (int64, bool) {
+	if dm.mounter.Load() == nil {
+		return 0, false
+	}
+	limit, _, _ := dm.currentVolumeLimit()
+	return limit, true
 }
 
 // SetVolumeLimitTimingForTesting replaces how long VolumeLimit waits for a mounter after startup, and how
@@ -97,13 +123,24 @@ func (dm *DaemonsetMounter) setMounter(m *mounterPod) {
 // VolumeLimit returns the volume limit to advertise for this node (0 for none): the mounter's
 // MounterMaxVolumesLabel once one runs here, or noMounterVolumeLimit until then. A mounter that goes away
 // keeps its limit until another one runs. Shortly after startup, it first waits for a mounter.
-func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) int64 {
-	dm.waitForMounterAfterStartup(ctx)
+//
+// On a node that has the startup taint and no mounter yet, it waits for one at every call, and fails if none
+// runs, so kubelet registers the node only with its mounter's limit: no workload runs there yet to need it
+// registered sooner.
+func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) (int64, error) {
+	if !dm.mounterFoundOnce() && dm.hasStartupTaint(ctx) {
+		if !dm.waitForMounter(ctx, time.Now().Add(dm.limitWaitForMounter)) {
+			return 0, fmt.Errorf("no s3-csi-daemonset-mounter runs on node %s yet, and the node has the %s startup taint, so "+
+				"it isn't registered with kubelet until one runs. %s", dm.nodeID, dm.limit.startupTaintKey, helpMessageForCheckingMounterPodStatus())
+		}
+	} else {
+		dm.waitForMounter(ctx, dm.startedAt.Add(dm.limitWaitForMounter))
+	}
 
 	limit, reason, warn := dm.currentVolumeLimit()
 	if ctx.Err() != nil {
 		// Kubelet gave up on this call, so it never gets this limit: don't record it as the one kubelet has.
-		return limit
+		return limit, nil
 	}
 
 	s := &dm.limit
@@ -123,23 +160,55 @@ func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) int64 {
 			klog.Info(msg)
 		}
 	}
-	return limit
+	return limit, nil
 }
 
-// waitForMounterAfterStartup waits until a mounter is discovered, ctx is done, or limitWaitForMounter
-// has passed since this node pod started, whichever is first.
-func (dm *DaemonsetMounter) waitForMounterAfterStartup(ctx context.Context) {
-	wait := time.Until(dm.startedAt.Add(dm.limitWaitForMounter))
-	if wait <= 0 || dm.mounter.Load() != nil {
-		return
+// waitForMounter waits until a mounter is first discovered, ctx is done, or until, whichever is first, and
+// returns whether a mounter runs.
+func (dm *DaemonsetMounter) waitForMounter(ctx context.Context, until time.Time) bool {
+	if wait := time.Until(until); wait > 0 && dm.mounter.Load() == nil {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-dm.MounterFound():
+		case <-timer.C:
+		case <-ctx.Done():
+		}
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-dm.MounterFound():
-	case <-timer.C:
-	case <-ctx.Done():
+	return dm.mounter.Load() != nil
+}
+
+// mounterFoundOnce returns whether a mounter has been discovered on this node since startup.
+func (dm *DaemonsetMounter) mounterFoundOnce() bool {
+	dm.limit.mu.Lock()
+	defer dm.limit.mu.Unlock()
+	return dm.limit.foundClosed
+}
+
+// hasStartupTaint returns whether this node has the startup taint, or false if it can't tell. The taint only
+// comes off a node, so once it's gone this doesn't ask the API server again.
+func (dm *DaemonsetMounter) hasStartupTaint(ctx context.Context) bool {
+	s := &dm.limit
+	s.mu.Lock()
+	gone := s.startupTaintGone
+	s.mu.Unlock()
+	if s.startupTaintKey == "" || gone {
+		return false
 	}
+
+	node, err := dm.clientset.CoreV1().Nodes().Get(ctx, dm.nodeID, metav1.GetOptions{})
+	if err != nil {
+		klog.Warningf("DaemonsetMounter: can't tell whether node %s has the %s startup taint, so registering it as if not: %v",
+			dm.nodeID, s.startupTaintKey, err)
+		return false
+	}
+	if slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == s.startupTaintKey }) {
+		return true
+	}
+	s.mu.Lock()
+	s.startupTaintGone = true
+	s.mu.Unlock()
+	return false
 }
 
 // currentVolumeLimit returns the volume limit that holds now, why, and whether that deserves a warning.

@@ -29,19 +29,19 @@ func TestVolumeLimit(t *testing.T) {
 	t.Run("is the running mounter's label", func(t *testing.T) {
 		dm := limitDM(t, withLimit(runningMounterPod("mounter"), "5"))
 		assert.NoError(t, dm.DiscoverMounter(ctx))
-		assert.Equals(t, int64(5), dm.VolumeLimit(ctx))
+		assert.Equals(t, int64(5), volumeLimit(t, dm))
 	})
 
 	t.Run("is no limit from a mounter labeled 0", func(t *testing.T) {
 		dm := limitDM(t, withLimit(runningMounterPod("mounter"), "0"))
 		assert.NoError(t, dm.DiscoverMounter(ctx))
-		assert.Equals(t, int64(0), dm.VolumeLimit(ctx))
+		assert.Equals(t, int64(0), volumeLimit(t, dm))
 	})
 
 	t.Run("is none from a mounter with no valid label", func(t *testing.T) {
 		dm := limitDM(t, runningMounterPod("mounter"))
 		assert.NoError(t, dm.DiscoverMounter(ctx))
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
 	})
 
 	t.Run("is none with no mounter, once the startup wait is over", func(t *testing.T) {
@@ -49,13 +49,13 @@ func TestVolumeLimit(t *testing.T) {
 		dm.SetVolumeLimitTimingForTesting(100*time.Millisecond, time.Minute)
 
 		start := time.Now()
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
 		if waited := time.Since(start); waited < 90*time.Millisecond {
 			t.Fatalf("returned after %v, before the startup wait was over", waited)
 		}
 
 		start = time.Now()
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
 		if waited := time.Since(start); waited > 50*time.Millisecond {
 			t.Fatalf("waited %v again after the startup wait", waited)
 		}
@@ -73,7 +73,7 @@ func TestVolumeLimit(t *testing.T) {
 		}()
 
 		start := time.Now()
-		assert.Equals(t, int64(3), dm.VolumeLimit(ctx))
+		assert.Equals(t, int64(3), volumeLimit(t, dm))
 		if waited := time.Since(start); waited > 10*time.Second {
 			t.Fatalf("returned after %v, not when the mounter was found", waited)
 		}
@@ -89,7 +89,9 @@ func TestVolumeLimit(t *testing.T) {
 		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute)
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(cancelled))
+		limit, err := dm.VolumeLimit(cancelled)
+		assert.NoError(t, err)
+		assert.Equals(t, noMounterVolumeLimit, limit)
 		// Kubelet never got that answer, so it doesn't count as the limit kubelet has.
 		assert.Equals(t, true, dm.limit.advertisedAt.IsZero())
 	})
@@ -99,10 +101,10 @@ func TestVolumeLimit(t *testing.T) {
 		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
 		dm.setMounter(&mounterPod{commDir: "old", maxVolumes: 3})
 		dm.setMounter(nil)
-		assert.Equals(t, int64(3), dm.VolumeLimit(ctx))
+		assert.Equals(t, int64(3), volumeLimit(t, dm))
 
 		dm.setMounter(&mounterPod{commDir: "new", maxVolumes: 6})
-		assert.Equals(t, int64(6), dm.VolumeLimit(ctx))
+		assert.Equals(t, int64(6), volumeLimit(t, dm))
 	})
 
 	t.Run("keeps only the limit of the mounter that just went away", func(t *testing.T) {
@@ -114,7 +116,7 @@ func TestVolumeLimit(t *testing.T) {
 		dm.setMounter(&mounterPod{commDir: "b", maxVolumes: -1})
 		dm.setMounter(nil)
 
-		assert.Equals(t, noMounterVolumeLimit, dm.VolumeLimit(ctx))
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
 	})
 
 	t.Run("logs a change once", func(t *testing.T) {
@@ -226,6 +228,86 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 	})
 }
 
+func TestVolumeLimitOnNodeWithStartupTaint(t *testing.T) {
+	ctx := context.Background()
+	taint := corev1.Taint{Key: "s3.csi.aws.com/agent-not-ready", Effect: corev1.TaintEffectNoExecute}
+
+	t.Run("fails at every call until a mounter runs", func(t *testing.T) {
+		dm := limitDM(t, testNode(taint))
+		dm.SetStartupTaintKey(taint.Key)
+		dm.SetVolumeLimitTimingForTesting(100*time.Millisecond, time.Minute)
+
+		for range 2 {
+			start := time.Now()
+			_, err := dm.VolumeLimit(ctx)
+			if err == nil {
+				t.Fatal("VolumeLimit succeeded with no mounter on a node with the startup taint")
+			}
+			assert.Contains(t, err.Error(), "no s3-csi-daemonset-mounter runs on node test-node yet")
+			if waited := time.Since(start); waited < 90*time.Millisecond {
+				t.Fatalf("failed after %v, before waiting for a mounter", waited)
+			}
+		}
+
+		dm.setMounter(&mounterPod{maxVolumes: 3})
+		assert.Equals(t, int64(3), volumeLimit(t, dm))
+	})
+
+	t.Run("waits for a mounter that starts", func(t *testing.T) {
+		dm := limitDM(t, testNode(taint))
+		dm.SetStartupTaintKey(taint.Key)
+		dm.SetVolumeLimitTimingForTesting(30*time.Second, time.Minute)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			dm.setMounter(&mounterPod{maxVolumes: 3})
+		}()
+
+		assert.Equals(t, int64(3), volumeLimit(t, dm))
+	})
+
+	t.Run("keeps the limit of a mounter that went away", func(t *testing.T) {
+		dm := limitDM(t, testNode(taint))
+		dm.SetStartupTaintKey(taint.Key)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
+		dm.setMounter(&mounterPod{maxVolumes: 3})
+		dm.setMounter(nil)
+
+		assert.Equals(t, int64(3), volumeLimit(t, dm))
+	})
+
+	t.Run("is none on a node without it", func(t *testing.T) {
+		dm := limitDM(t, testNode())
+		dm.SetStartupTaintKey(taint.Key)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
+
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
+	})
+
+	t.Run("is none when the node can't be read", func(t *testing.T) {
+		dm := limitDM(t)
+		dm.SetStartupTaintKey(taint.Key)
+		dm.SetVolumeLimitTimingForTesting(0, time.Minute)
+
+		assert.Equals(t, noMounterVolumeLimit, volumeLimit(t, dm))
+	})
+}
+
+func TestRunningMounterVolumeLimit(t *testing.T) {
+	dm := limitDM(t)
+	_, ok := dm.RunningMounterVolumeLimit()
+	assert.Equals(t, false, ok)
+
+	dm.setMounter(&mounterPod{maxVolumes: 4})
+	limit, ok := dm.RunningMounterVolumeLimit()
+	assert.Equals(t, true, ok)
+	assert.Equals(t, int64(4), limit)
+
+	// The limit a mounter that went away leaves isn't one a running mounter takes.
+	dm.setMounter(nil)
+	_, ok = dm.RunningMounterVolumeLimit()
+	assert.Equals(t, false, ok)
+}
+
 func TestStaleCheckInterval(t *testing.T) {
 	// Every second while a restarting mounter is back within its restart time, then less often.
 	assert.Equals(t, commDirStaleCheckInterval, staleCheckInterval(0))
@@ -250,17 +332,26 @@ func TestMountWithNoMounterLooksForOneRightAway(t *testing.T) {
 	}
 }
 
-// limitDM is a DaemonsetMounter on test-node, built as the driver builds it, whose API server holds pods.
-func limitDM(t *testing.T, pods ...*corev1.Pod) *DaemonsetMounter {
+// limitDM is a DaemonsetMounter on test-node, built as the driver builds it, whose API server holds objects.
+func limitDM(t *testing.T, objects ...runtime.Object) *DaemonsetMounter {
 	t.Helper()
-	var objects []runtime.Object
-	for _, pod := range pods {
-		objects = append(objects, pod)
-	}
 	dm := NewDaemonsetMounter(fake.NewSimpleClientset(objects...), "test-node", mpmounter.NewWithMount(mountutils.NewFakeMounter(nil)),
 		nil, nil, nil, nil, "", cluster.DefaultKubernetes)
 	dm.kubeletPath = t.TempDir()
 	return dm
+}
+
+// volumeLimit returns dm's volume limit, failing the test if VolumeLimit fails.
+func volumeLimit(t *testing.T, dm *DaemonsetMounter) int64 {
+	t.Helper()
+	limit, err := dm.VolumeLimit(context.Background())
+	assert.NoError(t, err)
+	return limit
+}
+
+// testNode is the test-node Node, with taints.
+func testNode(taints ...corev1.Taint) *corev1.Node {
+	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}, Spec: corev1.NodeSpec{Taints: taints}}
 }
 
 // withLimit sets the mounter pod's MounterMaxVolumesLabel.

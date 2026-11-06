@@ -91,6 +91,9 @@ type Driver struct {
 	// mounterFound, if set, is closed once this node can mount S3 volumes, which the agent-not-ready
 	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
 	mounterFound <-chan struct{}
+	// mounterVolumeLimit, if set, returns the volume limit kubelet must have for this node before the
+	// agent-not-ready taint comes off, and false while no mounter runs.
+	mounterVolumeLimit func() (int64, bool)
 
 	stopCh chan struct{}
 }
@@ -135,6 +138,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	var nodeServer *node.S3NodeServer
 	var mounterFound <-chan struct{}
+	var mounterVolumeLimit func() (int64, bool)
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
@@ -182,8 +186,10 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		go dm.StartCommDirWatch(stopCh)
 		go dm.StartPeriodicCleanup(stopCh)
 
+		dm.SetStartupTaintKey(node.AgentNotReadyNodeTaintKey)
 		nodeServer = node.NewS3NodeServer(nodeID, dm, 0)
 		mounterFound = dm.MounterFound()
+		mounterVolumeLimit = dm.RunningMounterVolumeLimit
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -209,12 +215,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}
 
 	return &Driver{
-		Endpoint:     endpoint,
-		NodeID:       nodeID,
-		NodeServer:   nodeServer,
-		Clientset:    clientset,
-		mounterFound: mounterFound,
-		stopCh:       stopCh,
+		Endpoint:           endpoint,
+		NodeID:             nodeID,
+		NodeServer:         nodeServer,
+		Clientset:          clientset,
+		mounterFound:       mounterFound,
+		mounterVolumeLimit: mounterVolumeLimit,
+		stopCh:             stopCh,
 	}, nil
 }
 
@@ -273,7 +280,9 @@ func (d *Driver) Run() error {
 
 // startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node
 // can mount S3 volumes: right away, or in daemonset mode once its mounter is first found, so a node that
-// the taint keeps workloads off stays that way while its mounter isn't running.
+// the taint keeps workloads off stays that way while its mounter isn't running. In daemonset mode the
+// watcher also waits for kubelet to have the mounter's volume limit, so the scheduler places no more S3
+// volumes on the node than its mounter takes.
 func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
 	if d.mounterFound != nil {
 		select {
@@ -282,7 +291,7 @@ func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
 			return
 		}
 	}
-	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
+	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration, d.mounterVolumeLimit)
 }
 
 func (d *Driver) Stop() {
