@@ -63,9 +63,18 @@ const (
 
 // S3NodeServer is the implementation of the csi.NodeServer interface
 type S3NodeServer struct {
-	NodeID            string
-	Mounter           mounter.Mounter
+	NodeID  string
+	Mounter mounter.Mounter
+	// MaxVolumesPerNode is the volume limit NodeGetInfo advertises, unless Mounter is a [VolumeLimiter].
 	MaxVolumesPerNode int64
+}
+
+// VolumeLimiter is a [mounter.Mounter] that decides the node's volume limit itself, which can change while
+// the driver runs. Kubelet picks up a change where it re-reads NodeGetInfo periodically.
+type VolumeLimiter interface {
+	// VolumeLimit returns the most S3 volumes the scheduler may place on this node, or 0 for no limit. An error
+	// fails NodeGetInfo, so kubelet doesn't register the node yet.
+	VolumeLimit(ctx context.Context) (int64, error)
 }
 
 func NewS3NodeServer(nodeID string, mounter mounter.Mounter, maxVolumesPerNode int64) *S3NodeServer {
@@ -298,9 +307,18 @@ func (ns *S3NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGe
 func (ns *S3NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	klog.V(4).Infof("NodeGetInfo: called with args %+v", req)
 
+	maxVolumesPerNode := ns.MaxVolumesPerNode
+	if limiter, ok := ns.Mounter.(VolumeLimiter); ok {
+		limit, err := limiter.VolumeLimit(ctx)
+		if err != nil {
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
+		maxVolumesPerNode = limit
+	}
+
 	return &csi.NodeGetInfoResponse{
 		NodeId:            ns.NodeID,
-		MaxVolumesPerNode: ns.MaxVolumesPerNode,
+		MaxVolumesPerNode: maxVolumesPerNode,
 	}, nil
 }
 
