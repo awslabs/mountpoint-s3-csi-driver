@@ -44,7 +44,7 @@ func cacheVolumeSummary(cacheVolume *corev1.Volume) string {
 	case cacheVolume.EmptyDir != nil:
 		return fmt.Sprintf("cache type: emptyDir, emptyDir medium: %q, emptyDir sizeLimit: %q",
 			cacheVolume.EmptyDir.Medium, cacheVolume.EmptyDir.SizeLimit.String())
-	case cacheVolume.Ephemeral != nil:
+	case cacheVolume.Ephemeral != nil && cacheVolume.Ephemeral.VolumeClaimTemplate != nil:
 		spec := cacheVolume.Ephemeral.VolumeClaimTemplate.Spec
 		return fmt.Sprintf("cache type: ephemeral, ephemeral StorageClass: %q, ephemeral request: %q",
 			ptr.Deref(spec.StorageClassName, ""), spec.Resources.Requests.Storage().String())
@@ -98,13 +98,13 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, n
 	// cache type / emptyDir medium / ephemeral StorageClass mismatch
 	switch pvCache {
 	case volumecontext.CacheTypeEmptyDir:
-		if nodeCache.EmptyDir == nil {
+		if nodeCache == nil || nodeCache.EmptyDir == nil {
 			mismatch = "cache type"
 		} else if string(nodeCache.EmptyDir.Medium) != volumeCtx[volumecontext.CacheEmptyDirMedium] {
 			mismatch = "emptyDir medium"
 		}
 	case volumecontext.CacheTypeEphemeral:
-		if nodeCache.Ephemeral == nil {
+		if nodeCache == nil || nodeCache.Ephemeral == nil || nodeCache.Ephemeral.VolumeClaimTemplate == nil {
 			mismatch = "cache type"
 		} else if ptr.Deref(nodeCache.Ephemeral.VolumeClaimTemplate.Spec.StorageClassName, "") != volumeCtx[volumecontext.CacheEphemeralStorageClassName] {
 			mismatch = "ephemeral StorageClass"
@@ -117,6 +117,7 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, n
 	}
 
 	// No cache type mismatch: warn if v2 cache sizes are set (CacheEmptyDirSizeLimit / CacheEphemeralStorageResourceRequest)
+	// nodeCache can be nil on a node, but the deprecated config warnings below still apply
 	var deprecated []string
 	for _, attr := range deprecatedVolumeAttributes {
 		if volumeCtx[attr] != "" {
