@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1413,5 +1415,191 @@ func TestProvideWritesCredentialsWithTheModeForTheirOwner(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equals(t, tc.wantPerm, stat.Mode().Perm())
 		})
+	}
+}
+
+// Secrets that must never appear in an error from Provide. Such errors become the NodePublishVolume
+// error, which the kubelet shows as a FailedMount event to anyone who can read the workload's events.
+const (
+	disclosureSTSToken     = "sts-token-must-not-leak"
+	disclosureEKSToken     = "eks-token-must-not-leak"
+	disclosureAccessKeyID  = "AKIAMUSTNOTLEAK00000"
+	disclosureSecretKey    = "secret-access-key-must-not-leak"
+	disclosureSessionToken = "session-token-must-not-leak"
+)
+
+func assertErrorDiscloses(t *testing.T, err error, secrets ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected Provide to fail")
+	}
+	t.Logf("Provide failed with: %v", err)
+	for _, secret := range secrets {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error discloses %q: %v", secret, err)
+		}
+	}
+}
+
+func podLevelDisclosureCtx(t *testing.T, writePath, tokensJSON string) credentialprovider.ProvideContext {
+	t.Helper()
+	return credentialprovider.ProvideContext{
+		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		WorkloadPodID:        testPodID,
+		VolumeID:             testVolumeID,
+		PodNamespace:         testPodNamespace,
+		ServiceAccountName:   testPodServiceAccount,
+		ServiceAccountTokens: tokensJSON,
+		MountKind:            credentialprovider.MountKindDaemonset,
+	}
+}
+
+func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+	validTokens := func(t *testing.T) string {
+		return serviceAccountTokens(t, tokens{
+			serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken},
+			serviceAccountTokenAudienceEKS: {Token: disclosureEKSToken},
+		})
+	}
+
+	t.Run("does not put a pod's token in the error when its service account tokens are malformed", func(t *testing.T) {
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+		// A token where an object is expected, so decoding fails with the secret in its input.
+		malformed := `{"` + serviceAccountTokenAudienceSTS + `":"` + disclosureSTSToken + `"}`
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), malformed))
+
+		assertErrorDiscloses(t, err, disclosureSTSToken)
+	})
+
+	t.Run("does not put a pod's token in the error when one audience's token is missing", func(t *testing.T) {
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+		onlySTS := serviceAccountTokens(t, tokens{serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken}})
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), onlySTS))
+
+		assertErrorDiscloses(t, err, disclosureSTSToken)
+	})
+
+	t.Run("does not put a pod's tokens in the error when its service account cannot be found", func(t *testing.T) {
+		// No service account exists, so the IAM role lookup fails while both tokens are present.
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), validTokens(t)))
+
+		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
+	})
+
+	t.Run("does not put a pod's tokens in the error when its token file cannot be written", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace,
+			map[string]string{"eks.amazonaws.com/role-arn": testRoleARN}))
+		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+		missingDir := filepath.Join(t.TempDir(), "missing")
+		provideCtx := podLevelDisclosureCtx(t, missingDir, validTokens(t))
+		provideCtx.StsRegion = "us-east-1"
+
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+
+		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
+	})
+
+	t.Run("does not put the driver's long-term keys in the error when they cannot be written", func(t *testing.T) {
+		t.Setenv("AWS_ACCESS_KEY_ID", disclosureAccessKeyID)
+		t.Setenv("AWS_SECRET_ACCESS_KEY", disclosureSecretKey)
+		t.Setenv("AWS_SESSION_TOKEN", disclosureSessionToken)
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            filepath.Join(t.TempDir(), "missing"),
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			MountKind:            credentialprovider.MountKindDaemonset,
+		})
+
+		assertErrorDiscloses(t, err, disclosureAccessKeyID, disclosureSecretKey, disclosureSessionToken)
+	})
+}
+
+// Every credential file the driver writes for a mount carries the mode for its owner, whichever driver-level
+// source provides it: owner-only (0400) and owned by the mount's UID in daemonset mode, so no other mount's
+// Mountpoint can read it.
+func TestDriverLevelCredentialFilesAreOwnerOnlyAndOwnedByTheMountsUID(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+	sources := []struct {
+		name  string
+		setup func(t *testing.T)
+	}{
+		{
+			name: "long-term credentials from a Kubernetes Secret",
+			setup: func(t *testing.T) {
+				t.Setenv("AWS_ACCESS_KEY_ID", testAccessKeyID)
+				t.Setenv("AWS_SECRET_ACCESS_KEY", testSecretAccessKey)
+				t.Setenv("AWS_SESSION_TOKEN", testSessionToken)
+			},
+		},
+		{
+			name: "the driver's IRSA web identity token",
+			setup: func(t *testing.T) {
+				tokenFile := filepath.Join(t.TempDir(), "token")
+				assert.NoError(t, os.WriteFile(tokenFile, []byte(testWebIdentityToken), 0600))
+				t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenFile)
+				t.Setenv("AWS_ROLE_ARN", testRoleARN)
+			},
+		},
+	}
+	owners := []struct {
+		name     string
+		uid      uint32
+		wantPerm fs.FileMode
+	}{
+		{name: "owned by a mount", uid: 65536, wantPerm: credentialprovider.IsolatedCredentialFilePerm},
+		{name: "owned by csi-node", uid: 0, wantPerm: credentialprovider.CredentialFilePerm},
+	}
+	for _, source := range sources {
+		for _, owner := range owners {
+			t.Run(source.name+", "+owner.name, func(t *testing.T) {
+				if owner.uid != 0 && os.Getuid() != 0 {
+					t.Skip("handing a file to another UID needs root")
+				}
+				source.setup(t)
+				writePath := t.TempDir()
+				provider := credentialprovider.New(nil, dummyRegionProvider)
+
+				_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					WritePath:            writePath,
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					VolumeID:             testVolumeID,
+					MountKind:            credentialprovider.MountKindDaemonset,
+					Uid:                  owner.uid,
+				})
+				assert.NoError(t, err)
+
+				entries, err := os.ReadDir(writePath)
+				assert.NoError(t, err)
+				if len(entries) == 0 {
+					t.Fatal("expected Provide to write credential files")
+				}
+				for _, entry := range entries {
+					stat, err := os.Stat(filepath.Join(writePath, entry.Name()))
+					assert.NoError(t, err)
+					if stat.Mode().Perm() != owner.wantPerm {
+						t.Errorf("%s has mode %o, want %o", entry.Name(), stat.Mode().Perm(), owner.wantPerm)
+					}
+					if owner.uid != 0 {
+						sys, ok := stat.Sys().(*syscall.Stat_t)
+						assert.Equals(t, true, ok)
+						assert.Equals(t, owner.uid, sys.Uid)
+						assert.Equals(t, owner.uid, sys.Gid)
+					}
+				}
+			})
+		}
 	}
 }
