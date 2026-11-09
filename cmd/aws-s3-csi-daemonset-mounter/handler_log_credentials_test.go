@@ -39,7 +39,11 @@ func TestHandleConnection_LogsNoCredentials(t *testing.T) {
 	defer listener.Close()
 
 	dev := mountertest.OpenDevNull(t)
+	// Wait for the sender before returning, so the cleanup that closes dev can't race its read of dev.Fd().
+	sent := make(chan struct{})
+	defer func() { <-sent }()
 	go func() {
+		defer close(sent)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		mountoptions.Send(ctx, sockPath, mountoptions.Options{

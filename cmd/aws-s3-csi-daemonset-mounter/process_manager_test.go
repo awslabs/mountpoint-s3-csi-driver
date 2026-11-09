@@ -133,8 +133,11 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 
 	dev := mountertest.OpenDevNull(t)
 
-	// Send options via UDS in background
+	// Send options via UDS in background. Wait for the sender before returning, so the cleanup that
+	// closes dev can't race its read of dev.Fd().
+	sent := make(chan struct{})
 	go func() {
+		defer close(sent)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		mountoptions.Send(ctx, sockPath, mountoptions.Options{
@@ -147,6 +150,7 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 			Gid:        65536,
 		})
 	}()
+	defer func() { <-sent }()
 
 	conn, err := listener.Accept()
 	assert.NoError(t, err)
