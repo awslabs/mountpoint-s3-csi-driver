@@ -89,16 +89,16 @@ func findWorkload(t *testing.T, workloads []renderedWorkload, kind, name string)
 
 // Values rendering the daemonset architecture, without and with a cache volume.
 var daemonsetModeValues = map[string]string{
-	"without a cache": `
+	"in daemonset mode without a cache": `
 experimental: {mounterMode: daemonset}
 daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none}]`,
-	"with a cache": `
+	"in daemonset mode with a cache": `
 experimental: {mounterMode: daemonset}
 daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}]`,
 }
 
 func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
-	cases := map[string]string{"default values": ``}
+	cases := map[string]string{"with the default values": ``}
 	for name, values := range daemonsetModeValues {
 		cases[name] = values
 	}
@@ -117,11 +117,11 @@ func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
 	}
 }
 
-func TestMounterRunsWithMinimalPrivileges(t *testing.T) {
+func TestMounterIsUnprivilegedAndCannotEscalate(t *testing.T) {
 	baseCapabilities := []corev1.Capability{"SETUID", "SETGID", "KILL"}
 	wantCapabilities := map[string][]corev1.Capability{
-		"without a cache": baseCapabilities,
-		"with a cache":    append(slices.Clone(baseCapabilities), "CHOWN", "DAC_OVERRIDE", "FOWNER"),
+		"in daemonset mode without a cache": baseCapabilities,
+		"in daemonset mode with a cache":    append(slices.Clone(baseCapabilities), "CHOWN", "DAC_OVERRIDE", "FOWNER"),
 	}
 	for name, values := range daemonsetModeValues {
 		t.Run(name, func(t *testing.T) {
@@ -162,18 +162,18 @@ func TestMounterRunsWithMinimalPrivileges(t *testing.T) {
 	}
 }
 
-func TestImagesComeFromTheConfiguredRegistry(t *testing.T) {
+func TestImagesComeOnlyFromTheApprovedRegistry(t *testing.T) {
 	for _, tc := range []struct {
 		name, values, wantPrefix string
 	}{
 		{
 			name:       "public ECR by default",
-			values:     daemonsetModeValues["with a cache"],
+			values:     daemonsetModeValues["in daemonset mode with a cache"],
 			wantPrefix: "public.ecr.aws/",
 		},
 		{
 			name: "the regional EKS registry for the EKS add-on",
-			values: daemonsetModeValues["with a cache"] + `
+			values: daemonsetModeValues["in daemonset mode with a cache"] + `
 isEKSAddon: true
 image: {containerRegistry: 602401143452.dkr.ecr.us-west-2.amazonaws.com}
 sidecars:

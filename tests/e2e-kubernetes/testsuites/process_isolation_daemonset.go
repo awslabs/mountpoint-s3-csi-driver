@@ -152,7 +152,7 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 
 	// Holding no capabilities, with every UID set to the mount's, a Mountpoint cannot switch back to
 	// root. Checked by a process with exactly a Mountpoint's identity, as setpriv gives it from the mounter.
-	ginkgo.It("should not let a mount's UID regain root", func(ctx context.Context) {
+	ginkgo.It("should not let a mount's UID switch back to root", func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		pvName := resource.Pv.Name
@@ -237,7 +237,7 @@ func (t *s3CSIProcessIsolationDaemonsetTestSuite) DefineTests(driver storagefram
 
 	// Credential files are covered here, not above: driver-level credentials from the node instance
 	// profile write no files, so only pod-level credentials put a token on disk.
-	ginkgo.It("should own pod-level credential files by the mount's UID", func(ctx context.Context) {
+	ginkgo.It("should own pod-level credential files by the mount's UID and refuse them to another mount's UID", func(ctx context.Context) {
 		oidcProvider := oidcProviderForCluster(ctx, f)
 		if oidcProvider == "" {
 			ginkgo.Skip("cluster has no OIDC provider, so pod-level credentials via IRSA are unavailable")

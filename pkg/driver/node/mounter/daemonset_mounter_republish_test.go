@@ -17,7 +17,7 @@ import (
 
 // With `requiresRepublish: true`, the kubelet calls NodePublishVolume on a running pod's target
 // periodically. A healthy mount must keep serving across those calls: never remounted, never unmounted.
-func TestDaemonsetMounter_RepublishKeepsAHealthyMount(t *testing.T) {
+func TestDaemonsetMounter_HealthyMountKeepsServingAcrossRepublishes(t *testing.T) {
 	testCtx := setupDM(t)
 	target := testCtx.targetPath(testCtx.podUID)
 	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)

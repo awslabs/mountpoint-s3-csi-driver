@@ -891,7 +891,7 @@ func TestCleanupOrphans(t *testing.T) {
 		{
 			// Dead source (nothing in the mount table): source, creds, error file,
 			// meta, and map entry all removed.
-			name: "dead source torn down",
+			name: "dead source torn down, with its credentials and error file",
 			setup: func(t *testing.T, dm *DaemonsetMounter, _ *mountutils.FakeMounter, kubeletPath, sourcePath, _ string) {
 				commDir := filepath.Join(kubeletPath, "comm")
 				assert.NoError(t, os.MkdirAll(filepath.Join(commDir, volumeID), 0750))

@@ -31,7 +31,7 @@ func isCryptoImport(path string) bool {
 	})
 }
 
-func TestProductionCodeImportsOnlyApprovedCrypto(t *testing.T) {
+func TestProductionCodeUsesNoCustomOrThirdPartyCrypto(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

@@ -59,7 +59,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 		})
 	}
 
-	t.Run("pod-level: malformed service account tokens", func(t *testing.T) {
+	t.Run("does not put a pod's token in the error when its service account tokens are malformed", func(t *testing.T) {
 		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
 		// A token where an object is expected, so decoding fails with the secret in its input.
 		malformed := `{"` + serviceAccountTokenAudienceSTS + `":"` + disclosureSTSToken + `"}`
@@ -69,7 +69,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 		assertErrorDiscloses(t, err, disclosureSTSToken)
 	})
 
-	t.Run("pod-level: token for one audience missing", func(t *testing.T) {
+	t.Run("does not put a pod's token in the error when one audience's token is missing", func(t *testing.T) {
 		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
 		onlySTS := serviceAccountTokens(t, tokens{serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken}})
 
@@ -78,7 +78,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 		assertErrorDiscloses(t, err, disclosureSTSToken)
 	})
 
-	t.Run("pod-level: service account lookup fails", func(t *testing.T) {
+	t.Run("does not put a pod's tokens in the error when its service account cannot be found", func(t *testing.T) {
 		// No service account exists, so the IAM role lookup fails while both tokens are present.
 		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
 
@@ -87,7 +87,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
 	})
 
-	t.Run("pod-level: token cannot be written", func(t *testing.T) {
+	t.Run("does not put a pod's tokens in the error when its token file cannot be written", func(t *testing.T) {
 		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace,
 			map[string]string{"eks.amazonaws.com/role-arn": testRoleARN}))
 		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
@@ -100,7 +100,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
 	})
 
-	t.Run("driver-level: long-term credentials cannot be written", func(t *testing.T) {
+	t.Run("does not put the driver's long-term keys in the error when they cannot be written", func(t *testing.T) {
 		t.Setenv("AWS_ACCESS_KEY_ID", disclosureAccessKeyID)
 		t.Setenv("AWS_SECRET_ACCESS_KEY", disclosureSecretKey)
 		t.Setenv("AWS_SESSION_TOKEN", disclosureSessionToken)

@@ -699,7 +699,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				// the refresh path itself: the rewritten file keeps its owner-only mode and the mount's UID, and
 				// the mount keeps working with it.
 				// TODO: Also implement for pod-level EKS Pod Identity.
-				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
+				It("should keep a refreshed token file owner-only and owned by the mount's UID, with the mount still working", func(ctx context.Context) {
 					if !isDaemonsetMounterMode(ctx, f) {
 						Skip("checks the daemonset mounter's per-mount token file")
 					}

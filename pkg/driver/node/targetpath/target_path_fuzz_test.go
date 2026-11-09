@@ -14,8 +14,8 @@ import (
 // suffix. The regex leaves the `.` in `kubernetes.io~csi` unescaped, so the fuzzer finds it accepting
 // `/pods/0/volumes/kubernetes0io~csi/0/mount`. Add that check, and `.`/`..` rejection, with the fix.
 //
-// `go test` runs the seeds below; `go test -fuzz=FuzzParse ./pkg/driver/node/targetpath/` explores further.
-func FuzzParse(f *testing.F) {
+// `go test` runs the seeds below; `go test -fuzz=FuzzTargetPathParseNeverCrashesOnMalformedPaths ./pkg/driver/node/targetpath/` explores further.
+func FuzzTargetPathParseNeverCrashesOnMalformedPaths(f *testing.F) {
 	for _, seed := range []string{
 		"/var/lib/kubelet/pods/d8c872d7-a29c-4362-81b1-9912370d0813/volumes/kubernetes.io~csi/s3-pv/mount",
 		"/var/lib/kubelet/pods/8b40411d/volumes/kubernetes.io~csi/s3-csi~driver/mount",

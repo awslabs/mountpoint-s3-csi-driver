@@ -16,7 +16,7 @@ import (
 // Every credential file the driver writes for a mount carries the mode for its owner, whichever driver-level
 // source provides it: owner-only (0400) and owned by the mount's UID in daemonset mode, so no other mount's
 // Mountpoint can read it.
-func TestProvideWritesDriverLevelCredentialFilesWithTheModeForTheirOwner(t *testing.T) {
+func TestDriverLevelCredentialFilesAreOwnerOnlyAndOwnedByTheMountsUID(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 	sources := []struct {
 		name  string

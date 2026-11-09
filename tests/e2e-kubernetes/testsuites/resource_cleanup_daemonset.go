@@ -254,7 +254,7 @@ func (t *s3CSIResourceCleanupDaemonsetTestSuite) DefineTests(driver storageframe
 	// the credentials and the bind mount every time would need fault injection in the driver. The log records
 	// which path a run took.
 	// Serial: it kills the node's csi-node pod, which every other spec on the node relies on.
-	ginkgo.It("should leave no residue when csi-node is killed during a publish", ginkgo.Serial, func(ctx context.Context) {
+	ginkgo.It("should leave no source mount, cache or credentials behind when csi-node is killed during a publish", ginkgo.Serial, func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		pvName := resource.Pv.Name

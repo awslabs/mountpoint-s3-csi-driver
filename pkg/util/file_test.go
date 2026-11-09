@@ -154,7 +154,7 @@ func TestWriteFileOwned(t *testing.T) {
 		assert.Equals(t, 1, len(entries))
 	})
 
-	t.Run("Keeps the owner when it replaces an existing file", func(t *testing.T) {
+	t.Run("Keeps the owner and owner-only mode when a credential refresh replaces the file", func(t *testing.T) {
 		if os.Getuid() != 0 {
 			t.Skip("changing a file's owner and group needs root")
 		}

@@ -39,7 +39,7 @@ var tlsAndEndpointArgs = []string{
 // With nothing in the PV asking for it, the options csi-node sends a Mountpoint carry no TLS, endpoint or
 // signing override, so Mountpoint keeps its defaults: HTTPS to the regional S3 endpoint, signed with SigV4.
 // TLS itself is negotiated by Mountpoint's CRT client, outside this repository.
-func TestDaemonsetMounter_SendsNoTLSOrEndpointOverrideByDefault(t *testing.T) {
+func TestDaemonsetMounter_KeepsMountpointOnTLSToTheS3EndpointByDefault(t *testing.T) {
 	testCtx := setupDM(t)
 	for _, key := range tlsAndEndpointEnv {
 		t.Setenv(key, "https://attacker.example.com")

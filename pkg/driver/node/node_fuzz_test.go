@@ -21,8 +21,8 @@ import (
 // with InvalidArgument and never panic. A request it accepts must reach the mounter with no `-o` or
 // `--ca-bundle`, a target under the kubelet path, and only user environment variables on the allowlist.
 //
-// `go test` runs the seeds below; `go test -fuzz=FuzzNodePublishVolume ./pkg/driver/node/` explores further.
-func FuzzNodePublishVolume(f *testing.F) {
+// `go test` runs the seeds below; `go test -fuzz=FuzzNodePublishVolumeNeverCrashesOnMalformedRequests ./pkg/driver/node/` explores further.
+func FuzzNodePublishVolumeNeverCrashesOnMalformedRequests(f *testing.F) {
 	const target = "/var/lib/kubelet/pods/d8c872d7-a29c-4362-81b1-9912370d0813/volumes/kubernetes.io~csi/s3-pv/mount"
 	type seed struct {
 		volumeID, bucket   string
