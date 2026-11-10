@@ -134,8 +134,6 @@ With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-schedulin
   The driver doesn't run on nodes that `node.affinity` or `node.nodeSelector` exclude, or on nodes with taints it doesn't tolerate.
 - If the Pod is waiting for Cluster Autoscaler to add a node, check that Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, and that node groups that scale from zero have the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag with `s3.csi.aws.com` in its value.
 
-To go back to the previous scheduling behavior, set `node.preventPodSchedulingIfMissing` to `false`.
-
 ## Mountpoint pods are failing with "Failed to receive mount options from /comm/mount.sock"
 
 Mountpoint pods are scheduled immediately when a workload's pod is scheduled.
