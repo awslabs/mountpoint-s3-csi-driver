@@ -614,7 +614,7 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		pm.Shutdown()
 	})
 
-	t.Run("recreates the PV's directory, owned by its UID and closed to every other, when the mount is launched again", func(t *testing.T) {
+	t.Run("gives a relaunched mount a fresh 0700 cache directory, even when a killed Mountpoint left blocks behind and the directory at 0755", func(t *testing.T) {
 		fr := &fakeProcessRunner{}
 		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
 		perPvCacheDir := filepath.Join(cacheDir, dirName)
@@ -1505,8 +1505,6 @@ func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *tes
 // The mounter receives a mount's credentials in the options csi-node sends, and passes them to Mountpoint
 // in its environment. Across the whole lifecycle (receive, launch, Mountpoint failing, shutdown) it logs
 // the mount ID and bucket, never the environment.
-//
-// Mountpoint's own stderr is copied to the logs as is, so this does not cover what Mountpoint prints.
 func TestHandleConnection_LogsNoCredentials(t *testing.T) {
 	const (
 		accessKeyID     = "AKIAIOSFODNN7EXAMPLE"

@@ -693,12 +693,18 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					expectFailToMount(enablePodLevelIdentity(ctx), sa.Name, nil)
 				})
 
+				It("should refresh credentials after receiving new tokens", func(ctx context.Context) {
+					// TODO:
+					// 1. Trigger a manual `TokenRequest` or wait for it's own lifecylce
+					// 2. Assert new token file is written to the Pod
+					// TODO: Also implement for pod-level EKS Pod Identity
+				})
+
 				// With requiresRepublish the kubelet calls NodePublishVolume periodically with the pod's current
 				// token, and csi-node rewrites the token file each time: that is how a refreshed token reaches
 				// Mountpoint. Forcing a new token is impractical (1h TTL, renewed late in its life), so this checks
 				// the refresh path itself: the rewritten file keeps its owner-only mode and the mount's UID, and
 				// the mount keeps working with it.
-				// TODO: Also implement for pod-level EKS Pod Identity.
 				It("should keep a refreshed token file owner-only and owned by the mount's UID, with the mount still working", func(ctx context.Context) {
 					if !isDaemonsetMounterMode(ctx, f) {
 						Skip("checks the daemonset mounter's per-mount token file")

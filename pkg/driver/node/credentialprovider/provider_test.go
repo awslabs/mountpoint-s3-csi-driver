@@ -1418,8 +1418,8 @@ func TestProvideWritesCredentialsWithTheModeForTheirOwner(t *testing.T) {
 	}
 }
 
-// Secrets that must never appear in an error from Provide. Such errors become the NodePublishVolume
-// error, which the kubelet shows as a FailedMount event to anyone who can read the workload's events.
+// These fake secrets must never show up in an error from Provide. When Provide fails, its error ends up
+// in the pod's FailedMount event, and anyone who can read the pod's events can see it.
 const (
 	disclosureSTSToken     = "sts-token-must-not-leak"
 	disclosureEKSToken     = "eks-token-must-not-leak"
@@ -1525,9 +1525,7 @@ func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
 	})
 }
 
-// Every credential file the driver writes for a mount carries the mode for its owner, whichever driver-level
-// source provides it: owner-only (0400) and owned by the mount's UID in daemonset mode, so no other mount's
-// Mountpoint can read it.
+// The driver's credential files for a mount are owned by that mount's UID and readable only by it (0400).
 func TestDriverLevelCredentialFilesAreOwnerOnlyAndOwnedByTheMountsUID(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 	sources := []struct {
