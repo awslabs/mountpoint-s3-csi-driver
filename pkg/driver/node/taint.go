@@ -23,7 +23,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -53,9 +52,7 @@ type JSONPatch struct {
 
 // StartNotReadyTaintWatcher launches a short-lived Node informer that removes the
 // s3.csi.aws.com/agent-not-ready taint. The informer is stopped after maxWatchDuration.
-// volumeLimit, if set, returns the volume limit kubelet must have registered for the driver before the
-// taint comes off, and false while there's none yet.
-func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, maxWatchDuration time.Duration, volumeLimit func() (int64, bool)) {
+func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, maxWatchDuration time.Duration) {
 	if nodeID == "" {
 		klog.V(4).Infof("nodeID is empty, skipping taint watcher")
 		return
@@ -91,8 +88,8 @@ func StartNotReadyTaintWatcher(clientset kubernetes.Interface, nodeID string, ma
 
 		err := wait.ExponentialBackoffWithContext(ctx, backoff, func(ctx context.Context) (bool, error) {
 			// First check if driver is registered
-			if err := checkDriverRegistered(ctx, clientset, n.Name, volumeLimit); err != nil {
-				klog.V(4).Infof("CSI driver not ready yet, retrying for node %s: %v", n.Name, err)
+			if err := checkDriverRegistered(ctx, clientset, n.Name); err != nil {
+				klog.V(4).Infof("CSI driver not yet registered, retrying for node %s: %v", n.Name, err)
 				return false, nil // Continue retrying
 			}
 
@@ -156,41 +153,21 @@ func hasNotReadyTaint(n *corev1.Node) bool {
 	return false
 }
 
-// checkDriverRegistered verifies that the CSI driver is registered in the CSINode object, with the volume
-// limit volumeLimit returns if set.
-func checkDriverRegistered(ctx context.Context, clientset kubernetes.Interface, nodeName string, volumeLimit func() (int64, bool)) error {
+// checkDriverRegistered verifies that the CSI driver is registered in the CSINode object
+func checkDriverRegistered(ctx context.Context, clientset kubernetes.Interface, nodeName string) error {
 	csiNode, err := clientset.StorageV1().CSINodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get CSINode for %s: %w", nodeName, err)
 	}
 
 	for _, driver := range csiNode.Spec.Drivers {
-		if driver.Name != csiDriverName {
-			continue
+		if driver.Name == csiDriverName {
+			klog.V(4).Infof("CSI driver %s found in CSINode for node %s", csiDriverName, nodeName)
+			return nil
 		}
-		if volumeLimit != nil {
-			want, ok := volumeLimit()
-			if !ok {
-				return fmt.Errorf("no volume limit for CSI driver %s on node %s yet", csiDriverName, nodeName)
-			}
-			if got := registeredVolumeLimit(driver); got != want {
-				return fmt.Errorf("CSINode for node %s has a volume limit of %d for CSI driver %s, not %d yet (0 is none)",
-					nodeName, got, csiDriverName, want)
-			}
-		}
-		klog.V(4).Infof("CSI driver %s found in CSINode for node %s", csiDriverName, nodeName)
-		return nil
 	}
 
 	return fmt.Errorf("CSI driver %s not found in CSINode for node %s", csiDriverName, nodeName)
-}
-
-// registeredVolumeLimit returns the volume limit kubelet registered for driver, or 0 for none.
-func registeredVolumeLimit(driver storagev1.CSINodeDriver) int64 {
-	if driver.Allocatable == nil || driver.Allocatable.Count == nil {
-		return 0
-	}
-	return int64(*driver.Allocatable.Count)
 }
 
 // removeNotReadyTaint removes the taint s3.csi.aws.com/agent-not-ready from the local node

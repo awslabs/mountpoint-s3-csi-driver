@@ -172,7 +172,8 @@ experimental:
 # Only used when experimental.mounterMode is "daemonset".
 daemonsetMounters:
     # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
-    # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
+    # Advertised to the Kubernetes scheduler via MaxVolumesPerNode. Until a node's mounter
+    # runs, the node advertises the smallest maxVolumesPerNode of all entries instead.
     # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
     # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
     # 0 is only allowed with memoryLimitStrategy "none".

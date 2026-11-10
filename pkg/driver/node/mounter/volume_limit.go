@@ -2,34 +2,23 @@ package mounter
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
 // The volume limit this node pod advertises to the scheduler, through NodeGetInfo.
 //
-// It is the MounterMaxVolumesLabel of this node's mounter, kept after the mounter goes away until another
-// one runs. A node pod with no mounter still serves the volumes already on its node, which need unmounting
-// (and those V1 and V2 mounted, credential refresh), so it stays registered, and advertises
-// noMounterVolumeLimit until a mounter runs.
+// It is the MounterMaxVolumesLabel of this node's running mounter. A node pod with no mounter still serves the
+// volumes already on its node, which need unmounting (and those V1 and V2 mounted, credential refresh), so it
+// registers right away, advertising the fallback limit: the smallest maxVolumesPerNode of the chart's
+// daemonsetMounters entries, so no more than the mounter that comes to run here takes. The startup taint, not
+// registration, keeps workloads off a new node until its mounter runs.
 const (
-	// noMounterVolumeLimit is the limit advertised until a mounter runs on this node: none. The startup
-	// taint keeps workloads off new nodes until their mounter runs.
-	noMounterVolumeLimit int64 = 0
-
-	// defaultLimitWaitForMounter is how long VolumeLimit waits for a mounter: once after startup, so a node pod
-	// starting alongside its mounter registers the mounter's limit, the only one some kubelets read, and at
-	// every call on a node that has the startup taint and no mounter yet, before it fails. Kubelet allows
-	// NodeGetInfo 2 minutes at registration.
-	defaultLimitWaitForMounter = 110 * time.Second
-
 	// defaultStaleVolumeLimitWarnAfter is how long kubelet can keep a limit that no longer holds, without
 	// re-reading it, before this node pod warns that kubelet isn't refreshing it.
 	defaultStaleVolumeLimitWarnAfter = 60 * time.Second
@@ -43,10 +32,6 @@ type volumeLimitState struct {
 	found       chan struct{}
 	foundClosed bool
 
-	// lastLimit is the limit of the last mounter discovered, if it had a valid MounterMaxVolumesLabel (hasLastLimit).
-	lastLimit    int64
-	hasLastLimit bool
-
 	// advertised is the limit NodeGetInfo last returned, and advertisedReason why, at advertisedAt. A zero
 	// advertisedAt means kubelet hasn't asked yet.
 	advertised       int64
@@ -56,12 +41,6 @@ type volumeLimitState struct {
 	// staleWarnedFor is the limit the last stale-limit warning was logged for, if staleWarned.
 	staleWarnedFor int64
 	staleWarned    bool
-
-	// startupTaintKey is the taint that keeps workloads off a new node until its mounter runs, if set. It's set
-	// before NodeGetInfo is served, so reading it needs no lock. startupTaintGone is set once the node is seen
-	// without it.
-	startupTaintKey  string
-	startupTaintGone bool
 }
 
 // foundCh returns the channel closed once a mounter is first discovered. Caller must hold s.mu.
@@ -79,27 +58,10 @@ func (dm *DaemonsetMounter) MounterFound() <-chan struct{} {
 	return dm.limit.foundCh()
 }
 
-// SetStartupTaintKey sets the key of the taint that keeps workloads off a new node until its mounter runs.
+// SetFallbackVolumeLimit sets the volume limit to advertise while no mounter runs on this node, 0 for none.
 // Call it before serving NodeGetInfo.
-func (dm *DaemonsetMounter) SetStartupTaintKey(key string) {
-	dm.limit.startupTaintKey = key
-}
-
-// RunningMounterVolumeLimit returns the volume limit VolumeLimit advertises for this node's running mounter,
-// and false while no mounter runs.
-func (dm *DaemonsetMounter) RunningMounterVolumeLimit() (int64, bool) {
-	if dm.mounter.Load() == nil {
-		return 0, false
-	}
-	limit, _, _ := dm.currentVolumeLimit()
-	return limit, true
-}
-
-// SetVolumeLimitTimingForTesting replaces how long VolumeLimit waits for a mounter after startup, and how
-// long a stale limit lasts before a warning.
-func (dm *DaemonsetMounter) SetVolumeLimitTimingForTesting(limitWaitForMounter, staleWarnAfter time.Duration) {
-	dm.limitWaitForMounter = limitWaitForMounter
-	dm.staleVolumeLimitWarnAfter = staleWarnAfter
+func (dm *DaemonsetMounter) SetFallbackVolumeLimit(limit int64) {
+	dm.fallbackVolumeLimit = limit
 }
 
 // setMounter records m as this node's mounter, or nil once it is gone or stale.
@@ -109,38 +71,19 @@ func (dm *DaemonsetMounter) setMounter(m *mounterPod) {
 	defer s.mu.Unlock()
 
 	dm.mounter.Store(m)
-	if m == nil {
-		return
-	}
-	// A mounter with no valid label has no limit to keep once it goes away, so drop any earlier mounter's.
-	s.lastLimit, s.hasLastLimit = m.maxVolumes, m.maxVolumes >= 0
-	if !s.foundClosed {
+	if m != nil && !s.foundClosed {
 		close(s.foundCh())
 		s.foundClosed = true
 	}
 }
 
-// VolumeLimit returns the volume limit to advertise for this node (0 for none): the mounter's
-// MounterMaxVolumesLabel once one runs here, or noMounterVolumeLimit until then. A mounter that goes away
-// keeps its limit until another one runs. Shortly after startup, it first waits for a mounter.
-//
-// On a node that has the startup taint and no mounter yet, it waits for one at every call, and fails if none
-// runs, so kubelet registers the node only with its mounter's limit: no workload runs there yet to need it
-// registered sooner.
+// VolumeLimit returns the volume limit to advertise for this node (0 for none): the running mounter's
+// MounterMaxVolumesLabel, or the fallback limit while none runs. It fails only when it can't tell whether a
+// mounter runs, as the fallback can be more than a running mounter takes.
 func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) (int64, error) {
-	if !dm.mounterFoundOnce() && dm.hasStartupTaint(ctx) {
-		if !dm.waitForMounter(ctx, time.Now().Add(dm.limitWaitForMounter)) {
-			return 0, fmt.Errorf("no s3-csi-daemonset-mounter runs on node %s yet, and the node has the %s startup taint, so "+
-				"it isn't registered with kubelet until one runs. %s", dm.nodeID, dm.limit.startupTaintKey, helpMessageForCheckingMounterPodStatus())
-		}
-	} else {
-		dm.waitForMounter(ctx, dm.startedAt.Add(dm.limitWaitForMounter))
-	}
-
-	limit, reason, warn := dm.currentVolumeLimit()
-	if ctx.Err() != nil {
-		// Kubelet gave up on this call, so it never gets this limit: don't record it as the one kubelet has.
-		return limit, nil
+	limit, reason, warn, err := dm.currentVolumeLimit(ctx)
+	if err != nil {
+		return 0, err
 	}
 
 	s := &dm.limit
@@ -163,82 +106,49 @@ func (dm *DaemonsetMounter) VolumeLimit(ctx context.Context) (int64, error) {
 	return limit, nil
 }
 
-// waitForMounter waits until a mounter is first discovered, ctx is done, or until, whichever is first, and
-// returns whether a mounter runs.
-func (dm *DaemonsetMounter) waitForMounter(ctx context.Context, until time.Time) bool {
-	if wait := time.Until(until); wait > 0 && dm.mounter.Load() == nil {
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		select {
-		case <-dm.MounterFound():
-		case <-timer.C:
-		case <-ctx.Done():
-		}
-	}
-	return dm.mounter.Load() != nil
-}
-
-// mounterFoundOnce returns whether a mounter has been discovered on this node since startup.
-func (dm *DaemonsetMounter) mounterFoundOnce() bool {
-	dm.limit.mu.Lock()
-	defer dm.limit.mu.Unlock()
-	return dm.limit.foundClosed
-}
-
-// hasStartupTaint returns whether this node has the startup taint, or false if it can't tell. The taint only
-// comes off a node, so once it's gone this doesn't ask the API server again.
-func (dm *DaemonsetMounter) hasStartupTaint(ctx context.Context) bool {
-	s := &dm.limit
-	s.mu.Lock()
-	gone := s.startupTaintGone
-	s.mu.Unlock()
-	if s.startupTaintKey == "" || gone {
-		return false
-	}
-
-	node, err := dm.clientset.CoreV1().Nodes().Get(ctx, dm.nodeID, metav1.GetOptions{})
-	if err != nil {
-		klog.Warningf("DaemonsetMounter: can't tell whether node %s has the %s startup taint, so registering it as if not: %v",
-			dm.nodeID, s.startupTaintKey, err)
-		return false
-	}
-	if slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == s.startupTaintKey }) {
-		return true
-	}
-	s.mu.Lock()
-	s.startupTaintGone = true
-	s.mu.Unlock()
-	return false
-}
-
 // currentVolumeLimit returns the volume limit that holds now, why, and whether that deserves a warning.
-func (dm *DaemonsetMounter) currentVolumeLimit() (int64, string, bool) {
+func (dm *DaemonsetMounter) currentVolumeLimit(ctx context.Context) (int64, string, bool, error) {
+	maxVolumes, found := int64(0), false
 	if m := dm.mounter.Load(); m != nil {
+		maxVolumes, found = m.maxVolumes, true
+	} else {
+		// Discovery may not have found a mounter that runs yet, so look. A running mounter's label wins over the
+		// fallback: one left from before a helm upgrade that raised maxVolumesPerNode takes fewer volumes.
+		running, err := dm.runningMounterPods(ctx)
 		switch {
-		case m.maxVolumes < 0:
-			return noMounterVolumeLimit, "its s3-csi-daemonset-mounter has no valid " + MounterMaxVolumesLabel + " label", true
-		case m.maxVolumes == 0:
-			return 0, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label is 0. The scheduler will not " +
-				"limit the number of S3 volumes on this node, which may lead to resource exhaustion (memory OOM, or disk " +
-				"exhaustion when cache is enabled) on s3-csi-daemonset-mounter", true
-		default:
-			return m.maxVolumes, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label", false
+		case errors.Is(err, ErrMultipleMounterPods):
+			// New mounts fail until only one runs, and the fallback is no more than either takes.
+		case err != nil:
+			return 0, "", false, fmt.Errorf("can't tell whether an s3-csi-daemonset-mounter runs on node %s, so it can't "+
+				"tell its volume limit: %w", dm.nodeID, err)
+		case len(running) == 1:
+			maxVolumes, found = mounterPodMaxVolumes(running[0]), true
+			// Discovery takes it on now, rather than on its backed-off schedule.
+			dm.requestRediscovery()
 		}
 	}
 
-	s := &dm.limit
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.hasLastLimit {
-		return s.lastLimit, "kept from its s3-csi-daemonset-mounter, which went away; new S3 mounts on this node fail until another one runs", false
+	const fallback = "the smallest maxVolumesPerNode of the daemonsetMounters entries"
+	switch {
+	case !found:
+		return dm.fallbackVolumeLimit, "no s3-csi-daemonset-mounter runs on this node yet, so new S3 mounts on it fail " +
+			"until one does. Until then it advertises " + fallback, false, nil
+	case maxVolumes < 0:
+		return dm.fallbackVolumeLimit, "its s3-csi-daemonset-mounter has no valid " + MounterMaxVolumesLabel +
+			" label, so it advertises " + fallback, true, nil
+	case maxVolumes == 0:
+		return 0, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label is 0. The scheduler will not " +
+			"limit the number of S3 volumes on this node, which may lead to resource exhaustion (memory OOM, or disk " +
+			"exhaustion when cache is enabled) on s3-csi-daemonset-mounter", true, nil
+	default:
+		return maxVolumes, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label", false, nil
 	}
-	return noMounterVolumeLimit, "no s3-csi-daemonset-mounter runs on this node, so new S3 mounts on it fail until one does", false
 }
 
 // warnIfVolumeLimitStale logs a warning when kubelet still has a limit other than the one of this node's
 // running mounter, and hasn't re-read it for staleVolumeLimitWarnAfter, which happens where kubelet reads it
-// only at registration. It warns once per limit until kubelet's limit holds again. A limit kubelet kept
-// from a mounter that went away needs no warning.
+// only at registration. It warns once per limit until kubelet's limit holds again, and not while no mounter
+// runs.
 func (dm *DaemonsetMounter) warnIfVolumeLimitStale() {
 	m := dm.mounter.Load()
 

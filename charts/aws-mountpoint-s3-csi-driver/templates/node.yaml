@@ -9,6 +9,7 @@ See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more deta
 ` -}}
 {{- end -}}
 {{- $affinity := .Values.node.affinity }}
+{{- $fallbackMaxVolumes := 0 }}
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
 {{- include "aws-mountpoint-s3-csi-driver.validateMounterEntries" . }}
 {{- /* The node pod runs wherever any entry's mounter runs: one node term per entry. */}}
@@ -20,6 +21,11 @@ See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more deta
 {{- end }}
 {{- $exprs = concat $exprs ($m.matchExpressions | default list) }}
 {{- if $exprs }}{{- $exprLists = append $exprLists $exprs }}{{- end }}
+{{- /* The volume limit while no mounter runs on a node: the smallest entry's, where 0 (no limit) is the largest. */}}
+{{- $maxVolumes := int $m.maxVolumesPerNode }}
+{{- if and (gt $maxVolumes 0) (or (eq $fallbackMaxVolumes 0) (lt $maxVolumes $fallbackMaxVolumes)) }}
+{{- $fallbackMaxVolumes = $maxVolumes }}
+{{- end }}
 {{- end }}
 {{- $affinity = include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
 {{- end }}
@@ -141,6 +147,10 @@ spec:
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
+            # The volume limit to advertise while no mounter runs on this node: no more than whichever entry's
+            # mounter comes to run here takes.
+            - name: FALLBACK_MAX_VOLUMES_PER_NODE
+              value: {{ $fallbackMaxVolumes | quote }}
             # This container's image, which the CSI node compares with the mounter's to warn about a mismatch.
             - name: CSI_NODE_IMAGE
               value: {{ include "csiDriverImageName" . }}

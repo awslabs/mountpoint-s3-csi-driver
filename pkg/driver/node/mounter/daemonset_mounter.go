@@ -8,8 +8,8 @@
 //
 // The primary daemonset runs whether or not a secondary pod runs on its node, since the volumes already
 // on the node still need unmounting, and those V1 and V2 mounted, credential refresh. Without one, for
-// example when the node can't fit it or pull its image, new mounts fail and the node advertises the last
-// secondary's volume limit, or none if no secondary has run (volume_limit.go).
+// example when the node can't fit it or pull its image, new mounts fail and the node advertises the
+// fallback volume limit (volume_limit.go).
 //
 // Startup (driver.go):
 //
@@ -155,10 +155,9 @@ type DaemonsetMounter struct {
 	// can find the same pod. Only discovery uses it, which runs at startup and then on the watch goroutine.
 	lastCommDir string
 
-	// limit and the durations below decide the volume limit this node advertises; see VolumeLimit.
+	// limit and the fields below decide the volume limit this node advertises; see VolumeLimit.
 	limit                     volumeLimitState
-	startedAt                 time.Time
-	limitWaitForMounter       time.Duration
+	fallbackVolumeLimit       int64
 	staleVolumeLimitWarnAfter time.Duration
 
 	// Injectable for testing. nil = use default.
@@ -204,9 +203,7 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 		kubernetesVersion: kubernetesVersion,
 		variant:           variant,
 		rediscoverCh:      make(chan struct{}, 1),
-		startedAt:         time.Now(),
 
-		limitWaitForMounter:       defaultLimitWaitForMounter,
 		staleVolumeLimitWarnAfter: defaultStaleVolumeLimitWarnAfter,
 
 		mountSyscall:      mountSyscall,
@@ -1554,10 +1551,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 	commDir := dm.commDirOf(running[0])
 	hasCacheVolume := mounterPodHasCacheVolume(running[0])
 	image := mounterPodImage(running[0])
-	maxVolumes := int64(-1)
-	if n, err := strconv.ParseInt(running[0].Labels[MounterMaxVolumesLabel], 10, 64); err == nil && n >= 0 {
-		maxVolumes = n
-	}
+	maxVolumes := mounterPodMaxVolumes(running[0])
 
 	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t, image: %s",
 		running[0].Name, podUID, commDir, hasCacheVolume, image)
@@ -1570,6 +1564,14 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 		image:          image,
 		maxVolumes:     maxVolumes,
 	}, nil
+}
+
+// mounterPodMaxVolumes returns pod's MounterMaxVolumesLabel, or -1 if it has no valid one.
+func mounterPodMaxVolumes(pod corev1.Pod) int64 {
+	if n, err := strconv.ParseInt(pod.Labels[MounterMaxVolumesLabel], 10, 64); err == nil && n >= 0 {
+		return n
+	}
+	return -1
 }
 
 // runningMounterPods lists this node's running mounter pods, with an ErrMultipleMounterPods error if there is more than one.

@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -63,6 +64,10 @@ const (
 	// mounterWaitBeforeServing is how long startup looks for this node's mounter before serving, so the first
 	// mount requests after a restart find it. Keep it well under the liveness probe's budget (about 18s).
 	mounterWaitBeforeServing = 5 * time.Second
+
+	// fallbackMaxVolumesPerNodeEnv is the volume limit to advertise while no mounter runs on this node, which the
+	// chart sets to the smallest daemonsetMounters[].maxVolumesPerNode. Unset means none.
+	fallbackMaxVolumesPerNodeEnv = "FALLBACK_MAX_VOLUMES_PER_NODE"
 )
 
 var (
@@ -91,9 +96,6 @@ type Driver struct {
 	// mounterFound, if set, is closed once this node can mount S3 volumes, which the agent-not-ready
 	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
 	mounterFound <-chan struct{}
-	// mounterVolumeLimit, if set, returns the volume limit kubelet must have for this node before the
-	// agent-not-ready taint comes off, and false while no mounter runs.
-	mounterVolumeLimit func() (int64, bool)
 
 	stopCh chan struct{}
 }
@@ -138,13 +140,22 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	var nodeServer *node.S3NodeServer
 	var mounterFound <-chan struct{}
-	var mounterVolumeLimit func() (int64, bool)
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
 		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
+		var fallbackVolumeLimit int64
+		if v := os.Getenv(fallbackMaxVolumesPerNodeEnv); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("%s must be a whole number >= 0, got %q", fallbackMaxVolumesPerNodeEnv, v)
+			}
+			fallbackVolumeLimit = n
+		}
+
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil, kubernetesVersion, variant)
+		dm.SetFallbackVolumeLimit(fallbackVolumeLimit)
 
 		// Rebuild mount map from persisted .meta.json files + kernel mount table.
 		// Fatal on failure: operating with an empty map while FUSE mounts exist
@@ -186,10 +197,8 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		go dm.StartCommDirWatch(stopCh)
 		go dm.StartPeriodicCleanup(stopCh)
 
-		dm.SetStartupTaintKey(node.AgentNotReadyNodeTaintKey)
 		nodeServer = node.NewS3NodeServer(nodeID, dm, 0)
 		mounterFound = dm.MounterFound()
-		mounterVolumeLimit = dm.RunningMounterVolumeLimit
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -215,13 +224,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}
 
 	return &Driver{
-		Endpoint:           endpoint,
-		NodeID:             nodeID,
-		NodeServer:         nodeServer,
-		Clientset:          clientset,
-		mounterFound:       mounterFound,
-		mounterVolumeLimit: mounterVolumeLimit,
-		stopCh:             stopCh,
+		Endpoint:     endpoint,
+		NodeID:       nodeID,
+		NodeServer:   nodeServer,
+		Clientset:    clientset,
+		mounterFound: mounterFound,
+		stopCh:       stopCh,
 	}, nil
 }
 
@@ -280,9 +288,7 @@ func (d *Driver) Run() error {
 
 // startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node
 // can mount S3 volumes: right away, or in daemonset mode once its mounter is first found, so a node that
-// the taint keeps workloads off stays that way while its mounter isn't running. In daemonset mode the
-// watcher also waits for kubelet to have the mounter's volume limit, so the scheduler places no more S3
-// volumes on the node than its mounter takes.
+// the taint keeps workloads off stays that way while its mounter isn't running.
 func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
 	if d.mounterFound != nil {
 		select {
@@ -291,7 +297,7 @@ func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
 			return
 		}
 	}
-	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration, d.mounterVolumeLimit)
+	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
 }
 
 func (d *Driver) Stop() {

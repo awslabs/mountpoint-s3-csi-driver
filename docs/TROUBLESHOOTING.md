@@ -149,7 +149,7 @@ $ kubectl describe pod -n kube-system <mounter-pod-name>
 
 - A `Pending` mounter usually doesn't fit on its node: its events show `Insufficient memory` or `Insufficient cpu` when the node has less free than the entry's `daemonsetMounters[].resources.requests`. Free up the node, use larger nodes for that entry, or lower its `resources.requests`.
 
-When the mounter runs, the volume limit becomes the entry's `maxVolumesPerNode`. On EKS 1.34 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
+Until a mounter runs, the node's volume limit is the smallest `maxVolumesPerNode` of your `daemonsetMounters` entries. When the mounter runs, it becomes that mounter's entry's `maxVolumesPerNode`. On EKS 1.34 and later, and Kubernetes 1.35 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
 
 ```bash
 $ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>

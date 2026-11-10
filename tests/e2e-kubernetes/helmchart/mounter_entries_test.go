@@ -123,6 +123,29 @@ func TestMounterEntriesDefaultInstall(t *testing.T) {
 	assert.Equals(t, "4", daemonSets["s3-csi-daemonset-mounter"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
 }
 
+func TestMounterEntriesFallbackVolumeLimit(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		values   string
+		expected string
+	}{
+		{"default install", `{}`, "4"},
+		{"smallest entry's", `daemonsetMounters:
+  - {name: big, nodeSelector: {pool: big}, maxVolumesPerNode: 32, memoryLimitStrategy: none, logLevel: 4}
+  - {name: small, nodeSelector: {pool: small}, ` + entry + `}`, "4"},
+		{"no limit counts as the largest", `daemonsetMounters:
+  - {name: unbounded, nodeSelector: {pool: a}, maxVolumesPerNode: 0, memoryLimitStrategy: none, logLevel: 4}
+  - {name: bounded, nodeSelector: {pool: b}, maxVolumesPerNode: 8, memoryLimitStrategy: none, logLevel: 4}`, "8"},
+		{"none when no entry has a limit", `daemonsetMounters: [{maxVolumesPerNode: 0, memoryLimitStrategy: none, logLevel: 4}]`, "0"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			daemonSets, err := renderDaemonSets(t, testCase.values)
+			assert.NoError(t, err)
+			assert.Equals(t, testCase.expected, envValue(daemonSets["s3-csi-node"], "s3-plugin", "FALLBACK_MAX_VOLUMES_PER_NODE"))
+		})
+	}
+}
+
 func TestMounterEntriesQuoteNodeSelectorValues(t *testing.T) {
 	// Unquoted, these render as a bool and a number, which a nodeSelector can't hold.
 	manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{nodeSelector: {gpu: true, zone: 1}, `+entry+`}]`)
@@ -148,6 +171,21 @@ func terms(ds appsv1.DaemonSet) []string {
 		out = append(out, strings.Join(exprs, " AND "))
 	}
 	return out
+}
+
+// envValue returns the value of env var name in ds's container, or "" if it has none.
+func envValue(ds appsv1.DaemonSet, container, name string) string {
+	for _, c := range ds.Spec.Template.Spec.Containers {
+		if c.Name != container {
+			continue
+		}
+		for _, env := range c.Env {
+			if env.Name == name {
+				return env.Value
+			}
+		}
+	}
+	return ""
 }
 
 // renderDaemonSets renders the chart in daemonset mode with values, a values file's YAML, and returns its DaemonSets by name.
