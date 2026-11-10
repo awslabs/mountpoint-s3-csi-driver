@@ -568,11 +568,9 @@ func (r *Reconciler) createS3PodAttachmentWithMPPod(
 		return err
 	}
 	s3pa := &crdv2beta.MountpointS3PodAttachment{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "s3pa-",
-			Labels: map[string]string{
-				LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
-			},
+		GenerateName: "s3pa-",
+		Labels: map[string]string{
+			LabelCSIDriverVersion: r.mountpointPodConfig.CSIDriverVersion,
 		},
 		Spec: crdv2beta.MountpointS3PodAttachmentSpec{
 			NodeName:             workloadPod.Spec.NodeName,

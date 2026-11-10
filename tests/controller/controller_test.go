@@ -450,10 +450,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -484,11 +482,9 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-								Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
+							Annotations:  map[string]string{csicontroller.AnnotationServiceAccountRole: "test-role"},
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -520,10 +516,8 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
@@ -579,16 +573,12 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
@@ -633,32 +623,24 @@ var _ = Describe("Mountpoint Controller", func() {
 						vol.bind()
 
 						ns := &corev1.Namespace{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "ns-",
-							},
+							GenerateName: "ns-",
 						}
 						Expect(k8sClient.Create(ctx, ns)).To(Succeed())
 						sa1 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "sa-",
-								Namespace:    defaultNamespace,
-							},
+							GenerateName: "sa-",
+							Namespace:    defaultNamespace,
 						}
 						Expect(k8sClient.Create(ctx, sa1)).To(Succeed())
 						sa2 := &corev1.ServiceAccount{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      sa1.Name,
-								Namespace: ns.Name,
-							},
+							Name:      sa1.Name,
+							Namespace: ns.Name,
 						}
 						Expect(k8sClient.Create(ctx, sa2)).To(Succeed())
 						_, err := controllerutil.CreateOrUpdate(ctx, k8sClient, sa2, func() error { return nil })
 						Expect(err).To(Succeed())
 						pvc2 := &corev1.PersistentVolumeClaim{
-							ObjectMeta: metav1.ObjectMeta{
-								GenerateName: "test-pvc",
-								Namespace:    ns.Name,
-							},
+							GenerateName: "test-pvc",
+							Namespace:    ns.Name,
 							Spec: corev1.PersistentVolumeClaimSpec{
 								StorageClassName: vol.pvc.Spec.StorageClassName,
 								AccessModes:      vol.pvc.Spec.AccessModes,
@@ -961,10 +943,9 @@ var _ = Describe("Mountpoint Controller", func() {
 
 	Context("Mountpoint Pod Customization", func() {
 		It("should use configured service account name in PV", func() {
-			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+			sa := &corev1.ServiceAccount{
 				Name:      "mount-s3-sa",
-				Namespace: mountpointNamespace,
-			}}
+				Namespace: mountpointNamespace}
 			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 			waitForObject(sa)
 
@@ -1046,10 +1027,8 @@ var _ = Describe("Mountpoint Controller", func() {
 				verifyLocalCacheVolume(mountpointPod.Pod, corev1.VolumeSource{
 					Ephemeral: &corev1.EphemeralVolumeSource{
 						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-							ObjectMeta: metav1.ObjectMeta{
-								Labels: map[string]string{
-									"s3.csi.aws.com/type": "local-ephemeral-cache",
-								},
+							Labels: map[string]string{
+								"s3.csi.aws.com/type": "local-ephemeral-cache",
 							},
 							Spec: corev1.PersistentVolumeClaimSpec{
 								AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -1234,10 +1213,8 @@ func withPVC(pvc *corev1.PersistentVolumeClaim) podModifier {
 	return func(pod *corev1.Pod) {
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: pvc.Name,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvc.Name,
-				},
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvc.Name,
 			},
 		})
 	}
@@ -1283,10 +1260,8 @@ type podModifier func(*corev1.Pod)
 // createPod creates a new Kubernetes Pod in the control plane with given `modifiers`.
 func createPod(modifiers ...podModifier) *testPod {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    defaultNamespace,
-			GenerateName: "test-pod-",
-		},
+		Namespace:    defaultNamespace,
+		GenerateName: "test-pod-",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
@@ -1364,9 +1339,7 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pv",
-		},
+		GenerateName: "test-pv",
 		Spec: corev1.PersistentVolumeSpec{
 			// Needs to be empty for static provisioning
 			StorageClassName: "",
@@ -1382,10 +1355,8 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "test-pvc",
-			Namespace:    defaultNamespace,
-		},
+		GenerateName: "test-pvc",
+		Namespace:    defaultNamespace,
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: new(""),
 			AccessModes:      accessModes,
@@ -1411,10 +1382,8 @@ func createVolume(modifiers ...volumeModifier) *testVolume {
 // waitForMountpointPodWithName waits and returns the Mountpoint Pod scheduled for given `mpPodName`
 func waitForMountpointPodWithName(mpPodName string) *testPod {
 	mountpointPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mpPodName,
-			Namespace: mountpointNamespace,
-		},
+		Name:      mpPodName,
+		Namespace: mountpointNamespace,
 	}
 	waitForObject(mountpointPod)
 	return &testPod{Pod: mountpointPod}

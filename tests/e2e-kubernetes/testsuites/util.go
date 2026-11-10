@@ -112,9 +112,7 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 	normalizedOptions.Set(mountpoint.ArgDebugCRT, mountpoint.ArgNoValue)
 
 	pv := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
+		Name: pvName,
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: *pvSource,
 			StorageClassName:       "", // for static provisioning
@@ -131,10 +129,8 @@ func createVolumeResource(ctx context.Context, config *storageframework.PerTestC
 		},
 	}
 	pvc := &v1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: f.Namespace.Name,
-		},
+		Name:      pvcName,
+		Namespace: f.Namespace.Name,
 		Spec: v1.PersistentVolumeClaimSpec{
 			StorageClassName: new(""), // for static provisioning
 			VolumeName:       pvName,
@@ -301,7 +297,7 @@ func createServiceAccount(ctx context.Context, f *framework.Framework) (*v1.Serv
 	framework.Logf("Creating ServiceAccount")
 
 	client := f.ClientSet.CoreV1().ServiceAccounts(f.Namespace.Name)
-	sa, err := client.Create(ctx, &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{GenerateName: f.BaseName + "-sa-"}}, metav1.CreateOptions{})
+	sa, err := client.Create(ctx, &v1.ServiceAccount{GenerateName: f.BaseName + "-sa-"}, metav1.CreateOptions{})
 	framework.ExpectNoError(err)
 
 	framework.ExpectNoError(waitForKubernetesObject(ctx, framework.GetObject(client.Get, sa.Name, metav1.GetOptions{})))

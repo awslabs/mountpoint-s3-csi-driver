@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -125,7 +124,7 @@ var _ = AfterSuite(func() {
 // createMountpointNamespace creates Mountpoint namespace in the control plane.
 func createMountpointNamespace() {
 	By(fmt.Sprintf("Creating Mountpoint namespace %q", mountpointNamespace))
-	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mountpointNamespace}}
+	namespace := &corev1.Namespace{Name: mountpointNamespace}
 	Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
 	waitForObject(namespace)
 }
@@ -133,10 +132,8 @@ func createMountpointNamespace() {
 // createDefaultServiceAccount creates default service account in the control plane.
 func createDefaultServiceAccount() {
 	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "default",
-			Namespace: defaultNamespace,
-		},
+		Name:      "default",
+		Namespace: defaultNamespace,
 	}
 
 	By(fmt.Sprintf("Creating default service account in %q", mountpointNamespace))
@@ -148,8 +145,8 @@ func createDefaultServiceAccount() {
 func createMountpointPriorityClass() {
 	By(fmt.Sprintf("Creating priority class  %q for Mountpoint Pods", mountpointPriorityClassName))
 	priorityClass := &schedulingv1.PriorityClass{
-		ObjectMeta: metav1.ObjectMeta{Name: mountpointPriorityClassName},
-		Value:      1000000,
+		Name:  mountpointPriorityClassName,
+		Value: 1000000,
 	}
 	Expect(k8sClient.Create(ctx, priorityClass)).To(Succeed())
 	waitForObject(priorityClass)
