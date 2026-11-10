@@ -26,19 +26,37 @@ type renderedWorkload struct {
 	pod        corev1.PodSpec
 }
 
-// renderWorkloads renders the whole chart with values, a values file's YAML, and returns every DaemonSet and
-// Deployment in it.
-func renderWorkloads(t *testing.T, values string) []renderedWorkload {
+// renderChart renders the whole chart with values, a values file's YAML, and returns its manifests by template
+// path. overrides are set on top of values. The chart refuses to render from a source checkout without
+// unsupportedDevInstall, so that is always set.
+func renderChart(t *testing.T, values string, overrides map[string]any) (map[string]string, error) {
 	t.Helper()
 	ch, err := loader.Load("../../../charts/aws-mountpoint-s3-csi-driver")
 	assert.NoError(t, err)
 	userValues, err := chartutil.ReadValues([]byte(values))
 	assert.NoError(t, err)
-	// The chart refuses to render from a source checkout without unsupportedDevInstall.
+	for key, value := range overrides {
+		userValues[key] = value
+	}
 	userValues["unsupportedDevInstall"] = true
 	renderValues, err := chartutil.ToRenderValues(ch, userValues, chartutil.ReleaseOptions{Name: "s3-csi", Namespace: "kube-system"}, chartutil.DefaultCapabilities)
 	assert.NoError(t, err)
-	manifests, err := engine.Render(ch, renderValues)
+	return engine.Render(ch, renderValues)
+}
+
+// daemonsetMode renders the daemonset architecture; it is the only mode the mounter renders in.
+var daemonsetMode = map[string]any{"experimental": map[string]any{"mounterMode": "daemonset"}}
+
+// templatePath is the key renderChart returns a template's manifest under.
+func templatePath(file string) string {
+	return "aws-mountpoint-s3-csi-driver/templates/" + file
+}
+
+// renderWorkloads renders the whole chart with values, a values file's YAML, and returns every DaemonSet and
+// Deployment in it.
+func renderWorkloads(t *testing.T, values string) []renderedWorkload {
+	t.Helper()
+	manifests, err := renderChart(t, values, nil)
 	assert.NoError(t, err)
 
 	var workloads []renderedWorkload
@@ -117,7 +135,7 @@ func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
 	}
 }
 
-func TestImagesComeOnlyFromTheApprovedRegistry(t *testing.T) {
+func TestImagesComeFromTheConfiguredRegistry(t *testing.T) {
 	for _, tc := range []struct {
 		name, values, wantPrefix string
 	}{

@@ -308,24 +308,8 @@ func TestParseUserEnvFromVolumeContext(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			userEnv, err := envprovider.ParseUserEnvFromVolumeContext(testCase.volumeCtx)
-			if testCase.errMsg != "" {
-				if !strings.Contains(err.Error(), testCase.errMsg) {
-					t.Errorf("Expected error message %q, but got %q", testCase.errMsg, err.Error())
-				}
-			} else {
-				assert.NoError(t, err)
-				assert.Equals(t, testCase.want, userEnv)
-			}
-		})
-	}
-}
-
-// A PV's `mountpointEnv.*` volume attributes become Mountpoint's environment. Only proxy settings are
-// allowed there, so a PV cannot point Mountpoint at another CA bundle or endpoint, or turn off signing.
-func TestUserEnvCannotOverrideTLSOrEndpoint(t *testing.T) {
+	// Only proxy settings are allowed, so a PV cannot point Mountpoint at another CA bundle or endpoint, or
+	// replace its credentials.
 	for _, tc := range []struct{ key, why string }{
 		{"AWS_CA_BUNDLE", "it would trust another CA bundle"},
 		{"AWS_ENDPOINT_URL", "it would send every request to another endpoint"},
@@ -337,14 +321,31 @@ func TestUserEnvCannotOverrideTLSOrEndpoint(t *testing.T) {
 		{"AWS_SECRET_ACCESS_KEY", "it would replace the mount's credentials"},
 		{"AWS_PROFILE", "it would switch to another credentials profile"},
 	} {
-		key := tc.key
-		t.Run("rejects mountpointEnv."+key+", as "+tc.why, func(t *testing.T) {
-			env, err := envprovider.ParseUserEnvFromVolumeContext(map[string]string{
-				"bucketName":           "test-bucket",
-				"mountpointEnv." + key: "http://attacker.example.com",
-			})
-			if err == nil {
-				t.Fatalf("mountpointEnv.%s must be rejected, got environment %v", key, env)
+		testCases = append(testCases, struct {
+			name      string
+			volumeCtx map[string]string
+			want      envprovider.Environment
+			errMsg    string
+		}{
+			name:      "failed, mountpointEnv." + tc.key + " not allowed, as " + tc.why,
+			volumeCtx: map[string]string{"mountpointEnv." + tc.key: "http://attacker.example.com"},
+			errMsg:    "environment variable not allowed: mountpointEnv." + tc.key,
+		})
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			userEnv, err := envprovider.ParseUserEnvFromVolumeContext(testCase.volumeCtx)
+			if testCase.errMsg != "" {
+				if err == nil {
+					t.Fatalf("Expected error %q, but got environment %v", testCase.errMsg, userEnv)
+				}
+				if !strings.Contains(err.Error(), testCase.errMsg) {
+					t.Errorf("Expected error message %q, but got %q", testCase.errMsg, err.Error())
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equals(t, testCase.want, userEnv)
 			}
 		})
 	}

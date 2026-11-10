@@ -186,12 +186,8 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 		err = e2epod.WaitForPodCondition(ctx, f.ClientSet, f.Namespace.Name, extraPod.Name, "Unschedulable", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
 			if pod.Status.Phase == v1.PodPending {
 				// Matches Message " 0/1 nodes are available: 1 node(s) exceed max volume count."
-				reg, err := regexp.Compile(`max.+volume.+count`)
-				if err != nil {
-					return false, err
-				}
 				for _, cond := range pod.Status.Conditions {
-					matched := reg.MatchString(cond.Message)
+					matched := exceedsVolumeLimit.MatchString(cond.Message)
 					if cond.Type == v1.PodScheduled && cond.Status == v1.ConditionFalse && cond.Reason == "Unschedulable" && matched {
 						return true, nil
 					}
@@ -213,9 +209,8 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 			if err != nil {
 				return err
 			}
-			reg := regexp.MustCompile(`max.+volume.+count`)
 			for _, event := range events.Items {
-				if event.Type == v1.EventTypeWarning && event.Reason == "FailedScheduling" && reg.MatchString(event.Message) {
+				if event.Type == v1.EventTypeWarning && event.Reason == "FailedScheduling" && exceedsVolumeLimit.MatchString(event.Message) {
 					return nil
 				}
 			}
@@ -511,3 +506,7 @@ func countS3VolumesOnNode(ctx context.Context, f *framework.Framework, nodeName,
 	}
 	return len(handles), nil
 }
+
+// exceedsVolumeLimit matches the scheduler's message for a pod that would exceed a node's volume limit,
+// e.g. "0/1 nodes are available: 1 node(s) exceed max volume count."
+var exceedsVolumeLimit = regexp.MustCompile(`max.+volume.+count`)

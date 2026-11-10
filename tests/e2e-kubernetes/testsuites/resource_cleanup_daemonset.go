@@ -217,9 +217,9 @@ func (t *s3CSIResourceCleanupDaemonsetTestSuite) DefineTests(driver storageframe
 				assertPodIOFails(ctx, f, current, e2epod.VolumeMountPath1)
 				startedWithFailingIO++
 			case state.Waiting != nil && state.Waiting.Reason == "CreateContainerError":
-				// The kubelet cannot bind-mount a dead FUSE mount into a new container, so it does not start.
-				gomega.Expect(state.Waiting.Message).To(gomega.ContainSubstring("transport endpoint is not connected"),
-					"the container must be refused because its volume's mount is dead, got: %s", state.Waiting.Message)
+				// The runtime cannot bind-mount a dead FUSE mount into a new container, so it does not start. The
+				// message is the runtime's own (containerd and CRI-O word it differently), so it is only logged.
+				framework.Logf("Restart refused: %s", state.Waiting.Message)
 				refused++
 			}
 			if !reclaimed {
@@ -254,11 +254,11 @@ func (t *s3CSIResourceCleanupDaemonsetTestSuite) DefineTests(driver storageframe
 	// the credentials and the bind mount every time would need fault injection in the driver. The log records
 	// which path a run took.
 	// Serial: it kills the node's csi-node pod, which every other spec on the node relies on.
-	ginkgo.It("should leave no source mount, cache or credentials behind when csi-node is killed during a publish", ginkgo.Serial, func(ctx context.Context) {
+	ginkgo.It("should leave no source mount, Mountpoint or credentials behind when csi-node is killed during a publish", ginkgo.Serial, func(ctx context.Context) {
 		resource := createVolumeResourceWithMountOptions(ctx, l.config, pattern, nil)
 		l.resources = append(l.resources, resource)
 		pvName := resource.Pv.Name
-		bucketName := resource.Pv.Spec.CSI.VolumeHandle
+		bucketName := resource.Pv.Spec.CSI.VolumeAttributes["bucketName"]
 
 		ginkgo.By("Creating a workload without waiting for it to start")
 		pod := e2epod.MakePod(f.Namespace.Name, nil, []*v1.PersistentVolumeClaim{resource.Pvc}, admissionapi.LevelBaseline, "")
@@ -357,17 +357,33 @@ const (
 // triggerContainerExit makes the pod's container exit by creating `marker`, which its command waits for, and
 // returns once the kubelet has recorded the exit.
 func triggerContainerExit(ctx context.Context, f *framework.Framework, pod *v1.Pod, marker string) {
-	triggered := time.Now().Add(-time.Second)
+	// The exit to wait for is the next termination the kubelet records, told apart from any earlier one by its
+	// container ID, so no clock is compared between the node and the test runner.
+	lastTerminatedID := func(ctx context.Context) (string, error) {
+		current, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return "", err
+		}
+		status := current.Status.ContainerStatuses[0]
+		if status.State.Terminated != nil {
+			return status.State.Terminated.ContainerID, nil
+		}
+		if status.LastTerminationState.Terminated != nil {
+			return status.LastTerminationState.Terminated.ContainerID, nil
+		}
+		return "", nil
+	}
+	before, err := lastTerminatedID(ctx)
+	framework.ExpectNoError(err)
 	// The container exits right after, so the exec may report an error; the recorded exit is the check.
 	_, _, _ = e2epod.ExecCommandInContainerWithFullOutput(f, pod.Name, pod.Spec.Containers[0].Name, "/bin/sh", "-c", "touch "+marker)
 
 	gomega.Eventually(ctx, func(ctx context.Context) error {
-		current, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		id, err := lastTerminatedID(ctx)
 		if err != nil {
 			return err
 		}
-		last := current.Status.ContainerStatuses[0].LastTerminationState.Terminated
-		if last == nil || last.FinishedAt.Time.Before(triggered) {
+		if id == "" || id == before {
 			return fmt.Errorf("container of pod %s has not exited since it was asked to", pod.Name)
 		}
 		return nil

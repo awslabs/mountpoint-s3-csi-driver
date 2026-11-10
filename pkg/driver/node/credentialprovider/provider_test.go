@@ -1383,155 +1383,15 @@ func serviceAccount(name, namespace string, annotations map[string]string) *v1.S
 		Annotations: annotations}
 }
 
+// Every credential file the driver writes for a mount, from any driver-level source, carries the mode for
+// its owner: owner-only (0400) and owned by the mount's UID in daemonset mode, so no other mount can read it.
 func TestProvideWritesCredentialsWithTheModeForTheirOwner(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		uid      uint32
-		wantPerm fs.FileMode
-	}{
-		{name: "owned by a mount", uid: 65536, wantPerm: credentialprovider.IsolatedCredentialFilePerm},
-		{name: "owned by csi-node", uid: 0, wantPerm: credentialprovider.CredentialFilePerm},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.uid != 0 && os.Getuid() != 0 {
-				t.Skip("handing a file to another UID needs root")
-			}
-			setEnvForContainerCredentials(t)
-			writePath := t.TempDir()
-
-			provider := credentialprovider.New(nil, dummyRegionProvider)
-			_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
-				AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-				WritePath:            writePath,
-				EnvPath:              testEnvPath,
-				WorkloadPodID:        testPodID,
-				VolumeID:             testVolumeID,
-				MountKind:            credentialprovider.MountKindDaemonset,
-				Uid:                  tc.uid,
-			})
-			assert.NoError(t, err)
-
-			stat, err := os.Stat(filepath.Join(writePath, testEKSPodIdentityServiceAccountToken))
-			assert.NoError(t, err)
-			assert.Equals(t, tc.wantPerm, stat.Mode().Perm())
-		})
-	}
-}
-
-// These fake secrets must never show up in an error from Provide. When Provide fails, its error ends up
-// in the pod's FailedMount event, and anyone who can read the pod's events can see it.
-const (
-	disclosureSTSToken     = "sts-token-must-not-leak"
-	disclosureEKSToken     = "eks-token-must-not-leak"
-	disclosureAccessKeyID  = "AKIAMUSTNOTLEAK00000"
-	disclosureSecretKey    = "secret-access-key-must-not-leak"
-	disclosureSessionToken = "session-token-must-not-leak"
-)
-
-func assertErrorDiscloses(t *testing.T, err error, secrets ...string) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected Provide to fail")
-	}
-	t.Logf("Provide failed with: %v", err)
-	for _, secret := range secrets {
-		if strings.Contains(err.Error(), secret) {
-			t.Errorf("error discloses %q: %v", secret, err)
-		}
-	}
-}
-
-func podLevelDisclosureCtx(t *testing.T, writePath, tokensJSON string) credentialprovider.ProvideContext {
-	t.Helper()
-	return credentialprovider.ProvideContext{
-		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
-		WritePath:            writePath,
-		EnvPath:              testEnvPath,
-		WorkloadPodID:        testPodID,
-		VolumeID:             testVolumeID,
-		PodNamespace:         testPodNamespace,
-		ServiceAccountName:   testPodServiceAccount,
-		ServiceAccountTokens: tokensJSON,
-		MountKind:            credentialprovider.MountKindDaemonset,
-	}
-}
-
-func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
-	testutil.CleanRegionEnv(t)
-	validTokens := func(t *testing.T) string {
-		return serviceAccountTokens(t, tokens{
-			serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken},
-			serviceAccountTokenAudienceEKS: {Token: disclosureEKSToken},
-		})
-	}
-
-	t.Run("does not put a pod's token in the error when its service account tokens are malformed", func(t *testing.T) {
-		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
-		// A token where an object is expected, so decoding fails with the secret in its input.
-		malformed := `{"` + serviceAccountTokenAudienceSTS + `":"` + disclosureSTSToken + `"}`
-
-		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), malformed))
-
-		assertErrorDiscloses(t, err, disclosureSTSToken)
-	})
-
-	t.Run("does not put a pod's token in the error when one audience's token is missing", func(t *testing.T) {
-		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
-		onlySTS := serviceAccountTokens(t, tokens{serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken}})
-
-		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), onlySTS))
-
-		assertErrorDiscloses(t, err, disclosureSTSToken)
-	})
-
-	t.Run("does not put a pod's tokens in the error when its service account cannot be found", func(t *testing.T) {
-		// No service account exists, so the IAM role lookup fails while both tokens are present.
-		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
-
-		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), validTokens(t)))
-
-		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
-	})
-
-	t.Run("does not put a pod's tokens in the error when its token file cannot be written", func(t *testing.T) {
-		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace,
-			map[string]string{"eks.amazonaws.com/role-arn": testRoleARN}))
-		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
-		missingDir := filepath.Join(t.TempDir(), "missing")
-		provideCtx := podLevelDisclosureCtx(t, missingDir, validTokens(t))
-		provideCtx.StsRegion = "us-east-1"
-
-		_, _, err := provider.Provide(context.Background(), provideCtx)
-
-		assertErrorDiscloses(t, err, disclosureSTSToken, disclosureEKSToken)
-	})
-
-	t.Run("does not put the driver's long-term keys in the error when they cannot be written", func(t *testing.T) {
-		t.Setenv("AWS_ACCESS_KEY_ID", disclosureAccessKeyID)
-		t.Setenv("AWS_SECRET_ACCESS_KEY", disclosureSecretKey)
-		t.Setenv("AWS_SESSION_TOKEN", disclosureSessionToken)
-		provider := credentialprovider.New(nil, dummyRegionProvider)
-
-		_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
-			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-			WritePath:            filepath.Join(t.TempDir(), "missing"),
-			EnvPath:              testEnvPath,
-			WorkloadPodID:        testPodID,
-			VolumeID:             testVolumeID,
-			MountKind:            credentialprovider.MountKindDaemonset,
-		})
-
-		assertErrorDiscloses(t, err, disclosureAccessKeyID, disclosureSecretKey, disclosureSessionToken)
-	})
-}
-
-// The driver's credential files for a mount are owned by that mount's UID and readable only by it (0400).
-func TestDriverLevelCredentialFilesAreOwnerOnlyAndOwnedByTheMountsUID(t *testing.T) {
 	testutil.CleanRegionEnv(t)
 	sources := []struct {
 		name  string
 		setup func(t *testing.T)
 	}{
+		{name: "EKS Pod Identity container credentials", setup: setEnvForContainerCredentials},
 		{
 			name: "long-term credentials from a Kubernetes Secret",
 			setup: func(t *testing.T) {
@@ -1600,4 +1460,111 @@ func TestDriverLevelCredentialFilesAreOwnerOnlyAndOwnedByTheMountsUID(t *testing
 			})
 		}
 	}
+}
+
+// These fake secrets must never show up in an error from Provide. When Provide fails, its error ends up
+// in the pod's FailedMount event, and anyone who can read the pod's events can see it.
+const (
+	disclosureSTSToken     = "sts-token-must-not-leak"
+	disclosureEKSToken     = "eks-token-must-not-leak"
+	disclosureAccessKeyID  = "AKIAMUSTNOTLEAK00000"
+	disclosureSecretKey    = "secret-access-key-must-not-leak"
+	disclosureSessionToken = "session-token-must-not-leak"
+)
+
+func assertErrorDoesNotDisclose(t *testing.T, err error, secrets ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected Provide to fail")
+	}
+	t.Logf("Provide failed with: %v", err)
+	for _, secret := range secrets {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error discloses %q: %v", secret, err)
+		}
+	}
+}
+
+func podLevelDisclosureCtx(t *testing.T, writePath, tokensJSON string) credentialprovider.ProvideContext {
+	t.Helper()
+	return credentialprovider.ProvideContext{
+		AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+		WritePath:            writePath,
+		EnvPath:              testEnvPath,
+		WorkloadPodID:        testPodID,
+		VolumeID:             testVolumeID,
+		PodNamespace:         testPodNamespace,
+		ServiceAccountName:   testPodServiceAccount,
+		ServiceAccountTokens: tokensJSON,
+		MountKind:            credentialprovider.MountKindDaemonset,
+	}
+}
+
+func TestProvideErrorsDoNotDiscloseCredentials(t *testing.T) {
+	testutil.CleanRegionEnv(t)
+	validTokens := func(t *testing.T) string {
+		return serviceAccountTokens(t, tokens{
+			serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken},
+			serviceAccountTokenAudienceEKS: {Token: disclosureEKSToken},
+		})
+	}
+
+	t.Run("does not put a pod's token in the error when its service account tokens are malformed", func(t *testing.T) {
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+		// A token where an object is expected, so decoding fails with the secret in its input.
+		malformed := `{"` + serviceAccountTokenAudienceSTS + `":"` + disclosureSTSToken + `"}`
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), malformed))
+
+		assertErrorDoesNotDisclose(t, err, disclosureSTSToken)
+	})
+
+	t.Run("does not put a pod's token in the error when one audience's token is missing", func(t *testing.T) {
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+		onlySTS := serviceAccountTokens(t, tokens{serviceAccountTokenAudienceSTS: {Token: disclosureSTSToken}})
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), onlySTS))
+
+		assertErrorDoesNotDisclose(t, err, disclosureSTSToken)
+	})
+
+	t.Run("does not put a pod's tokens in the error when its service account cannot be found", func(t *testing.T) {
+		// No service account exists, so the IAM role lookup fails while both tokens are present.
+		provider := credentialprovider.New(fake.NewSimpleClientset().CoreV1(), dummyRegionProvider)
+
+		_, _, err := provider.Provide(context.Background(), podLevelDisclosureCtx(t, t.TempDir(), validTokens(t)))
+
+		assertErrorDoesNotDisclose(t, err, disclosureSTSToken, disclosureEKSToken)
+	})
+
+	t.Run("does not put a pod's tokens in the error when its token file cannot be written", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace,
+			map[string]string{"eks.amazonaws.com/role-arn": testRoleARN}))
+		provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+		missingDir := filepath.Join(t.TempDir(), "missing")
+		provideCtx := podLevelDisclosureCtx(t, missingDir, validTokens(t))
+		provideCtx.StsRegion = "us-east-1"
+
+		_, _, err := provider.Provide(context.Background(), provideCtx)
+
+		assertErrorDoesNotDisclose(t, err, disclosureSTSToken, disclosureEKSToken)
+	})
+
+	t.Run("does not put the driver's long-term keys in the error when they cannot be written", func(t *testing.T) {
+		t.Setenv("AWS_ACCESS_KEY_ID", disclosureAccessKeyID)
+		t.Setenv("AWS_SECRET_ACCESS_KEY", disclosureSecretKey)
+		t.Setenv("AWS_SESSION_TOKEN", disclosureSessionToken)
+		provider := credentialprovider.New(nil, dummyRegionProvider)
+
+		_, _, err := provider.Provide(context.Background(), credentialprovider.ProvideContext{
+			AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+			WritePath:            filepath.Join(t.TempDir(), "missing"),
+			EnvPath:              testEnvPath,
+			WorkloadPodID:        testPodID,
+			VolumeID:             testVolumeID,
+			MountKind:            credentialprovider.MountKindDaemonset,
+		})
+
+		assertErrorDoesNotDisclose(t, err, disclosureAccessKeyID, disclosureSecretKey, disclosureSessionToken)
+	})
 }
