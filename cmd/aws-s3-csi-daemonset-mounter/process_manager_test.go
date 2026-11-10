@@ -134,8 +134,7 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 
 	dev := mountertest.OpenDevNull(t)
 
-	// Send options via UDS in background. Wait for the sender before returning, so the cleanup that
-	// closes dev can't race its read of dev.Fd().
+	// Send options via UDS in background
 	sent := make(chan struct{})
 	go func() {
 		defer close(sent)
@@ -1525,7 +1524,6 @@ func TestHandleConnection_LogsNoCredentials(t *testing.T) {
 	defer listener.Close()
 
 	dev := mountertest.OpenDevNull(t)
-	// Wait for the sender before returning, so the cleanup that closes dev can't race its read of dev.Fd().
 	sent := make(chan struct{})
 	defer func() { <-sent }()
 	go func() {
