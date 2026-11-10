@@ -419,9 +419,7 @@ func createEBSCacheSC(ctx context.Context, f *framework.Framework) string {
 	scName := f.UniqueName + "-sc"
 
 	sc := &storagev1.StorageClass{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: scName,
-		},
+		Name:              scName,
 		Provisioner:       "ebs.csi.aws.com",
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 		ReclaimPolicy:     ptr.To(v1.PersistentVolumeReclaimDelete),
@@ -484,11 +482,9 @@ func ensureCacheDirExistsInNode(pod *v1.Pod, cacheDir string) {
 	})
 	pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
 		Name: "make-cache-dir",
-		VolumeSource: v1.VolumeSource{
-			HostPath: &v1.HostPathVolumeSource{
-				Path: cacheDir,
-				Type: ptr.To(v1.HostPathDirectoryOrCreate),
-			},
+		HostPath: &v1.HostPathVolumeSource{
+			Path: cacheDir,
+			Type: ptr.To(v1.HostPathDirectoryOrCreate),
 		},
 	})
 	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, cacheVolumeMount)

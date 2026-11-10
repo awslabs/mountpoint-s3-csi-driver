@@ -686,10 +686,8 @@ func createMountpointPod(testCtx *testCtx) *mountpointPod {
 	t.Helper()
 
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			UID:  types.UID(testCtx.mpPodUID),
-			Name: testCtx.mpPodName,
-		},
+		UID:  types.UID(testCtx.mpPodUID),
+		Name: testCtx.mpPodName,
 	}
 	pod, err := testCtx.client.CoreV1().Pods(mountpointPodNamespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	assert.NoError(t, err)

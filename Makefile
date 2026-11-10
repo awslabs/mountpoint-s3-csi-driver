@@ -143,8 +143,7 @@ bin:
 
 .PHONY: install-go-test-coverage
 install-go-test-coverage:
-	# Pinned to the last release that supports the Go version in go.mod (v2.20.0+ require Go 1.27).
-	go install github.com/vladopajic/go-test-coverage/v2@v2.19.0
+	go install github.com/vladopajic/go-test-coverage/v2@latest
 
 .PHONY: test
 test:

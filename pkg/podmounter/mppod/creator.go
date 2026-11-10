@@ -84,15 +84,13 @@ func NewCreator(config Config, log logr.Logger) *Creator {
 func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod, error) {
 	uid := c.config.ClusterVariant.MountpointPodUserID()
 	mpPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "mp-",
-			Namespace:    c.config.Namespace,
-			Labels: map[string]string{
-				LabelMountpointVersion: c.config.MountpointVersion,
-				LabelVolumeName:        pv.Name,
-				LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
-				LabelCSIDriverVersion:  c.config.CSIDriverVersion,
-			},
+		GenerateName: "mp-",
+		Namespace:    c.config.Namespace,
+		Labels: map[string]string{
+			LabelMountpointVersion: c.config.MountpointVersion,
+			LabelVolumeName:        pv.Name,
+			LabelVolumeId:          pv.Spec.CSI.VolumeHandle,
+			LabelCSIDriverVersion:  c.config.CSIDriverVersion,
 		},
 		Spec: corev1.PodSpec{
 			// Mountpoint terminates with zero exit code on a successful termination,
@@ -157,11 +155,9 @@ func (c *Creator) Create(node string, pv *corev1.PersistentVolume) (*corev1.Pod,
 				// This emptyDir volume is used for communication between Mountpoint Pod and the CSI Driver Node Pod
 				{
 					Name: CommunicationDirName,
-					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{
-							Medium:    corev1.StorageMediumMemory,
-							SizeLimit: resource.NewQuantity(CommunicationDirSizeLimit, resource.BinarySI),
-						},
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium:    corev1.StorageMediumMemory,
+						SizeLimit: resource.NewQuantity(CommunicationDirSizeLimit, resource.BinarySI),
 					},
 				},
 			},
@@ -275,10 +271,8 @@ func (c *Creator) createCacheVolumeSourceForEphemeral(volumeAttributes map[strin
 	return corev1.VolumeSource{
 		Ephemeral: &corev1.EphemeralVolumeSource{
 			VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"s3.csi.aws.com/type": "local-ephemeral-cache",
-					},
+				Labels: map[string]string{
+					"s3.csi.aws.com/type": "local-ephemeral-cache",
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
