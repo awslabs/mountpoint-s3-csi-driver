@@ -213,12 +213,18 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 
 // Mount mounts the given S3 bucket at the target path with pod-sharing support.
 //
+// Two mounts are involved: the source is the volume's single FUSE mount (one Mountpoint process,
+// shared by every pod on this node using the PV), and the target is this pod's bind mount of the
+// source. A Mountpoint exit kills both.
+//
 // Flow:
-//  0. If the target is still mounted but its Mountpoint has exited, fail with Aborted before
-//     touching any state (see deadTargetError); the workload pod must be recreated.
+//  0. If the target is still mounted but dead, fail with Aborted before touching any state (see
+//     deadTargetError). The pod's containers already hold that bind mount, so remounting the source
+//     would not reach them; the workload pod must be recreated.
 //  1. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
 //  2. If source is mounted, check source health:
-//     - Dead source → mark sourceMounted=false (fall through to step 3)
+//     - Dead source → mark sourceMounted=false (fall through to step 3). Safe to remount: a pod
+//     already bound to this source would have a dead target too and stopped at step 0.
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
 //  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
 //     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
@@ -353,8 +359,8 @@ func deadTargetError(pvName, podUID string, volumeCtx map[string]string) error {
 	}
 	// TODO: once the last Mountpoint exit reason for a volume is kept, name it here instead of "likely".
 	// TODO(remount-in-place): like V2's verifyOrSetupMountTarget, unmount the dead target, mount it again
-	// and return nil, so restarted containers recover without recreating the pod (running containers
-	// still cannot see the new mount).
+	// and return nil. On V2 (v2.9.2) after a Mountpoint OOM kill this lets restarted containers read again
+	// without recreating the pod, while containers that keep running stay on the dead mount.
 	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to remount the volume. "+
 		"Volume %s, pod %s. Likely cause: the Mountpoint process exited, for example because the mounter "+
 		"pod serving it on this node restarted", pvName, pod)
