@@ -54,8 +54,8 @@ node:
 sidecars:
   nodeDriverRegistrar:
     image:
-      repository: public.ecr.aws/eks-distro/kubernetes-csi/node-driver-registrar
-      tag: v2.10.0-eks-1-29-7
+      repository: public.ecr.aws/csi-components/csi-node-driver-registrar
+      tag: v2.18.0-eksbuild.4
       pullPolicy: IfNotPresent
     env:
       - name: KUBE_NODE_NAME
@@ -70,8 +70,8 @@ sidecars:
     resources: {}
   livenessProbe:
     image:
-      repository: public.ecr.aws/eks-distro/kubernetes-csi/livenessprobe
-      tag: v2.12.0-eks-1-29-7
+      repository: public.ecr.aws/csi-components/livenessprobe
+      tag: v2.20.0-eksbuild.4
       pullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: /csi
