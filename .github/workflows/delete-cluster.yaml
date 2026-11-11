@@ -26,7 +26,7 @@ jobs:
       # Failing fast causes some resources created during the test to leak,
       # so we disable it to ensure all resources created during test are properly cleaned up.
       fail-fast: false
-      matrix: ${{ fromJson(needs.build_matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.build_matrix.outputs.delete_matrix) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
