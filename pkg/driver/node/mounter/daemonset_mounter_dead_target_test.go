@@ -2,77 +2,23 @@ package mounter_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	mountutils "k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
-	mock_credentialprovider "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider/mocks"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
-
-// strictUnmountMounter fails Unmount of a path that is not in the mount table, the way umount(8)
-// exits 32 ("not mounted"). FakeMounter alone returns nil there, which would hide a missed unmount.
-type strictUnmountMounter struct {
-	*mountutils.FakeMounter
-}
-
-func (m *strictUnmountMounter) Unmount(target string) error {
-	mounts, err := m.FakeMounter.List()
-	if err != nil {
-		return err
-	}
-	for _, mp := range mounts {
-		if mp.Path == target {
-			return m.FakeMounter.Unmount(target)
-		}
-	}
-	return fmt.Errorf("unmount failed: exit status 32: umount: %s: not mounted", target)
-}
-
-// useStrictUnmount rebuilds the mounter around a strictUnmountMounter. The rest of the wiring matches setupDM.
-func (testCtx *dmTestCtx) useStrictUnmount() {
-	strict := &strictUnmountMounter{testCtx.mount}
-	credProvider := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(testCtx.t))
-	credProvider.EXPECT().Provide(gomock.Any(), gomock.Any()).
-		Return(envprovider.Environment{}, credentialprovider.AuthenticationSourceDriver, nil).AnyTimes()
-	credProvider.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
-	testCtx.dm = mounter.NewDaemonsetMounter(testCtx.client, testCtx.nodeName,
-		mpmounter.NewWithMount(strict), credProvider,
-		func(target string, opts mpmounter.MountOptions) (int, error) {
-			testCtx.mount.Mount("mountpoint-s3", target, "fuse", nil)
-			fd, err := syscall.Dup(int(mountertest.OpenDevNull(testCtx.t).Fd()))
-			assert.NoError(testCtx.t, err)
-			return fd, nil
-		},
-		func(source, target string) error {
-			return testCtx.mount.Mount(source, target, "bind", []string{"bind"})
-		},
-		func() ([]mountutils.MountInfo, error) {
-			var infos []mountutils.MountInfo
-			for _, mp := range testCtx.mount.MountPoints {
-				infos = append(infos, mountutils.MountInfo{MountPoint: mp.Path})
-			}
-			return infos, nil
-		}, testK8sVersion, cluster.DefaultKubernetes)
-	testCtx.installOwnershipRecorders()
-	assert.NoError(testCtx.t, testCtx.dm.DiscoverMounter(testCtx.ctx))
-}
 
 // isMounted reports whether path is in the fake kernel mount table.
 func (testCtx *dmTestCtx) isMounted(path string) bool {
@@ -93,7 +39,6 @@ func (testCtx *dmTestCtx) isMounted(path string) bool {
 // target through the untracked best-effort path.
 func TestMount_DeadTargetLifecycle(t *testing.T) {
 	testCtx := setupDM(t)
-	testCtx.useStrictUnmount()
 	target := testCtx.targetPath(testCtx.podUID)
 	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
 
@@ -134,10 +79,11 @@ func TestMount_DeadTargetLifecycle(t *testing.T) {
 	assert.Equals(t, false, testCtx.isMounted(source))
 	assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
 
-	// NodeUnpublishVolume on pod deletion: no map entry is left, so the best-effort path unmounts the
-	// dead target. With strict umount semantics this only succeeds if the target really was mounted.
+	// NodeUnpublishVolume on pod deletion: no map entry is left, so the untracked best-effort path must
+	// unmount the dead target. That path swallows unmount errors, so assert the unmount itself happened.
 	cleanupCtx := credentialprovider.CleanupContext{PodID: testCtx.podUID, VolumeID: testCtx.volumeID}
 	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, target, cleanupCtx))
+	testCtx.assertUnmounted(target)
 	assert.Equals(t, false, testCtx.isMounted(target))
 
 	// A kubelet retry of NodeUnpublishVolume after success is still a no-op success.
@@ -183,7 +129,10 @@ func TestMount_DeadTargetPodIdentity(t *testing.T) {
 		{"namespace without name keeps the namespace", map[string]string{
 			"csi.storage.k8s.io/pod.namespace": "team-a", "csi.storage.k8s.io/pod.uid": "pod-uid-789",
 		}, "with UID pod-uid-789 in namespace team-a"},
-		{"no pod info falls back to the target path UID", nil, "with UID pod-uid-789"},
+		{"name without namespace keeps the name", map[string]string{
+			"csi.storage.k8s.io/pod.name": "trainer-0", "csi.storage.k8s.io/pod.uid": "pod-uid-789",
+		}, "trainer-0 (pod-uid-789)"},
+		{"no pod info uses the workload pod UID", nil, "with UID pod-uid-789"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

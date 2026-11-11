@@ -260,8 +260,8 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
 	}
 	if targetState == TargetDead {
-		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead mount (Mountpoint not connected), returning Aborted", target, volumeID)
-		return deadTargetError(volumeID, parsedTarget.PodID, volumeCtx)
+		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead mount, returning Aborted", target, volumeID)
+		return deadTargetError(volumeID, credentialCtx.WorkloadPodID, volumeCtx)
 	}
 
 	// Handle legacy mounts — only for healthy mounted targets that are NOT already tracked
@@ -323,10 +323,12 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter.commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
-// deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited
-// (ENOTCONN), for example because the mounter pod serving it on this node restarted (the
-// s3-csi-daemonset-mounter pod, or a legacy V2 Mountpoint Pod). Nothing can repair the pod's existing
-// bind mount in place, so the workload pod has to be recreated.
+// deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited, for
+// example because the mounter pod serving it on this node restarted (the s3-csi-daemonset-mounter pod, or
+// a legacy V2 Mountpoint Pod). "Dead" is any errno mount-utils IsCorruptedMnt treats as a corrupted mount
+// (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN, EWOULDBLOCK); IsHealthyMountpoint logs which one at V(2).
+// A running container keeps the dead mount: a new mount at the target is not visible to it, so today the
+// workload pod has to be recreated.
 //
 // The code is Aborted because kubelet treats it as non-final: the volume keeps its state in kubelet's
 // actual state of world (and the mount directory is not removed), so NodeUnpublishVolume still runs
@@ -336,23 +338,23 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 //
 // The action comes first so a truncated Event still carries it. Nothing is logged here at Error level:
 // the gRPC interceptor already logs the returned error.
-func deadTargetError(pvName, targetPodUID string, volumeCtx map[string]string) error {
-	// Pod identity comes from podInfoOnMount; the UID falls back to the one in the target path.
-	uid := volumeCtx[volumecontext.CSIPodUID]
-	if uid == "" {
-		uid = targetPodUID
-	}
+func deadTargetError(pvName, podUID string, volumeCtx map[string]string) error {
 	namespace, name := volumeCtx[volumecontext.CSIPodNamespace], volumeCtx[volumecontext.CSIPodName]
 	var pod string
 	switch {
 	case namespace != "" && name != "":
-		pod = fmt.Sprintf("%s/%s (%s)", namespace, name, uid)
+		pod = fmt.Sprintf("%s/%s (%s)", namespace, name, podUID)
+	case name != "":
+		pod = fmt.Sprintf("%s (%s)", name, podUID)
 	case namespace != "":
-		pod = fmt.Sprintf("with UID %s in namespace %s", uid, namespace)
+		pod = fmt.Sprintf("with UID %s in namespace %s", podUID, namespace)
 	default:
-		pod = "with UID " + uid
+		pod = "with UID " + podUID
 	}
 	// TODO: once the last Mountpoint exit reason for a volume is kept, name it here instead of "likely".
+	// TODO(remount-in-place): like V2's verifyOrSetupMountTarget, unmount the dead target, mount it again
+	// and return nil, so restarted containers recover without recreating the pod (running containers
+	// still cannot see the new mount).
 	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to remount the volume. "+
 		"Volume %s, pod %s. Likely cause: the Mountpoint process exited, for example because the mounter "+
 		"pod serving it on this node restarted", pvName, pod)
