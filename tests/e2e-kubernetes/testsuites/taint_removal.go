@@ -27,7 +27,7 @@ import (
 
 const (
 	agentNotReadyTaintKey = "s3.csi.aws.com/agent-not-ready"
-	mounterDaemonSetName  = "s3-csi-daemonset-mounter"
+	mounterDaemonSetName  = "s3-csi-mounter"
 )
 
 type s3CSITaintRemovalTestSuite struct {

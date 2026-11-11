@@ -1,6 +1,7 @@
 package helmchart
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,24 +12,21 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-const entry = `maxVolumesPerNode: 4, memoryLimitStrategy: equalSplit, resources: {requests: {memory: 4Gi}}, logLevel: 4`
-
-func TestMounterEntriesRejectInvalidValues(t *testing.T) {
+func TestAdditionalDaemonsetsRejectInvalidValues(t *testing.T) {
 	for _, testCase := range []struct {
 		name                string
 		values              string
 		expectedErrContains string
 	}{
-		{"no entries", `daemonsetMounters: []`, "daemonsetMounters must have at least one entry"},
-		{"negative limit on a later entry", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {name: b, nodeSelector: {x: "2"}, maxVolumesPerNode: -1, memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
-		{"limit that isn't a number", `daemonsetMounters: [{maxVolumesPerNode: "abc", memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
-		{"decimal limit", `daemonsetMounters: [{maxVolumesPerNode: 4.5, memoryLimitStrategy: none, logLevel: 4}]`, "maxVolumesPerNode must be a whole number >= 0"},
-		{"invalid name", `daemonsetMounters: [{name: Big_Mem, nodeSelector: {x: "1"}, ` + entry + `}]`, `name "Big_Mem" must be lowercase letters`},
-		{"repeated name", `daemonsetMounters: [{name: a, nodeSelector: {x: "1"}, ` + entry + `}, {name: a, nodeSelector: {x: "2"}, ` + entry + `}]`, `two entries are named "a"`},
-		{"two unnamed", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {nodeSelector: {x: "2"}, ` + entry + `}]`, "at most one entry may leave out name"},
-		{"no selector with two entries", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {name: b, ` + entry + `}]`, "nodeSelector or matchExpressions is required"},
-		{"same selection", `daemonsetMounters: [{nodeSelector: {x: "1"}, ` + entry + `}, {name: b, nodeSelector: {x: "1"}, ` + entry + `}]`, "two entries select the same nodes"},
-		{"key in node.nodeSelector and an entry", `{node: {nodeSelector: {x: "1"}}, daemonsetMounters: [{nodeSelector: {x: "2"}, ` + entry + `}]}`, `node.nodeSelector both set "x"`},
+		{"limit that isn't a number", `mounter: {maxVolumesPerNode: "abc"}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"decimal limit", `mounter: {maxVolumesPerNode: 4.5}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"negative limit on an entry", `additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonsets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"invalid name", `additionalDaemonsets: {Big_Mem: {node: {nodeSelector: {x: "1"}}}}`, `name "Big_Mem" must be lowercase letters`},
+		{"a key outside node and mounter", `additionalDaemonsets: {b: {maxVolumesPerNode: 4, node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonsets.b.maxVolumesPerNode: an entry only takes node and mounter"},
+		{"no placement", `additionalDaemonsets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonsets.b.node: nodeSelector or affinity is required"},
+		{"same placement as another entry", `additionalDaemonsets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonsets.b.node selects the same nodes as another DaemonSet"},
+		{"same placement as the default", `{node: {nodeSelector: {x: "1"}, affinity: null}, additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "additionalDaemonsets.b.node selects the same nodes as another DaemonSet"},
+		{"invalid entry mounter", `additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonsets.b.mounter: memoryLimitStrategy must be one of"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := renderDaemonSets(t, testCase.values)
@@ -40,92 +38,61 @@ func TestMounterEntriesRejectInvalidValues(t *testing.T) {
 	}
 }
 
-func TestMounterEntriesPlacement(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}}
-daemonsetMounters:
-  - {name: general, nodeSelector: {pool: general}, matchExpressions: [{key: mem, operator: Lt, values: ["65536"]}], `+entry+`}
-  - {name: bigmem, matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}], maxVolumesPerNode: 32, memoryLimitStrategy: none, logLevel: 4}
-  - {name: small, nodeSelector: {pool: small}, `+entry+`}`)
+func TestAdditionalDaemonsetsPlacementAndOverrides(t *testing.T) {
+	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5}
+mounter: {maxVolumesPerNode: 4}
+additionalDaemonsets:
+  bigmem:
+    node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}}
+    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}}
+  cached:
+    node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}]}]}}}}`)
 	assert.NoError(t, err)
+	assert.Equals(t, 6, len(daemonSets))
 
-	// The node pod runs wherever any entry's mounter runs: each default rule with each entry.
-	node := daemonSets["s3-csi-node"]
-	assert.Equals(t, []string{
-		notSpecial + " AND pool In general AND mem Lt 65536",
-		notSpecial + " AND mem Gt 65535",
-		notSpecial + " AND pool In small",
-		autoNotSystem + " AND pool In general AND mem Lt 65536",
-		autoNotSystem + " AND mem Gt 65535",
-		autoNotSystem + " AND pool In small",
-	}, terms(node))
-	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "team": "data"}, node.Spec.Template.Spec.NodeSelector)
+	// The default pair keeps node's placement, on both pods.
+	for _, name := range []string{"s3-csi-node", "s3-csi-mounter"} {
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "team": "data"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+		assert.Equals(t, []string{notSpecial, autoNotSystem}, terms(daemonSets[name]))
+	}
 
-	general := daemonSets["s3-csi-daemonset-mounter-general"]
-	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "team": "data", "pool": "general"}, general.Spec.Template.Spec.NodeSelector)
-	assert.Equals(t, []string{notSpecial + " AND mem Lt 65536", autoNotSystem + " AND mem Lt 65536"}, terms(general))
-	assert.Equals(t, "4", general.Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
+	// An entry's pair uses only its own placement, on both pods: node's nodeSelector and affinity aren't copied.
+	for _, name := range []string{"s3-csi-node-bigmem", "s3-csi-mounter-bigmem"} {
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "pool": "bigmem"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+		assert.Equals(t, (*corev1.Affinity)(nil), daemonSets[name].Spec.Template.Spec.Affinity)
+	}
+	for _, name := range []string{"s3-csi-node-cached", "s3-csi-mounter-cached"} {
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+		assert.Equals(t, []string{"mem Gt 65535"}, terms(daemonSets[name]))
+	}
 
-	bigmem := daemonSets["s3-csi-daemonset-mounter-bigmem"]
-	assert.Equals(t, []string{notSpecial + " AND mem Gt 65535", autoNotSystem + " AND mem Gt 65535"}, terms(bigmem))
-	assert.Equals(t, "32", bigmem.Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
-
-	// With only a nodeSelector, the mounter keeps the default rules as they are.
-	small := daemonSets["s3-csi-daemonset-mounter-small"]
-	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "team": "data", "pool": "small"}, small.Spec.Template.Spec.NodeSelector)
-	assert.Equals(t, []string{notSpecial, autoNotSystem}, terms(small))
+	// Everything else is copied from node and mounter, and the entry overrides what it sets.
+	assert.Equals(t, "ml", daemonSets["s3-csi-node-bigmem"].Spec.Template.Labels["cost"])
+	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-node-bigmem"].Spec.Template.Spec.Containers[0].Args, "--v=5"))
+	assert.Equals(t, "32", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
+	assert.Equals(t, "32Gi", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
+	assert.Equals(t, "4", daemonSets["s3-csi-mounter-cached"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
+	assert.Equals(t, "4Gi", daemonSets["s3-csi-mounter-cached"].Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
 }
 
-func TestMounterEntriesKeepOtherAffinityRules(t *testing.T) {
-	const entries = `daemonsetMounters:
-  - {name: small, nodeSelector: {pool: small}, ` + entry + `}
-  - {name: bigmem, matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}], maxVolumesPerNode: 32, memoryLimitStrategy: none, logLevel: 4}`
-
-	t.Run("keeps matchFields, preferred rules and pod affinity", func(t *testing.T) {
-		const affinity = `{nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: a, operator: In, values: ["1"]}], matchFields: [{key: metadata.name, operator: NotIn, values: [n1]}]}]},
-  preferredDuringSchedulingIgnoredDuringExecution: [{weight: 1, preference: {matchExpressions: [{key: p, operator: Exists}]}}]},
-  podAntiAffinity: {requiredDuringSchedulingIgnoredDuringExecution: [{labelSelector: {matchLabels: {app: x}}, topologyKey: kubernetes.io/hostname}]}}`
-		var want corev1.Affinity
-		assert.NoError(t, yaml.Unmarshal([]byte(affinity), &want))
-		daemonSets, err := renderDaemonSets(t, "node: {affinity: "+affinity+"}\n"+entries)
-		assert.NoError(t, err)
-
-		node := daemonSets["s3-csi-node"].Spec.Template.Spec.Affinity
-		assert.Equals(t, []string{"a In 1 AND pool In small", "a In 1 AND mem Gt 65535"}, terms(daemonSets["s3-csi-node"]))
-		for _, term := range node.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-			assert.Equals(t, want.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchFields, term.MatchFields)
-		}
-		assert.Equals(t, want.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, node.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
-		assert.Equals(t, want.PodAntiAffinity, node.PodAntiAffinity)
-		assert.Equals(t, &want, daemonSets["s3-csi-daemonset-mounter-small"].Spec.Template.Spec.Affinity)
-	})
-
-	// null, not {}, since Helm merges {} into the default rules.
-	t.Run("adds a rule per entry with no node.affinity", func(t *testing.T) {
-		daemonSets, err := renderDaemonSets(t, "node: {affinity: null}\n"+entries)
-		assert.NoError(t, err)
-		assert.Equals(t, []string{"pool In small", "mem Gt 65535"}, terms(daemonSets["s3-csi-node"]))
-		assert.Equals(t, (*corev1.Affinity)(nil), daemonSets["s3-csi-daemonset-mounter-small"].Spec.Template.Spec.Affinity)
-		assert.Equals(t, []string{"mem Gt 65535"}, terms(daemonSets["s3-csi-daemonset-mounter-bigmem"]))
-	})
-}
-
-func TestMounterEntriesDefaultInstall(t *testing.T) {
+func TestAdditionalDaemonsetsDefaultInstall(t *testing.T) {
 	daemonSets, err := renderDaemonSets(t, `{}`)
 	assert.NoError(t, err)
 	assert.Equals(t, 2, len(daemonSets))
-	for _, name := range []string{"s3-csi-node", "s3-csi-daemonset-mounter"} {
+	for _, name := range []string{"s3-csi-node", "s3-csi-mounter"} {
 		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
 		assert.Equals(t, []string{notSpecial, autoNotSystem}, terms(daemonSets[name]))
 	}
-	assert.Equals(t, "4", daemonSets["s3-csi-daemonset-mounter"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
+	assert.Equals(t, "4", daemonSets["s3-csi-mounter"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
 }
 
-func TestMounterEntriesQuoteNodeSelectorValues(t *testing.T) {
+func TestAdditionalDaemonsetsQuoteNodeSelectorValues(t *testing.T) {
 	// Unquoted, these render as a bool and a number, which a nodeSelector can't hold.
-	manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{nodeSelector: {gpu: true, zone: 1}, `+entry+`}]`)
+	daemonSets, err := renderDaemonSets(t, `additionalDaemonsets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1}}}}`)
 	assert.NoError(t, err)
-	assert.Contains(t, manifest, `gpu: "true"`)
-	assert.Contains(t, manifest, `zone: "1"`)
+	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+	}
 }
 
 // The two default node.affinity rules: not Fargate, hybrid or Auto Mode, or Auto Mode outside the system NodePool.

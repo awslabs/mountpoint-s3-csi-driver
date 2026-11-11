@@ -133,7 +133,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
-		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
+		klog.Info("Note: the mounter DaemonSets use OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil, kubernetesVersion, variant)
 
@@ -176,7 +176,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		if maxVolumesPerNode == 0 {
 			klog.Warningf("%s is 0: volume limit is disabled (unbounded). The scheduler will not "+
 				"limit the number of S3 volumes per node, which may lead to resource exhaustion "+
-				"(memory OOM, or disk exhaustion when cache is enabled) on s3-csi-daemonset-mounter.",
+				"(memory OOM, or disk exhaustion when cache is enabled) on the mounter.",
 				mounter.MounterMaxVolumesLabel)
 		}
 

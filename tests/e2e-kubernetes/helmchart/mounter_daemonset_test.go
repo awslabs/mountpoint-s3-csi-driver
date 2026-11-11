@@ -22,7 +22,7 @@ func TestMounterDaemonSetRejectsInvalidMemory(t *testing.T) {
 		},
 		{
 			name:                "equalSplit, no memory request",
-			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: equalSplit}`,
+			mounter:             `{maxVolumesPerNode: 4, memoryLimitStrategy: equalSplit, resources: null}`,
 			expectedErrContains: "resources.requests.memory is required when memoryLimitStrategy=equalSplit",
 		},
 		{
@@ -42,7 +42,7 @@ func TestMounterDaemonSetRejectsInvalidMemory(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := renderMounterDaemonSet(t, "daemonsetMounters: ["+testCase.mounter+"]")
+			_, err := renderMounterDaemonSet(t, "mounter: "+testCase.mounter)
 			if err == nil {
 				t.Fatal("expected the chart to fail to render")
 			}
@@ -52,7 +52,7 @@ func TestMounterDaemonSetRejectsInvalidMemory(t *testing.T) {
 }
 
 func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
-	// Helm replaces a list value whole, so each row spells out its full daemonsetMounters entry.
+	// Helm merges each row over the default mounter values.
 	for _, testCase := range []struct {
 		name                string
 		mounter             string
@@ -126,7 +126,7 @@ func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := renderMounterDaemonSet(t, "daemonsetMounters: ["+testCase.mounter+"]")
+			_, err := renderMounterDaemonSet(t, "mounter: "+testCase.mounter)
 			if err == nil {
 				t.Fatal("expected the chart to fail to render")
 			}
@@ -137,7 +137,7 @@ func TestMounterDaemonSetRejectsInvalidCache(t *testing.T) {
 
 func TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache(t *testing.T) {
 	t.Run("grants CHOWN, DAC_OVERRIDE and FOWNER with a cache", func(t *testing.T) {
-		manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}]`)
+		manifest, err := renderMounterDaemonSet(t, `mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}`)
 		assert.NoError(t, err)
 		assert.Contains(t, manifest, "- CHOWN")
 		assert.Contains(t, manifest, "- DAC_OVERRIDE")
@@ -145,7 +145,7 @@ func TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache(t *testing.T) {
 	})
 
 	t.Run("grants none of CHOWN, DAC_OVERRIDE and FOWNER without a cache", func(t *testing.T) {
-		manifest, err := renderMounterDaemonSet(t, `daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none}]`)
+		manifest, err := renderMounterDaemonSet(t, `mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none}`)
 		assert.NoError(t, err)
 		assert.Equals(t, false, strings.Contains(manifest, "- CHOWN"))
 		assert.Equals(t, false, strings.Contains(manifest, "- DAC_OVERRIDE"))
