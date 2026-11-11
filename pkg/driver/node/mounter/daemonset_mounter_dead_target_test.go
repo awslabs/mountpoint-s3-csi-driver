@@ -194,6 +194,9 @@ func assertRemountMessage(t *testing.T, msg, pvName, pod string) {
 	if a, v := strings.Index(msg, action), strings.Index(msg, "Volume "+pvName); a < 0 || v < 0 || a > v {
 		t.Errorf("error message %q does not put the action before the identifiers", msg)
 	}
+	if strings.Contains(msg, "Likely cause") {
+		t.Errorf("error message %q still guesses the cause; the Event should carry only the action and identity", msg)
+	}
 	if strings.Contains(msg, "s3-csi-daemonset-mounter") {
 		t.Errorf("error message %q names the V3 mounter pod, which is wrong for legacy V1/V2 targets", msg)
 	}
