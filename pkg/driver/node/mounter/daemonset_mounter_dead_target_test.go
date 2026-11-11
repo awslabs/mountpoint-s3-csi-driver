@@ -2,12 +2,15 @@ package mounter_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -32,82 +35,170 @@ func (testCtx *dmTestCtx) isMounted(path string) bool {
 	return false
 }
 
-// TestMount_DeadTargetLifecycle walks the "mounter pod restarted under a live workload" case as it
-// happens in production: the restart kills the shared source and the pod's bind mount alike, the
-// periodic cleanup tears the dead source down and drops the mount map entry, kubelet's republish of
-// the dead target fails with Aborted naming the pod, and NodeUnpublishVolume then unmounts the dead
-// target through the untracked best-effort path.
-func TestMount_DeadTargetLifecycle(t *testing.T) {
+// killAllMounts makes the source and the given targets report ENOTCONN while they stay in the mount
+// table, as they do after the mounter pod restarts and every Mountpoint on the node exits.
+func (testCtx *dmTestCtx) killAllMounts(targets ...string) {
+	testCtx.mount.MountCheckErrors = map[string]error{
+		mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID): healthPathErr(syscall.ENOTCONN),
+	}
+	for _, target := range targets {
+		testCtx.mount.MountCheckErrors[target] = healthPathErr(syscall.ENOTCONN)
+	}
+}
+
+// republish runs kubelet's NodePublishVolume for an already-published pod. With serveMount it also plays
+// the mounter: it receives the mount options and mounts the source, as a fresh FUSE mount needs.
+func (testCtx *dmTestCtx) republish(podUID string, volumeCtx map[string]string, serveMount bool) error {
+	res := make(chan error, 1)
+	go func() {
+		res <- testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, testCtx.targetPath(podUID),
+			credentialprovider.ProvideContext{WorkloadPodID: podUID, VolumeID: testCtx.volumeID},
+			volumeCtx, mountpoint.ParseArgs(nil), "", nil)
+	}()
+	if serveMount {
+		testCtx.receiveMountOptions()
+		testCtx.mount.Mount("mountpoint-s3", mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID), "fuse", nil)
+	}
+	return <-res
+}
+
+func podInfo(podUID string) map[string]string {
+	return map[string]string{
+		"csi.storage.k8s.io/pod.namespace": "team-a",
+		"csi.storage.k8s.io/pod.name":      "trainer-0",
+		"csi.storage.k8s.io/pod.uid":       podUID,
+	}
+}
+
+// TestMount_DeadTargetRemount walks the "mounter pod restarted under a live workload" case: the restart
+// kills the shared source and the pod's bind mount alike, and kubelet's next republish of the dead
+// target unmounts it, mounts the source again, binds it, and reports Aborted once so kubelet shows a
+// FailedMount Event. The republish may come before or after the periodic cleanup reaps the dead source.
+func TestMount_DeadTargetRemount(t *testing.T) {
+	for _, cleanupFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("cleanup ran first: %t", cleanupFirst), func(t *testing.T) {
+			testCtx := setupDM(t)
+			target := testCtx.targetPath(testCtx.podUID)
+			source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
+			volumeCtx := podInfo(testCtx.podUID)
+
+			testCtx.mountVolume()
+			// Healthy target: a republish refreshes credentials and returns nil.
+			assert.NoError(t, testCtx.republish(testCtx.podUID, volumeCtx, false))
+
+			testCtx.killAllMounts(target)
+			if cleanupFirst {
+				testCtx.dm.CleanupOrphans()
+				assert.Equals(t, false, testCtx.isMounted(source))
+				assert.Equals(t, true, testCtx.isMounted(target)) // cleanup never touches workload targets
+			}
+
+			logs := testutil.CaptureKlog(t)
+			err := testCtx.republish(testCtx.podUID, volumeCtx, true)
+			assert.Equals(t, codes.Aborted, status.Code(err))
+			assertRemountMessage(t, status.Convert(err).Message(), testCtx.volumeID, "team-a/trainer-0 ("+testCtx.podUID+")")
+			// The gRPC interceptor (driver.go) already logs the returned error; Mount adds no line of its own.
+			for _, line := range strings.Split(logs.String(), "\n") {
+				if strings.HasPrefix(line, "E") || strings.HasPrefix(line, "W") {
+					t.Errorf("dead-target remount logged at Warning/Error level: %q", line)
+				}
+			}
+
+			// The dead target was unmounted and bound again to a freshly mounted source.
+			testCtx.assertUnmounted(target)
+			assert.Equals(t, true, testCtx.isMounted(source))
+			assert.Equals(t, true, testCtx.isMounted(target))
+			uid := uint32(testCtx.ownerOf(filepath.Join(testCtx.commDir, testCtx.volumeID))[0])
+			assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uid))
+
+			// The next republish finds a healthy target and succeeds.
+			assert.NoError(t, testCtx.republish(testCtx.podUID, volumeCtx, false))
+
+			// NodeUnpublishVolume on pod deletion releases the new mount like any other.
+			assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, target,
+				credentialprovider.CleanupContext{PodID: testCtx.podUID, VolumeID: testCtx.volumeID}))
+			assert.Equals(t, false, testCtx.isMounted(target))
+			assert.Equals(t, false, testCtx.isMounted(source))
+			assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
+		})
+	}
+}
+
+// TestMount_DeadTargetRemountShared checks two pods sharing a PV: the first republish mounts the source
+// again, the second binds to it, and the source stays until the last pod is unpublished.
+func TestMount_DeadTargetRemountShared(t *testing.T) {
+	testCtx := setupDM(t)
+	podA, podB := testCtx.podUID, uuid.New().String()
+	targetA, targetB := testCtx.targetPath(podA), testCtx.targetPath(podB)
+	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
+
+	testCtx.mountVolume()
+	assert.NoError(t, testCtx.republish(podB, podInfo(podB), false)) // pod B shares the running source
+
+	testCtx.killAllMounts(targetA, targetB)
+	testCtx.dm.CleanupOrphans()
+
+	errA := testCtx.republish(podA, podInfo(podA), true)
+	assert.Equals(t, codes.Aborted, status.Code(errA))
+	errB := testCtx.republish(podB, podInfo(podB), false) // shares the new source, no new FUSE mount
+	assert.Equals(t, codes.Aborted, status.Code(errB))
+	assertRemountMessage(t, status.Convert(errB).Message(), testCtx.volumeID, "team-a/trainer-0 ("+podB+")")
+	assert.Equals(t, true, testCtx.isMounted(targetA))
+	assert.Equals(t, true, testCtx.isMounted(targetB))
+
+	cleanupCtx := func(pod string) credentialprovider.CleanupContext {
+		return credentialprovider.CleanupContext{PodID: pod, VolumeID: testCtx.volumeID}
+	}
+	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, targetA, cleanupCtx(podA)))
+	assert.Equals(t, true, testCtx.isMounted(source)) // pod B still uses it
+	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, targetB, cleanupCtx(podB)))
+	assert.Equals(t, false, testCtx.isMounted(source))
+}
+
+// TestMount_DeadTargetUnmountFails checks that a dead target the unmount cannot remove is reported as a
+// retryable (non-final) error, and nothing is mounted over it.
+func TestMount_DeadTargetUnmountFails(t *testing.T) {
 	testCtx := setupDM(t)
 	target := testCtx.targetPath(testCtx.podUID)
 	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
 
-	// Absent target: a fresh mount goes all the way through.
 	testCtx.mountVolume()
-	uid := uint32(testCtx.ownerOf(filepath.Join(testCtx.commDir, testCtx.volumeID))[0])
-	assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uid))
-
-	provideCtx := credentialprovider.ProvideContext{WorkloadPodID: testCtx.podUID, VolumeID: testCtx.volumeID}
-	volumeCtx := map[string]string{
-		"csi.storage.k8s.io/pod.namespace": "team-a",
-		"csi.storage.k8s.io/pod.name":      "trainer-0",
-		"csi.storage.k8s.io/pod.uid":       testCtx.podUID,
-	}
-
-	// Healthy target: a republish (requiresRepublish) refreshes credentials and returns nil.
-	err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, provideCtx, volumeCtx, mountpoint.ParseArgs(nil), "", nil)
-	assert.NoError(t, err)
-
-	// The mounter pod restarts: every Mountpoint on the node exits, so the source and the target both
-	// report ENOTCONN while staying in the mount table.
-	testCtx.mount.MountCheckErrors = map[string]error{
-		source: healthPathErr(syscall.ENOTCONN),
-		target: healthPathErr(syscall.ENOTCONN),
-	}
-
-	// The periodic cleanup finds the dead source, unmounts it and forgets the mount.
+	testCtx.killAllMounts(target)
 	testCtx.dm.CleanupOrphans()
-	assert.Equals(t, false, testCtx.isMounted(source))
-	assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
-	assert.Equals(t, true, testCtx.isMounted(target)) // cleanup never touches workload targets
+	testCtx.mount.UnmountFunc = func(path string) error {
+		if path == target {
+			return errors.New("device or resource busy")
+		}
+		return nil
+	}
 
-	// kubelet's republish of the dead target fails with Aborted naming the pod.
-	err = testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, provideCtx, volumeCtx, mountpoint.ParseArgs(nil), "", nil)
+	err := testCtx.republish(testCtx.podUID, podInfo(testCtx.podUID), false)
 	assert.Equals(t, codes.Aborted, status.Code(err))
-	assertDeadTargetMessage(t, status.Convert(err).Message(), testCtx.volumeID, "team-a/trainer-0 ("+testCtx.podUID+")")
-	// The failed republish touched nothing: no new source, no UID taken.
+	if !strings.Contains(err.Error(), "failed to unmount dead target") {
+		t.Errorf("error %q is not the dead-target unmount failure", err)
+	}
+	assert.Equals(t, true, testCtx.isMounted(target))
 	assert.Equals(t, false, testCtx.isMounted(source))
-	assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
-
-	// NodeUnpublishVolume on pod deletion: no map entry is left, so the untracked best-effort path must
-	// unmount the dead target. That path swallows unmount errors, so assert the unmount itself happened.
-	cleanupCtx := credentialprovider.CleanupContext{PodID: testCtx.podUID, VolumeID: testCtx.volumeID}
-	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, target, cleanupCtx))
-	testCtx.assertUnmounted(target)
-	assert.Equals(t, false, testCtx.isMounted(target))
-
-	// A kubelet retry of NodeUnpublishVolume after success is still a no-op success.
-	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, target, cleanupCtx))
 }
 
-// assertDeadTargetMessage checks the dead-target message: printable ASCII, the action first (so a
-// truncated Event keeps it), then the volume and pod identity.
-func assertDeadTargetMessage(t *testing.T, msg, pvName, pod string) {
+// assertRemountMessage checks the message: printable ASCII, the action first (so a truncated Event keeps
+// it), then the volume and pod identity.
+func assertRemountMessage(t *testing.T, msg, pvName, pod string) {
 	t.Helper()
-	const action = "delete and recreate this pod to remount the volume"
-	for _, want := range []string{action, "Volume " + pvName, "pod " + pod} {
+	const action = "restart the containers using it, or delete and recreate this pod"
+	for _, want := range []string{action, "Transport endpoint is not connected", "Volume " + pvName, "pod " + pod} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message %q does not contain %q", msg, want)
 		}
 	}
-	if a, v := strings.Index(msg, action), strings.Index(msg, pvName); a < 0 || v < 0 || a > v {
+	if a, v := strings.Index(msg, action), strings.Index(msg, "Volume "+pvName); a < 0 || v < 0 || a > v {
 		t.Errorf("error message %q does not put the action before the identifiers", msg)
 	}
 	if strings.Contains(msg, "s3-csi-daemonset-mounter") {
 		t.Errorf("error message %q names the V3 mounter pod, which is wrong for legacy V1/V2 targets", msg)
 	}
 	for _, r := range msg {
-		if r > 0x7e || (r < 0x20 && r != '\t') {
+		if r > 0x7e || r < 0x20 {
 			t.Errorf("error message %q is not printable ASCII (rune %q)", msg, r)
 			break
 		}
@@ -117,55 +208,31 @@ func assertDeadTargetMessage(t *testing.T, msg, pvName, pod string) {
 // TestMount_DeadTargetPodIdentity checks the pod identity in the message for every combination of
 // podInfoOnMount keys kubelet may send (podInfoOnMount off, or an older CSIDriver object, sends none).
 func TestMount_DeadTargetPodIdentity(t *testing.T) {
-	const volumeID = "pv-pod-info"
 	tests := []struct {
-		name      string
-		volumeCtx map[string]string
-		wantPod   string
+		name    string
+		keys    []string
+		wantPod func(uid string) string
 	}{
-		{"all pod info", map[string]string{
-			"csi.storage.k8s.io/pod.namespace": "team-a", "csi.storage.k8s.io/pod.name": "trainer-0", "csi.storage.k8s.io/pod.uid": "pod-uid-789",
-		}, "team-a/trainer-0 (pod-uid-789)"},
-		{"namespace without name keeps the namespace", map[string]string{
-			"csi.storage.k8s.io/pod.namespace": "team-a", "csi.storage.k8s.io/pod.uid": "pod-uid-789",
-		}, "with UID pod-uid-789 in namespace team-a"},
-		{"name without namespace keeps the name", map[string]string{
-			"csi.storage.k8s.io/pod.name": "trainer-0", "csi.storage.k8s.io/pod.uid": "pod-uid-789",
-		}, "trainer-0 (pod-uid-789)"},
-		{"no pod info uses the workload pod UID", nil, "with UID pod-uid-789"},
+		{"all pod info", []string{"namespace", "name", "uid"}, func(uid string) string { return "team-a/trainer-0 (" + uid + ")" }},
+		{"namespace without name keeps the namespace", []string{"namespace", "uid"}, func(uid string) string { return "with UID " + uid + " in namespace team-a" }},
+		{"name without namespace keeps the name", []string{"name", "uid"}, func(uid string) string { return "trainer-0 (" + uid + ")" }},
+		{"no pod info uses the workload pod UID", nil, func(uid string) string { return "with UID " + uid }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			targetDir := filepath.Join(t.TempDir(), "pods", "pod-uid-789", "volumes", "kubernetes.io~csi", volumeID, "mount")
-			assert.NoError(t, os.MkdirAll(targetDir, 0750))
+			testCtx := setupDM(t)
+			all := podInfo(testCtx.podUID)
+			volumeCtx := map[string]string{}
+			for _, k := range tt.keys {
+				volumeCtx["csi.storage.k8s.io/pod."+k] = all["csi.storage.k8s.io/pod."+k]
+			}
+			testCtx.mountVolume()
+			testCtx.killAllMounts(testCtx.targetPath(testCtx.podUID))
 
-			dm := newHealthDM(&fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)})
-			err := dm.Mount(context.Background(), "test-bucket", targetDir,
-				credentialprovider.ProvideContext{VolumeID: "handle-1", WorkloadPodID: "pod-uid-789"},
-				tt.volumeCtx, mountpoint.Args{}, "", nil)
-
+			err := testCtx.republish(testCtx.podUID, volumeCtx, true)
 			assert.Equals(t, codes.Aborted, status.Code(err))
-			assertDeadTargetMessage(t, status.Convert(err).Message(), volumeID, tt.wantPod)
+			assertRemountMessage(t, status.Convert(err).Message(), testCtx.volumeID, tt.wantPod(testCtx.podUID))
 		})
-	}
-}
-
-// TestMount_DeadTargetLogsNoError checks the dead-target path adds no Error line of its own: the gRPC
-// interceptor (driver.go) already logs every returned error, and kubelet retries for as long as the pod lives.
-func TestMount_DeadTargetLogsNoError(t *testing.T) {
-	targetDir := filepath.Join(t.TempDir(), "pods", "pod-uid-555", "volumes", "kubernetes.io~csi", "pv-log", "mount")
-	assert.NoError(t, os.MkdirAll(targetDir, 0750))
-
-	dm := newHealthDM(&fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)})
-	logs := testutil.CaptureKlog(t) // after construction, which warns about CSI_NODE_IMAGE
-	err := dm.Mount(context.Background(), "test-bucket", targetDir,
-		credentialprovider.ProvideContext{VolumeID: "pv-log", WorkloadPodID: "pod-uid-555"}, nil, mountpoint.Args{}, "", nil)
-
-	assert.Equals(t, codes.Aborted, status.Code(err))
-	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.HasPrefix(line, "E") || strings.HasPrefix(line, "W") {
-			t.Errorf("dead-target Mount logged at Warning/Error level: %q", line)
-		}
 	}
 }
 
