@@ -69,6 +69,12 @@ node:
                 operator: NotIn
                 values:
                   - system
+  # Set to true to keep Pods that use S3 volumes off nodes where the CSI Driver isn't registered, so they
+  # wait in Pending instead of getting stuck in ContainerCreating. Takes effect on Kubernetes 1.37 and
+  # later. If you use Cluster Autoscaler, check the requirements first, or it may stop scaling up for
+  # these Pods:
+  # https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver
+  preventPodSchedulingIfMissing: false
 
 sidecars:
   nodeDriverRegistrar:
