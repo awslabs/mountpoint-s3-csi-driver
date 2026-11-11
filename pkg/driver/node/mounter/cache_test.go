@@ -12,7 +12,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func TestMounterPodHasCacheVolume(t *testing.T) {
+func TestMounterPodCacheVolume(t *testing.T) {
 	emptyDir := corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
 	ephemeral := corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}
 
@@ -30,7 +30,7 @@ func TestMounterPodHasCacheVolume(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			pod := corev1.Pod{Spec: corev1.PodSpec{Volumes: testCase.volumes}}
-			assert.Equals(t, testCase.expected, mounterPodHasCacheVolume(pod))
+			assert.Equals(t, testCase.expected, mounterPodCacheVolume(pod) != nil)
 		})
 	}
 }
@@ -203,7 +203,7 @@ func TestValidateCacheRequest(t *testing.T) {
 				t.Run(testCase.name, func(t *testing.T) {
 					args := mountpoint.ParseArgs(testCase.mountOptions)
 
-					caches, err := validateCacheRequest(args, testCase.volumeCtx, volumeID, testCase.mounterHasCache)
+					caches, err := validateCacheRequest(args, testCase.volumeCtx, volumeID, testCase.mounterHasCache, true)
 
 					if testCase.expectedErrContains != "" {
 						if err == nil {
@@ -220,3 +220,15 @@ func TestValidateCacheRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheHelpersWithoutNodeCacheOrClaimTemplate(t *testing.T) {
+	// Must not panic. The API server rejects an ephemeral volume without a claim template, but a fake clientset's pod can have one.
+	noClaimTemplate := &corev1.Volume{VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}}
+	cacheVolumeSummary(noClaimTemplate)
+	for _, nodeCache := range []*corev1.Volume{nil, noClaimTemplate} {
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir}, "test-volume-id", nodeCache)
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral}, "test-volume-id", nodeCache)
+	}
+}
+
+// Note: warnDeprecatedCacheSettings, and every warning only on a new target, tested via daemonset_mounter_test.go "A v2 PV mounts on this node's cache, with its deprecated settings warned about once" and "Warns once per new target, not on republishes".

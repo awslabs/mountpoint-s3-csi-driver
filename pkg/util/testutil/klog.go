@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"k8s.io/klog/v2"
@@ -14,7 +15,10 @@ func CaptureKlog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	klog.LogToStderr(false)
-	klog.SetOutput(&buf)
+	// Capture only the INFO sink: klog also writes every warning and error there, so this keeps each line once.
+	// Discard the others rather than leave them nil, which would make klog create a log file.
+	klog.SetOutput(io.Discard)
+	klog.SetOutputBySeverity("INFO", &buf)
 	t.Cleanup(func() {
 		klog.SetOutput(nil)
 		klog.LogToStderr(true)

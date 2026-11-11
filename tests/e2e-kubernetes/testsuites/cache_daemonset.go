@@ -357,7 +357,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 				DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
 				By("Waiting for a FailedMount event that names the Helm value to add")
-				assertPodFailsToMount(ctx, f, pod, "daemonsetMounters[0].cache")
+				assertPodFailsToMount(ctx, f, pod, "daemonsetMounters[] entry")
 			})
 
 			It("grants the mounter only SETUID, SETGID and KILL", func(ctx context.Context) {
