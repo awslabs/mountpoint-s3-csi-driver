@@ -6,7 +6,7 @@ This document explains the memory model and how to size it for your workload.
 
 ## The memory model
 
-One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share that single container's memory.
+One `s3-csi-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share that single container's memory.
 
 The driver therefore bounds each Mountpoint process with Mountpoint's [`--memory-target`](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#configuring-memory-usage) argument. `--memory-target` is not a guaranteed limit, but Mountpoint manages its buffers to stay within it: under memory pressure it slows down I/O, reclaims buffers it no longer needs, and reduces prefetching.
 
@@ -41,13 +41,13 @@ Two other related points matter for throughput:
 `equalSplit` is the default. It gives each Mountpoint process an equal share of the mounter's memory request as its `--memory-target`, derived from two Helm values:
 
 ```yaml
-daemonsetMounters:
-  - maxVolumesPerNode: 4          # how many distinct S3 volumes a node may mount
-    memoryLimitStrategy: equalSplit
-    resources:
-      requests:
-        memory: "4Gi"             # the node-wide budget for all Mountpoint processes
-        cpu: "500m"
+mounter:
+  maxVolumesPerNode: 4          # how many distinct S3 volumes a node may mount
+  memoryLimitStrategy: equalSplit
+  resources:
+    requests:
+      memory: "4Gi"             # the node-wide budget for all Mountpoint processes
+      cpu: "500m"
 ```
 
 Each Mountpoint process gets:
@@ -104,14 +104,13 @@ If an equal split does not suit your workload, for example when one volume needs
 For example, with one volume read at high throughput and another used only for uploading logs:
 
 ```yaml
-daemonsetMounters:
-  - maxVolumesPerNode: 2
-    memoryLimitStrategy: none
-    resources:
-      requests:
-        memory: "6720Mi"   # 64Mi + 6144Mi + 512Mi
-        cpu: "500m"
-    logLevel: 4
+mounter:
+  maxVolumesPerNode: 2
+  memoryLimitStrategy: none
+  resources:
+    requests:
+      memory: "6720Mi"   # 64Mi + 6144Mi + 512Mi
+      cpu: "500m"
 ```
 
 ```yaml

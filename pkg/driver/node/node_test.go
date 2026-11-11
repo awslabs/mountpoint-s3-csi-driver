@@ -742,7 +742,7 @@ func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
 	}{
 		{
 			name:     "a mounter's own rejection reaches the kubelet with its code",
-			mountErr: status.Error(codes.InvalidArgument, "requests a local cache, but s3-csi-daemonset-mounter has no cache volume"),
+			mountErr: status.Error(codes.InvalidArgument, "requests a local cache, but the mounter has no cache volume"),
 			wantCode: codes.InvalidArgument,
 		},
 		{

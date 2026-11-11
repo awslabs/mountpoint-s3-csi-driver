@@ -73,15 +73,15 @@ func newMemoryLimit(strategy memoryLimitStrategy, requestBytes, tmpfsBytes, maxV
 
 	if requestBytes <= 0 {
 		return memoryLimit{}, fmt.Errorf("memoryLimitStrategy=%s divides this container's %s between "+
-			"the Mountpoints it hosts, but none is declared. Set daemonsetMounters[].%s, or set "+
-			"daemonsetMounters[].memoryLimitStrategy=%s to leave %s to each PV's mountOptions",
+			"the Mountpoints it hosts, but none is declared. Set mounter.%s, or set "+
+			"mounter.memoryLimitStrategy=%s to leave %s to each PV's mountOptions",
 			memoryLimitEqualSplit, requestField, requestField, memoryLimitNone, mountpoint.ArgMemoryTarget)
 	}
 
 	if maxVolumesPerNode <= 0 {
 		return memoryLimit{}, fmt.Errorf("memoryLimitStrategy=%s divides this container's %s by "+
-			"maxVolumesPerNode, which is %d. Set a positive daemonsetMounters[].maxVolumesPerNode, or "+
-			"set daemonsetMounters[].memoryLimitStrategy=%s to leave %s to each PV's mountOptions",
+			"maxVolumesPerNode, which is %d. Set a positive mounter.maxVolumesPerNode, or "+
+			"set mounter.memoryLimitStrategy=%s to leave %s to each PV's mountOptions",
 			memoryLimitEqualSplit, requestField, maxVolumesPerNode, memoryLimitNone,
 			mountpoint.ArgMemoryTarget)
 	}
@@ -92,12 +92,12 @@ func newMemoryLimit(strategy memoryLimitStrategy, requestBytes, tmpfsBytes, maxV
 	tmpfsReserved, tmpfsRemedy := "", ""
 	if tmpfsMiB > 0 {
 		tmpfsReserved = fmt.Sprintf(" and the %d MiB tmpfs cache volume", tmpfsMiB)
-		tmpfsRemedy = ", or lower daemonsetMounters[].cache.emptyDir.sizeLimit as it uses medium Memory"
+		tmpfsRemedy = ", or lower mounter.cache.emptyDir.sizeLimit as it uses medium Memory"
 	}
 	if budgetMiB <= 0 {
 		return memoryLimit{}, fmt.Errorf("this container's %s of %d bytes is at or below the %d MiB "+
 			"reserved for the mounter process itself%s, leaving nothing for Mountpoint. Raise "+
-			"daemonsetMounters[].%s%s",
+			"mounter.%s%s",
 			requestField, requestBytes, mounterOverheadMiB, tmpfsReserved, requestField, tmpfsRemedy)
 	}
 
@@ -105,8 +105,8 @@ func newMemoryLimit(strategy memoryLimitStrategy, requestBytes, tmpfsBytes, maxV
 	if shareMiB < mountpoint.MinMemoryTargetMiB {
 		return memoryLimit{}, fmt.Errorf("this container's %s (%d bytes, %d MiB after reserving %d MiB "+
 			"for the mounter process%s) divided by maxVolumesPerNode=%d gives %d MiB per Mountpoint, below "+
-			"Mountpoint's minimum %s of %d MiB. Raise daemonsetMounters[].%s or lower "+
-			"daemonsetMounters[].maxVolumesPerNode%s",
+			"Mountpoint's minimum %s of %d MiB. Raise mounter.%s or lower "+
+			"mounter.maxVolumesPerNode%s",
 			requestField, requestBytes, budgetMiB, mounterOverheadMiB, tmpfsReserved, maxVolumesPerNode, shareMiB,
 			mountpoint.ArgMemoryTarget, mountpoint.MinMemoryTargetMiB, requestField, tmpfsRemedy)
 	}
@@ -128,7 +128,7 @@ func (l memoryLimit) targetFor(volumeId string, args mountpoint.Args) int64 {
 			klog.Warningf("Volume %s does not set %s in its PV mountOptions and "+
 				"memoryLimitStrategy=%s, so its Mountpoint targets 95%% of the memory it detects. "+
 				"Together the mounts on this node can exhaust it. Set %s in the PV mountOptions, or set "+
-				"daemonsetMounters[].memoryLimitStrategy=%s to divide this container's %s evenly.",
+				"mounter.memoryLimitStrategy=%s to divide this container's %s evenly.",
 				volumeId, mountpoint.ArgMemoryTarget, memoryLimitNone, mountpoint.ArgMemoryTarget,
 				memoryLimitEqualSplit, requestField)
 		}
@@ -138,7 +138,7 @@ func (l memoryLimit) targetFor(volumeId string, args mountpoint.Args) int64 {
 	if hasDeclared {
 		klog.Warningf("Ignoring %s=%s from the PV mountOptions of volume %s: memoryLimitStrategy=%s "+
 			"gives every Mountpoint on this node an equal %d MiB share of this container's %s. Set "+
-			"daemonsetMounters[].memoryLimitStrategy=%s to honour per-volume targets.",
+			"mounter.memoryLimitStrategy=%s to honour per-volume targets.",
 			mountpoint.ArgMemoryTarget, declared, volumeId, memoryLimitEqualSplit, l.shareMiB,
 			requestField, memoryLimitNone)
 	}

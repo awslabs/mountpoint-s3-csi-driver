@@ -1,6 +1,6 @@
 // DaemonsetMounter is the primary side of the two-daemonset architecture: where the primary daemonset
 // (s3-csi-node, privileged) performs FUSE mounts and passes file descriptors (fds) to the secondary
-// daemonset (s3-csi-daemonset-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
+// daemonset (s3-csi-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
 //
 // The two daemonsets communicate through the secondary daemonset's emptyDir volume (commDir). The
 // primary daemonset discovers the secondary pod, its comm dir and whether it has a cache volume,
@@ -100,7 +100,7 @@ const (
 	// csiNodeImageEnv carries this CSI node's own image reference. The chart renders it with the same
 	// helper as the s3-plugin and mounter container images, so it equals the CSI node's `image:`.
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
-	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
+	// mounterContainerName is the container in the s3-csi-mounter pod that runs Mountpoint.
 	mounterContainerName = "mounter"
 )
 
@@ -193,7 +193,7 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc, kubernetesVersion string, variant cluster.Variant) *DaemonsetMounter {
 	ownImage := os.Getenv(csiNodeImageEnv)
 	if ownImage == "" {
-		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / s3-csi-daemonset-mounter image check is disabled", csiNodeImageEnv)
+		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / mounter image check is disabled", csiNodeImageEnv)
 	}
 	return &DaemonsetMounter{
 		ownImage:          ownImage,
@@ -330,7 +330,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	if mounter == nil {
 		// Look again now rather than on the backed-off schedule, since a workload is waiting for it.
 		dm.requestRediscovery()
-		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes. "+
+		return fmt.Errorf("no usable mounter on node %s yet, so it can't mount new S3 volumes. "+
 			"Kubelet retries the mount until it can. %s", dm.nodeID, helpMessageForCheckingMounterPodStatus())
 	}
 
@@ -1322,7 +1322,7 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%w, check that s3-csi-daemonset-mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
+		return fmt.Errorf("%w, check that the mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
 	}
 	return nil
 }
@@ -1690,7 +1690,7 @@ func (dm *DaemonsetMounter) imageMismatchWarning(mounterImage string) string {
 	if dm.ownImage == "" || dm.ownImage == mounterImage {
 		return ""
 	}
-	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
+	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, the mounter runs %[3]q. "+
 		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
 		"`kubectl cordon %[1]s`, "+
 		"`kubectl drain %[1]s --ignore-daemonsets`, "+

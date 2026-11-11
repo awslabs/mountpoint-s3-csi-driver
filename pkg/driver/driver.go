@@ -168,7 +168,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
-		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
+		klog.Info("Note: the mounter DaemonSets use OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
 		var fallbackVolumeLimit int64
 		if v := os.Getenv(fallbackMaxVolumesPerNodeEnv); v != "" {
@@ -214,7 +214,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
 		ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
 		if err := dm.DiscoverMounter(ctx); err != nil {
-			klog.Warningf("No s3-csi-daemonset-mounter this node can use yet (%v). Serving the volumes already on this node "+
+			klog.Warningf("No mounter this node can use yet (%v). Serving the volumes already on this node "+
 				"and failing new S3 mounts until there is one. V3 requires the %s startup taint on nodes, which keeps workloads off "+
 				"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
 		}

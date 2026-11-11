@@ -53,8 +53,8 @@ func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, vol
 
 	if !mounterHasCache {
 		return false, status.Errorf(codes.InvalidArgument,
-			"Volume %s requests a local cache, but s3-csi-daemonset-mounter has no cache volume."+
-				" Add a daemonsetMounters[0].cache block to the Helm values and restart its pods.", volumeID)
+			"Volume %s requests a local cache, but the mounter has no cache volume."+
+				" Add a mounter.cache block to the Helm values and restart its pods.", volumeID)
 	}
 
 	return true, nil

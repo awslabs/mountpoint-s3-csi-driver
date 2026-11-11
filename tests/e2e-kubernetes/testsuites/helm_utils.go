@@ -192,7 +192,7 @@ func waitForDaemonSetReady(ctx context.Context, f *framework.Framework, name, la
 	}).WithTimeout(timeout).WithPolling(5*time.Second).Should(BeTrue(), func() string { return describePods(ctx, f, label) })
 }
 
-// mounterDaemonSetNames returns the release's mounter DaemonSets, one per daemonsetMounters entry.
+// mounterDaemonSetNames returns the release's mounter DaemonSets: the default one, and one per additionalDaemonsets entry.
 func mounterDaemonSetNames(ctx context.Context, f *framework.Framework) []string {
 	GinkgoHelper()
 	list, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{})

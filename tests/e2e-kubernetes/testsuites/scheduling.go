@@ -152,7 +152,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
-		// The chart has a single mounter (`daemonsetMounters`), so the pool's nodes have the same limit as the others.
+		// The chart has only the default pair (no additionalDaemonsets), so the pool's nodes have the same limit as the others.
 		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
 		framework.ExpectNoError(err)
 		scaleOut(ctx, 2*limit, limit, "")
@@ -169,14 +169,17 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
 		pool := map[string]any{nodePoolKey: nodePoolValue}
-		// The other nodes' entry keeps the unnamed DaemonSet, and the driver's DaemonSets are OnDelete, so only the pool's
-		// new nodes run the new templates.
-		release.upgradeOnly(ctx, withMounterEntries(release,
-			map[string]any{"matchExpressions": []any{map[string]any{"key": nodePoolKey, "operator": "DoesNotExist"}}},
-			map[string]any{"name": "small", "nodeSelector": pool, "matchExpressions": small, "maxVolumesPerNode": 2,
-				"resources": map[string]any{"requests": map[string]any{"memory": "2Gi"}}},
-			map[string]any{"name": "big", "nodeSelector": pool, "matchExpressions": big, "maxVolumesPerNode": 4,
-				"resources": map[string]any{"requests": map[string]any{"memory": "10Gi"}}}))
+		entry := func(sizes []any, limit int, memory string) map[string]any {
+			return map[string]any{
+				"node": map[string]any{"nodeSelector": pool, "affinity": map[string]any{"nodeAffinity": map[string]any{
+					"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{"nodeSelectorTerms": []any{map[string]any{"matchExpressions": sizes}}}}}},
+				"mounter": map[string]any{"maxVolumesPerNode": limit, "resources": map[string]any{"requests": map[string]any{"memory": memory}}},
+			}
+		}
+		// The default pair stays off the pool, so only the pool's new nodes run the entries.
+		release.upgradeOnly(ctx, withAdditionalDaemonsets(release,
+			map[string]any{"key": nodePoolKey, "operator": "DoesNotExist"},
+			map[string]any{"small": entry(small, 2, "2Gi"), "big": entry(big, 4, "10Gi")}))
 
 		// The 256Mi workloads request something so that Cluster Autoscaler, which ranks its nodegroups by what the workloads
 		// leave unused, picks the small one. A 6.5Gi workload fits neither an 8GiB node beside the 2Gi small mounter nor a

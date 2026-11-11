@@ -55,7 +55,7 @@ const (
 type cacheVolume struct {
 	// name completes "with <name>" in the container description.
 	name string
-	// helm is the daemonsetMounters[0].cache block that creates this volume.
+	// helm is the mounter.cache block that creates this volume.
 	helm map[string]any
 	// runsExpressSpec adds the local plus Express spec; no code of ours differs by cache type there, so one row runs it.
 	runsExpressSpec bool
@@ -357,7 +357,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 				DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 
 				By("Waiting for a FailedMount event that names the Helm value to add")
-				assertPodFailsToMount(ctx, f, pod, "daemonsetMounters[0].cache")
+				assertPodFailsToMount(ctx, f, pod, "mounter.cache")
 			})
 
 			It("grants the mounter only SETUID, SETGID and KILL", func(ctx context.Context) {
@@ -383,14 +383,12 @@ func clusterProvides(ctx context.Context, f *framework.Framework, req clusterPre
 	return true
 }
 
-// withMounterCache returns the installed values with one complete mounter element carrying cache (nil: none) and
+// withMounterCache returns the installed values with the default mounter carrying cache (nil: none) and
 // defaultMaxVolumesPerNode, and both driver DaemonSets on nodeSelector's nodes only (nil: every node).
 func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[string]string) map[string]any {
-	// Helm replaces a list whole, so the element starts from the chart's: a partial one renders an absent logLevel as `--v=`.
-	chartMounter := r.chart.Values["daemonsetMounters"].([]any)[0].(map[string]any)
-	mounter := maps.Clone(chartMounter)
-	if installed, _ := r.installed["daemonsetMounters"].([]any); len(installed) > 0 {
-		maps.Copy(mounter, installed[0].(map[string]any))
+	mounter := map[string]any{}
+	if installed, _ := r.installed["mounter"].(map[string]any); installed != nil {
+		maps.Copy(mounter, installed)
 	}
 	// The chart reads the key's presence, not its value, as asking for a cache.
 	delete(mounter, "cache")
@@ -401,7 +399,6 @@ func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[s
 
 	// Placement from the chart, not the install: an install pinned to the NVMe nodes would leave unpinned workloads on nodes
 	// without s3-csi-node. Both DaemonSets read node.nodeSelector.
-	mounter["affinity"] = chartMounter["affinity"]
 	installedNode, _ := r.installed["node"].(map[string]any)
 	node := map[string]any{}
 	maps.Copy(node, installedNode)
@@ -413,7 +410,7 @@ func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[s
 	node["nodeSelector"] = selector
 
 	values := maps.Clone(r.installed)
-	values["daemonsetMounters"] = []any{mounter}
+	values["mounter"] = mounter
 	values["node"] = node
 	return values
 }
