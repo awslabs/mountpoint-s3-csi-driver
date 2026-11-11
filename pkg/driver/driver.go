@@ -189,15 +189,15 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
 		ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
 		if err := dm.DiscoverMounter(ctx); err != nil {
-			klog.Warningf("No s3-csi-daemonset-mounter is running on this node yet (%v). Serving the volumes already on this node "+
-				"and failing new S3 mounts until one runs. V3 requires the %s startup taint on nodes, which keeps workloads off "+
+			klog.Warningf("No s3-csi-daemonset-mounter this node can use yet (%v). Serving the volumes already on this node "+
+				"and failing new S3 mounts until there is one. V3 requires the %s startup taint on nodes, which keeps workloads off "+
 				"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
 		}
 		cancel()
 		go dm.StartCommDirWatch(stopCh)
 		go dm.StartPeriodicCleanup(stopCh)
 
-		nodeServer = node.NewS3NodeServer(nodeID, dm, 0)
+		nodeServer = node.NewS3NodeServer(nodeID, dm)
 		mounterFound = dm.MounterFound()
 	} else {
 		mpMounter := mpmounter.New()
@@ -220,7 +220,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		if err != nil {
 			klog.Fatalln(err)
 		}
-		nodeServer = node.NewS3NodeServer(nodeID, podMounter, 0) // maxVolumesPerNode = 0 means no limit
+		nodeServer = node.NewS3NodeServer(nodeID, podMounter)
 	}
 
 	return &Driver{

@@ -243,7 +243,7 @@ func TestMountWithNoMounterLooksForOneRightAway(t *testing.T) {
 		nil, mountpoint.ParseArgs(nil), "", nil)
 
 	assert.ErrorIs(t, err, ErrCommDirNotReady)
-	assert.Contains(t, err.Error(), "no s3-csi-daemonset-mounter is running on node test-node yet")
+	assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node test-node yet")
 	select {
 	case <-dm.rediscoverCh:
 	default:

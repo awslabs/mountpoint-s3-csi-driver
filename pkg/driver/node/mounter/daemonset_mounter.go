@@ -316,7 +316,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	if mounter == nil {
 		// Look again now rather than on the backed-off schedule, since a workload is waiting for it.
 		dm.requestRediscovery()
-		return fmt.Errorf("no s3-csi-daemonset-mounter is running on node %s yet, so it can't mount new S3 volumes, "+
+		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes, "+
 			"allowing kubelet to retry NodePublishVolume: %w. %s", dm.nodeID, ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
 	}
 
@@ -879,7 +879,8 @@ func helpMessageForGettingMounterLogs() string {
 // helpMessageForCheckingMounterPodStatus returns a help message with a command to check mounter pod status.
 func helpMessageForCheckingMounterPodStatus() string {
 	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
-		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests", mounterNamespace)
+		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
+		"Two on one node mean two daemonsetMounters entries select it", mounterNamespace)
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.
@@ -1365,7 +1366,11 @@ func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
 	if _, err := dm.runningMounterPods(ctx); errors.Is(err, ErrMultipleMounterPods) {
-		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err)
+		effect := "Mounts on this node keep using the first mounter"
+		if dm.mounter.Load() == nil {
+			effect = "None of them holds this node's mounts, so new S3 mounts on it fail until only one runs"
+		}
+		klog.Errorf("DaemonsetMounter: %v. %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, effect)
 	}
 }
 
