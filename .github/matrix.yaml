@@ -3,6 +3,9 @@
 # an old release.
 matrix:
   cluster-type: ["eksctl"]
+  # The cluster's profile in `tests/e2e-kubernetes/scripts/profiles`, none for the regular cells. Listed here so GitHub
+  # adds the profile cells in "include" rather than merging them into the regular ones.
+  cluster-profile: [""]
   arch: ["x86", "arm"]
   # Canonical patches plain Ubuntu EKS AMIs only during EKS standard support, but patches pro AMIs during extended support.
   # We use UbuntuPro2404 and UbuntuPro2604 so we don't need to move each one to Pro when its standard support ends every time.
@@ -24,6 +27,26 @@ matrix:
     # field rather than trying to exclude all other variants.
     - family: "AmazonLinux2023"
       selinux-mode: "enforcing"
+    # The scheduling tests, on one cluster per autoscaler profile. Only PRs into feature/daemonset-architecture run them,
+    # as only it has the profiles, so don't backport these. When bumping `kubernetes-version`, check each autoscaler supports it.
+    - cluster-type: "eksctl"
+      cluster-profile: "karpenter"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
+    - cluster-type: "eksctl"
+      cluster-profile: "cas"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
+    - cluster-type: "eksctl"
+      cluster-profile: "automode"
+      tests: "scheduling"
+      arch: "x86"
+      family: "AmazonLinux2023"
+      kubernetes-version: "1.36.1"
   exclude:
     # Ubuntu 26.04 EKS AMIs are only published for EKS >= 1.35.
     - cluster-type: "eksctl"
