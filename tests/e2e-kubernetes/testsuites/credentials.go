@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,6 +205,70 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
 		deferCleanup(vol.CleanupResource)
 		return createPod(ctx, vol)
+	}
+
+	// expectCredentialFilesOwnedByMount checks the credential files csi-node wrote for pod's mount are owner-only and
+	// owned by the mount's UID (the owner of the mount's credential directory), so no other mount on the node can read
+	// them, both as first written and after a republish rewrites them. Only daemonset mode gives each mount its own UID.
+	expectCredentialFilesOwnedByMount := func(ctx context.Context, pod *v1.Pod, files ...string) {
+		GinkgoHelper()
+		var claim string
+		for _, vol := range pod.Spec.Volumes {
+			if vol.PersistentVolumeClaim != nil {
+				claim = vol.PersistentVolumeClaim.ClaimName
+			}
+		}
+		pvc, err := f.ClientSet.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, claim, metav1.GetOptions{})
+		framework.ExpectNoError(err)
+		node := pod.Spec.NodeName
+		credDir := filepath.Join(commDirHostPath(ctx, f, node), pvc.Spec.VolumeName)
+		owner := statPath(ctx, f, node, credDir).uid
+		gomega.Expect(owner).NotTo(gomega.Equal(0), "the mount's credential directory %s must belong to the mount's UID", credDir)
+
+		// Inode, mode, owner and group: an atomic rewrite gives the file a new inode.
+		statFile := func(ctx context.Context, name string) ([]string, error) {
+			out, err := execInCSINodePod(ctx, f, node, fmt.Sprintf("stat -c '%%i %%a %%u %%g' %q", filepath.Join(credDir, name)))
+			if err != nil {
+				return nil, err
+			}
+			fields := strings.Fields(strings.TrimSpace(out))
+			if len(fields) != 4 {
+				return nil, fmt.Errorf("unexpected stat output for %s: %q", name, out)
+			}
+			return fields, nil
+		}
+		expectOwnerOnly := func(name string, stat []string) {
+			GinkgoHelper()
+			gomega.Expect(stat[1]).To(gomega.Equal(expectedCredFileMode), "%s must be readable only by its owner", name)
+			gomega.Expect(stat[2]).To(gomega.Equal(strconv.Itoa(owner)), "%s must be owned by the mount's UID", name)
+			gomega.Expect(stat[3]).To(gomega.Equal(strconv.Itoa(owner)), "%s must be in the mount's group", name)
+		}
+
+		inodes := map[string]string{}
+		for _, name := range files {
+			By(fmt.Sprintf("Checking %s is owner-only and owned by the mount's UID %d", name, owner))
+			stat, err := statFile(ctx, name)
+			framework.ExpectNoError(err)
+			expectOwnerOnly(name, stat)
+			inodes[name] = stat[0]
+		}
+
+		// With requiresRepublish the kubelet calls NodePublishVolume periodically, and csi-node rewrites the files.
+		for _, name := range files {
+			By(fmt.Sprintf("Waiting for a republish to rewrite %s, then checking it is still owner-only and owned by UID %d", name, owner))
+			var stat []string
+			gomega.Eventually(ctx, func(ctx context.Context) error {
+				stat, err = statFile(ctx, name)
+				if err != nil {
+					return err
+				}
+				if stat[0] == inodes[name] {
+					return fmt.Errorf("%s not rewritten yet (inode %s)", name, stat[0])
+				}
+				return nil
+			}).WithTimeout(tokenRewriteTimeout).WithPolling(5 * time.Second).Should(gomega.Succeed())
+			expectOwnerOnly(name, stat)
+		}
 	}
 
 	createPodAllowsDeleteNonRoot := func(ctx context.Context) *v1.Pod {
@@ -486,6 +551,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3NoAccess)
 					expectFailToMount(ctx, "", nil)
 				})
+
+				It("should keep the driver's token file owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
+					if !isDaemonsetMounterMode(ctx, f) {
+						Skip("only daemonset mode gives each mount its own UID")
+					}
+					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(ctx, pod)
+					expectCredentialFilesOwnedByMount(ctx, pod, "token")
+					expectFullAccess(ctx, pod)
+				})
 			})
 
 			Context("EKS Pod Identity", Ordered, func() {
@@ -517,6 +593,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3NoAccess)
 					expectFailToMount(ctx, "", nil)
 				})
+
+				It("should keep the driver's token file owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
+					if !isDaemonsetMounterMode(ctx, f) {
+						Skip("only daemonset mode gives each mount its own UID")
+					}
+					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(ctx, pod)
+					expectCredentialFilesOwnedByMount(ctx, pod, "eks-pod-identity-token")
+					expectFullAccess(ctx, pod)
+				})
 			})
 
 			Context("Credentials via Kubernetes Secrets", func() {
@@ -541,6 +628,17 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				It("should fail to mount if aws credentials does not allow s3::ListObjectsV2", func(ctx context.Context) {
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3NoAccess)
 					expectFailToMount(ctx, "", nil)
+				})
+
+				It("should keep the credentials and config files owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
+					if !isDaemonsetMounterMode(ctx, f) {
+						Skip("only daemonset mode gives each mount its own UID")
+					}
+					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
+					pod := createPodAllowsDelete(ctx)
+					expectFullAccess(ctx, pod)
+					expectCredentialFilesOwnedByMount(ctx, pod, "s3-csi-credentials", "s3-csi-config")
+					expectFullAccess(ctx, pod)
 				})
 			})
 		})
