@@ -9,7 +9,7 @@ matrix:
   cluster-profile: [""]
   arch: ["x86", "arm"]
   # Canonical patches plain Ubuntu EKS AMIs only during EKS standard support, but patches pro AMIs during extended support.
-  # We use UbuntuPro2404 so we don't need to move each one to Pro when its standard support ends every time.
+  # We use UbuntuPro2404 and UbuntuPro2604 so we don't need to move each one to Pro when its standard support ends every time.
   # Check the tabs on https://cloud-images.ubuntu.com/docs/aws/eks/ to see e.g. Noble 1.33 is missing but Noble Pro 1.33 is present.
   # To check the AMI used (use eks instead of eks-pro for plain Ubuntu):
   #   aws ssm get-parameter --region us-east-1 --name /aws/service/canonical/ubuntu/eks-pro/24.04/1.33/stable/current/amd64/hvm/ebs-gp3/ami-id
@@ -19,6 +19,7 @@ matrix:
       "AmazonLinux2023",
       "Bottlerocket",
       "UbuntuPro2404",
+      "UbuntuPro2604",
     ]
   kubernetes-version:
     ["1.31.0", "1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1", "1.37.0"]
@@ -50,6 +51,20 @@ matrix:
       arch: "x86"
       family: "AmazonLinux2023"
       kubernetes-version: "1.36.1"
+  exclude:
+    # Ubuntu 26.04 EKS AMIs are only published for EKS >= 1.35.
+    - cluster-type: "eksctl"
+      family: "UbuntuPro2604"
+      kubernetes-version: "1.31.0"
+    - cluster-type: "eksctl"
+      family: "UbuntuPro2604"
+      kubernetes-version: "1.32.1"
+    - cluster-type: "eksctl"
+      family: "UbuntuPro2604"
+      kubernetes-version: "1.33.2"
+    - cluster-type: "eksctl"
+      family: "UbuntuPro2604"
+      kubernetes-version: "1.34.1"
 
 # Combinations CI no longer tests, whose clusters earlier runs or other branch runs may have left behind.
 # delete-cluster.yaml deletes these as well as everything in `matrix`.

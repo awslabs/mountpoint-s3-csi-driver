@@ -16,3 +16,6 @@ spec:
   {{- if semverCompare ">=1.33.0-0" .Capabilities.KubeVersion.Version }}
   nodeAllocatableUpdatePeriodSeconds: 10
   {{- end }}
+  {{- if and .Values.node.preventPodSchedulingIfMissing (semverCompare ">=1.37.0-0" .Capabilities.KubeVersion.Version) }}
+  preventPodSchedulingIfMissing: true
+  {{- end }}
