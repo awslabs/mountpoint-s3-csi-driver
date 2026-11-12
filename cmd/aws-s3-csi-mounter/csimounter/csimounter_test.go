@@ -1,6 +1,7 @@
 package csimounter_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/cmd/aws-s3-csi-mounter/csimounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
@@ -165,6 +167,46 @@ func TestRunningMountpoint(t *testing.T) {
 		errMsg, err := os.ReadFile(mountErrPath)
 		assert.NoError(t, err)
 		assert.Equals(t, mountpointErr.Error(), string(errMsg))
+	})
+
+	t.Run("Logs why the error file could not be written", func(t *testing.T) {
+		var buf bytes.Buffer
+		klog.LogToStderr(false)
+		klog.SetOutput(&buf)
+		t.Cleanup(func() { klog.SetOutput(os.Stderr); klog.LogToStderr(true) })
+
+		mountErrPath := filepath.Join(t.TempDir(), "missing-dir", "mount.err")
+		dev := mountertest.OpenDevNull(t)
+		_, err := csimounter.Run(csimounter.Options{
+			MountpointPath: mountpointPath,
+			MountErrPath:   mountErrPath,
+			MountOptions:   mountoptions.Options{Fd: int(dev.Fd()), BucketName: "test-bucket"},
+			CmdRunner:      func(c *exec.Cmd) (int, error) { return 1, errors.New("mountpoint exit status 1") },
+		})
+		assert.Equals(t, true, err != nil)
+		klog.Flush()
+		assert.Contains(t, buf.String(), "no such file or directory")
+	})
+
+	t.Run("Writes Mountpoint's stderr to the error file as one line", func(t *testing.T) {
+		mountErrPath := filepath.Join(t.TempDir(), "mount.err")
+		dev := mountertest.OpenDevNull(t)
+		runner := func(c *exec.Cmd) (int, error) {
+			_, err := c.Stderr.Write([]byte("Error: Failed to create S3 client\n\nCaused by:\n    0: The bucket does not exist\n"))
+			assert.NoError(t, err)
+			return 1, errors.New("exit status 1")
+		}
+		_, err := csimounter.Run(csimounter.Options{
+			MountpointPath: mountpointPath,
+			MountErrPath:   mountErrPath,
+			MountOptions:   mountoptions.Options{Fd: int(dev.Fd()), BucketName: "test-bucket"},
+			CmdRunner:      runner,
+		})
+		assert.Equals(t, true, err != nil)
+
+		errMsg, err := os.ReadFile(mountErrPath)
+		assert.NoError(t, err)
+		assert.Equals(t, "Error: Failed to create S3 client Caused by: 0: The bucket does not exist", string(errMsg))
 	})
 
 	t.Run("Exists with zero code if `mount.exit` file exist", func(t *testing.T) {

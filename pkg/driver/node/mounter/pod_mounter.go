@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -396,7 +397,7 @@ func (pm *PodMounter) waitForMount(parentCtx context.Context, target, podName, p
 				return false, nil
 			}
 
-			mountResultCh <- fmt.Errorf("Mountpoint Pod %s failed: %s", podName, res)
+			mountResultCh <- fmt.Errorf("Mountpoint Pod %s failed: %s", podName, errorfile.Format(string(res)))
 			return true, nil
 		})
 	}()

@@ -518,7 +518,8 @@ func TestPodMounter(t *testing.T) {
 
 				// Emulate that Mountpoint failed to mount
 				mountErrorPath := mppod.PathOnHost(mpPod.podPath, mppod.KnownPathMountError)
-				err := os.WriteFile(mountErrorPath, []byte("mount failed"), 0777)
+				// Raw multi-line stderr, as an older Mountpoint Pod image writes it.
+				err := os.WriteFile(mountErrorPath, []byte("Error: mount failed\n\x1b[31mCaused by:\x1b[0m no such bucket\n"), 0777)
 				assert.NoError(t, err)
 			}()
 
@@ -527,7 +528,12 @@ func TestPodMounter(t *testing.T) {
 				WorkloadPodID: testCtx.podUID,
 			}, nil, mountpoint.ParseArgs(nil), testCtx.fsGroup, envprovider.Environment{})
 			if err == nil {
-				t.Errorf("mount shouldn't succeeded if Mountpoint fails to start")
+				t.Fatalf("mount shouldn't succeeded if Mountpoint fails to start")
+			}
+			// It becomes the FailedMount event: one line of printable ASCII.
+			assert.Contains(t, err.Error(), "Error: mount failed Caused by: no such bucket")
+			if strings.ContainsAny(err.Error(), "\n\x1b") {
+				t.Errorf("unformatted Mountpoint Pod error: %q", err.Error())
 			}
 
 			ok, err := testCtx.mount.IsMountPoint(testCtx.sourcePath)

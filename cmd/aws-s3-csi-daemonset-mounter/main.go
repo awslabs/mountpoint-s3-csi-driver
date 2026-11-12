@@ -15,15 +15,19 @@
 //  2. The mounter receives the options, spawns a Mountpoint child process with the FUSE fd,
 //     and closes the connection.
 //  3. If the mounter refuses a request with a valid mount-id, or the Mountpoint process exits with a non-zero
-//     code, the reason or its stderr is written to <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
-//     The driver is responsible for removing this file during Unmount.
+//     code or is killed by a signal, a one-line reason is written to <comm-dir>/<mount-id>.error: the exit code or
+//     signal and the `Error:` chain (or last lines) of its stderr, at most 512 bytes of ASCII (see
+//     pkg/mountpoint/errorfile). The full stderr is in this container's log, each line prefixed with
+//     [<mount-id>], as are the mounter's own lines about the mount. The file is written atomically (temporary file
+//     and rename). Nothing is written on clean (zero) exit. The driver returns or logs this file's content, then
+//     removes it.
 //
 // The mount-id (Options.VolumeId) must be unique per active mount (e.g. <WorkloadPodId>-<VolumeId>
 // or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected, and so is a UID a running Mountpoint holds.
 //
 // Note: if Mountpoint crashes with non-zero exit after the driver has already completed Unmount,
 // a small .error file may be left behind. This is bounded by the number of such rare race
-// occurrences and each file is only a few KB of stderr.
+// occurrences and each file is at most 512 bytes.
 package main
 
 import (
