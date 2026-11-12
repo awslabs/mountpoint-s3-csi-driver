@@ -9,7 +9,9 @@ import (
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	clientset "k8s.io/client-go/kubernetes"
@@ -130,6 +132,51 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 
 			// 6. Test basic file operations
 			framework.Logf("Testing file operations on pod %s", pod.Name)
+			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
+		})
+
+		It("should re-register the driver after its kubelet registration socket is removed", func(ctx context.Context) {
+			csiNodePod := csiDriverPod(ctx, f)
+			nodeName := csiNodePod.Spec.NodeName
+			driverName := driver.GetDriverInfo().Name
+			registered := func(ctx context.Context) (bool, error) {
+				csiNode, err := f.ClientSet.StorageV1().CSINodes().Get(ctx, nodeName, metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				return slices.ContainsFunc(csiNode.Spec.Drivers, func(d storagev1.CSINodeDriver) bool { return d.Name == driverName }), nil
+			}
+			// If the driver doesn't come back, restart the node pod so later tests still have a registered driver
+			deferCleanup(func(ctx context.Context) error {
+				if ok, err := registered(ctx); err != nil || ok {
+					return err
+				}
+				return e2epod.DeletePodWithWait(ctx, f.ClientSet, csiNodePod)
+			})
+
+			// 1. Remove the socket kubelet registered the driver from; kubelet then deregisters the driver on the node
+			_, _, err := e2epod.ExecWithOptionsContext(ctx, f, e2epod.ExecOptions{
+				Command:       []string{"rm", "/var/lib/kubelet/plugins_registry/" + driverName + "-reg.sock"},
+				Namespace:     csiDriverDaemonSetNamespace,
+				PodName:       csiNodePod.Name,
+				ContainerName: "s3-plugin",
+				CaptureStdout: true,
+				CaptureStderr: true,
+			})
+			framework.ExpectNoError(err)
+			gomega.Eventually(ctx, registered).WithTimeout(time.Minute).WithPolling(2 * time.Second).Should(gomega.BeFalse())
+
+			// 2. The registrar's liveness probe fails without its socket, so kubelet restarts it and it registers again
+			gomega.Eventually(ctx, registered).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(gomega.BeTrue())
+
+			// 3. New mounts on the node work again
+			vol := createVolumeResourceWithMountOptions(ctx, l.config, pattern, []string{"allow-delete"})
+			deferCleanup(vol.CleanupResource)
+			pod := e2epod.MakePod(f.Namespace.Name, map[string]string{"kubernetes.io/hostname": nodeName},
+				[]*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, "")
+			pod, err = createPod(ctx, f.ClientSet, f.Namespace.Name, pod)
+			framework.ExpectNoError(err)
+			deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 			checkBasicFileOperations(ctx, pod, e2epod.VolumeMountPath1)
 		})
 	})
