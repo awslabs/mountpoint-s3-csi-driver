@@ -242,7 +242,6 @@ func TestMountWithNoMounterLooksForOneRightAway(t *testing.T) {
 	err := dm.Mount(context.Background(), "bucket", target, credentialprovider.ProvideContext{VolumeID: "pv"},
 		nil, mountpoint.ParseArgs(nil), "", nil)
 
-	assert.ErrorIs(t, err, ErrCommDirNotReady)
 	assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node test-node yet")
 	select {
 	case <-dm.rediscoverCh:

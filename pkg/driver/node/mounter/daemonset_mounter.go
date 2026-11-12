@@ -316,8 +316,8 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	if mounter == nil {
 		// Look again now rather than on the backed-off schedule, since a workload is waiting for it.
 		dm.requestRediscovery()
-		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes, "+
-			"allowing kubelet to retry NodePublishVolume: %w. %s", dm.nodeID, ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
+		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes. "+
+			"Kubelet retries the mount until it can. %s", dm.nodeID, helpMessageForCheckingMounterPodStatus())
 	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
@@ -1350,15 +1350,6 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 	dm.lastCommDir = mounter.commDir
 	klog.V(2).Infof("DaemonsetMounter: re-discovered mounter: %s", mounter.commDir)
 	return true
-}
-
-// MounterMaxVolumesPerNode returns the discovered mounter pod's MounterMaxVolumesLabel, if it has one.
-func (dm *DaemonsetMounter) MounterMaxVolumesPerNode() (int64, bool) {
-	m := dm.mounter.Load()
-	if m == nil || m.maxVolumes < 0 {
-		return 0, false
-	}
-	return m.maxVolumes, true
 }
 
 // checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.
