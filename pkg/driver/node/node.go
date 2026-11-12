@@ -21,6 +21,7 @@ import (
 	"maps"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -135,6 +136,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	// `--ca-bundle` is not supported in CSI Driver yet.
 	if args.Has(mountpoint.ArgCABundle) {
 		return nil, status.Errorf(codes.InvalidArgument, "Running mount-s3 with %s is not supported in CSI Driver.", mountpoint.ArgCABundle)
+	}
+
+	// Mountpoint fails to start if `AWS_MAX_ATTEMPTS`, which is set from `--aws-max-attempts`, is not a positive integer.
+	if maxAttempts, ok := args.Value(mountpoint.ArgAWSMaxAttempts); ok && !isPositiveInteger(maxAttempts) {
+		return nil, status.Errorf(codes.InvalidArgument, "%s must be a positive integer, got %q", mountpoint.ArgAWSMaxAttempts, maxAttempts)
 	}
 
 	fsGroup := ""
@@ -380,4 +386,11 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 		Readonly:          req.Readonly,
 		VolumeContext:     safeVolumeContext,
 	}
+}
+
+// isPositiveInteger reports whether value is accepted by Mountpoint as a positive integer, e.g. for `AWS_MAX_ATTEMPTS`:
+// decimal digits with an optional leading `+`, not zero, and fitting in 64 bits.
+func isPositiveInteger(value string) bool {
+	n, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
+	return err == nil && n > 0
 }

@@ -12,6 +12,7 @@
   * Fix existing directories appearing as missing, and directory listings ending early, when S3 returns an empty page of listing results. ([#1954](https://github.com/awslabs/mountpoint-s3/pull/1954), [#2023](https://github.com/awslabs/mountpoint-s3/pull/2023))
   * Fix a deadlock that could make the file system hang when the kernel forgets a file or directory while another file in the same directory is renamed, or while the directory is opened for listing with files still being written in it. ([#1995](https://github.com/awslabs/mountpoint-s3/pull/1995))
   * Make `incremental-upload` consistently check for concurrent writes when appending (i.e. without `O_TRUNC`), even at offset 0. Previously, appending to an existing empty object could silently overwrite another writer's changes instead of failing with `EIO`. ([#1970](https://github.com/awslabs/mountpoint-s3/pull/1970))
+* Reject `aws-max-attempts` mount option values that are not positive integers: `NodePublishVolume` now fails with `InvalidArgument` instead of starting Mountpoint, which fails to start with them since v1.25.0. ([#TBD](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/TBD))
 
 # v2.9.2
 

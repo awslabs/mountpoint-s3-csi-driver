@@ -9,6 +9,8 @@ import (
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
@@ -703,6 +705,78 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
+	}
+}
+
+func TestNodePublishVolumeAWSMaxAttempts(t *testing.T) {
+	var (
+		volumeId   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/var/lib/kubelet/target/path"
+	)
+
+	testCases := []struct {
+		name      string
+		mountFlag string
+		wantValue string
+		wantValid bool
+	}{
+		{name: "valid", mountFlag: "aws-max-attempts 5", wantValue: "5", wantValid: true},
+		{name: "valid: equals separator", mountFlag: "--aws-max-attempts=1", wantValue: "1", wantValid: true},
+		{name: "valid: leading plus", mountFlag: "aws-max-attempts +10", wantValue: "+10", wantValid: true},
+		{name: "valid: above 64", mountFlag: "aws-max-attempts 100", wantValue: "100", wantValid: true},
+		{name: "invalid: zero", mountFlag: "aws-max-attempts 0"},
+		{name: "invalid: negative", mountFlag: "aws-max-attempts -1"},
+		{name: "invalid: not a number", mountFlag: "aws-max-attempts abc"},
+		{name: "invalid: decimal", mountFlag: "aws-max-attempts 1.5"},
+		{name: "invalid: no value", mountFlag: "aws-max-attempts"},
+		{name: "invalid: overflow", mountFlag: "aws-max-attempts 18446744073709551616"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			ctx := context.Background()
+			req := &csi.NodePublishVolumeRequest{
+				VolumeId: volumeId,
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{
+							MountFlags: []string{testCase.mountFlag},
+						},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				},
+				VolumeContext: map[string]string{"bucketName": bucketName},
+				TargetPath:    targetPath,
+			}
+
+			if testCase.wantValid {
+				nodeTestEnv.mockMounter.EXPECT().Mount(
+					gomock.Eq(context.Background()),
+					gomock.Eq(bucketName),
+					gomock.Eq(targetPath),
+					gomock.Eq(credentialprovider.ProvideContext{
+						VolumeID:             volumeId,
+						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+					}),
+					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root", "--aws-max-attempts=" + testCase.wantValue})),
+					gomock.Eq(""),
+					gomock.Eq(envprovider.Environment{}),
+				).Return(nil)
+			}
+
+			_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+			if testCase.wantValid {
+				assert.NoError(t, err)
+			} else {
+				assert.Equals(t, codes.InvalidArgument, status.Code(err))
+			}
+
+			nodeTestEnv.mockCtl.Finish()
+		})
 	}
 }
 
