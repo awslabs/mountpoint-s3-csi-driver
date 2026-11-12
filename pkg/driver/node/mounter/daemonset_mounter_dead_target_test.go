@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	mountutils "k8s.io/mount-utils"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/cluster"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
@@ -78,6 +79,8 @@ func TestMount_DeadTargetRemount(t *testing.T) {
 	for _, cleanupFirst := range []bool{true, false} {
 		t.Run(fmt.Sprintf("cleanup ran first: %t", cleanupFirst), func(t *testing.T) {
 			testCtx := setupDM(t)
+			// A V3 dead target is remounted with legacy support on too.
+			t.Setenv("SUPPORT_LEGACY_POD_MOUNTS", "true")
 			target := testCtx.targetPath(testCtx.podUID)
 			source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
 			volumeCtx := podInfo(testCtx.podUID)
@@ -261,4 +264,44 @@ func TestMount_UnknownTargetStateIsRetryable(t *testing.T) {
 	if !strings.Contains(err.Error(), "will retry") {
 		t.Errorf("error %q is not the retryable unknown-state error", err)
 	}
+}
+
+// TestMount_DeadLegacyV2Target checks a dead target still bound to a legacy V2 Mountpoint Pod's source
+// (during the V2 to V3 migration). It is not remounted onto the V3 mounter: Mount returns Aborted asking
+// to recreate the pod, which moves it to V3 cleanly, and leaves the target and the V2 source alone.
+func TestMount_DeadLegacyV2Target(t *testing.T) {
+	testCtx := setupDM(t)
+	t.Setenv("SUPPORT_LEGACY_POD_MOUNTS", "true")
+	target := testCtx.targetPath(testCtx.podUID)
+	v2Source := filepath.Join(mounter.SourceMountDir(testCtx.kubeletPath), "mp-abc12")
+	v3Source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
+	for _, dir := range []string{target, v2Source} {
+		assert.NoError(t, os.MkdirAll(dir, 0750))
+	}
+	// The V2 Mountpoint Pod's source and the pod's bind of it; its Mountpoint has exited.
+	assert.NoError(t, testCtx.mount.Mount("mountpoint-s3", v2Source, "fuse", nil))
+	assert.NoError(t, testCtx.mount.Mount(v2Source, target, "bind", []string{"bind"}))
+	testCtx.mount.MountCheckErrors = map[string]error{
+		v2Source: healthPathErr(syscall.ENOTCONN),
+		target:   healthPathErr(syscall.ENOTCONN),
+	}
+
+	err := testCtx.republish(testCtx.podUID, podInfo(testCtx.podUID), false)
+	assert.Equals(t, codes.Aborted, status.Code(err))
+	msg := status.Convert(err).Message()
+	for _, want := range []string{"delete and recreate this pod", "Volume " + testCtx.volumeID, "pod team-a/trainer-0 (" + testCtx.podUID + ")"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q does not contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "mounted again") {
+		t.Errorf("error message %q says the volume was mounted again, but a legacy V2 target is not remounted", msg)
+	}
+	for _, action := range testCtx.mount.GetLog() {
+		if action.Action == mountutils.FakeActionUnmount {
+			t.Errorf("legacy V2 target handling unmounted %s", action.Target)
+		}
+	}
+	assert.Equals(t, true, testCtx.isMounted(target))
+	assert.Equals(t, false, testCtx.isMounted(v3Source))
 }
