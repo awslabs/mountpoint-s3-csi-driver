@@ -162,12 +162,12 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		if !isDaemonsetMounterMode(ctx, f) {
 			e2eskipper.Skipf("mounter entries are DaemonSets, which only exist in daemonset mode")
 		}
+		small, big := sizeSelectors(ctx, f)
 		release := setUpDriverRelease(ctx, f)
 		waitForEmptyNodePool(ctx, f)
 		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
-		small, big := sizeSelectors(ctx, f)
 		pool := map[string]any{nodePoolKey: nodePoolValue}
 		// The other nodes' entry keeps the unnamed DaemonSet, and the driver's DaemonSets are OnDelete, so only the pool's
 		// new nodes run the new templates.
@@ -181,7 +181,6 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		// The 256Mi workloads request something so that Cluster Autoscaler, which ranks its nodegroups by what the workloads
 		// leave unused, picks the small one. A 6.5Gi workload fits neither an 8GiB node beside the 2Gi small mounter nor a
 		// 16GiB one beside the 10Gi big mounter, so only an autoscaler counting each node's own mounter launches a 32GiB one.
-		// Fails on Karpenter until kubernetes-sigs/karpenter#3474 is fixed: it counts neither mounter.
 		for _, phase := range []struct {
 			entry            string
 			workloads, limit int
@@ -196,13 +195,13 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 	})
 }
 
-// sizeSelectors returns matchExpressions for the pool's small (under 16GiB) and big nodes, by a label the cluster's
+// sizeSelectors returns matchExpressions for the pool's small (8GiB and under) and big nodes, by a label the cluster's
 // autoscaler knows before it launches a node. Cluster Autoscaler only knows the instance type, of the two pool nodegroups
 // in `scripts/profiles/cas/eksctl-patch.json`.
 func sizeSelectors(ctx context.Context, f *framework.Framework) (small, big []any) {
 	memory := func(key string) ([]any, []any) {
-		return []any{map[string]any{"key": key, "operator": "Lt", "values": []any{"16384"}}},
-			[]any{map[string]any{"key": key, "operator": "Gt", "values": []any{"16383"}}}
+		return []any{map[string]any{"key": key, "operator": "Lt", "values": []any{"9000"}}},
+			[]any{map[string]any{"key": key, "operator": "Gt", "values": []any{"8999"}}}
 	}
 	autoMode, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "eks.amazonaws.com/compute-type=auto", Limit: 1})
 	framework.ExpectNoError(err)
@@ -211,7 +210,9 @@ func sizeSelectors(ctx context.Context, f *framework.Framework) (small, big []an
 	}
 	// Karpenter's own API group, which Auto Mode doesn't serve.
 	if _, err := f.ClientSet.Discovery().ServerResourcesForGroupVersion("karpenter.k8s.aws/v1"); err == nil {
-		return memory("karpenter.k8s.aws/instance-memory")
+		// Once the bug is fixed, return memory("karpenter.k8s.aws/instance-memory") instead.
+		e2eskipper.Skipf("skipped on Karpenter until kubernetes-sigs/karpenter#3474 is fixed: when Karpenter plans a node, " +
+			"it counts neither entry's mounter, so it launches nodes too small for the workload beside it")
 	} else if !apierrors.IsNotFound(err) {
 		framework.ExpectNoError(err)
 	}
