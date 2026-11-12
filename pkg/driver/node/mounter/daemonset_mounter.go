@@ -151,6 +151,10 @@ type DaemonsetMounter struct {
 	chown             chownFunc
 	chmod             chmodFunc
 
+	// socket is the path of the csi.sock this CSI node listens on. When two CSI nodes share a node, the newer one
+	// replaces it, and the older one must then leave the shared mount state alone.
+	socket atomic.Pointer[string]
+
 	// mountMap tracks shared source mounts for pod-sharing.
 	// Mount/Unmount use reference-counted sharing via this map.
 	mountMap *MountMap
@@ -679,6 +683,17 @@ func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, creden
 	return nil
 }
 
+// OwnSocket records the path of the csi.sock this CSI node listens on.
+func (dm *DaemonsetMounter) OwnSocket(path string) {
+	dm.socket.Store(&path)
+}
+
+// ownsSocket reports whether this process is still the one listening on the recorded socket; true until OwnSocket runs.
+func (dm *DaemonsetMounter) ownsSocket() bool {
+	path := dm.socket.Load()
+	return path == nil || listenerIsSelf(*path)
+}
+
 // StartPeriodicCleanup runs CleanupOrphans on a ticker until stopCh is closed.
 //
 // It's a safety net for when inline cleanup and startup cleanup miss resources orphaned while the driver keeps running with no operation touching a volume
@@ -702,6 +717,11 @@ func (dm *DaemonsetMounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
 //     to zero, tear it down.
 func (dm *DaemonsetMounter) CleanupOrphans() {
 	dm.mountMap.Range(func(volumeID string, entry *MountEntry) bool {
+		// Checked per entry, so a takeover partway through stops the pass.
+		if !dm.ownsSocket() {
+			klog.Infof("DaemonsetMounter: stopping cleanup, another CSI node on this node now owns the CSI socket")
+			return false
+		}
 		dm.cleanupEntry(volumeID, entry)
 		return true
 	})
