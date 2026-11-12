@@ -222,7 +222,9 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //     the steps below mount the source again and bind it to the target. Containers that restart then
 //     get a working mount; containers that keep running hold the old bind mount and stay broken. So
 //     after a successful remount Mount still returns Aborted once (see remountedTargetError), which
-//     kubelet shows as a FailedMount Event.
+//     kubelet shows as a FailedMount Event. A dead target still bound to a legacy V2 Mountpoint Pod's
+//     source is not remounted onto the V3 mounter: Mount returns Aborted asking to recreate the pod
+//     (see deadLegacyV2TargetError), which moves it to V3 cleanly.
 //  2. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
 //  3. If source is mounted, check source health:
 //     - Dead source → mark sourceMounted=false (fall through to step 4). Safe to remount: every pod
@@ -269,6 +271,17 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
 	}
 	remountDeadTarget := targetState == TargetDead
+	if remountDeadTarget {
+		// The V2 check only reads the mount table, which still lists a dead FUSE mount and its V2 source.
+		isV2, err := dm.isLegacyV2Mount(target)
+		if err != nil {
+			return fmt.Errorf("failed to determine if dead target %q is a legacy V2 mount for volume %s, will retry: %w", target, credentialCtx.VolumeID, err)
+		}
+		if isV2 {
+			klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead legacy V2 mount, not remounting it", target, volumeID)
+			return deadLegacyV2TargetError(volumeID, credentialCtx.WorkloadPodID, volumeCtx)
+		}
+	}
 
 	// Handle legacy mounts — only for healthy mounted targets that are NOT already tracked
 	// as V3 mounts. A target tracked in the V3 MountMap is a V3 republish and must skip the
@@ -347,10 +360,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 }
 
 // remountedTargetError reports a dead target that Mount has just mounted again: its Mountpoint had
-// exited, for example because the mounter pod serving it on this node restarted (the
-// s3-csi-daemonset-mounter pod, or a legacy V2 Mountpoint Pod). "Dead" is any errno mount-utils
-// IsCorruptedMnt treats as a corrupted mount (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN, EWOULDBLOCK);
-// IsHealthyMountpoint logs which one at V(2).
+// exited, for example because the mounter pod serving it on this node restarted. "Dead" is any errno
+// mount-utils IsCorruptedMnt treats as a corrupted mount (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN,
+// EWOULDBLOCK); IsHealthyMountpoint logs which one at V(2).
 //
 // The new mount is in place, but a container that kept running holds the old bind mount and still
 // gets "Transport endpoint is not connected"; it recovers when it restarts. That is why this is an
@@ -364,24 +376,39 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 // The action comes first so a truncated Event still carries it. Nothing is logged here at Error level:
 // the gRPC interceptor already logs the returned error.
 func remountedTargetError(pvName, podUID string, volumeCtx map[string]string) error {
-	namespace, name := volumeCtx[volumecontext.CSIPodNamespace], volumeCtx[volumecontext.CSIPodName]
-	var pod string
-	switch {
-	case namespace != "" && name != "":
-		pod = fmt.Sprintf("%s/%s (%s)", namespace, name, podUID)
-	case name != "":
-		pod = fmt.Sprintf("%s (%s)", name, podUID)
-	case namespace != "":
-		pod = fmt.Sprintf("with UID %s in namespace %s", podUID, namespace)
-	default:
-		pod = "with UID " + podUID
-	}
 	// TODO: name why Mountpoint exited once the driver keeps its last exit reason. The mounter writes it
 	// to the volume's error file, but a mounter pod restart loses it and remount cleanup deletes it.
 	msg := fmt.Sprintf("Mountpoint had stopped and the volume was mounted again; restart the containers "+
 		"using it, or delete and recreate this pod. Containers that kept running still get \"Transport "+
-		"endpoint is not connected\". Volume %s, pod %s", pvName, pod)
+		"endpoint is not connected\". Volume %s, pod %s", pvName, podIdentity(podUID, volumeCtx))
 	return status.Error(codes.Aborted, msg)
+}
+
+// deadLegacyV2TargetError reports a dead target still bound to a legacy V2 Mountpoint Pod's source,
+// whose Mountpoint has exited. Under V3 nothing mounts V2 sources again, and remounting the target onto
+// the V3 mounter would move the pod to V3 behind the user's back and leave its V2 Mountpoint Pod behind.
+// Recreating the pod moves it to V3 cleanly. Aborted, as in remountedTargetError, keeps the volume
+// tracked so NodeUnpublishVolume still runs.
+func deadLegacyV2TargetError(pvName, podUID string, volumeCtx map[string]string) error {
+	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to mount the volume again. "+
+		"Volume %s, pod %s", pvName, podIdentity(podUID, volumeCtx))
+	return status.Error(codes.Aborted, msg)
+}
+
+// podIdentity names the workload pod from the podInfoOnMount volume context, keeping whichever of its
+// namespace and name kubelet sent.
+func podIdentity(podUID string, volumeCtx map[string]string) string {
+	namespace, name := volumeCtx[volumecontext.CSIPodNamespace], volumeCtx[volumecontext.CSIPodName]
+	switch {
+	case namespace != "" && name != "":
+		return fmt.Sprintf("%s/%s (%s)", namespace, name, podUID)
+	case name != "":
+		return fmt.Sprintf("%s (%s)", name, podUID)
+	case namespace != "":
+		return fmt.Sprintf("with UID %s in namespace %s", podUID, namespace)
+	default:
+		return "with UID " + podUID
+	}
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
