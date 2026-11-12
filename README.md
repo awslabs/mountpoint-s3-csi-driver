@@ -86,6 +86,7 @@ The following table provides the support status for various distros with regards
 | Ubuntu 20.04         |      1.0.0 |     1.16.0 | —                                |
 | Ubuntu 22.04         |      1.0.0 |     1.16.0 | —                                |
 | Ubuntu 24.04         |     1.16.0 |          — | 1.31 – 1.37                      |
+| Ubuntu 26.04         |     1.16.0 |          — | 1.35 – 1.37                      |
 | Bottlerocket >1.19.2 |      1.4.0 |          — | 1.31 – 1.37                      |
 
 ## Documentation
