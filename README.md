@@ -82,11 +82,11 @@ The following table provides the support status for various distros with regards
 | Distro               | Stable     | Deprecated | Currently Supported EKS Versions |
 |----------------------|-----------:|-----------:|----------------------------------|
 | Amazon Linux 2       |      1.0.0 |     1.16.0 | —                                |
-| Amazon Linux 2023    |      1.0.0 |          — | 1.31 – 1.36                      |
+| Amazon Linux 2023    |      1.0.0 |          — | 1.31 – 1.37                      |
 | Ubuntu 20.04         |      1.0.0 |     1.16.0 | —                                |
 | Ubuntu 22.04         |      1.0.0 |     1.16.0 | —                                |
-| Ubuntu 24.04         |     1.16.0 |          — | 1.31 – 1.36                      |
-| Bottlerocket >1.19.2 |      1.4.0 |          — | 1.31 – 1.36                      |
+| Ubuntu 24.04         |     1.16.0 |          — | 1.31 – 1.37                      |
+| Bottlerocket >1.19.2 |      1.4.0 |          — | 1.31 – 1.37                      |
 
 ## Documentation
 
