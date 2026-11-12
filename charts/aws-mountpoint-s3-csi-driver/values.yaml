@@ -257,9 +257,12 @@ mounter:
 # above with the entry's own values on top.
 #
 # Placement is never copied: each entry must set node.nodeSelector, node.affinity or both. The default
-# pair (node and mounter above) always renders, so no node may match two DaemonSets: narrow
-# node.nodeSelector or node.affinity to keep the default pair off the entries' nodes. Only used when
-# experimental.mounterMode is "daemonset".
+# pair (node and mounter above) always renders, so narrow node.nodeSelector or node.affinity to keep it
+# off the entries' nodes. Only used when experimental.mounterMode is "daemonset".
+#
+# WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
+# matches two DaemonSets, including the default pair; otherwise new mounts on that node can fail.
+# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md for how to recover.
 #
 # Removing or renaming an entry makes helm upgrade delete its DaemonSets, which breaks every S3 mount
 # on its nodes. Drain those nodes first, then upgrade, then uncordon them.
