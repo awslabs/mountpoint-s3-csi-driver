@@ -40,6 +40,10 @@ spec:
         {{- if $node.podLabels }}
         {{- toYaml $node.podLabels | nindent 8 }}
         {{- end }}
+      {{- with $node.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux

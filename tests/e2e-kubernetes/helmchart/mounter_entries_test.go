@@ -39,12 +39,12 @@ func TestAdditionalDaemonsetsRejectInvalidValues(t *testing.T) {
 }
 
 func TestAdditionalDaemonsetsPlacementAndOverrides(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5}
-mounter: {maxVolumesPerNode: 4}
+	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5, podAnnotations: {a: node}}
+mounter: {maxVolumesPerNode: 4, podAnnotations: {a: mounter}}
 additionalDaemonsets:
   bigmem:
-    node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}}
-    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}}
+    node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}, podAnnotations: {b: bigmem}}
+    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}}
   cached:
     node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}]}]}}}}`)
 	assert.NoError(t, err)
@@ -73,6 +73,18 @@ additionalDaemonsets:
 	assert.Equals(t, "32Gi", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
 	assert.Equals(t, "4", daemonSets["s3-csi-mounter-cached"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
 	assert.Equals(t, "4Gi", daemonSets["s3-csi-mounter-cached"].Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
+
+	// Annotations follow the same copy and override, each on its own kind of pod.
+	for name, want := range map[string]map[string]string{
+		"s3-csi-node":           {"a": "node"},
+		"s3-csi-mounter":        {"a": "mounter"},
+		"s3-csi-node-bigmem":    {"a": "node", "b": "bigmem"},
+		"s3-csi-mounter-bigmem": {"a": "bigmem"},
+		"s3-csi-node-cached":    {"a": "node"},
+		"s3-csi-mounter-cached": {"a": "mounter"},
+	} {
+		assert.Equals(t, want, daemonSets[name].Spec.Template.Annotations)
+	}
 }
 
 func TestAdditionalDaemonsetsDefaultInstall(t *testing.T) {
