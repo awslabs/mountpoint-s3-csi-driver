@@ -184,6 +184,36 @@ func TestMount_DeadTargetUnmountFails(t *testing.T) {
 	assert.Equals(t, false, testCtx.isMounted(source))
 }
 
+// TestMount_DeadTargetRemountFails checks that when the dead target is unmounted but mounting it again
+// fails, Mount returns Aborted. A final code would make kubelet (before 1.36) remove the now-unmounted
+// mount directory and its vol_data.json, which kubelet needs to unmount the volume when the pod is deleted.
+func TestMount_DeadTargetRemountFails(t *testing.T) {
+	testCtx := setupDM(t)
+	target := testCtx.targetPath(testCtx.podUID)
+	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
+
+	testCtx.mountVolume()
+	testCtx.killAllMounts(target)
+	testCtx.dm.CleanupOrphans()
+	testCtx.mountSyscall = func(string, mpmounter.MountOptions) (int, error) {
+		return 0, errors.New("fuse mount failed")
+	}
+
+	err := testCtx.republish(testCtx.podUID, podInfo(testCtx.podUID), false)
+	assert.Equals(t, codes.Aborted, status.Code(err))
+	if !strings.Contains(err.Error(), "fuse mount failed") {
+		t.Errorf("error %q does not carry the mount failure", err)
+	}
+	testCtx.assertUnmounted(target)
+	assert.Equals(t, false, testCtx.isMounted(source))
+	assert.Equals(t, false, testCtx.isMounted(target))
+
+	// kubelet's retry is a fresh mount of the now-absent target.
+	testCtx.mountSyscall = nil
+	assert.NoError(t, testCtx.republish(testCtx.podUID, podInfo(testCtx.podUID), true))
+	assert.Equals(t, true, testCtx.isMounted(target))
+}
+
 // assertRemountMessage checks the message: printable ASCII, the action first (so a truncated Event keeps
 // it), then the volume and pod identity.
 func assertRemountMessage(t *testing.T, msg, pvName, pod string) {
