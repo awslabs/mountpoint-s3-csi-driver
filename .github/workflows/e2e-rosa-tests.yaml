@@ -190,6 +190,21 @@ jobs:
           ACTION: "run_tests"
           IMDS_AVAILABLE: "false"
         run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Summarize E2E test report
+        if: always()
+        # Reporting only: this and the upload never fail the job.
+        continue-on-error: true
+        run: tests/e2e-kubernetes/scripts/generate_test_summary.py tests/e2e-kubernetes/csi-test-artifacts/test-report.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload E2E test report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report-${{ inputs.environment }}-${{ github.run_attempt }}
+          # Only the report: csi-test-artifacts/ also holds the cluster's kubeconfig.
+          path: tests/e2e-kubernetes/csi-test-artifacts/test-report.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Post e2e cleanup
         if: always()
         env:
