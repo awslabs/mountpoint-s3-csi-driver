@@ -38,7 +38,7 @@ type nodeServerTestEnv struct {
 func initNodeServerTestEnv(t *testing.T) *nodeServerTestEnv {
 	mockCtl := gomock.NewController(t)
 	mockMounter := mock_driver.NewMockMounter(mockCtl)
-	server := node.NewS3NodeServer(testNodeID, mockMounter, 0)
+	server := node.NewS3NodeServer(testNodeID, mockMounter)
 	return &nodeServerTestEnv{
 		mockCtl:     mockCtl,
 		mockMounter: mockMounter,
@@ -1103,25 +1103,33 @@ func TestNodeGetInfo(t *testing.T) {
 		testFunc func(t *testing.T)
 	}{
 		{
-			name: "returns MaxVolumesPerNode when configured",
+			name: "returns the limit a VolumeLimiter mounter decides, at each call",
 			testFunc: func(t *testing.T) {
-				var maxVolumesPerNode int64 = 50
-				nodeTestEnv := initNodeServerTestEnv(t)
-				nodeTestEnv.server.MaxVolumesPerNode = maxVolumesPerNode
+				limiter := &limitingMounter{limit: 1}
+				server := node.NewS3NodeServer(testNodeID, limiter)
 
-				ctx := context.Background()
-				req := &csi.NodeGetInfoRequest{}
+				resp, err := server.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+				assert.NoError(t, err)
+				assert.Equals(t, int64(1), resp.MaxVolumesPerNode)
 
-				resp, err := nodeTestEnv.server.NodeGetInfo(ctx, req)
-				if err != nil {
-					t.Fatalf("NodeGetInfo failed: %v", err)
-				}
-				assert.Equals(t, testNodeID, resp.NodeId)
-				assert.Equals(t, maxVolumesPerNode, resp.MaxVolumesPerNode)
+				limiter.limit = 4
+				resp, err = server.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+				assert.NoError(t, err)
+				assert.Equals(t, int64(4), resp.MaxVolumesPerNode)
 			},
 		},
 		{
-			name: "returns zero when MaxVolumesPerNode not set (unbounded, for pod mode)",
+			name: "fails while a VolumeLimiter mounter can't decide the limit",
+			testFunc: func(t *testing.T) {
+				limiter := &limitingMounter{err: errors.New("no mounter yet")}
+				server := node.NewS3NodeServer(testNodeID, limiter)
+
+				_, err := server.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+				assert.Equals(t, codes.Unavailable, status.Code(err))
+			},
+		},
+		{
+			name: "returns no limit for a mounter that isn't a VolumeLimiter, as the pod mounter",
 			testFunc: func(t *testing.T) {
 				nodeTestEnv := initNodeServerTestEnv(t)
 
@@ -1141,6 +1149,19 @@ func TestNodeGetInfo(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
 	}
+}
+
+var _ node.VolumeLimiter = &limitingMounter{}
+
+// limitingMounter is a mounter that decides the node's volume limit.
+type limitingMounter struct {
+	dummyMounter
+	limit int64
+	err   error
+}
+
+func (m *limitingMounter) VolumeLimit(context.Context) (int64, error) {
+	return m.limit, m.err
 }
 
 var _ mounter.Mounter = &dummyMounter{}

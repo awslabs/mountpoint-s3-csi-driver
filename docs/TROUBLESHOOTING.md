@@ -150,6 +150,26 @@ F0919 20:25:04.161506       1 main.go:45] Failed to receive mount options from /
 One well-known cause of this issue is when <a href="#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status">volumes are specified without using a unique `volumeHandle` value</a>.
 There may be other issues related to the volume or pod spec that can lead to the workload pod being stuck in `ContainerCreating`, and the Mountpoint pod failing with this error.
 
+## My Pod is stuck at `ContainerCreating` with error "no usable s3-csi-daemonset-mounter on node"
+
+The S3 volumes on a node are served by the node's `s3-csi-daemonset-mounter` Pod. While it has none it can use, the node's `s3-csi-node` Pod fails new S3 mounts with this error, which the kubelet retries until it has one. It still unmounts the S3 volumes already on the node, and refreshes the credentials.
+
+To see why the node has no mounter it can use:
+
+```bash
+$ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter -o wide
+$ kubectl describe pod -n kube-system <mounter-pod-name>
+```
+
+- A `Pending` mounter usually doesn't fit on its node: its events show `Insufficient memory` or `Insufficient cpu` when the node has less free than the entry's `daemonsetMounters[].resources.requests`. Free up the node, use larger nodes for that entry, or lower its `resources.requests`.
+- Two mounter Pods on the node mean two `daemonsetMounters` entries select it, and its `s3-csi-node` Pod logs `multiple running mounter pods found`. Change the entries' `nodeSelector` or `matchExpressions`, or the node's labels, so only one entry matches the node. If the node has S3 mounts, drain it first: the mounter of an entry that stops matching is deleted, which breaks its mounts.
+
+Until a mounter runs, the node's volume limit is the smallest `maxVolumesPerNode` of your `daemonsetMounters` entries. When the mounter runs, it becomes that mounter's entry's `maxVolumesPerNode`. On EKS 1.34 and later, and Kubernetes 1.35 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
+
+```bash
+$ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
+```
+
 ## My workload pods are getting "Transport endpoint is not connected" errors during node drain
 
 This error occurs when workload pods are terminated before the Mountpoint pod that provides their S3 volume mount. To prevent this, the CSI driver implements graceful eviction:

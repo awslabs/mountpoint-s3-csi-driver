@@ -73,7 +73,6 @@ var _ = BeforeSuite(func() {
 		NodeServer: node.NewS3NodeServer(
 			"fake_id",
 			&mounter.FakeMounter{},
-			0,
 		),
 	}
 	go func() {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"slices"
@@ -12,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/errors"
@@ -117,6 +119,8 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 				restoreMounter = removeMounterFromNode(ctx, f, node.Name)
 				// Restart the node pod so no taint watcher from its previous start is running
 				killCSIDriverPods(ctx, f)
+				// Without a mounter, the node pod still registers, so it serves the volumes already on the node
+				expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
 			}
 
 			// 2. Apply the taint to the node
@@ -137,6 +141,8 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			if v3 {
 				// Without a mounter the node pod never removes the taint
 				gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
+				// but registers, tainted or not, so it still serves the volumes already on the node
+				expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
 				framework.ExpectNoError(restoreMounter(ctx))
 			}
 
@@ -219,7 +225,7 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 			return err
 		}
 		waitForMounterPodReady(ctx, f, nodeName)
-		// Restart the node pod so it doesn't wait out its crash-loop backoff
+		// Restart the node pod so it finds the mounter now, rather than when it next looks for one, and registers its limit
 		killCSIDriverPods(ctx, f)
 		waitForCSIDriverReady(ctx, f)
 		return nil
@@ -228,6 +234,63 @@ func removeMounterFromNode(ctx context.Context, f *framework.Framework, nodeName
 
 	waitForNoMounterPod(ctx, f, nodeName)
 	return restore
+}
+
+// expectServingWithoutMounter checks that the node pod on nodeName, which has no mounter, registers the driver with its
+// fallback volume limit, and runs without restarting.
+func expectServingWithoutMounter(ctx context.Context, f *framework.Framework, nodeName, driverName string) {
+	GinkgoHelper()
+	var nodePod *v1.Pod
+	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
+		var err error
+		if nodePod, err = podOnNode(ctx, f, csiNodePodLabel, nodeName); err != nil || nodePod.Status.Phase != v1.PodRunning {
+			return false, err
+		}
+		want, err := fallbackVolumeLimit(nodePod)
+		if err != nil {
+			return false, err
+		}
+		driver, err := csiNodeDriver(ctx, f, nodeName, driverName)
+		return driver != nil && registeredVolumeLimit(driver) == want, err
+	}).WithTimeout(csiNodeInfoTimeout).WithPolling(5*time.Second).Should(gomega.BeTrue(), "node pod on %s runs and registers %s with its fallback volume limit", nodeName, driverName)
+
+	for _, status := range nodePod.Status.ContainerStatuses {
+		gomega.Expect(status.RestartCount).To(gomega.BeZero(), "container %s in node pod %s restarted without a mounter", status.Name, nodePod.Name)
+	}
+}
+
+// fallbackVolumeLimit returns the volume limit nodePod advertises while no mounter runs on its node, 0 for none.
+func fallbackVolumeLimit(nodePod *v1.Pod) (int64, error) {
+	for _, container := range nodePod.Spec.Containers {
+		for _, env := range container.Env {
+			if env.Name == "FALLBACK_MAX_VOLUMES_PER_NODE" {
+				return strconv.ParseInt(env.Value, 10, 64)
+			}
+		}
+	}
+	return 0, fmt.Errorf("node pod %s has no FALLBACK_MAX_VOLUMES_PER_NODE", nodePod.Name)
+}
+
+// registeredVolumeLimit returns the volume limit kubelet registered for driver, or 0 for none.
+func registeredVolumeLimit(driver *storagev1.CSINodeDriver) int64 {
+	if driver.Allocatable == nil || driver.Allocatable.Count == nil {
+		return 0
+	}
+	return int64(*driver.Allocatable.Count)
+}
+
+// csiNodeDriver returns the CSINode entry of driverName on nodeName, or nil if there's none.
+func csiNodeDriver(ctx context.Context, f *framework.Framework, nodeName, driverName string) (*storagev1.CSINodeDriver, error) {
+	csiNode, err := f.ClientSet.StorageV1().CSINodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	for i := range csiNode.Spec.Drivers {
+		if csiNode.Spec.Drivers[i].Name == driverName {
+			return &csiNode.Spec.Drivers[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // excludeNode returns a copy of affinity that also keeps pods off nodeName.
