@@ -172,7 +172,8 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
+  # Unset FLAKE_ATTEMPTS leaves retries off; CI sets it per ref in the E2E workflows.
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output ${FLAKE_ATTEMPTS:+--flake-attempts=${FLAKE_ATTEMPTS}} -timeout 60m -- --bucket-region=${REGION} --commit-id=${TAG} --bucket-prefix=${CLUSTER_NAME} --imds-available=${IMDS_AVAILABLE} --cluster-name=${CLUSTER_NAME} --cluster-type=${CLUSTER_TYPE}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

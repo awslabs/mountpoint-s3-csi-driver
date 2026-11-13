@@ -68,6 +68,8 @@ jobs:
       contents: read
     env:
       AWS_REGION: "${{ vars.AWS_REGION }}"
+      # Retry a failed spec once, except for release branches, PRs into them and tags, where every failure must fail the run.
+      FLAKE_ATTEMPTS: "${{ (startsWith(github.ref, 'refs/heads/release-') || startsWith(github.base_ref, 'release-') || startsWith(github.ref, 'refs/tags/')) && '1' || '2' }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
