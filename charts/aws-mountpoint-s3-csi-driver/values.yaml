@@ -37,6 +37,7 @@ node:
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
   podLabels: {}
+  podAnnotations: {}
   nodeSelector: {}
   resources:
     requests:
@@ -247,6 +248,7 @@ mounter:
   #   limitStrategy: equalSplit
   logLevel: 4
   podLabels: {}
+  podAnnotations: {}
   # The mounter runs on the same nodes as the CSI node: it uses node.nodeSelector, node.affinity and the
   # node tolerations (node.tolerateAllTaints, node.defaultTolerations, node.tolerations).
   imagePullSecrets: []

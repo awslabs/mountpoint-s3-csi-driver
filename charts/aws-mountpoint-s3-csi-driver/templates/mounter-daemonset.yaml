@@ -127,6 +127,10 @@ spec:
         {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- with $mounter.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       # The mounter runs mount-s3 only; it needs no node network namespace. With hostNetwork: false
       # IMDS (169.254.169.254) is unreachable unless the node's IMDS hop limit is >= 2, keeping node
