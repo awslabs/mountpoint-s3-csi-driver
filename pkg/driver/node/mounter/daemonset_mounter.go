@@ -1336,7 +1336,7 @@ func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
 	if _, err := dm.runningMounterPods(ctx); errors.Is(err, ErrMultipleMounterPods) {
-		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err)
+		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err)
 	}
 }
 
@@ -1510,7 +1510,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 			return nil, err
 		}
 		running = []corev1.Pod{*inUse}
-		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
+		klog.Errorf("DaemonsetMounter: %v. Using %s; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err, running[0].Name)
 	} else if err != nil {
 		return nil, err
 	}

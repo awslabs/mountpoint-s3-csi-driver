@@ -24,8 +24,10 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 		{"invalid name", `additionalDaemonSets: {Big_Mem: {node: {nodeSelector: {x: "1"}}}}`, `name "Big_Mem" must be lowercase letters`},
 		{"a key outside node and mounter", `additionalDaemonSets: {b: {maxVolumesPerNode: 4, node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.maxVolumesPerNode: an entry only takes node and mounter"},
 		{"no placement", `additionalDaemonSets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonSets.b.node: nodeSelector or affinity is required"},
-		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another DaemonSet"},
-		{"same placement as the default", `{node: {nodeSelector: {x: "1"}, affinity: null}, additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "additionalDaemonSets.b.node selects the same nodes as another DaemonSet"},
+		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
+		{"same placement as the default", `{node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}, additionalDaemonSets: {b: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
+		{"an entry service account", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, serviceAccount: {name: b}}}}`, "additionalDaemonSets.b.node.serviceAccount: set it on node instead"},
+		{"an entry preventPodSchedulingIfMissing", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, preventPodSchedulingIfMissing: true}}}`, "additionalDaemonSets.b.node.preventPodSchedulingIfMissing: set it on node instead"},
 		{"invalid entry mounter", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -84,6 +86,28 @@ additionalDaemonSets:
 		"s3-csi-mounter-cached": {"a": "mounter"},
 	} {
 		assert.Equals(t, want, daemonSets[name].Spec.Template.Annotations)
+	}
+}
+
+func TestAdditionalDaemonSetsCache(t *testing.T) {
+	daemonSets, err := renderDaemonSets(t, `mounter: {cache: {limitStrategy: equalSplit, emptyDir: {sizeLimit: 8Gi}}}
+additionalDaemonSets:
+  copied: {node: {nodeSelector: {pool: copied}}}
+  ebs: {node: {nodeSelector: {pool: ebs}}, mounter: {cache: {limitStrategy: none, ephemeral: {storageClassName: gp3, resourceRequests: 100Gi}}}}
+  none: {node: {nodeSelector: {pool: none}}, mounter: {cache: null}}`)
+	assert.NoError(t, err)
+
+	// An entry copies mounter's cache, unless it sets its own, which replaces it whole, or null, which removes it.
+	for name, want := range map[string]string{"s3-csi-mounter-copied": "emptyDir", "s3-csi-mounter-ebs": "ephemeral", "s3-csi-mounter-none": ""} {
+		got := ""
+		for _, volume := range daemonSets[name].Spec.Template.Spec.Volumes {
+			if volume.Name == "cache" && volume.EmptyDir != nil {
+				got = "emptyDir"
+			} else if volume.Name == "cache" && volume.Ephemeral != nil {
+				got = "ephemeral"
+			}
+		}
+		assert.Equals(t, want, got)
 	}
 }
 
