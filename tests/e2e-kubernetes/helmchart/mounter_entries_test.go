@@ -12,7 +12,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-func TestAdditionalDaemonsetsRejectInvalidValues(t *testing.T) {
+func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 	for _, testCase := range []struct {
 		name                string
 		values              string
@@ -20,13 +20,13 @@ func TestAdditionalDaemonsetsRejectInvalidValues(t *testing.T) {
 	}{
 		{"limit that isn't a number", `mounter: {maxVolumesPerNode: "abc"}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
 		{"decimal limit", `mounter: {maxVolumesPerNode: 4.5}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
-		{"negative limit on an entry", `additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonsets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
-		{"invalid name", `additionalDaemonsets: {Big_Mem: {node: {nodeSelector: {x: "1"}}}}`, `name "Big_Mem" must be lowercase letters`},
-		{"a key outside node and mounter", `additionalDaemonsets: {b: {maxVolumesPerNode: 4, node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonsets.b.maxVolumesPerNode: an entry only takes node and mounter"},
-		{"no placement", `additionalDaemonsets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonsets.b.node: nodeSelector or affinity is required"},
-		{"same placement as another entry", `additionalDaemonsets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonsets.b.node selects the same nodes as another DaemonSet"},
-		{"same placement as the default", `{node: {nodeSelector: {x: "1"}, affinity: null}, additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "additionalDaemonsets.b.node selects the same nodes as another DaemonSet"},
-		{"invalid entry mounter", `additionalDaemonsets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonsets.b.mounter: memoryLimitStrategy must be one of"},
+		{"negative limit on an entry", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonSets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"invalid name", `additionalDaemonSets: {Big_Mem: {node: {nodeSelector: {x: "1"}}}}`, `name "Big_Mem" must be lowercase letters`},
+		{"a key outside node and mounter", `additionalDaemonSets: {b: {maxVolumesPerNode: 4, node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.maxVolumesPerNode: an entry only takes node and mounter"},
+		{"no placement", `additionalDaemonSets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonSets.b.node: nodeSelector or affinity is required"},
+		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another DaemonSet"},
+		{"same placement as the default", `{node: {nodeSelector: {x: "1"}, affinity: null}, additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "additionalDaemonSets.b.node selects the same nodes as another DaemonSet"},
+		{"invalid entry mounter", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := renderDaemonSets(t, testCase.values)
@@ -38,10 +38,10 @@ func TestAdditionalDaemonsetsRejectInvalidValues(t *testing.T) {
 	}
 }
 
-func TestAdditionalDaemonsetsPlacementAndOverrides(t *testing.T) {
+func TestAdditionalDaemonSetsPlacementAndOverrides(t *testing.T) {
 	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5, podAnnotations: {a: node}}
 mounter: {maxVolumesPerNode: 4, podAnnotations: {a: mounter}}
-additionalDaemonsets:
+additionalDaemonSets:
   bigmem:
     node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}, podAnnotations: {b: bigmem}}
     mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}}
@@ -87,7 +87,7 @@ additionalDaemonsets:
 	}
 }
 
-func TestAdditionalDaemonsetsDefaultInstall(t *testing.T) {
+func TestAdditionalDaemonSetsDefaultInstall(t *testing.T) {
 	daemonSets, err := renderDaemonSets(t, `{}`)
 	assert.NoError(t, err)
 	assert.Equals(t, 2, len(daemonSets))
@@ -98,9 +98,9 @@ func TestAdditionalDaemonsetsDefaultInstall(t *testing.T) {
 	assert.Equals(t, "4", daemonSets["s3-csi-mounter"].Spec.Template.Labels["s3.csi.aws.com/max-volumes-per-node"])
 }
 
-func TestAdditionalDaemonsetsQuoteNodeSelectorValues(t *testing.T) {
+func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 	// Unquoted, these render as a bool and a number, which a nodeSelector can't hold.
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonsets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1}}}}`)
+	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1}}}}`)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
 		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1"}, daemonSets[name].Spec.Template.Spec.NodeSelector)

@@ -8,7 +8,7 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
-{{- /* One CSI node per pair; in daemonset mode each additionalDaemonsets entry adds a pair, with its own placement. */}}
+{{- /* One CSI node per pair; in daemonset mode each additionalDaemonSets entry adds a pair, with its own placement. */}}
 {{- $pairs := list (dict "name" "" "node" .Values.node) }}
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
 {{- $pairs = (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}

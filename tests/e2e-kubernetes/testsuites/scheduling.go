@@ -98,7 +98,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
 
 		driverName := driver.GetDriverInfo().Name
-		// The chart has only the default mounter (no additionalDaemonsets), so the pool's nodes have the same limit as the others.
+		// The chart has only the default mounter (no additionalDaemonSets), so the pool's nodes have the same limit as the others.
 		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
 		framework.ExpectNoError(err)
 		workloads := 2 * limit

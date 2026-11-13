@@ -125,36 +125,34 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 
 {{/*
 Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default from node and mounter, then
-one per additionalDaemonsets entry, which copies both except placement (node.nodeSelector and node.affinity).
-shortcut: Helm's merge skips empty values, so an entry's false, 0 or "" doesn't override the default (EBS has the same
-limit); upgrade if customers need to unset a default per entry.
+one per additionalDaemonSets entry, which copies both except placement (node.nodeSelector and node.affinity).
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
 {{- $base := omit .Values.node "nodeSelector" "affinity" }}
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
 {{- $placements := list (toJson (dict "nodeSelector" .Values.node.nodeSelector "affinity" .Values.node.affinity)) }}
-{{- $entries := .Values.additionalDaemonsets | default dict }}
+{{- $entries := .Values.additionalDaemonSets | default dict }}
 {{- range $name := keys $entries | sortAlpha }}
 {{- $entry := get $entries $name | default dict }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
-{{- fail (printf "additionalDaemonsets: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSets" $name) }}
+{{- fail (printf "additionalDaemonSets: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSets" $name) }}
 {{- end }}
 {{- range $key, $_ := $entry }}
 {{- if not (has $key (list "node" "mounter")) }}
-{{- fail (printf "additionalDaemonsets.%s.%s: an entry only takes node and mounter, which override the top-level node and mounter values" $name $key) }}
+{{- fail (printf "additionalDaemonSets.%s.%s: an entry only takes node and mounter, which override the top-level node and mounter values" $name $key) }}
 {{- end }}
 {{- end }}
 {{- $entryNode := $entry.node | default dict }}
 {{- if not (or $entryNode.nodeSelector $entryNode.affinity) }}
-{{- fail (printf "additionalDaemonsets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
+{{- fail (printf "additionalDaemonSets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
 {{- end }}
 {{- $placement := toJson (dict "nodeSelector" $entryNode.nodeSelector "affinity" $entryNode.affinity) }}
 {{- if has $placement $placements }}
-{{- fail (printf "additionalDaemonsets.%s.node selects the same nodes as another DaemonSet, so every node it matches would run two" $name) }}
+{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another DaemonSet, so every node it matches would run two" $name) }}
 {{- end }}
 {{- $placements = append $placements $placement }}
-{{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonsets.%s.mounter" $name)
+{{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonSets.%s.mounter" $name)
     "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode))
     "mounter" (mustMergeOverwrite (deepCopy $mounter) (deepCopy ($entry.mounter | default dict)))) }}
 {{- end }}
