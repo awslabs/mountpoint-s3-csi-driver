@@ -100,6 +100,8 @@ jobs:
       SELINUX_MODE: "${{ matrix.selinux-mode }}"
       MOUNTPOINT_CSI_DRIVER_PREVIOUS_VERSION: "${{ inputs.upgrade_tests_old_version }}"
       MOUNTPOINT_CSI_DRIVER_NEW_VERSION: "${{ inputs.upgrade_tests_new_version }}"
+      # Retry a failed spec once, except for release branches, PRs into them and tags, where every failure must fail the run.
+      FLAKE_ATTEMPTS: "${{ (startsWith(github.ref, 'refs/heads/release-') || startsWith(github.base_ref, 'release-') || startsWith(github.ref, 'refs/tags/')) && '1' || '2' }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
