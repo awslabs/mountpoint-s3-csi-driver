@@ -147,8 +147,9 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, ErrMountAbsent
 		}
-		// A corrupted mount is a definite "dead" signal.
+		// A corrupted mount is a definite "dead" signal. Log the errno, which the (false, nil) result drops.
 		if m.IsMountpointCorrupted(err) {
+			klog.V(2).Infof("mounter: %q is a dead mount: %v", target, err)
 			return false, nil
 		}
 		// Anything else (e.g. couldn't stat or list the mount table) is UNKNOWN.
@@ -173,6 +174,7 @@ func (m *Mounter) IsHealthyMountpoint(target Target) (bool, error) {
 		}
 		// A corrupted/dead mount (ENOTCONN, ESTALE, EIO, ...) — definite dead.
 		if m.IsMountpointCorrupted(err) {
+			klog.V(2).Infof("mounter: %q is a dead mount: %v", target, err)
 			return false, nil
 		}
 		// Transient errors (EINTR, EMFILE/ENFILE, ENOMEM, ...) are UNKNOWN, not dead.

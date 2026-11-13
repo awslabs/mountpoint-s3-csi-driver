@@ -1671,10 +1671,10 @@ func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 	assert.Equals(t, true, err != nil)
 }
 
-// TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that when Mount is called with a
-// corrupted target (ENOTCONN), it returns nil without creating a meta file. This is the
-// churn-prevention invariant: a corrupted target causes an early bail, leaving cleanup to
-// the periodic job rather than churning mount/creds every republish.
+// TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that a corrupted target (ENOTCONN) is left
+// alone while no mounter has been discovered: Mount returns the retryable "not yet established"
+// error without unmounting the target (fakeHealthMount panics on Unmount) or writing a meta file.
+// The dead target is unmounted only once a mounter is there to mount it again.
 func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	kubeletPath := t.TempDir()
 	const volumeID = "pv-corrupted-target"
@@ -1702,11 +1702,18 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 		VolumeID:      volumeID,
 		WorkloadPodID: "pod-uid-123",
 	}
+	// kubelet sends the pod identity because the CSIDriver sets podInfoOnMount.
+	volumeCtx := map[string]string{
+		"csi.storage.k8s.io/pod.namespace": "team-a",
+		"csi.storage.k8s.io/pod.name":      "trainer-0",
+		"csi.storage.k8s.io/pod.uid":       "pod-uid-123",
+	}
 
-	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, volumeCtx, mountpoint.Args{}, "", nil)
 
-	// Mount should return nil (nothing to do, corrupted target).
-	assert.NoError(t, err)
+	if !errors.Is(err, mounter.ErrCommDirNotReady) {
+		t.Fatalf("want ErrCommDirNotReady, got %v", err)
+	}
 
 	// No meta file should exist — Mount bailed before writing anything.
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)

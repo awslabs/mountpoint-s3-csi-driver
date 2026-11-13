@@ -25,6 +25,7 @@ const (
 
 	CSIServiceAccountName   = "csi.storage.k8s.io/serviceAccount.name"
 	CSIServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens"
+	CSIPodName              = "csi.storage.k8s.io/pod.name"
 	CSIPodNamespace         = "csi.storage.k8s.io/pod.namespace"
 	CSIPodUID               = "csi.storage.k8s.io/pod.uid"
 )
