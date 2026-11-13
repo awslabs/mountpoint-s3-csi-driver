@@ -136,7 +136,7 @@ With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-schedulin
 
 ## My node runs more than one `s3-csi-node` Pod and new mounts fail with "multiple running mounter pods found"
 
-The node matches more than one DaemonSet: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node.
+The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node.
 
 To recover:
 
@@ -144,7 +144,7 @@ To recover:
    ```bash
    $ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name> --sort-by=.status.startTime
    ```
-   Change the rules of the other DaemonSets so they no longer match these nodes. Their mounters have no mounts, so you don't need to drain these nodes. Removing an entry deletes its mounter on every node it covers, so if you remove one, cordon and drain all of its nodes first.
+   Change the placement of the other pairs so they no longer match these nodes. Their mounters have no mounts, so you don't need to drain these nodes. Removing an entry deletes its mounter on every node it covers, so if you remove one, cordon and drain all of its nodes first.
 2. Run `helm upgrade`, then check the driver is registered again:
    ```bash
    $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'

@@ -1409,7 +1409,7 @@ func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 		if dm.mounter.Load() == nil {
 			effect = "None of them holds this node's mounts, so new S3 mounts on it fail until only one runs"
 		}
-		klog.Errorf("DaemonsetMounter: %v. %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, effect)
+		klog.Errorf("DaemonsetMounter: %v. %s; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err, effect)
 	}
 }
 
@@ -1582,7 +1582,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 			return nil, err
 		}
 		running = []corev1.Pod{*inUse}
-		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
+		klog.Errorf("DaemonsetMounter: %v. Using %s; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err, running[0].Name)
 	} else if err != nil {
 		return nil, err
 	}

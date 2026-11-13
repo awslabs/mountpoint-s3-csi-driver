@@ -131,7 +131,7 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- $base := omit .Values.node "nodeSelector" "affinity" }}
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
-{{- $placements := list (toJson (dict "nodeSelector" .Values.node.nodeSelector "affinity" .Values.node.affinity)) }}
+{{- $placements := list (toJson (dict "nodeSelector" (.Values.node.nodeSelector | default dict) "affinity" (.Values.node.affinity | default dict))) }}
 {{- $entries := .Values.additionalDaemonSets | default dict }}
 {{- range $name := keys $entries | sortAlpha }}
 {{- $entry := get $entries $name | default dict }}
@@ -144,17 +144,28 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- end }}
 {{- end }}
 {{- $entryNode := $entry.node | default dict }}
+{{- range $key := list "serviceAccount" "preventPodSchedulingIfMissing" }}
+{{- if hasKey $entryNode $key }}
+{{- fail (printf "additionalDaemonSets.%s.node.%s: set it on node instead, since the chart applies it to every CSI node" $name $key) }}
+{{- end }}
+{{- end }}
 {{- if not (or $entryNode.nodeSelector $entryNode.affinity) }}
 {{- fail (printf "additionalDaemonSets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
 {{- end }}
-{{- $placement := toJson (dict "nodeSelector" $entryNode.nodeSelector "affinity" $entryNode.affinity) }}
+{{- $placement := toJson (dict "nodeSelector" ($entryNode.nodeSelector | default dict) "affinity" ($entryNode.affinity | default dict)) }}
 {{- if has $placement $placements }}
-{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another DaemonSet, so every node it matches would run two" $name) }}
+{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another pair, so every node it matches would run two" $name) }}
 {{- end }}
 {{- $placements = append $placements $placement }}
+{{- $entryMounter := $entry.mounter | default dict }}
+{{- $pairMounter := mustMergeOverwrite (deepCopy $mounter) (deepCopy $entryMounter) }}
+{{- /* An entry's cache replaces the default's whole, and null removes it, as null does for any Helm default. */}}
+{{- if hasKey $entryMounter "cache" }}
+{{- $_ := unset $pairMounter "cache" }}
+{{- if not (kindIs "invalid" $entryMounter.cache) }}{{- $_ := set $pairMounter "cache" (deepCopy $entryMounter.cache) }}{{- end }}
+{{- end }}
 {{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonSets.%s.mounter" $name)
-    "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode))
-    "mounter" (mustMergeOverwrite (deepCopy $mounter) (deepCopy ($entry.mounter | default dict)))) }}
+    "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode)) "mounter" $pairMounter) }}
 {{- end }}
 {{- range $pair := $pairs }}
 {{- /* On the raw value, since int turns anything that isn't a whole number into 0, which means no limit. */}}
