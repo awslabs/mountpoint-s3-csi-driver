@@ -9,8 +9,6 @@ import (
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
@@ -718,13 +716,13 @@ func TestNodePublishVolumeAWSMaxAttempts(t *testing.T) {
 	testCases := []struct {
 		name      string
 		mountFlag string
-		wantValue string
-		wantValid bool
+		// wantArgs are the arguments expected in addition to `--allow-root`.
+		wantArgs []string
 	}{
-		{name: "valid", mountFlag: "aws-max-attempts 5", wantValue: "5", wantValid: true},
-		{name: "valid: equals separator", mountFlag: "--aws-max-attempts=1", wantValue: "1", wantValid: true},
-		{name: "valid: leading plus", mountFlag: "aws-max-attempts +10", wantValue: "+10", wantValid: true},
-		{name: "valid: above 64", mountFlag: "aws-max-attempts 100", wantValue: "100", wantValid: true},
+		{name: "valid", mountFlag: "aws-max-attempts 5", wantArgs: []string{"--aws-max-attempts=5"}},
+		{name: "valid: equals separator", mountFlag: "--aws-max-attempts=1", wantArgs: []string{"--aws-max-attempts=1"}},
+		{name: "valid: leading plus", mountFlag: "aws-max-attempts +10", wantArgs: []string{"--aws-max-attempts=+10"}},
+		{name: "valid: above 64", mountFlag: "aws-max-attempts 100", wantArgs: []string{"--aws-max-attempts=100"}},
 		{name: "invalid: zero", mountFlag: "aws-max-attempts 0"},
 		{name: "invalid: negative", mountFlag: "aws-max-attempts -1"},
 		{name: "invalid: not a number", mountFlag: "aws-max-attempts abc"},
@@ -753,27 +751,21 @@ func TestNodePublishVolumeAWSMaxAttempts(t *testing.T) {
 				TargetPath:    targetPath,
 			}
 
-			if testCase.wantValid {
-				nodeTestEnv.mockMounter.EXPECT().Mount(
-					gomock.Eq(context.Background()),
-					gomock.Eq(bucketName),
-					gomock.Eq(targetPath),
-					gomock.Eq(credentialprovider.ProvideContext{
-						VolumeID:             volumeId,
-						AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
-					}),
-					gomock.Eq(mountpoint.ParseArgs([]string{"--allow-root", "--aws-max-attempts=" + testCase.wantValue})),
-					gomock.Eq(""),
-					gomock.Eq(envprovider.Environment{}),
-				).Return(nil)
-			}
+			nodeTestEnv.mockMounter.EXPECT().Mount(
+				gomock.Eq(context.Background()),
+				gomock.Eq(bucketName),
+				gomock.Eq(targetPath),
+				gomock.Eq(credentialprovider.ProvideContext{
+					VolumeID:             volumeId,
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+				}),
+				gomock.Eq(mountpoint.ParseArgs(append([]string{"--allow-root"}, testCase.wantArgs...))),
+				gomock.Eq(""),
+				gomock.Eq(envprovider.Environment{}),
+			).Return(nil)
 
 			_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
-			if testCase.wantValid {
-				assert.NoError(t, err)
-			} else {
-				assert.Equals(t, codes.InvalidArgument, status.Code(err))
-			}
+			assert.NoError(t, err)
 
 			nodeTestEnv.mockCtl.Finish()
 		})

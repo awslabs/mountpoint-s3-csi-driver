@@ -139,8 +139,10 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	}
 
 	// Mountpoint fails to start if `AWS_MAX_ATTEMPTS`, which is set from `--aws-max-attempts`, is not a positive integer.
+	// Drop invalid values instead, so that Mountpoint uses its default as it did before v1.25.0.
 	if maxAttempts, ok := args.Value(mountpoint.ArgAWSMaxAttempts); ok && !isPositiveInteger(maxAttempts) {
-		return nil, status.Errorf(codes.InvalidArgument, "%s must be a positive integer, got %q", mountpoint.ArgAWSMaxAttempts, maxAttempts)
+		klog.Warningf("NodePublishVolume: ignoring %s %q for volume %s: it must be a positive integer", mountpoint.ArgAWSMaxAttempts, maxAttempts, volumeID)
+		args.Remove(mountpoint.ArgAWSMaxAttempts)
 	}
 
 	fsGroup := ""
