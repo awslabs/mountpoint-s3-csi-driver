@@ -153,6 +153,11 @@ function print_cluster_info() {
   $KUBECTL_BIN get nodes -o wide --kubeconfig ${KUBECONFIG}
 }
 
+# The run_* actions compile the e2e module, so fetch its deps first, with retries.
+if [[ "${ACTION}" == run_* ]]; then
+  (cd "${BASE_DIR}/.." && "${BASE_DIR}/../../../hack/retry.sh" go mod download)
+fi
+
 if [[ "${ACTION}" == "install_tools" ]]; then
   install_tools
 elif [[ "${ACTION}" == "create_cluster" ]]; then
