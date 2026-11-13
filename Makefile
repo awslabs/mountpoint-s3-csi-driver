@@ -23,7 +23,9 @@ BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS?="-X ${PKG}/pkg/driver/version.driverVersion=${VERSION} -X ${PKG}/pkg/driver/version.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/driver/version.buildDate=${BUILD_DATE}"
 
 GO111MODULE=on
-GOPROXY=direct
+# Use the public Go module proxy, and fetch modules directly from their source on any proxy error
+# (e.g. where proxy.golang.org is unreachable).
+GOPROXY?=https://proxy.golang.org|direct
 GOPATH=$(shell go env GOPATH)
 GOOS=$(shell go env GOOS)
 GOBIN=$(GOPATH)/bin
@@ -118,7 +120,7 @@ image: .image-$(TAG)-$(OS)-$(ARCH)-$(OSVERSION)
 			--target=$(OS)-$(OSVERSION) \
 			--output=type=$(OUTPUT_TYPE) \
 			-t=$(IMAGE):$(TAG)-$(OS)-$(ARCH)-$(OSVERSION) \
-			--build-arg=GOPROXY=$(GOPROXY) \
+			--build-arg=GOPROXY="$(GOPROXY)" \
 			--build-arg=VERSION=$(VERSION) \
 			--provenance=false \
 			.; \
