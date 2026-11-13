@@ -1,6 +1,6 @@
 // DaemonsetMounter is the primary side of the two-daemonset architecture: where the primary daemonset
 // (s3-csi-node, privileged) performs FUSE mounts and passes file descriptors (fds) to the secondary
-// daemonset (s3-csi-daemonset-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
+// daemonset (s3-csi-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
 //
 // The two daemonsets communicate through the secondary daemonset's emptyDir volume (commDir). The
 // primary daemonset discovers the secondary pod, its comm dir and whether it has a cache volume,
@@ -86,7 +86,7 @@ const (
 	// csiNodeImageEnv carries this CSI node's own image reference. The chart renders it with the same
 	// helper as the s3-plugin and mounter container images, so it equals the CSI node's `image:`.
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
-	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
+	// mounterContainerName is the container in the s3-csi-mounter pod that runs Mountpoint.
 	mounterContainerName = "mounter"
 )
 
@@ -151,6 +151,10 @@ type DaemonsetMounter struct {
 	chown             chownFunc
 	chmod             chmodFunc
 
+	// socket is the path of the csi.sock this CSI node listens on. When more than one CSI node shares a node, the
+	// newest one replaces it, and the others must then leave the shared mount state alone.
+	socket atomic.Pointer[string]
+
 	// mountMap tracks shared source mounts for pod-sharing.
 	// Mount/Unmount use reference-counted sharing via this map.
 	mountMap *MountMap
@@ -175,7 +179,7 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc, kubernetesVersion string, variant cluster.Variant) *DaemonsetMounter {
 	ownImage := os.Getenv(csiNodeImageEnv)
 	if ownImage == "" {
-		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / s3-csi-daemonset-mounter image check is disabled", csiNodeImageEnv)
+		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / mounter image check is disabled", csiNodeImageEnv)
 	}
 	return &DaemonsetMounter{
 		ownImage:          ownImage,
@@ -295,7 +299,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// restarts between provideCredentials and fuseMount, causing mount-s3 to start without creds.
 	mounter := dm.mounter.Load()
 	if mounter == nil {
-		return fmt.Errorf("connection to s3-csi-daemonset-mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
+		return fmt.Errorf("connection to the mounter not yet established, allowing kubelet to retry NodePublishVolume: %w. %s", ErrCommDirNotReady, helpMessageForCheckingMounterPodStatus())
 	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
@@ -679,6 +683,17 @@ func (dm *DaemonsetMounter) releaseTarget(target string, volumeID string, creden
 	return nil
 }
 
+// OwnSocket records the path of the csi.sock this CSI node listens on.
+func (dm *DaemonsetMounter) OwnSocket(path string) {
+	dm.socket.Store(&path)
+}
+
+// ownsSocket reports whether this process is still the one listening on the recorded socket; true until OwnSocket runs.
+func (dm *DaemonsetMounter) ownsSocket() bool {
+	path := dm.socket.Load()
+	return path == nil || listenerIsSelf(*path)
+}
+
 // StartPeriodicCleanup runs CleanupOrphans on a ticker until stopCh is closed.
 //
 // It's a safety net for when inline cleanup and startup cleanup miss resources orphaned while the driver keeps running with no operation touching a volume
@@ -702,6 +717,11 @@ func (dm *DaemonsetMounter) StartPeriodicCleanup(stopCh <-chan struct{}) {
 //     to zero, tear it down.
 func (dm *DaemonsetMounter) CleanupOrphans() {
 	dm.mountMap.Range(func(volumeID string, entry *MountEntry) bool {
+		// Checked per entry, so a takeover partway through stops the pass.
+		if !dm.ownsSocket() {
+			klog.Infof("DaemonsetMounter: stopping cleanup, another CSI node on this node now owns the CSI socket")
+			return false
+		}
 		dm.cleanupEntry(volumeID, entry)
 		return true
 	})
@@ -1245,7 +1265,7 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%w, check that s3-csi-daemonset-mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
+		return fmt.Errorf("%w, check that the mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
 	}
 	return nil
 }
@@ -1316,7 +1336,7 @@ func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
 	if _, err := dm.runningMounterPods(ctx); errors.Is(err, ErrMultipleMounterPods) {
-		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err)
+		klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using the first mounter; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err)
 	}
 }
 
@@ -1490,7 +1510,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 			return nil, err
 		}
 		running = []corev1.Pod{*inUse}
-		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
+		klog.Errorf("DaemonsetMounter: %v. Using %s; change node.nodeSelector or node.affinity, on node or an additionalDaemonSets entry, or this node's labels, so only one pair matches it", err, running[0].Name)
 	} else if err != nil {
 		return nil, err
 	}
@@ -1593,7 +1613,7 @@ func (dm *DaemonsetMounter) imageMismatchWarning(mounterImage string) string {
 	if dm.ownImage == "" || dm.ownImage == mounterImage {
 		return ""
 	}
-	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
+	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, the mounter runs %[3]q. "+
 		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
 		"`kubectl cordon %[1]s`, "+
 		"`kubectl drain %[1]s --ignore-daemonsets`, "+

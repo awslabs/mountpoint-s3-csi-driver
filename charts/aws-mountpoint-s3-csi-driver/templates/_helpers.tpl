@@ -124,74 +124,54 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 {{- end -}}
 
 {{/*
-Checks the daemonsetMounters entries. Each entry becomes its own mounter DaemonSet, so names must not repeat, and with
-two or more entries each must say which nodes it applies to.
+Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default from node and mounter, then
+one per additionalDaemonSets entry, which copies both except placement (node.nodeSelector and node.affinity).
 */}}
-{{- define "aws-mountpoint-s3-csi-driver.validateMounterEntries" -}}
-{{- $entries := .Values.daemonsetMounters }}
-{{- if lt (len $entries) 1 }}
-{{- fail "daemonsetMounters must have at least one entry" }}
+{{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
+{{- $base := omit .Values.node "nodeSelector" "affinity" }}
+{{- $mounter := .Values.mounter | default dict }}
+{{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
+{{- $placements := list (toJson (dict "nodeSelector" (.Values.node.nodeSelector | default dict) "affinity" (.Values.node.affinity | default dict))) }}
+{{- $entries := .Values.additionalDaemonSets | default dict }}
+{{- range $name := keys $entries | sortAlpha }}
+{{- $entry := get $entries $name | default dict }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
+{{- fail (printf "additionalDaemonSets: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSets" $name) }}
 {{- end }}
-{{- $names := list }}
-{{- $selections := list }}
-{{- $unnamed := 0 }}
-{{- range $m := $entries }}
+{{- range $key, $_ := $entry }}
+{{- if not (has $key (list "node" "mounter")) }}
+{{- fail (printf "additionalDaemonSets.%s.%s: an entry only takes node and mounter, which override the top-level node and mounter values" $name $key) }}
+{{- end }}
+{{- end }}
+{{- $entryNode := $entry.node | default dict }}
+{{- range $key := list "serviceAccount" "preventPodSchedulingIfMissing" }}
+{{- if hasKey $entryNode $key }}
+{{- fail (printf "additionalDaemonSets.%s.node.%s: set it on node instead, since the chart applies it to every CSI node" $name $key) }}
+{{- end }}
+{{- end }}
+{{- if not (or $entryNode.nodeSelector $entryNode.affinity) }}
+{{- fail (printf "additionalDaemonSets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
+{{- end }}
+{{- $placement := toJson (dict "nodeSelector" ($entryNode.nodeSelector | default dict) "affinity" ($entryNode.affinity | default dict)) }}
+{{- if has $placement $placements }}
+{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another pair, so every node it matches would run two" $name) }}
+{{- end }}
+{{- $placements = append $placements $placement }}
+{{- $entryMounter := $entry.mounter | default dict }}
+{{- $pairMounter := mustMergeOverwrite (deepCopy $mounter) (deepCopy $entryMounter) }}
+{{- /* An entry's cache replaces the default's whole, and null removes it, as null does for any Helm default. */}}
+{{- if hasKey $entryMounter "cache" }}
+{{- $_ := unset $pairMounter "cache" }}
+{{- if not (kindIs "invalid" $entryMounter.cache) }}{{- $_ := set $pairMounter "cache" (deepCopy $entryMounter.cache) }}{{- end }}
+{{- end }}
+{{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonSets.%s.mounter" $name)
+    "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode)) "mounter" $pairMounter) }}
+{{- end }}
+{{- range $pair := $pairs }}
 {{- /* On the raw value, since int turns anything that isn't a whole number into 0, which means no limit. */}}
-{{- if not (regexMatch "^[0-9]+$" (toString $m.maxVolumesPerNode)) }}
-{{- fail (printf "daemonsetMounters[%s].maxVolumesPerNode must be a whole number >= 0, got %v" ($m.name | default "") $m.maxVolumesPerNode) }}
-{{- end }}
-{{- if $m.name }}
-{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $m.name) }}
-{{- fail (printf "daemonsetMounters: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSet" $m.name) }}
-{{- end }}
-{{- if has $m.name $names }}
-{{- fail (printf "daemonsetMounters: two entries are named %q; each entry needs its own name" $m.name) }}
-{{- end }}
-{{- $names = append $names $m.name }}
-{{- else }}
-{{- $unnamed = add1 $unnamed }}
-{{- end }}
-{{- if and (gt (len $entries) 1) (not $m.nodeSelector) (not $m.matchExpressions) }}
-{{- fail (printf "daemonsetMounters[%s]: nodeSelector or matchExpressions is required when there is more than one entry, or its mounter would run on every node" ($m.name | default "")) }}
-{{- end }}
-{{- $selection := toJson (dict "nodeSelector" $m.nodeSelector "matchExpressions" $m.matchExpressions) }}
-{{- if has $selection $selections }}
-{{- fail (printf "daemonsetMounters: two entries select the same nodes with %s" $selection) }}
-{{- end }}
-{{- $selections = append $selections $selection }}
-{{- range $k, $_ := $m.nodeSelector }}
-{{- if hasKey ($.Values.node.nodeSelector | default dict) $k }}
-{{- fail (printf "daemonsetMounters[%s].nodeSelector and node.nodeSelector both set %q" ($m.name | default "") $k) }}
+{{- if not (regexMatch "^[0-9]+$" (toString $pair.mounter.maxVolumesPerNode)) }}
+{{- fail (printf "%s.maxVolumesPerNode must be a whole number >= 0, got %v" $pair.where $pair.mounter.maxVolumesPerNode) }}
 {{- end }}
 {{- end }}
-{{- end }}
-{{- if gt $unnamed 1 }}
-{{- fail "daemonsetMounters: at most one entry may leave out name" }}
-{{- end }}
-{{- end }}
-
-{{/*
-Returns .affinity with each required node term repeated once per list in .exprLists, with that list's expressions
-added. Kubernetes ORs the terms, so the result matches a node if any list does. Other rules are kept as they are.
-With no lists, .affinity is returned unchanged.
-*/}}
-{{- define "aws-mountpoint-s3-csi-driver.addToNodeTerms" -}}
-{{- $affinity := deepCopy (.affinity | default dict) }}
-{{- if .exprLists }}
-{{- $nodeAffinity := $affinity.nodeAffinity | default dict }}
-{{- $required := $nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | default dict }}
-{{- $nodeTerms := $required.nodeSelectorTerms | default (list (dict)) }}
-{{- $terms := list }}
-{{- range $n := $nodeTerms }}
-{{- range $exprs := $.exprLists }}
-{{- $term := dict "matchExpressions" (concat ($n.matchExpressions | default list) $exprs) }}
-{{- with $n.matchFields }}{{- $_ := set $term "matchFields" . }}{{- end }}
-{{- $terms = append $terms $term }}
-{{- end }}
-{{- end }}
-{{- $_ := set $required "nodeSelectorTerms" $terms }}
-{{- $_ := set $nodeAffinity "requiredDuringSchedulingIgnoredDuringExecution" $required }}
-{{- $_ := set $affinity "nodeAffinity" $nodeAffinity }}
-{{- end }}
-{{- toYaml $affinity }}
+{{- toJson (dict "pairs" $pairs) }}
 {{- end }}

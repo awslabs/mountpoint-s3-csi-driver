@@ -1,7 +1,14 @@
 package mounter
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	goruntime "runtime"
 	"testing"
 	"time"
 
@@ -147,5 +154,63 @@ func returnsPromptly(t *testing.T, f func()) {
 	case <-done:
 	case <-time.After(1 * time.Second):
 		t.Fatal("did not return within a second, so it is likely waiting on a mount's lock")
+	}
+}
+
+// Once another process listens on csi.sock in its place, this CSI node no longer owns it, even if the new socket
+// reuses the old one's inode number.
+func TestOwnsSocketOnlyWhileThisProcessListensOnIt(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("the check asks the kernel for the listener's PID, which only Linux supports")
+	}
+	sock := filepath.Join(t.TempDir(), "csi.sock")
+	dm := &DaemonsetMounter{}
+	assert.Equals(t, true, dm.ownsSocket())
+
+	listener, err := net.Listen("unix", sock)
+	assert.NoError(t, err)
+	defer listener.Close()
+	go acceptAndClose(listener)
+	dm.OwnSocket(sock)
+	assert.Equals(t, true, dm.ownsSocket())
+
+	// Another CSI node removes it and listens at the same path.
+	other := exec.Command(os.Args[0], "-test.run=^TestHelperListenOnSocket$")
+	other.Env = append(os.Environ(), listenOnSocketEnv+"="+sock)
+	stdout, err := other.StdoutPipe()
+	assert.NoError(t, err)
+	assert.NoError(t, other.Start())
+	_, err = bufio.NewReader(stdout).ReadString('\n')
+	assert.NoError(t, err)
+	assert.Equals(t, false, dm.ownsSocket())
+
+	// It exits, leaving its socket file with nobody listening.
+	assert.NoError(t, other.Process.Kill())
+	_ = other.Wait()
+	assert.Equals(t, false, dm.ownsSocket())
+}
+
+const listenOnSocketEnv = "TEST_LISTEN_ON_SOCKET"
+
+// TestHelperListenOnSocket is the other process in TestOwnsSocketOnlyWhileThisProcessListensOnIt.
+func TestHelperListenOnSocket(t *testing.T) {
+	sock := os.Getenv(listenOnSocketEnv)
+	if sock == "" {
+		t.Skip("only runs as the other process in TestOwnsSocketOnlyWhileThisProcessListensOnIt")
+	}
+	assert.NoError(t, os.Remove(sock))
+	listener, err := net.Listen("unix", sock)
+	assert.NoError(t, err)
+	fmt.Println("listening")
+	acceptAndClose(listener)
+}
+
+func acceptAndClose(listener net.Listener) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		conn.Close()
 	}
 }

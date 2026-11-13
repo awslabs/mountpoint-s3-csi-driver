@@ -77,14 +77,14 @@ func newCacheLimit(strategy cacheLimitStrategy, capacityBytes int64, maxVolumesP
 
 	if capacityBytes < 0 {
 		return cacheLimit{}, fmt.Errorf("cache.limitStrategy=%s divides this container's cache volume, whose size "+
-			"is %d bytes. Set a positive daemonsetMounters[].cache.emptyDir.sizeLimit or .ephemeral.resourceRequests",
+			"is %d bytes. Set a positive mounter.cache.emptyDir.sizeLimit or .ephemeral.resourceRequests",
 			cacheLimitEqualSplit, capacityBytes)
 	}
 
 	if maxVolumesPerNode <= 0 {
 		return cacheLimit{}, fmt.Errorf("cache.limitStrategy=%s divides this container's cache volume by "+
-			"maxVolumesPerNode, which is %d. Set a positive daemonsetMounters[].maxVolumesPerNode, or "+
-			"set daemonsetMounters[].cache.limitStrategy=%s to leave %s to each PV's mountOptions",
+			"maxVolumesPerNode, which is %d. Set a positive mounter.maxVolumesPerNode, or "+
+			"set mounter.cache.limitStrategy=%s to leave %s to each PV's mountOptions",
 			cacheLimitEqualSplit, maxVolumesPerNode, cacheLimitNone, mountpoint.ArgMaxCacheSize)
 	}
 
@@ -92,8 +92,8 @@ func newCacheLimit(strategy cacheLimitStrategy, capacityBytes int64, maxVolumesP
 	if shareMiB == 0 {
 		klog.Warningf("cache.limitStrategy=%s gives each Mountpoint no whole MiB of this container's cache "+
 			"volume of %d bytes divided by maxVolumesPerNode=%d, so every mount is served uncached with %s=0. "+
-			"Set or raise daemonsetMounters[].cache.emptyDir.sizeLimit or .ephemeral.resourceRequests, or "+
-			"lower daemonsetMounters[].maxVolumesPerNode.",
+			"Set or raise mounter.cache.emptyDir.sizeLimit or .ephemeral.resourceRequests, or "+
+			"lower mounter.maxVolumesPerNode.",
 			cacheLimitEqualSplit, capacityBytes, maxVolumesPerNode, mountpoint.ArgMaxCacheSize)
 		return cacheLimit{strategy: strategy, shareMiB: 0}, nil
 	}
@@ -120,7 +120,7 @@ func (l cacheLimit) maxCacheSizeFor(volumeId string, args mountpoint.Args) (size
 		if !hasDeclared {
 			klog.Warningf("Volume %s does not set %s in its PV mountOptions and cache.limitStrategy=%s, "+
 				"so nothing bounds its share of the cache volume. Together the mounts on this node can fill it. "+
-				"Set %s in the PV mountOptions, or set daemonsetMounters[].cache.limitStrategy=%s to "+
+				"Set %s in the PV mountOptions, or set mounter.cache.limitStrategy=%s to "+
 				"divide the cache volume evenly.",
 				volumeId, mountpoint.ArgMaxCacheSize, cacheLimitNone, mountpoint.ArgMaxCacheSize,
 				cacheLimitEqualSplit)

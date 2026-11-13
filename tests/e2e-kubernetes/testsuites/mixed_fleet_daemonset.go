@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -81,25 +82,23 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 		// Node A's entries request 2Gi, not the chart's 4Gi, so two of their mounters fit on one node during the overlap.
 		nodeAResources := map[string]any{"requests": map[string]any{"memory": "2Gi"}}
 		first := func() map[string]any {
-			return map[string]any{"name": "first", "nodeSelector": map[string]any{"kubernetes.io/hostname": nodeA}, "maxVolumesPerNode": 3,
-				"resources": nodeAResources}
-		}
-		rest := func() map[string]any {
-			return map[string]any{"name": "rest", "maxVolumesPerNode": 5,
-				"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": []any{nodeA}}}}
+			return map[string]any{
+				"node":    map[string]any{"nodeSelector": map[string]any{"kubernetes.io/hostname": nodeA}},
+				"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
+			}
 		}
 
-		Context("with two entries", func() {
+		Context("with an entry for node A, and the default pair on the other nodes", func() {
 			BeforeAll(func(ctx context.Context) {
-				release.upgrade(ctx, f, withMounterEntries(release, first(), rest()))
+				release.upgrade(ctx, f, withAdditionalDaemonSets(release, nodeA, map[string]any{"first": first()}))
 			})
 
-			It("runs each node's own entry's mounter and advertises its limit", func(ctx context.Context) {
+			It("runs each node's own pair's mounter and advertises its limit", func(ctx context.Context) {
 				expectOneMounterPerNode(ctx, f, driverName, func(node string) string {
 					if node == nodeA {
 						return mounterDaemonSetName + "-first"
 					}
-					return mounterDaemonSetName + "-rest"
+					return mounterDaemonSetName
 				})
 				Expect(getCSINodeLimits(ctx, f, nodeA, driverName)).To(Equal(3))
 				Expect(getCSINodeLimits(ctx, f, otherNode(ctx, f, nodeA), driverName)).To(Equal(5))
@@ -113,19 +112,23 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 			})
 		})
 
-		Context("with a third entry that also matches node A", func() {
+		Context("with a second entry that also matches node A", func() {
 			It("keeps node A's mounter in use, logging the overlap", func(ctx context.Context) {
 				running, runningPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				servedBy := servingMounter(ctx, f, nodeA, runningPV)
 
-				// A different rule from first's, as two identical selections are rejected at install, and first's limit, so node A
+				// A different rule from first's, as two identical placements are rejected at install, and first's limit, so node A
 				// advertises 3 whichever mounter it picks.
-				extra := map[string]any{"name": "extra", "maxVolumesPerNode": 3, "resources": nodeAResources,
-					"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}
-				// Only the node pod rolls, as its rules change, so node A's new node pod starts while a mount uses first's mounter.
-				release.upgradeOnly(ctx, withMounterEntries(release, first(), rest(), extra))
+				extra := map[string]any{
+					"node": map[string]any{"affinity": map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+						"nodeSelectorTerms": []any{map[string]any{"matchExpressions": []any{
+							map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}}}}}},
+					"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
+				}
+				// The new CSI node takes over node A's socket while a mount uses first's mounter.
+				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, nodeA, map[string]any{"first": first(), "extra": extra}))
 				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
-				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
+				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName+"-extra", csiNodePodLabel, csiNodeRestartTimeout)
 
 				Expect(mountersOn(ctx, f, nodeA)).To(HaveLen(2))
 				Expect(getCSINodeLimits(ctx, f, nodeA, driverName)).To(Equal(3))
@@ -142,21 +145,26 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 	})
 }
 
-// withMounterEntries returns the installed values with one complete daemonsetMounters element per entry.
-func withMounterEntries(r *driverRelease, entries ...map[string]any) map[string]any {
-	// Helm replaces a list whole, so each element starts from the chart's: a partial one renders an absent logLevel as `--v=`.
-	chartMounter := r.chart.Values["daemonsetMounters"].([]any)[0].(map[string]any)
-	var mounters []any
-	for _, entry := range entries {
-		mounter := maps.Clone(chartMounter)
-		if installed, _ := r.installed["daemonsetMounters"].([]any); len(installed) > 0 {
-			maps.Copy(mounter, installed[0].(map[string]any))
-		}
-		maps.Copy(mounter, entry)
-		mounters = append(mounters, mounter)
+// withAdditionalDaemonSets returns the installed values with entries as additionalDaemonSets, and the default pair kept
+// off excluded, since no node may match two pairs.
+func withAdditionalDaemonSets(r *driverRelease, excluded string, entries map[string]any) map[string]any {
+	affinity := r.chart.Values["node"].(map[string]any)["affinity"].(map[string]any)
+	terms := affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
+	notExcluded := map[string]any{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": []any{excluded}}
+	var narrowed []any
+	for _, term := range terms {
+		exprs := slices.Clone(term.(map[string]any)["matchExpressions"].([]any))
+		narrowed = append(narrowed, map[string]any{"matchExpressions": append(exprs, notExcluded)})
 	}
+	node := map[string]any{}
+	if installed, _ := r.installed["node"].(map[string]any); installed != nil {
+		maps.Copy(node, installed)
+	}
+	node["affinity"] = map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{"nodeSelectorTerms": narrowed}}}
 	values := maps.Clone(r.installed)
-	values["daemonsetMounters"] = mounters
+	values["node"] = node
+	values["mounter"] = map[string]any{"maxVolumesPerNode": 5}
+	values["additionalDaemonSets"] = entries
 	return values
 }
 

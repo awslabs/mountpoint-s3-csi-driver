@@ -8,25 +8,19 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
-{{- $affinity := .Values.node.affinity }}
+{{- /* One CSI node per pair; in daemonset mode each additionalDaemonSets entry adds a pair, with its own placement. */}}
+{{- $pairs := list (dict "name" "" "node" .Values.node) }}
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
-{{- include "aws-mountpoint-s3-csi-driver.validateMounterEntries" . }}
-{{- /* The node pod runs wherever any entry's mounter runs: one node term per entry. */}}
-{{- $exprLists := list }}
-{{- range $m := .Values.daemonsetMounters }}
-{{- $exprs := list }}
-{{- range $k, $v := $m.nodeSelector }}
-{{- $exprs = append $exprs (dict "key" $k "operator" "In" "values" (list (toString $v))) }}
+{{- $pairs = (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}
 {{- end }}
-{{- $exprs = concat $exprs ($m.matchExpressions | default list) }}
-{{- if $exprs }}{{- $exprLists = append $exprLists $exprs }}{{- end }}
-{{- end }}
-{{- $affinity = include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
-{{- end }}
+{{- range $pair := $pairs }}
+{{- $node := $pair.node }}
+{{- with $ }}
+---
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: s3-csi-node
+  name: s3-csi-node{{ with $pair.name }}-{{ . }}{{ end }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
@@ -43,24 +37,29 @@ spec:
         s3.csi.aws.com/chart-source: "github-main"
         {{- end }}
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
-        {{- if .Values.node.podLabels }}
-        {{- toYaml .Values.node.podLabels | nindent 8 }}
+        {{- if $node.podLabels }}
+        {{- toYaml $node.podLabels | nindent 8 }}
         {{- end }}
+      {{- with $node.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-        {{- with .Values.node.nodeSelector }}
-        {{- toYaml . | nindent 8 }}
+        {{- /* Quoted, since a nodeSelector takes only strings and YAML reads true or 1 as other types. */}}
+        {{- range $k, $v := $node.nodeSelector }}
+        {{ $k }}: {{ toString $v | quote }}
         {{- end }}
-      serviceAccountName: {{ .Values.node.serviceAccount.name }}
+      serviceAccountName: {{ $node.serviceAccount.name }}
       priorityClassName: system-node-critical
-      {{- with $affinity }}
+      {{- with $node.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
-        {{- if .Values.node.tolerateAllTaints }}
+        {{- if $node.tolerateAllTaints }}
         - operator: Exists
-        {{- else if .Values.node.defaultTolerations }}
+        {{- else if $node.defaultTolerations }}
         - key: CriticalAddonsOnly
           operator: Exists
         - key: s3.csi.aws.com/agent-not-ready
@@ -69,7 +68,7 @@ spec:
           effect: NoExecute
           tolerationSeconds: 300
         {{- end }}
-        {{- with .Values.node.tolerations }}
+        {{- with $node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- if .Values.imagePullSecrets }}
@@ -97,7 +96,7 @@ spec:
             # but Kubernetes API validator currently enforces that this is set to `true` for bidirectional mounts.
             # https://github.com/kubernetes/kubernetes/blob/v1.34.2/pkg/apis/core/validation/validation.go#L1410-L1413
             privileged: true
-            {{- with .Values.node.seLinuxOptions }}
+            {{- with $node.seLinuxOptions }}
             seLinuxOptions:
               user: {{ .user }}
               type: {{ .type }}
@@ -107,7 +106,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --endpoint=$(CSI_ENDPOINT)
-            - --v={{ .Values.node.logLevel }}
+            - --v={{ $node.logLevel }}
           env:
             - name: CSI_ENDPOINT
               value: unix:/var/lib/kubelet/plugins/s3.csi.aws.com/csi.sock
@@ -120,7 +119,7 @@ spec:
             - name: CONTAINER_KUBELET_PATH
               value: /var/lib/kubelet
             - name: HOST_KUBELET_PATH
-              value: {{ .Values.node.kubeletPath }}
+              value: {{ $node.kubeletPath }}
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
             {{- if eq .Values.experimental.mounterMode "daemonset" }}
@@ -181,7 +180,7 @@ spec:
             timeoutSeconds: 3
             periodSeconds: 2
             failureThreshold: 5
-          {{- with .Values.node.resources }}
+          {{- with $node.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -194,30 +193,29 @@ spec:
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+            - --http-endpoint=:9809
           env:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
+              value: {{ trimSuffix "/" $node.kubeletPath }}/plugins/s3.csi.aws.com/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
           livenessProbe:
-            exec:
-              command:
-                - /csi-node-driver-registrar
-                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-                - --mode=kubelet-registration-probe
+            httpGet:
+              path: /healthz
+              port: 9809
             initialDelaySeconds: 30
-            timeoutSeconds: 15
-            periodSeconds: 90
+            timeoutSeconds: 5
+            periodSeconds: 10
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
-          {{- with default .Values.node.resources .Values.sidecars.nodeDriverRegistrar.resources }}
+          {{- with default $node.resources .Values.sidecars.nodeDriverRegistrar.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -232,23 +230,25 @@ spec:
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
-          {{- with default .Values.node.resources .Values.sidecars.livenessProbe.resources }}
+          {{- with default $node.resources .Values.sidecars.livenessProbe.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
         - name: kubelet-dir
           hostPath:
-            path: {{ .Values.node.kubeletPath }}
+            path: {{ $node.kubeletPath }}
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins/s3.csi.aws.com/
+            path: {{ trimSuffix "/" $node.kubeletPath }}/plugins/s3.csi.aws.com/
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
-            path: {{ trimSuffix "/" .Values.node.kubeletPath }}/plugins_registry/
+            path: {{ trimSuffix "/" $node.kubeletPath }}/plugins_registry/
             type: Directory
-        {{- with .Values.node.volumes }}
+        {{- with $node.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+{{- end }}
+{{- end }}
