@@ -323,7 +323,9 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	}
 
 	// A dead target is unmounted only once a mounter is there to mount it again. From here on it is
-	// an absent target, so a failure below leaves it for kubelet's retry as a fresh mount.
+	// an absent target, so kubelet's retry mounts it fresh. Every failure below is returned as Aborted
+	// (see remountFailedError): a final code would make kubelet before 1.36 remove the unmounted mount
+	// directory and its vol_data.json, which it needs to unmount the volume when the pod is deleted.
 	if remountDeadTarget {
 		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead mount, unmounting it to mount again", target, volumeID)
 		if err := dm.unmountIfMounted(target); err != nil {
@@ -336,7 +338,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
 	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
 	if err != nil {
-		return err
+		return remountFailedError(remountDeadTarget, target, volumeID, err)
 	}
 	// Discard any PV supplied path (repeated cache mount options scenario - must remove all args)
 	for args.Has(mountpoint.ArgCache) {
@@ -351,12 +353,22 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
 	if err := dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter.commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy); err != nil {
-		return err
+		return remountFailedError(remountDeadTarget, target, volumeID, err)
 	}
 	if remountDeadTarget {
 		return remountedTargetError(volumeID, credentialCtx.WorkloadPodID, volumeCtx)
 	}
 	return nil
+}
+
+// remountFailedError returns err unchanged unless Mount unmounted a dead target before failing, in
+// which case it is returned as Aborted, which kubelet treats as non-final and so keeps the mount
+// directory and its vol_data.json.
+func remountFailedError(unmountedDeadTarget bool, target, volumeID string, err error) error {
+	if !unmountedDeadTarget {
+		return err
+	}
+	return status.Errorf(codes.Aborted, "unmounted dead target %q for volume %s but mounting it again failed, will retry: %v", target, volumeID, err)
 }
 
 // remountedTargetError reports a dead target that Mount has just mounted again: its Mountpoint had
