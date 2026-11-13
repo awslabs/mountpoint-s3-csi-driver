@@ -134,13 +134,17 @@ With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-schedulin
   The driver doesn't run on nodes that `node.affinity` or `node.nodeSelector` exclude, or on nodes with taints it doesn't tolerate.
 - If the Pod is waiting for Cluster Autoscaler to add a node, check that Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, and that node groups that scale from zero have the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag with `s3.csi.aws.com` in its value.
 
-## My node runs two `s3-csi-node` Pods and new mounts fail with "multiple running mounter pods found"
+## My node runs more than one `s3-csi-node` Pod and new mounts fail with "multiple running mounter pods found"
 
-The node matches more than one DaemonSet: two `additionalDaemonsets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node.
+The node matches more than one DaemonSet: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node.
 
 To recover:
 
-1. Change the rules of the entry you added so it no longer matches these nodes. On these nodes its mounter has no mounts, so you don't need to drain them. Removing an entry deletes its mounter on every node it covers, so if you remove one, cordon and drain all of its nodes first.
+1. Find the mounter that started first on each affected node. It serves the node's mounts, and the others have none:
+   ```bash
+   $ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name> --sort-by=.status.startTime
+   ```
+   Change the rules of the other DaemonSets so they no longer match these nodes. Their mounters have no mounts, so you don't need to drain these nodes. Removing an entry deletes its mounter on every node it covers, so if you remove one, cordon and drain all of its nodes first.
 2. Run `helm upgrade`, then check the driver is registered again:
    ```bash
    $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'

@@ -262,14 +262,15 @@ mounter:
 # entries' nodes. Only used when experimental.mounterMode is "daemonset".
 #
 # WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
-# matches two DaemonSets, including the default pair; otherwise new mounts on that node can fail.
-# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-two-s3-csi-node-pods-and-new-mounts-fail-with-multiple-running-mounter-pods-found
+# matches more than one DaemonSet, including the default pair; otherwise new mounts on that node can fail.
+# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod-and-new-mounts-fail-with-multiple-running-mounter-pods-found
 #
-# Removing or renaming an entry makes helm upgrade delete its DaemonSets, which breaks every S3 mount
-# on its nodes. Drain those nodes first, then upgrade, then uncordon them.
+# Removing or renaming an entry, or changing placement so a DaemonSet no longer matches a node (such as
+# narrowing the default pair's), makes helm upgrade delete its mounter there, which breaks every S3 mount
+# on that node. Drain those nodes first, then upgrade, then uncordon them.
 #
 # For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
-# additionalDaemonsets:
+# additionalDaemonSets:
 #   bigmem:
 #     node:
 #       nodeSelector:
@@ -280,4 +281,4 @@ mounter:
 #         requests:
 #           memory: "32Gi"
 #           cpu: "2"
-additionalDaemonsets: {}
+additionalDaemonSets: {}

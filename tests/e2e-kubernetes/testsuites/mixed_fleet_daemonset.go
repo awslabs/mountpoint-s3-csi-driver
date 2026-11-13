@@ -90,7 +90,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 
 		Context("with an entry for node A, and the default pair on the other nodes", func() {
 			BeforeAll(func(ctx context.Context) {
-				release.upgrade(ctx, f, withAdditionalDaemonsets(release, notOn(nodeA), map[string]any{"first": first()}))
+				release.upgrade(ctx, f, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first()}))
 			})
 
 			It("runs each node's own pair's mounter and advertises its limit", func(ctx context.Context) {
@@ -126,7 +126,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 					"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
 				}
 				// The new CSI node takes over node A's socket while a mount uses first's mounter.
-				release.upgradeOnly(ctx, withAdditionalDaemonsets(release, notOn(nodeA), map[string]any{"first": first(), "extra": extra}))
+				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first(), "extra": extra}))
 				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
 				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName+"-extra", csiNodePodLabel, csiNodeRestartTimeout)
 
@@ -145,9 +145,9 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 	})
 }
 
-// withAdditionalDaemonsets returns the installed values with entries as additionalDaemonsets, and the default pair kept
+// withAdditionalDaemonSets returns the installed values with entries as additionalDaemonSets, and the default pair kept
 // to nodes matching outside, a matchExpression, since no node may match two pairs.
-func withAdditionalDaemonsets(r *driverRelease, outside map[string]any, entries map[string]any) map[string]any {
+func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries map[string]any) map[string]any {
 	affinity := r.chart.Values["node"].(map[string]any)["affinity"].(map[string]any)
 	terms := affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
 	var narrowed []any
@@ -163,7 +163,7 @@ func withAdditionalDaemonsets(r *driverRelease, outside map[string]any, entries 
 	values := maps.Clone(r.installed)
 	values["node"] = node
 	values["mounter"] = map[string]any{"maxVolumesPerNode": 5}
-	values["additionalDaemonsets"] = entries
+	values["additionalDaemonSets"] = entries
 	return values
 }
 
