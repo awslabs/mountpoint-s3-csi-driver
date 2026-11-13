@@ -706,6 +706,72 @@ func TestNodePublishVolumeForPodMounter(t *testing.T) {
 	}
 }
 
+func TestNodePublishVolumeAWSMaxAttempts(t *testing.T) {
+	var (
+		volumeId   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/var/lib/kubelet/target/path"
+	)
+
+	testCases := []struct {
+		name      string
+		mountFlag string
+		// wantArgs are the arguments expected in addition to `--allow-root`.
+		wantArgs []string
+	}{
+		{name: "valid", mountFlag: "aws-max-attempts 5", wantArgs: []string{"--aws-max-attempts=5"}},
+		{name: "valid: equals separator", mountFlag: "--aws-max-attempts=1", wantArgs: []string{"--aws-max-attempts=1"}},
+		{name: "valid: leading plus", mountFlag: "aws-max-attempts +10", wantArgs: []string{"--aws-max-attempts=+10"}},
+		{name: "valid: above 64", mountFlag: "aws-max-attempts 100", wantArgs: []string{"--aws-max-attempts=100"}},
+		{name: "invalid: zero", mountFlag: "aws-max-attempts 0"},
+		{name: "invalid: negative", mountFlag: "aws-max-attempts -1"},
+		{name: "invalid: not a number", mountFlag: "aws-max-attempts abc"},
+		{name: "invalid: decimal", mountFlag: "aws-max-attempts 1.5"},
+		{name: "invalid: no value", mountFlag: "aws-max-attempts"},
+		{name: "invalid: overflow", mountFlag: "aws-max-attempts 18446744073709551616"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			ctx := context.Background()
+			req := &csi.NodePublishVolumeRequest{
+				VolumeId: volumeId,
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{
+							MountFlags: []string{testCase.mountFlag},
+						},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				},
+				VolumeContext: map[string]string{"bucketName": bucketName},
+				TargetPath:    targetPath,
+			}
+
+			nodeTestEnv.mockMounter.EXPECT().Mount(
+				gomock.Eq(context.Background()),
+				gomock.Eq(bucketName),
+				gomock.Eq(targetPath),
+				gomock.Eq(credentialprovider.ProvideContext{
+					VolumeID:             volumeId,
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+				}),
+				gomock.Eq(mountpoint.ParseArgs(append([]string{"--allow-root"}, testCase.wantArgs...))),
+				gomock.Eq(""),
+				gomock.Eq(envprovider.Environment{}),
+			).Return(nil)
+
+			_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+			assert.NoError(t, err)
+
+			nodeTestEnv.mockCtl.Finish()
+		})
+	}
+}
+
 func TestNodePublishVolumeMaxCacheSizeInjection(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
