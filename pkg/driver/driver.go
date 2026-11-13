@@ -82,6 +82,9 @@ type Driver struct {
 
 	NodeServer *node.S3NodeServer
 
+	// daemonsetMounter is set in daemonset mode, to record the socket Run creates.
+	daemonsetMounter *mounter.DaemonsetMounter
+
 	Clientset kubernetes.Interface
 
 	stopCh chan struct{}
@@ -126,6 +129,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	stopCh := make(chan struct{})
 
 	var nodeServer *node.S3NodeServer
+	var daemonsetMounter *mounter.DaemonsetMounter
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
@@ -143,6 +147,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		if err := dm.DiscoverMounter(context.Background()); err != nil {
 			klog.Fatalf("Failed to discover mounter pod: %v", err)
 		}
+		daemonsetMounter = dm
 		go dm.StartCommDirWatch(stopCh)
 		go dm.StartPeriodicCleanup(stopCh)
 
@@ -201,11 +206,12 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	}
 
 	return &Driver{
-		Endpoint:   endpoint,
-		NodeID:     nodeID,
-		NodeServer: nodeServer,
-		Clientset:  clientset,
-		stopCh:     stopCh,
+		Endpoint:         endpoint,
+		NodeID:           nodeID,
+		NodeServer:       nodeServer,
+		Clientset:        clientset,
+		stopCh:           stopCh,
+		daemonsetMounter: daemonsetMounter,
 	}, nil
 }
 
@@ -233,6 +239,9 @@ func (d *Driver) Run() error {
 		if err := os.Chmod(addr, unixSocketPerm); err != nil {
 			klog.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
 			return fmt.Errorf("Failed to change permissions on unix socket %s: %v", addr, err)
+		}
+		if d.daemonsetMounter != nil {
+			d.daemonsetMounter.OwnSocket(addr)
 		}
 	}
 
