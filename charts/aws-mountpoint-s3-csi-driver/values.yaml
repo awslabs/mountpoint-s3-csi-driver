@@ -254,17 +254,16 @@ mounter:
   imagePullSecrets: []
 
 
-# Mixed fleet: give different nodes different settings. Each entry renders its own CSI node and
-# mounter DaemonSets, s3-csi-node-<name> and s3-csi-mounter-<name>, from a copy of node and mounter
-# above with the entry's own values on top.
+# Mixed fleet: each entry renders its own CSI node and mounter DaemonSets, s3-csi-node-<name> and
+# s3-csi-mounter-<name>, copied from node and mounter above, with the entry's values overriding the copy.
 #
-# Placement is never copied: each entry must set node.nodeSelector, node.affinity or both. The default
-# pair (node and mounter above) always renders, so narrow node.nodeSelector or node.affinity to keep it
-# off the entries' nodes. Only used when experimental.mounterMode is "daemonset".
+# Placement isn't copied: each entry must set node.nodeSelector, node.affinity or both, and no two
+# DaemonSets may run on the same node, so narrow the default pair's placement to keep it off the
+# entries' nodes. Only used when experimental.mounterMode is "daemonset".
 #
 # WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
 # matches two DaemonSets, including the default pair; otherwise new mounts on that node can fail.
-# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md for how to recover.
+# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-two-s3-csi-node-pods-and-new-mounts-fail-with-multiple-running-mounter-pods-found
 #
 # Removing or renaming an entry makes helm upgrade delete its DaemonSets, which breaks every S3 mount
 # on its nodes. Drain those nodes first, then upgrade, then uncordon them.
