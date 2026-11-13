@@ -4,9 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/engine"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -158,15 +156,46 @@ func TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache(t *testing.T) {
 // renderMounterDaemonSet renders the chart with values, a values file's YAML, and returns the mounter DaemonSet's manifest.
 func renderMounterDaemonSet(t *testing.T, values string) (string, error) {
 	t.Helper()
-	ch, err := loader.Load("../../../charts/aws-mountpoint-s3-csi-driver")
-	assert.NoError(t, err)
-	userValues, err := chartutil.ReadValues([]byte(values))
-	assert.NoError(t, err)
-	// The mounter renders only in daemonset mode, and the chart refuses to render from a source checkout without unsupportedDevInstall.
-	userValues["experimental"] = map[string]any{"mounterMode": "daemonset"}
-	userValues["unsupportedDevInstall"] = true
-	renderValues, err := chartutil.ToRenderValues(ch, userValues, chartutil.ReleaseOptions{Name: "s3-csi", Namespace: "kube-system"}, chartutil.DefaultCapabilities)
-	assert.NoError(t, err)
-	manifests, err := engine.Render(ch, renderValues)
-	return manifests[ch.Name()+"/templates/mounter-daemonset.yaml"], err
+	manifests, err := renderChart(t, values, daemonsetMode)
+	return manifests[templatePath("mounter-daemonset.yaml")], err
+}
+
+// The capabilities the mounter adds back are checked by TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache.
+func TestMounterIsUnprivilegedAndCannotEscalate(t *testing.T) {
+	for name, values := range daemonsetModeValues {
+		t.Run(name, func(t *testing.T) {
+			mounter := findWorkload(t, renderWorkloads(t, values), "DaemonSet", mounterDaemonSet)
+
+			// Pod: no node network (IMDS unreachable at hop limit 1), no host PID namespace, no Kubernetes API token.
+			assert.Equals(t, false, mounter.pod.HostNetwork)
+			assert.Equals(t, false, mounter.pod.HostPID)
+			assert.Equals(t, false, mounter.pod.HostIPC)
+			if mounter.pod.AutomountServiceAccountToken == nil || *mounter.pod.AutomountServiceAccountToken {
+				t.Error("the mounter pod must set automountServiceAccountToken: false")
+			}
+
+			containers := allContainers(mounter.pod)
+			assert.Equals(t, 1, len(containers))
+			sc := containers[0].SecurityContext
+			if sc == nil {
+				t.Fatal("the mounter container has no securityContext")
+			}
+			if sc.Privileged != nil && *sc.Privileged {
+				t.Error("the mounter container must not be privileged")
+			}
+			if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+				t.Error("the mounter container must set allowPrivilegeEscalation: false")
+			}
+			if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+				t.Error("the mounter container must set readOnlyRootFilesystem: true")
+			}
+			if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+				t.Error("the mounter container must use the RuntimeDefault seccomp profile")
+			}
+			if sc.Capabilities == nil {
+				t.Fatal("the mounter container sets no capabilities")
+			}
+			assert.Equals(t, []corev1.Capability{"ALL"}, sc.Capabilities.Drop)
+		})
+	}
 }

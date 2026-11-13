@@ -137,12 +137,16 @@ func TestWriteFileOwned(t *testing.T) {
 
 	t.Run("Replaces an existing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "token")
-		assert.NoError(t, os.WriteFile(path, []byte("stale"), 0600))
+		// A wider mode than the one written, so a refresh is shown not to inherit it.
+		assert.NoError(t, os.WriteFile(path, []byte("stale"), 0644))
 		assert.NoError(t, util.WriteFileOwned(path, []byte("fresh"), 0400, 0))
 
 		got, err := os.ReadFile(path)
 		assert.NoError(t, err)
 		assert.Equals(t, "fresh", string(got))
+		stat, err := os.Stat(path)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0400), stat.Mode().Perm())
 
 		// No temporary file is left alongside it.
 		entries, err := os.ReadDir(filepath.Dir(path))

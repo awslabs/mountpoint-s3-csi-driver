@@ -17,6 +17,7 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -134,7 +135,9 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 	dev := mountertest.OpenDevNull(t)
 
 	// Send options via UDS in background
+	sent := make(chan struct{})
 	go func() {
+		defer close(sent)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		mountoptions.Send(ctx, sockPath, mountoptions.Options{
@@ -147,6 +150,7 @@ func TestHandleConnection_PropagatesOptionsToRunner(t *testing.T) {
 			Gid:        65536,
 		})
 	}()
+	defer func() { <-sent }()
 
 	conn, err := listener.Accept()
 	assert.NoError(t, err)
@@ -606,6 +610,31 @@ func TestProcessManager_Launch_CacheDir(t *testing.T) {
 		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", retry))
 
 		fr.handles[0].Exit(0, "")
+		pm.Shutdown()
+	})
+
+	t.Run("gives a relaunched mount a fresh 0700 cache directory, even when a killed Mountpoint left blocks behind and the directory at 0755", func(t *testing.T) {
+		fr := &fakeProcessRunner{}
+		pm, cacheDir := newProcessManagerWithCache(t, fr, cacheLimit{strategy: cacheLimitNone})
+		perPvCacheDir := filepath.Join(cacheDir, dirName)
+
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+		// The first Mountpoint leaves a block behind and its directory's mode drifts, then it is killed.
+		assert.NoError(t, os.WriteFile(filepath.Join(perPvCacheDir, "block"), []byte("x"), 0600))
+		assert.NoError(t, os.Chmod(perPvCacheDir, 0755))
+		fr.handles[0].Exit(137, "")
+		pm.Shutdown()
+
+		chowns := recordChowns(pm)
+		assert.NoError(t, pm.Launch(mountId, "/usr/bin/mount-s3", cachedOptions(t)))
+
+		fi, err := os.Lstat(perPvCacheDir)
+		assert.NoError(t, err)
+		assert.Equals(t, fs.FileMode(0700), fi.Mode().Perm())
+		assert.Equals(t, [2]int{mountoptions.UIDRangeStart, mountoptions.UIDRangeStart}, chowns[perPvCacheDir])
+		assertNotExist(t, filepath.Join(perPvCacheDir, "block"))
+
+		fr.handles[1].Exit(0, "")
 		pm.Shutdown()
 	})
 
@@ -1413,9 +1442,15 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	fr.handles[0].Exit(1, "credential error")
 	pm.Shutdown()
 
-	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-abc.error"))
+	errPath := filepath.Join(commDir, "mount-abc.error")
+	errBytes, err := os.ReadFile(errPath)
 	assert.NoError(t, err)
 	assert.Equals(t, "credential error", string(errBytes))
+	// The file carries Mountpoint's stderr, so only its owner, root, may read it.
+	fi, err := os.Stat(errPath)
+	assert.NoError(t, err)
+	assert.Equals(t, errorFilePerm, fi.Mode().Perm())
+	assert.Equals(t, fs.FileMode(0600), errorFilePerm)
 }
 
 func TestProcessManager_Launch_RemovesAnEarlierErrorFile(t *testing.T) {
@@ -1464,4 +1499,70 @@ func TestProcessManager_Launch_RejectsCredentialsOutsideTheAllocatorRange(t *tes
 			assert.Equals(t, 0, len(fr.handles))
 		})
 	}
+}
+
+// The mounter receives a mount's credentials in the options csi-node sends, and passes them to Mountpoint
+// in its environment. Across the whole lifecycle (receive, launch, Mountpoint failing, shutdown) it logs
+// the mount ID and bucket, never the environment.
+func TestHandleConnection_LogsNoCredentials(t *testing.T) {
+	const (
+		accessKeyID     = "AKIAIOSFODNN7EXAMPLE"
+		secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+		sessionToken    = "IQoJb3JpZ2luX2VjEXAMPLESESSIONTOKEN"
+		// Shaped like a service account token, three base64url parts.
+		webIdentityToken = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl"
+	)
+	logs := testutil.CaptureKlogAtVerbosity(t, 10)
+
+	commDir := t.TempDir()
+	fr := &fakeProcessRunner{}
+	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
+
+	sockPath := filepath.Join(commDir, "test.sock")
+	listener, err := net.Listen("unix", sockPath)
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	dev := mountertest.OpenDevNull(t)
+	sent := make(chan struct{})
+	defer func() { <-sent }()
+	go func() {
+		defer close(sent)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		mountoptions.Send(ctx, sockPath, mountoptions.Options{
+			Fd:         int(dev.Fd()),
+			BucketName: "test-bucket",
+			Args:       []string{"--region=us-west-2"},
+			Env: []string{
+				"AWS_ACCESS_KEY_ID=" + accessKeyID,
+				"AWS_SECRET_ACCESS_KEY=" + secretAccessKey,
+				"AWS_SESSION_TOKEN=" + sessionToken,
+				"AWS_WEB_IDENTITY_TOKEN=" + webIdentityToken,
+			},
+			VolumeId: "s3-pv",
+			Uid:      65536,
+			Gid:      65536,
+		})
+	}()
+
+	conn, err := listener.Accept()
+	assert.NoError(t, err)
+	handleConnection(conn.(*net.UnixConn), "/opt/mount-s3", pm, 5*time.Second)
+
+	fr.mu.Lock()
+	assert.Equals(t, 1, len(fr.handles))
+	handle := fr.handles[0]
+	fr.mu.Unlock()
+	// Guards the check below: had the credentials not reached Mountpoint, there would be nothing to leak.
+	assert.Equals(t, 4, len(handle.cmd.Env))
+
+	// Mountpoint fails, so the error path logs too. Its stderr carries no credentials here.
+	handle.Exit(1, "Error: Failed to create S3 client\n")
+	pm.Shutdown()
+	// Shutdown returns once the exit is handled; the error file proves the failure path ran.
+	_, err = os.Stat(filepath.Join(commDir, "s3-pv"+errorFileExt))
+	assert.NoError(t, err)
+
+	testutil.AssertNoCredentialsLogged(t, logs(), accessKeyID, secretAccessKey, sessionToken, webIdentityToken)
 }
