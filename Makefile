@@ -135,7 +135,7 @@ login_registry:
 
 .PHONY: download_go_deps
 download_go_deps:
-	go mod download || (echo "go mod download failed, retrying (1/2)..." && sleep 5 && go mod download) || (echo "go mod download failed, retrying (2/2)..." && sleep 10 && go mod download)
+	./hack/retry.sh go mod download
 
 .PHONY: bin
 bin:
@@ -157,7 +157,7 @@ test:
 	go test -v ./tests/sanity/... -ginkgo.skip="ControllerGetCapabilities" -ginkgo.skip="ValidateVolumeCapabilities" -ginkgo.skip="should remove target path"
 	# Run unit tests in e2e-kubernetes (image override, parsing, etc.) without requiring a cluster.
 	# TestE2E is the Ginkgo e2e suite entry point which requires a live cluster, so we skip it.
-	cd tests/e2e-kubernetes && go test -v -skip TestE2E ./...
+	cd tests/e2e-kubernetes && ../../hack/retry.sh go mod download && go test -v -skip TestE2E ./...
 
 .PHONY: cover
 cover:
@@ -170,7 +170,7 @@ fmt:
 
 # Run controller tests with envtest.
 .PHONY: e2e-controller
-e2e-controller: envtest
+e2e-controller: download_go_deps envtest
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TOOLS_BIN) -p path)" go test ./tests/controller/... -ginkgo.v -test.v
 
 .PHONY: e2e
