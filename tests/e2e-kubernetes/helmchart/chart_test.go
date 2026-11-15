@@ -17,7 +17,7 @@ import (
 
 const (
 	nodePluginContainer = "s3-plugin"
-	mounterDaemonSet    = "s3-csi-daemonset-mounter"
+	mounterDaemonSet    = "s3-csi-mounter"
 )
 
 // renderedWorkload is a workload the chart renders, with the pod template it runs.
@@ -109,10 +109,10 @@ func findWorkload(t *testing.T, workloads []renderedWorkload, kind, name string)
 var daemonsetModeValues = map[string]string{
 	"in daemonset mode without a cache": `
 experimental: {mounterMode: daemonset}
-daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none}]`,
+mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none}`,
 	"in daemonset mode with a cache": `
 experimental: {mounterMode: daemonset}
-daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}]`,
+mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}`,
 }
 
 func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
