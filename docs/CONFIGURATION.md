@@ -556,6 +556,17 @@ If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs wit
 
 <!-- TODO: MOUNTER_CONFIG.md (or similar) replaces MEMORY.md, with maxVolumesPerNode, memory and CPU, and "Updating configurations" (mounter changes need cordon, drain, delete, uncordon). -->
 
+#### Limit S3 volumes per node (`maxVolumesPerNode`)
+
+`maxVolumesPerNode` sets how many distinct S3 volumes one node can mount at once. The driver advertises it to the Kubernetes scheduler, which places Pods within it, and the mounter refuses mounts past it. The default is 4.
+
+A single Pod that needs more S3 volumes than the limit never schedules on a node that runs the driver: it stays `Pending` with `node(s) exceed max volume count`.
+
+To raise the limit, do remember to raise the mounter's memory request and cache size as well, since by default each volume gets an equal share of memory/cache space. Please also check that it fits your smallest node. See [MEMORY.md](MEMORY.md#sizing-the-mounter-memory-request) and [CACHING.md](CACHING.md) for more details.
+<!-- TODO: link to correct section in CACHING.md -->
+
+If you are using autoscalers, the volume limit only applies with the [node startup taint](#configure-node-startup-taint) configured, so please add the startup taint to your NodeGroups. To set a different limit on some nodes, give them their own entry; see [Mixed fleet](#mixed-fleet).
+
 ### Other values
 
 For the controller (`controller`) and the other values, see the comments in [values.yaml](../charts/aws-mountpoint-s3-csi-driver/values.yaml).
