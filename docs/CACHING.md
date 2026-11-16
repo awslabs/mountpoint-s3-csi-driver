@@ -33,7 +33,7 @@ To use a local cache:
 
 ### How the cache works
 
-One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share a single cache volume if configured, each PV using its own directory. A PV's cache on a node is deleted once no pod there uses the PV.
+One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share a single cache volume if configured, each PV using its own directory. A PV's cache on a node is deleted once no pod there uses the PV. The mounter empties the cache volume at startup and exit, so cached data does not survive mounter restarts.
 
 Mountpoint processes do not know how much cache the other processes use, so without a cap on each PV, one PV can take the cache space that the others need.
 
@@ -72,13 +72,17 @@ spec:
 
 Add a `cache` block, with exactly one of `emptyDir` or `ephemeral`, to each `daemonsetMounters` entry whose nodes' S3 workloads require cache. Here are some examples, with example changes to `values.yaml` for Helm installation method. EKS Add-on users can reference the same style to apply to the `daemonsetMounters` entries.
 
+The CSI Driver allows you to configure an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) or a [generic ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes) as the cache volume. See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#local-cache) for more details about local cache.
+
 | Cache volume                                      | Use it when                                                                  | Cost                                         |
 | ------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
 | Node disk (`emptyDir`)                            | you want the simplest setup                                                  | shares the node's disk with other processes  |
 | Memory (`emptyDir` with `medium: "Memory"`)       | you want the lowest latency, and the data you read repeatedly fits in memory | reserves `sizeLimit` of memory on every node |
 | EBS volume (`ephemeral` with an EBS StorageClass) | you want the cache to be away from the node's root disk                      | an EBS volume for every node                 |
 
-#### Node disk
+#### `emptyDir`
+
+You can specify `emptyDir` in the `cache` block to use an `emptyDir` volume as the cache volume:
 
 ```yaml
 daemonsetMounters:
@@ -90,11 +94,13 @@ daemonsetMounters:
       limitStrategy: equalSplit
 ```
 
+`sizeLimit` sets the maximum size of the `emptyDir` volume. It is required with `equalSplit`, which divides it between the PVs.
+
+`medium` controls the storage medium for the `emptyDir` volume. If not specified, the cache uses the node's default medium (disk, SSD, or network storage). Set it to `"Memory"` to use a `tmpfs` ramdisk instead, which offers lower latency at the cost of consuming node memory.
+
 On the node's disk, the kubelet enforces `sizeLimit` by evicting the Pod, and it never evicts the `system-node-critical` mounter pod, so only the cap from Step 1 bounds the cache. Choose a `sizeLimit` that fits in the disk's free space, or else if disk space gets full the workload pods would be evicted via [Node Pressure Eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction).
 
-See [Kubernetes's documentation](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) for more details about `emptyDir`.
-
-#### Memory (tmpfs)
+For example, for a 2Gi cache in memory:
 
 ```yaml
     resources:
@@ -110,7 +116,19 @@ See [Kubernetes's documentation](https://kubernetes.io/docs/concepts/storage/vol
 
 A tmpfs is charged to the mounter's memory, so raise `resources.requests.memory` by `sizeLimit`. [MEMORY.md](MEMORY.md#the-equalsplit-strategy) shows the effect on each PV's memory share.
 
-#### EBS volume
+Kubernetes deletes the `emptyDir` when the mounter Pod is removed from the node.
+
+See [Kubernetes's documentation](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) for more details about `emptyDir`.
+
+#### `ephemeral`
+
+You can specify `ephemeral` in the `cache` block, alongside a StorageClass and a storage size, to use a generic ephemeral volume as the cache volume. The CSI Driver will create a PersistentVolumeClaim (PVC) template within the mounter Pod's volumes, using the configured values and [`ReadWriteOnce` access mode](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes), to get a unique PVC created for each mounter Pod.
+
+`storageClassName` names the [StorageClass](https://kubernetes.io/docs/concepts/storage/storage-classes/), and `resourceRequests` is the storage size each PVC requests from that StorageClass. Both are required.
+
+Using `ephemeral`, you can use the [Amazon Elastic Block Store (EBS) CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) to dynamically provision an EBS volume. See the example below for more details.
+
+##### Using EBS CSI Driver to provision an EBS volume dynamically
 
 First, make sure to install the EBS CSI Driver in your cluster by following their [installation guide](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/docs/install.md).
 
@@ -135,6 +153,10 @@ parameters: # all optional, see https://github.com/kubernetes-sigs/aws-ebs-csi-d
         resourceRequests: 40Gi
       limitStrategy: equalSplit
 ```
+
+With this configuration, once the mounter Pod is scheduled onto a node, the EBS CSI Driver will dynamically provision an EBS volume and attach it to the node for Mountpoint to use as cache. The mounter Pod starts only once the EBS volume is attached, so until then no S3 volume mounts on that node, cached or not.
+
+The EBS volume and the mounter Pod (therefore its ephemeral PVC) will be automatically cleaned up once the mounter Pod is deleted, for example when its node is removed. We highly recommend you use `reclaimPolicy: Delete` in your StorageClass to ensure the EBS volume is cleaned up as part of this process.
 
 ### Step 3: Enable the cache on a PV
 
