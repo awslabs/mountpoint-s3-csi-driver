@@ -234,9 +234,8 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //   - If credential provisioning fails and the source is not yet mounted, the meta file is removed,
 //     the UID released and the map entry deleted. If the source is already mounted all three are
 //     preserved.
-//   - If sending the mount request finds the mounter stale (its socket is gone, refuses access, or
-//     does not accept within the timeout), the mounter this call loaded is cleared, unless the
-//     watcher has already replaced it, and the watcher is woken to rediscover.
+//   - If the mounter is stale when sending the mount request, it is cleared (unless the watcher
+//     already replaced it) and the watcher is signaled to rediscover.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
