@@ -37,19 +37,25 @@ func TestAcquireWaitsUntilTheHolderExits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	other := holdInOtherProcess(t, path)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := Acquire(ctx, path)
-	assert.Equals(t, true, errors.Is(err, context.DeadlineExceeded))
+	var lock *Lock
+	acquired := make(chan error, 1)
+	go func() {
+		var err error
+		lock, err = Acquire(ctx, path)
+		acquired <- err
+	}()
+	select {
+	case err := <-acquired:
+		t.Fatalf("Acquire returned while another process held the lock: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
 
-	// The kernel releases the lock when its holder exits, however it exits.
+	// The kernel releases the lock when its holder exits, however it exits, and the same Acquire then takes it.
 	assert.NoError(t, other.Process.Kill())
 	_ = other.Wait()
-
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	lock, err := Acquire(ctx, path)
-	assert.NoError(t, err)
+	assert.NoError(t, <-acquired)
 	defer lock.file.Close()
 }
 

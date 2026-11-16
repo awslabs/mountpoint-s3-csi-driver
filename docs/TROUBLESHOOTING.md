@@ -134,6 +134,10 @@ With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-schedulin
   The driver doesn't run on nodes that `node.affinity` or `node.nodeSelector` exclude, or on nodes with taints it doesn't tolerate.
 - If the Pod is waiting for Cluster Autoscaler to add a node, check that Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, and that node groups that scale from zero have the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag with `s3.csi.aws.com` in its value.
 
+## My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
+
+More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it, a second Helm release, or the EKS add-on alongside Helm. Only the first one works on the node; the others wait, serving nothing, until it exits. Make sure only one `s3-csi-node` Pod runs on each node, and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
+
 ## Mountpoint pods are failing with "Failed to receive mount options from /comm/mount.sock"
 
 Mountpoint pods are scheduled immediately when a workload's pod is scheduled.

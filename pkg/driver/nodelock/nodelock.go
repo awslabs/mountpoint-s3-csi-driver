@@ -58,7 +58,7 @@ func Acquire(ctx context.Context, path string) (*Lock, error) {
 		if err != nil && time.Since(lastLog) >= waitLogInterval {
 			klog.Errorf("nodelock: another CSI node on this node holds %s, so this one waits, serving nothing, until it "+
 				"exits. Only one s3-csi-node Pod may run per node: check that no node matches two s3-csi-node DaemonSets "+
-				"(from additionalDaemonsets, a second Helm release, or the EKS add-on alongside Helm)", path)
+				"(from additionalDaemonSets, a second Helm release, or the EKS add-on alongside Helm)", path)
 			lastLog = time.Now()
 		}
 		select {
@@ -153,7 +153,7 @@ func (l *Lock) Watch(stop <-chan struct{}, interval time.Duration, onLost func(e
 			// The file changed again while we were locking it; try again next tick.
 			continue
 		}
-		// Locked the new file before releasing the old one, so this process never holds neither.
+		// Locked the new file before releasing the old one, so this process always holds one.
 		l.file.Close()
 		l.file = replacement.file
 		klog.Infof("nodelock: holding %s again", l.path)
