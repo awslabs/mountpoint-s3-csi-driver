@@ -23,27 +23,19 @@ See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/m
 
 ## Local Data Cache
 
-To move v1 or v2 PVs that enable cache to v3, start with [Upgrading to v3](UPGRADING_TO_V3.md). For the v2 driver, see the [v2 caching guide](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md).
+One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts all `mount-s3` process, one per PersistentVolume mounted on the node. All `mount-s3` processes share a single cache volume if configured, with each PV using its own sub-directory. A PV's cache on a node is deleted once no pod there uses the PV. The mounter empties the cache volume at startup and exit, so cached data does not survive mounter restarts.
 
-To use a local cache:
+See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#local-cache) for more details about local cache.
 
-1. Choose how PVs share a node's cache volume with `cache.limitStrategy`. We recommend `equalSplit`.
-2. Configure the cache volumes: a `cache` block in each `daemonsetMounters` entry, in your Helm values or the EKS add-on's configuration values. With several entries, each entry sets its own cache volume.
-3. Set `cache: enabled` on each PV to opt in to use the cache volume.
-
-### How the cache works
-
-One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts **every** Mountpoint process on that node, one `mount-s3` process per PersistentVolume mounted on the node. All of those processes share a single cache volume if configured, each PV using its own directory. A PV's cache on a node is deleted once no pod there uses the PV. The mounter empties the cache volume at startup and exit, so cached data does not survive mounter restarts.
-
-Mountpoint processes do not know how much cache the other processes use, so without a cap on each PV, one PV can take the cache space that the others need.
+If upgrading from v1/v2 to v3, start with [Upgrading to v3](UPGRADING_TO_V3.md). For the v2 driver, see the [v2 caching guide](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2/docs/CACHING.md).
 
 ### Step 1: Choose how PVs share the cache volume
 
-`cache.limitStrategy`, required in each `cache` block, decides where each PV's `max-cache-size` comes from. Note `maxVolumesPerNode` is the scheduler's limit of S3 volumes per node; [Sizing the mounter memory request](MEMORY.md#sizing-the-mounter-memory-request) in MEMORY.md shows how to choose it.
+Mountpoint processes do not know how much cache the other processes use, so without a cap on each PV, one PV can take the cache space that the others need.
 
-**We recommend `equalSplit`.** `equalSplit` gives every PV on a node an equal share of the cache volume. 
+`cache.limitStrategy` decides where each PV's `max-cache-size` comes from. Note `maxVolumesPerNode` is the scheduler's limit of S3 volumes per node; [Sizing the mounter memory request](MEMORY.md#sizing-the-mounter-memory-request) in MEMORY.md shows how to choose it.
 
-**Choose `none` only if** PVs on the same node need different cache sizes, or you need to disable the limit on S3 volumes per node (via `maxVolumesPerNode: 0`).
+We recommend `equalSplit` strategy. `equalSplit` gives every PV on a node an equal share of the cache volume. Choose `none` strategy only if PVs on the same node need different cache sizes, or you need to disable the limit on S3 volumes per node (via `maxVolumesPerNode: 0`).
 
 |                                                                                                                                                                          | `equalSplit` (recommended)                                                                      | `none`                                                                                                                                     |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -70,9 +62,9 @@ spec:
 
 ### Step 2: Give each node a cache volume
 
-Add a `cache` block, with exactly one of `emptyDir` or `ephemeral`, to each `daemonsetMounters` entry whose nodes' S3 workloads require cache. Here are some examples, with example changes to `values.yaml` for Helm installation method. EKS Add-on users can reference the same style to apply to the `daemonsetMounters` entries.
+The CSI Driver allows you to configure an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) or a [generic ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes) as the cache volume.
 
-The CSI Driver allows you to configure an [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) or a [generic ephemeral volume](https://kubernetes.io/docs/concepts/storage/ephemeral-volumes/#generic-ephemeral-volumes) as the cache volume. See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#local-cache) for more details about local cache.
+Add a `cache` block, with exactly one of `emptyDir` or `ephemeral`, to each `daemonsetMounters` entry whose nodes' S3 workloads require cache. Here are some examples, with example changes to `values.yaml` for Helm installation method. EKS Add-on users can reference the same style to apply to the `daemonsetMounters` entries.
 
 | Cache volume                                      | Use it when                                                                  | Cost                                         |
 | ------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
@@ -96,9 +88,11 @@ daemonsetMounters:
 
 `sizeLimit` sets the maximum size of the `emptyDir` volume. It is required with `equalSplit`, which divides it between the PVs.
 
+On the node's disk, the kubelet enforces `sizeLimit` by evicting the Pod, and it never evicts the `system-node-critical` mounter pod, so only the cap from Step 1 bounds the cache. Choose a `sizeLimit` that fits in the disk's free space, or else if disk space gets full the workload pods would be evicted via [Node Pressure Eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction).
+
 `medium` controls the storage medium for the `emptyDir` volume. If not specified, the cache uses the node's default medium (disk, SSD, or network storage). Set it to `"Memory"` to use a `tmpfs` ramdisk instead, which offers lower latency at the cost of consuming node memory.
 
-On the node's disk, the kubelet enforces `sizeLimit` by evicting the Pod, and it never evicts the `system-node-critical` mounter pod, so only the cap from Step 1 bounds the cache. Choose a `sizeLimit` that fits in the disk's free space, or else if disk space gets full the workload pods would be evicted via [Node Pressure Eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction).
+If you plan to use `"Memory"` medium: you must raise `resources.requests.memory` by `sizeLimit`, as a tmpfs is charged to the mounter's memory. [MEMORY.md](MEMORY.md#the-equalsplit-strategy) shows the effect on each PV's memory share.
 
 For example, for a 2Gi cache in memory:
 
@@ -114,8 +108,6 @@ For example, for a 2Gi cache in memory:
       limitStrategy: equalSplit
 ```
 
-A tmpfs is charged to the mounter's memory, so raise `resources.requests.memory` by `sizeLimit`. [MEMORY.md](MEMORY.md#the-equalsplit-strategy) shows the effect on each PV's memory share.
-
 Kubernetes deletes the `emptyDir` when the mounter Pod is removed from the node.
 
 See [Kubernetes's documentation](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) for more details about `emptyDir`.
@@ -126,9 +118,9 @@ You can specify `ephemeral` in the `cache` block, alongside a StorageClass and a
 
 `storageClassName` names the [StorageClass](https://kubernetes.io/docs/concepts/storage/storage-classes/), and `resourceRequests` is the storage size each PVC requests from that StorageClass. Both are required.
 
-Using `ephemeral`, you can use the [Amazon Elastic Block Store (EBS) CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) to dynamically provision an EBS volume. See the example below for more details.
-
 ##### Using EBS CSI Driver to provision an EBS volume dynamically
+
+Using `ephemeral`, you can use the [Amazon Elastic Block Store (EBS) CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) to dynamically provision an EBS volume. 
 
 First, make sure to install the EBS CSI Driver in your cluster by following their [installation guide](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/docs/install.md).
 
@@ -172,7 +164,7 @@ spec:
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
       bucketName: amzn-s3-demo-bucket
-      cache: enabled
+      cache: enabled    # <-- Enable
 ```
 
 | `cache` value                         | Result                                   |
