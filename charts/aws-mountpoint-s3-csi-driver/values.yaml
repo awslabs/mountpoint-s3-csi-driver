@@ -176,6 +176,8 @@ experimental:
 # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
 # Configuration for the secondary mounter daemonset(s).
 # Only used when experimental.mounterMode is "daemonset".
+# Helm replaces this list wholesale rather than merging it with the defaults below, so an override
+# must restate each field it needs (e.g. memoryLimitStrategy and resources).
 daemonsetMounters:
     # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
@@ -245,6 +247,8 @@ daemonsetMounters:
     #     storageClassName: gp3
     #     resourceRequests: 10Gi
     #   limitStrategy: equalSplit
+
+    # Log verbosity (--v) of the mounter process. Optional; defaults to 4 when omitted.
     logLevel: 4
     podLabels: {}
     # The mounter inherits the node pod's nodeSelector, affinity and tolerations (node.nodeSelector,
@@ -255,8 +259,8 @@ daemonsetMounters:
   # mounter DaemonSet, s3-csi-daemonset-mounter-<name>, so each needs a name, except one that may
   # leave it out and keep s3-csi-daemonset-mounter. Each also needs a nodeSelector,
   # matchExpressions, or both, to say which nodes it applies to. Set maxVolumesPerNode,
-  # memoryLimitStrategy, resources and logLevel in each entry too, since this list replaces the
-  # default entry.
+  # memoryLimitStrategy and resources in each entry too, since this list replaces the default
+  # entry.
   #
   # Make sure no node matches two entries. If one does, its node pod logs an error and keeps
   # using the mounter it has, and the other mounter is unused. A node pod that starts then uses the
