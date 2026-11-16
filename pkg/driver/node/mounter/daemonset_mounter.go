@@ -14,7 +14,7 @@
 // Mount:
 //
 //	CheckTargetState -> load mounterPod -> validateCacheRequest -> ProvideCredentials -> Mount (FUSE) -> Send -> waitForMount
-//	Stale commDir path? -> store nil, signal rediscoverCh, return error
+//	Send finds the mounter stale? -> clear it unless the watcher already replaced it, signal rediscoverCh, return error
 //
 // Background (StartCommDirWatch -> checkCommDir):
 //
@@ -234,6 +234,9 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //   - If credential provisioning fails and the source is not yet mounted, the meta file is removed,
 //     the UID released and the map entry deleted. If the source is already mounted all three are
 //     preserved.
+//   - If sending the mount request finds the mounter stale (its socket is gone, refuses access, or
+//     does not accept within the timeout), the mounter this call loaded is cleared, unless the
+//     watcher has already replaced it, and the watcher is woken to rediscover.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
@@ -354,7 +357,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	// Provision credentials under the lock. We always use entry.CommDir which is set above
-	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
+	// (either from an existing healthy entry, or freshly assigned from the mounter's comm dir on new mount).
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
