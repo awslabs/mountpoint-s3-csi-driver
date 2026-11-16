@@ -229,6 +229,26 @@ func (testCtx *dmTestCtx) setMounterPodCacheVolume(volume *corev1.Volume) {
 	assert.NoError(testCtx.t, testCtx.dm.DiscoverMounter(testCtx.ctx))
 }
 
+// replaceMounterPod replaces the mounter pod with a new one, as a mounter rollout does, and returns
+// the new pod's comm dir.
+func (testCtx *dmTestCtx) replaceMounterPod() string {
+	testCtx.t.Helper()
+
+	pods := testCtx.client.CoreV1().Pods("kube-system")
+	old, err := pods.Get(testCtx.ctx, "s3-csi-daemonset-mounter-abcde", metav1.GetOptions{})
+	assert.NoError(testCtx.t, err)
+	assert.NoError(testCtx.t, pods.Delete(testCtx.ctx, old.Name, metav1.DeleteOptions{}))
+
+	replacement := old.DeepCopy()
+	replacement.Name, replacement.UID, replacement.ResourceVersion = "s3-csi-daemonset-mounter-fghij", types.UID(uuid.New().String()), ""
+	_, err = pods.Create(testCtx.ctx, replacement, metav1.CreateOptions{})
+	assert.NoError(testCtx.t, err)
+
+	commDir := filepath.Join(testCtx.kubeletPath, "pods", string(replacement.UID), "volumes", "kubernetes.io~empty-dir", mounter.CommVolumeName)
+	assert.NoError(testCtx.t, os.MkdirAll(commDir, 0750))
+	return commDir
+}
+
 // mountAndServe runs Mount to completion for a workload pod, playing the mounter's part by
 // receiving the options, and returns what the mounter got. Only usable with setupDM's default
 // mountSyscall, which is what registers the source mount waitForMount polls for.
@@ -829,6 +849,41 @@ func TestDaemonsetMounter(t *testing.T) {
 			// Verify the mounter pod was nilled by the staleness detection
 			_, err = testCtx.dm.GetCommDir()
 			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+		})
+
+		t.Run("A mount that fails to reach the old mounter does not forget the mounter found while it waited", func(t *testing.T) {
+			for _, testCase := range []struct {
+				name        string
+				replacesPod bool
+			}{
+				{"when a new mounter pod replaced the old one", true},
+				{"when the same mounter pod was found again", false},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					testCtx := setupDM(t)
+					wantCommDir := testCtx.commDir
+
+					// While this mount waits on the old socket, the watcher rediscovers.
+					testCtx.mountSyscall = func(tgt string, opts mpmounter.MountOptions) (int, error) {
+						if testCase.replacesPod {
+							wantCommDir = testCtx.replaceMounterPod()
+						}
+						assert.NoError(t, testCtx.dm.DiscoverMounter(testCtx.ctx))
+						testCtx.mount.Mount("mountpoint-s3", tgt, "fuse", nil)
+						return syscall.Dup(int(mountertest.OpenDevNull(t).Fd()))
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+					defer cancel()
+
+					err := testCtx.dm.Mount(ctx, testCtx.bucketName, testCtx.targetPath(testCtx.podUID),
+						testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
+					assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+					commDir, err := testCtx.dm.GetCommDir()
+					assert.NoError(t, err)
+					assert.Equals(t, wantCommDir, commDir)
+				})
+			}
 		})
 
 		t.Run("Cancelled context does not cause stale commDir", func(t *testing.T) {
