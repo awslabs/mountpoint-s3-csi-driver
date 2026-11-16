@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cluster Autoscaler profile, sourced by `run.sh`.
 #
-# Cluster Autoscaler runs on the `system` nodegroup, and scales the `pool-default` nodegroup in `eksctl-patch.json`
+# Cluster Autoscaler runs on the `system` nodegroup, and scales the `pool-default` and `pool-big` nodegroups in `eksctl-patch.json`
 # from zero for the pods targeting it. The driver gets its credentials from EKS Pod Identity.
 
 set -euox pipefail
