@@ -80,5 +80,34 @@
     }
   },
   { "op": "copy", "from": "/managedNodeGroups/0/amiFamily", "path": "/managedNodeGroups/1/amiFamily" },
-  { "op": "copy", "from": "/managedNodeGroups/0/iam", "path": "/managedNodeGroups/1/iam" }
+  { "op": "copy", "from": "/managedNodeGroups/0/iam", "path": "/managedNodeGroups/1/iam" },
+  {
+    "op": "add",
+    "path": "/managedNodeGroups/-",
+    "value": {
+      "name": "pool-big",
+      "instanceType": "r5.xlarge",
+      "minSize": 0,
+      "desiredCapacity": 0,
+      "maxSize": 2,
+      "labels": {
+        "e2e.s3.csi.aws.com/pool": "default"
+      },
+      "taints": [
+        {
+          "key": "e2e.s3.csi.aws.com/pool",
+          "value": "default",
+          "effect": "NoSchedule"
+        },
+        {
+          "key": "s3.csi.aws.com/agent-not-ready",
+          "effect": "NoExecute"
+        }
+      ],
+      "propagateASGTags": true,
+      "disablePodIMDS": true
+    }
+  },
+  { "op": "copy", "from": "/managedNodeGroups/0/amiFamily", "path": "/managedNodeGroups/2/amiFamily" },
+  { "op": "copy", "from": "/managedNodeGroups/0/iam", "path": "/managedNodeGroups/2/iam" }
 ]

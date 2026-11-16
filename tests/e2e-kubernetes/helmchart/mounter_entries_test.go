@@ -4,9 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/engine"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
@@ -153,21 +150,13 @@ func terms(ds appsv1.DaemonSet) []string {
 // renderDaemonSets renders the chart in daemonset mode with values, a values file's YAML, and returns its DaemonSets by name.
 func renderDaemonSets(t *testing.T, values string) (map[string]appsv1.DaemonSet, error) {
 	t.Helper()
-	ch, err := loader.Load("../../../charts/aws-mountpoint-s3-csi-driver")
-	assert.NoError(t, err)
-	userValues, err := chartutil.ReadValues([]byte(values))
-	assert.NoError(t, err)
-	userValues["experimental"] = map[string]any{"mounterMode": "daemonset"}
-	userValues["unsupportedDevInstall"] = true
-	renderValues, err := chartutil.ToRenderValues(ch, userValues, chartutil.ReleaseOptions{Name: "s3-csi", Namespace: "kube-system"}, chartutil.DefaultCapabilities)
-	assert.NoError(t, err)
-	manifests, err := engine.Render(ch, renderValues)
+	manifests, err := renderChart(t, values, daemonsetMode)
 	if err != nil {
 		return nil, err
 	}
 	daemonSets := map[string]appsv1.DaemonSet{}
 	for _, file := range []string{"node.yaml", "mounter-daemonset.yaml"} {
-		for _, doc := range strings.Split(manifests[ch.Name()+"/templates/"+file], "\n---") {
+		for _, doc := range strings.Split(manifests[templatePath(file)], "\n---") {
 			var ds appsv1.DaemonSet
 			assert.NoError(t, yaml.Unmarshal([]byte(doc), &ds))
 			if ds.Kind == "DaemonSet" {
