@@ -359,11 +359,6 @@ func deadTargetError(pvName, podUID string, volumeCtx map[string]string) error {
 	default:
 		pod = "with UID " + podUID
 	}
-	// TODO: name why Mountpoint exited once the driver keeps its last exit reason. The mounter writes it
-	// to the volume's error file, but a mounter pod restart loses it and periodic cleanup deletes it.
-	// TODO(remount-in-place): remounting the dead target in place would let restarted containers recover
-	// without recreating the pod, but unmounting it first leaves a window where a restarting container
-	// sees an empty node directory. Any remount must replace the target without that window.
 	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to remount the volume. "+
 		"Volume %s, pod %s", pvName, pod)
 	return status.Error(codes.Aborted, msg)
