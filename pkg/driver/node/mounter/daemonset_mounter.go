@@ -151,8 +151,8 @@ type DaemonsetMounter struct {
 	chown             chownFunc
 	chmod             chmodFunc
 
-	// socket is the path of the csi.sock this CSI node listens on. When two CSI nodes share a node, the newer one
-	// replaces it, and the older one must then leave the shared mount state alone.
+	// socket is the path of the csi.sock this CSI node listens on. When more than one CSI node shares a node, the
+	// newest one replaces it, and the others must then leave the shared mount state alone.
 	socket atomic.Pointer[string]
 
 	// mountMap tracks shared source mounts for pod-sharing.
