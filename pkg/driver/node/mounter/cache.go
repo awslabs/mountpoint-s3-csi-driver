@@ -42,8 +42,11 @@ func cacheVolumeSummary(cacheVolume *corev1.Volume) string {
 	case cacheVolume == nil:
 		return "cache type: none"
 	case cacheVolume.EmptyDir != nil:
-		return fmt.Sprintf("cache type: emptyDir, emptyDir medium: %q, emptyDir sizeLimit: %q",
-			cacheVolume.EmptyDir.Medium, cacheVolume.EmptyDir.SizeLimit.String())
+		summary := fmt.Sprintf("cache type: emptyDir, emptyDir medium: %q", cacheVolume.EmptyDir.Medium)
+		if cacheVolume.EmptyDir.SizeLimit != nil {
+			summary += fmt.Sprintf(", emptyDir sizeLimit: %q", cacheVolume.EmptyDir.SizeLimit.String())
+		}
+		return summary
 	case cacheVolume.Ephemeral != nil && cacheVolume.Ephemeral.VolumeClaimTemplate != nil:
 		spec := cacheVolume.Ephemeral.VolumeClaimTemplate.Spec
 		return fmt.Sprintf("cache type: ephemeral, ephemeral StorageClass: %q, ephemeral request: %q",
