@@ -1,7 +1,7 @@
-// Package errorfile formats and writes the error file a mounter writes for a failed Mountpoint: the V3
-// `<mount-id>.error` and the V2 Mountpoint Pod's mount error file. The CSI node returns its text as the
-// NodePublishVolume error, which the kubelet shows in a FailedMount event, so it is kept to one short
-// line of printable ASCII. The full output stays in the mounter's log.
+// Package errorfile formats and writes the `<mount-id>.error` file the V3 mounter writes for a failed
+// Mountpoint, and the CSI node reads back. The CSI node returns its text as the NodePublishVolume error,
+// which the kubelet shows in a FailedMount event, so it is kept to one short line of printable ASCII. The
+// full output stays in the mounter's log.
 package errorfile
 
 import (

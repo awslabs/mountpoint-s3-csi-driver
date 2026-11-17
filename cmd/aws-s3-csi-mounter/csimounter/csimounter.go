@@ -9,7 +9,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/runner"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod"
@@ -62,10 +61,8 @@ func Run(options Options) (int, error) {
 	})
 	if err != nil {
 		// If Mountpoint fails, write it to `options.MountErrPath` to let `PodMounter` running in the same node know.
-		// Formatted as one short line and written atomically, as `PodMounter` polls for it and returns it in the NodePublishVolume
-		// error and so the FailedMount event.
-		if writeErr := errorfile.Write(options.MountErrPath, string(stdErr), mountErrorFileperm); writeErr != nil {
-			klog.Errorf("Failed to write mount error logs to %s: %v", options.MountErrPath, writeErr)
+		if writeErr := os.WriteFile(options.MountErrPath, stdErr, mountErrorFileperm); writeErr != nil {
+			klog.Errorf("Failed to write mount error logs to %s: %v\n", options.MountErrPath, err)
 		}
 		return exitCode, err
 	}
