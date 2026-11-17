@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"time"
@@ -48,6 +49,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/nodelock"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -56,6 +58,9 @@ import (
 
 const (
 	driverName = "s3.csi.aws.com"
+
+	// nodeLockCheckInterval is how often the CSI node checks its node lock file is still the one it holds.
+	nodeLockCheckInterval = 10 * time.Second
 
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
@@ -97,6 +102,10 @@ type Driver struct {
 	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
 	mounterFound <-chan struct{}
 
+	// nodeLock is held for the process's lifetime, so no other CSI node works on this node meanwhile. Kept here so it
+	// stays reachable: a collected lock would release itself.
+	nodeLock *nodelock.Lock
+
 	stopCh chan struct{}
 }
 
@@ -136,7 +145,23 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 
+	// Before reading or changing anything on the node, wait until no other CSI node works on it. One that waits here
+	// never listens on the CSI socket, so it can't take it over from the one working, which keeps listening on it and
+	// serves every request kubelet sends there. A SIGTERM while waiting just ends the process, as main installs its
+	// signal handler only once NewDriver returns.
+	lockPath := filepath.Join(util.ContainerKubeletPath(), "plugins", driverName, nodelock.FileName)
+	lock, err := nodelock.Acquire(context.Background(), lockPath)
+	if err != nil {
+		return nil, err
+	}
+
 	stopCh := make(chan struct{})
+
+	go lock.Watch(stopCh, nodeLockCheckInterval, func(err error) {
+		// Exit without stopping the gRPC server: closing its listener would remove the CSI socket, which is now
+		// the other CSI node's. kubelet restarts this container, which then waits for the lock.
+		klog.Fatalf("%v; exiting so only one CSI node works on this node", err)
+	})
 
 	var nodeServer *node.S3NodeServer
 	var mounterFound <-chan struct{}
@@ -229,6 +254,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		NodeServer:   nodeServer,
 		Clientset:    clientset,
 		mounterFound: mounterFound,
+		nodeLock:     lock,
 		stopCh:       stopCh,
 	}, nil
 }
