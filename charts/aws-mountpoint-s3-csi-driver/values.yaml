@@ -264,7 +264,7 @@ mounter:
 #
 # WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
 # matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
-# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod-and-new-mounts-fail-with-multiple-running-mounter-pods-found
+# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
 #
 # Removing or renaming an entry, or changing placement so a pair no longer matches a node (such as
 # narrowing the default pair's), makes helm upgrade delete its mounter there, which breaks every S3 mount

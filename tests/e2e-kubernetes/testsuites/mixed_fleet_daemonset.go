@@ -125,7 +125,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 							map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}}}}}},
 					"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
 				}
-				// The new CSI node takes over node A's socket while a mount uses first's mounter.
+				// The new pair's CSI node waits for node A's lock, while a mount uses first's mounter.
 				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first(), "extra": extra}))
 				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
 				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName+"-extra", csiNodePodLabel, csiNodeRestartTimeout)
