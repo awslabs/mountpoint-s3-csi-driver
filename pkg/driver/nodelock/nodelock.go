@@ -1,6 +1,6 @@
 // Package nodelock makes sure at most one CSI node process works on a node at a time.
 //
-// Two CSI node pods can land on one node, for example when two DaemonSets match it. They share the node's CSI socket,
+// Multiple CSI node pods can land on one node, for example when two DaemonSets match it. They share the node's CSI socket,
 // mount state and credential directories, but each keeps its own view of them in memory, so a second one acting on
 // the node corrupts what the first set up. The first to take the lock works on the node; any other waits until it exits.
 //
@@ -58,7 +58,7 @@ func Acquire(ctx context.Context, path string) (*Lock, error) {
 		if err != nil && time.Since(lastLog) >= waitLogInterval {
 			klog.Errorf("nodelock: another CSI node on this node holds %s, so this one waits, serving nothing, until it "+
 				"exits. Only one s3-csi-node Pod may run per node: check that no node matches two s3-csi-node DaemonSets "+
-				"(from additionalDaemonSets, a second Helm release, or the EKS add-on alongside Helm)", path)
+				"(from additionalDaemonSets or a second Helm release)", path)
 			lastLog = time.Now()
 		}
 		select {

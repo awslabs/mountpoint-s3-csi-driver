@@ -146,8 +146,9 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 
 	// Before reading or changing anything on the node, wait until no other CSI node works on it. One that waits here
-	// never listens on the CSI socket, so it can't take it over from the one working. A SIGTERM while waiting just
-	// ends the process, as main installs its signal handler only once NewDriver returns.
+	// never listens on the CSI socket, so it can't take it over from the one working, which keeps listening on it and
+	// serves every request kubelet sends there. A SIGTERM while waiting just ends the process, as main installs its
+	// signal handler only once NewDriver returns.
 	lockPath := filepath.Join(util.ContainerKubeletPath(), "plugins", driverName, nodelock.FileName)
 	lock, err := nodelock.Acquire(context.Background(), lockPath)
 	if err != nil {

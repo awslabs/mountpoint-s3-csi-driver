@@ -134,10 +134,6 @@ With [`node.preventPodSchedulingIfMissing`](./CONFIGURATION.md#prevent-schedulin
   The driver doesn't run on nodes that `node.affinity` or `node.nodeSelector` exclude, or on nodes with taints it doesn't tolerate.
 - If the Pod is waiting for Cluster Autoscaler to add a node, check that Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, and that node groups that scale from zero have the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag with `s3.csi.aws.com` in its value.
 
-## My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
-
-More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it, a second Helm release, or the EKS add-on alongside Helm. Only the first one works on the node; the others wait, serving nothing, until it exits. Make sure only one `s3-csi-node` Pod runs on each node, and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
-
 ## Mountpoint pods are failing with "Failed to receive mount options from /comm/mount.sock"
 
 Mountpoint pods are scheduled immediately when a workload's pod is scheduled.
@@ -213,3 +209,9 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 **Recommendation:** Upgrade to Mountpoint S3 CSI driver v2.5.0 or later. The fix adds `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to MP pods, allowing the autoscaler to treat them as DaemonSet-managed pods instead of standalone pods that block scale-down.
 
 **Limitation:** Note that this may cause over-provisioning based on the templateNodeInfo mechanism. Overestimation of required pod slots is capped by the distinct S3 PV count (or the number of S3 pods on any running node), see: [podsExpectedOnFreshNode](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/simulator/node_info_utils.go#L177) and [how-does-scale-up-work](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/FAQ.md#how-does-scale-up-work).
+
+## V3 (daemonset mounter mode)
+
+### My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
+
+More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it or a second Helm release. Only the first one works on the node; the others wait, serving nothing, until it exits. Make sure only one `s3-csi-node` Pod runs on each node, and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
