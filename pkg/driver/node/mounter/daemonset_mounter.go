@@ -928,7 +928,7 @@ func helpMessageForGettingMounterLogs() string {
 func helpMessageForCheckingMounterPodStatus() string {
 	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
-		"Two on one node mean two daemonsetMounters entries select it", mounterNamespace)
+		"More than one on a node means more than one daemonsetMounters entry selects it", mounterNamespace)
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.
