@@ -144,7 +144,7 @@ func restartDriverPods(ctx context.Context, f *framework.Framework) {
 	for _, name := range mounterDaemonSetNames(ctx, f) {
 		waitForDaemonSetReady(ctx, f, name, mounterPodLabel, mounterRestartTimeout)
 	}
-	// s3-csi-node exits when it finds no mounter, and the kubelet backs off its restarts for up to five minutes.
+	// After the mounters, so each s3-csi-node finds its mounter at startup and registers its limit right away.
 	deletePods(ctx, f, csiNodePodLabel)
 	waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
 }

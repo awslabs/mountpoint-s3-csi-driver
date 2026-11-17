@@ -695,8 +695,7 @@ func TestDaemonsetMounter(t *testing.T) {
 		t.Run("Discovery resolves the mounter pod's comm directory", func(t *testing.T) {
 			testCtx := setupDM(t)
 
-			commDir, err := testCtx.dm.GetCommDir()
-			assert.NoError(t, err)
+			commDir := testCtx.dm.GetCommDir()
 			assert.Equals(t, testCtx.commDir, commDir)
 
 			// Also assert against literals to test accuracy of the comm dir path as well.
@@ -742,12 +741,11 @@ func TestDaemonsetMounter(t *testing.T) {
 			}
 		})
 
-		t.Run("DiscoverMounter reads the mounter pod's max-volumes-per-node label", func(t *testing.T) {
+		t.Run("DiscoverMounter reads the mounter pod's max-volumes-per-node label, or falls back without a valid one", func(t *testing.T) {
 			for _, tt := range []struct {
-				label  string
-				want   int64
-				wantOK bool
-			}{{"5", 5, true}, {"0", 0, true}, {"", 0, false}, {"-1", 0, false}, {"x", 0, false}} {
+				label string
+				want  int64
+			}{{"5", 5}, {"0", 0}, {"", 2}, {"-1", 2}, {"x", 2}} {
 				t.Run(tt.label, func(t *testing.T) {
 					t.Setenv("CONTAINER_KUBELET_PATH", t.TempDir())
 					pod := mounterPod("mounter-aaa", corev1.PodRunning)
@@ -759,9 +757,10 @@ func TestDaemonsetMounter(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 					defer cancel()
 
+					dm.SetFallbackVolumeLimit(2)
 					assert.NoError(t, dm.DiscoverMounter(ctx))
-					got, ok := dm.MounterMaxVolumesPerNode()
-					assert.Equals(t, tt.wantOK, ok)
+					got, err := dm.VolumeLimit(ctx)
+					assert.NoError(t, err)
 					assert.Equals(t, tt.want, got)
 				})
 			}
@@ -815,7 +814,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error when the mounter pod is not discovered")
 			}
-			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+			assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
 			if mountSyscallCalled {
 				t.Error("mountSyscall should not be called when the mounter pod is not available")
 			}
@@ -847,8 +846,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			assert.Contains(t, err.Error(), "failed to send mount options")
 
 			// Verify the mounter pod was nilled by the staleness detection
-			_, err = testCtx.dm.GetCommDir()
-			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+			assert.Equals(t, "", testCtx.dm.GetCommDir())
 		})
 
 		t.Run("A mount that fails to reach the old mounter does not forget the mounter found while it waited", func(t *testing.T) {
@@ -879,9 +877,7 @@ func TestDaemonsetMounter(t *testing.T) {
 						testCtx.driverProvideCtx(testCtx.podUID), nil, mountpoint.ParseArgs(nil), "", nil)
 					assert.ErrorIs(t, err, context.DeadlineExceeded)
 
-					commDir, err := testCtx.dm.GetCommDir()
-					assert.NoError(t, err)
-					assert.Equals(t, wantCommDir, commDir)
+					assert.Equals(t, wantCommDir, testCtx.dm.GetCommDir())
 				})
 			}
 		})
@@ -917,8 +913,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			}
 
 			// Verify the mounter pod was NOT nilled by the cancelled context
-			_, err = testCtx.dm.GetCommDir()
-			assert.NoError(t, err)
+			assert.Equals(t, testCtx.commDir, testCtx.dm.GetCommDir())
 		})
 	})
 }
@@ -1381,7 +1376,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 
 		// A cache request now reports the missing mounter rather than reading the dropped cache volume.
 		err = mountWithoutServing(testCtx, testCtx.ctx, "pod-while-stale", cacheRequest)
-		assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+		assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
 
 		// Simulate mounter is back + rerun discovery, but has no cache volume;
 		// PV accepted above (reached Send before) is now rejected.
@@ -1813,7 +1808,7 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
 
 	// Mount should NOT return nil — it should proceed past the health check and eventually
-	// error out downstream (e.g. "mounter pod not yet discovered or stale" since we didn't set up
+	// error out downstream (e.g. "no usable s3-csi-daemonset-mounter on node" since we didn't set up
 	// the mounter pod). The key assertion is that err != nil (it tried to mount) rather
 	// than err == nil (it bailed like a corrupted target).
 	assert.Equals(t, true, err != nil)
