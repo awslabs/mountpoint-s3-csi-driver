@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,8 @@ import (
 	mock_driver "github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mocks"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -743,6 +746,12 @@ func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
 			wantCode: codes.InvalidArgument,
 		},
 		{
+			// A dead target must stay non-final for kubelet, so NodeUnpublishVolume still runs.
+			name:     "a dead target's Aborted reaches the kubelet as Aborted",
+			mountErr: status.Error(codes.Aborted, "Mountpoint has stopped; delete and recreate this pod to remount the volume. Volume test-pv-name, pod ns/name (pod-uid)"),
+			wantCode: codes.Aborted,
+		},
+		{
 			name:     "a plain mount failure is Internal",
 			mountErr: errors.New("failed to send mount options"),
 			wantCode: codes.Internal,
@@ -773,6 +782,73 @@ func TestNodePublishVolumeMounterErrorCode(t *testing.T) {
 				VolumeContext: map[string]string{volumecontext.BucketName: bucketName},
 			})
 			assert.Equals(t, testCase.wantCode, status.Code(err))
+		})
+	}
+}
+
+func TestNodePublishVolumeAWSMaxAttempts(t *testing.T) {
+	var (
+		volumeId   = "test-volume-id"
+		bucketName = "test-bucket-name"
+		targetPath = "/var/lib/kubelet/target/path"
+	)
+
+	testCases := []struct {
+		name      string
+		mountFlag string
+		// wantArgs are the arguments expected in addition to `--allow-root`.
+		wantArgs []string
+	}{
+		{name: "valid", mountFlag: "aws-max-attempts 5", wantArgs: []string{"--aws-max-attempts=5"}},
+		{name: "valid: equals separator", mountFlag: "--aws-max-attempts=1", wantArgs: []string{"--aws-max-attempts=1"}},
+		{name: "valid: leading plus", mountFlag: "aws-max-attempts +10", wantArgs: []string{"--aws-max-attempts=+10"}},
+		{name: "valid: above 64", mountFlag: "aws-max-attempts 100", wantArgs: []string{"--aws-max-attempts=100"}},
+		{name: "invalid: zero", mountFlag: "aws-max-attempts 0"},
+		{name: "invalid: negative", mountFlag: "aws-max-attempts -1"},
+		{name: "invalid: not a number", mountFlag: "aws-max-attempts abc"},
+		{name: "invalid: decimal", mountFlag: "aws-max-attempts 1.5"},
+		{name: "invalid: no value", mountFlag: "aws-max-attempts"},
+		{name: "invalid: overflow", mountFlag: "aws-max-attempts 18446744073709551616"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nodeTestEnv := initNodeServerTestEnv(t)
+			ctx := context.Background()
+			req := &csi.NodePublishVolumeRequest{
+				VolumeId: volumeId,
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{
+							MountFlags: []string{testCase.mountFlag},
+						},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				},
+				VolumeContext: map[string]string{"bucketName": bucketName},
+				TargetPath:    targetPath,
+			}
+
+			nodeTestEnv.mockMounter.EXPECT().Mount(
+				gomock.Eq(context.Background()),
+				gomock.Eq(bucketName),
+				gomock.Eq(targetPath),
+				gomock.Eq(credentialprovider.ProvideContext{
+					VolumeID:             volumeId,
+					AuthenticationSource: credentialprovider.AuthenticationSourceDriver,
+				}),
+				gomock.Eq(map[string]string{"bucketName": bucketName}),
+				gomock.Eq(mountpoint.ParseArgs(append([]string{"--allow-root"}, testCase.wantArgs...))),
+				gomock.Eq(""),
+				gomock.Eq(envprovider.Environment{}),
+			).Return(nil)
+
+			_, err := nodeTestEnv.server.NodePublishVolume(ctx, req)
+			assert.NoError(t, err)
+
+			nodeTestEnv.mockCtl.Finish()
 		})
 	}
 }
@@ -1175,4 +1251,146 @@ func (d *dummyMounter) Unmount(ctx context.Context, target string, cleanupCtx cr
 
 func (d *dummyMounter) IsMountPoint(target string) (bool, error) {
 	return true, nil
+}
+
+// Fake credentials shaped like real ones, so both the verbatim and the shape checks have something to find.
+// The JWT is three base64url parts: {"alg":"RS256"}, {"sub":"test"} and "signature".
+const (
+	fakeServiceAccountJWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl"
+	fakeAccessKeyID       = "AKIAIOSFODNN7EXAMPLE"
+	fakeSecretAccessKey   = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+)
+
+// The kubelet hands csi-node the workload's service account tokens on every publish, in the volume context
+// and (Kubernetes v1.35+) in the request's secrets. At the most verbose level csi-node logs every publish and
+// unpublish, so neither may carry a token or key into the logs.
+func TestNodePublishAndUnpublishLogNoCredentials(t *testing.T) {
+	logs := testutil.CaptureKlogAtVerbosity(t, 10)
+
+	nodeTestEnv := initNodeServerTestEnv(t)
+	nodeTestEnv.mockMounter.EXPECT().Mount(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	nodeTestEnv.mockMounter.EXPECT().IsMountPoint(gomock.Any()).Return(true, nil)
+	nodeTestEnv.mockMounter.EXPECT().Unmount(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+
+	tokens := fmt.Sprintf(`{"sts.amazonaws.com":{"token":%q,"expirationTimestamp":"2026-10-30T01:00:00Z"}}`, fakeServiceAccountJWT)
+	const targetPath = "/var/lib/kubelet/pods/d8c872d7-a29c-4362-81b1-9912370d0813/volumes/kubernetes.io~csi/s3-pv/mount"
+	ctx := context.Background()
+
+	_, err := nodeTestEnv.server.NodePublishVolume(ctx, &csi.NodePublishVolumeRequest{
+		VolumeId: "s3-pv",
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER},
+		},
+		TargetPath: targetPath,
+		VolumeContext: map[string]string{
+			volumecontext.BucketName:              "test-bucket",
+			volumecontext.AuthenticationSource:    "pod",
+			volumecontext.CSIServiceAccountTokens: tokens,
+		},
+		Secrets: map[string]string{
+			volumecontext.CSIServiceAccountTokens: tokens,
+			// Not something the kubelet sends today, but node-publish secrets are free-form: none may be logged.
+			"accessKeyId":     fakeAccessKeyID,
+			"secretAccessKey": fakeSecretAccessKey,
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = nodeTestEnv.server.NodeUnpublishVolume(ctx, &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "s3-pv",
+		TargetPath: targetPath,
+	})
+	assert.NoError(t, err)
+
+	testutil.AssertNoCredentialsLogged(t, logs(), fakeServiceAccountJWT, fakeAccessKeyID, fakeSecretAccessKey)
+}
+
+// NodePublishVolume parses a request built from the kubelet and the PV, so a malformed one must be refused
+// with InvalidArgument and never panic. A request it accepts must reach the mounter with no `-o` or
+// `--ca-bundle`, a target under the kubelet path, and only user environment variables on the allowlist.
+func FuzzNodePublishVolumeNeverCrashesOnMalformedRequests(f *testing.F) {
+	const target = "/var/lib/kubelet/pods/d8c872d7-a29c-4362-81b1-9912370d0813/volumes/kubernetes.io~csi/s3-pv/mount"
+	type seed struct {
+		volumeID, bucket   string
+		hasBucket          bool
+		targetPath         string
+		mountFlags         string // one flag per line
+		ctxKey, ctxValue   string
+		readOnly, hasMount bool
+	}
+	for _, s := range []seed{
+		{"s3-pv", "bucket", true, target, "", "", "", false, true},
+		{"s3-pv", "bucket", true, target, "--allow-other\n--uid=1000\n--region us-west-2", "authenticationSource", "pod", true, true},
+		{"s3-pv", "bucket", true, target, "-o allow_other", "", "", false, true},
+		{"s3-pv", "bucket", true, target, " --ca-bundle=/etc/ssl/evil.pem ", "", "", false, true},
+		{"s3-pv", "bucket", true, target, "--cache /tmp\n--max-cache-size=abc", "cache", "emptyDir", false, true},
+		{"s3-pv", "bucket", true, target, "--max-cache-size=99999999999999999999", "cacheEmptyDirSizeLimit", "1Gi", false, true},
+		{"s3-pv", "bucket", true, target, "", "mountpointEnv.AWS_ENDPOINT_URL", "http://attacker", false, true},
+		{"s3-pv", "bucket", true, target, "", "mountpointEnv.HTTPS_PROXY", "http://proxy:3128", false, true},
+		{"s3-pv", "bucket", true, target, "", "csi.storage.k8s.io/serviceAccount.tokens", "{not json", false, true},
+		{"s3-pv", "bucket", true, "/etc/passwd", "", "", "", false, true},
+		{"s3-pv", "bucket", true, "/var/lib/kubelet/../../etc", "", "", "", false, true},
+		{"s3-pv", "", false, target, "", "", "", false, true},
+		{"", "bucket", true, target, "", "", "", false, true},
+		{"s3-pv", "bucket", true, "", "", "", "", false, true},
+		{"s3-pv", "bucket", true, target, "", "", "", false, false},
+		{"s3-pv\x00", "bucket\n", true, target + "\x00", "\x00", "\x00", "\x00", true, true},
+	} {
+		f.Add(s.volumeID, s.bucket, s.hasBucket, s.targetPath, s.mountFlags, s.ctxKey, s.ctxValue, s.readOnly, s.hasMount)
+	}
+
+	f.Fuzz(func(t *testing.T, volumeID, bucket string, hasBucket bool, targetPath, mountFlags, ctxKey, ctxValue string, readOnly, hasMount bool) {
+		nodeTestEnv := initNodeServerTestEnv(t)
+		nodeTestEnv.mockMounter.EXPECT().
+			Mount(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, gotBucket, gotTarget string, _ credentialprovider.ProvideContext,
+				_ map[string]string, args mountpoint.Args, _ string, userEnv envprovider.Environment) error {
+				if args.Has(mountpoint.ArgFsTab) || args.Has(mountpoint.ArgCABundle) {
+					t.Errorf("the mounter got a refused flag: %v", args.SortedList())
+				}
+				if !strings.HasPrefix(gotTarget, util.ContainerKubeletPath()) {
+					t.Errorf("the mounter got target %q, outside the kubelet path %q", gotTarget, util.ContainerKubeletPath())
+				}
+				if hasBucket && gotBucket != bucket {
+					t.Errorf("the mounter got bucket %q, want %q", gotBucket, bucket)
+				}
+				for key := range userEnv {
+					if !slices.Contains([]string{envprovider.EnvHTTPSProxy, envprovider.EnvNoProxy}, key) {
+						t.Errorf("the mounter got user environment variable %q, which is not on the allowlist", key)
+					}
+				}
+				return nil
+			}).AnyTimes()
+
+		volCtx := map[string]string{}
+		if ctxKey != "" {
+			volCtx[ctxKey] = ctxValue
+		}
+		if hasBucket {
+			volCtx["bucketName"] = bucket
+		}
+		volCap := &csi.VolumeCapability{
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER},
+		}
+		if hasMount {
+			var flags []string
+			if mountFlags != "" {
+				flags = strings.Split(mountFlags, "\n")
+			}
+			volCap.AccessType = &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{MountFlags: flags}}
+		}
+
+		_, err := nodeTestEnv.server.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+			VolumeId:         volumeID,
+			TargetPath:       targetPath,
+			VolumeCapability: volCap,
+			VolumeContext:    volCtx,
+			Readonly:         readOnly,
+		})
+		// The mounter accepts everything here, so only the request itself can be refused, and only as invalid.
+		if err != nil && status.Code(err) != codes.InvalidArgument {
+			t.Errorf("NodePublishVolume refused a request with %v, want InvalidArgument: %v", status.Code(err), err)
+		}
+	})
 }

@@ -42,8 +42,8 @@ jobs:
     name: Build Matrix
     uses: ./.github/workflows/build_matrix.yaml
     with:
-      # The upgrade tests replace the regular tests, on their cells.
-      regular_tests_only: ${{ inputs.run_upgrade_tests }}
+      # Upgrade tests replace the regular ones; the scheduling tests only exist on feature/daemonset-architecture.
+      regular_tests_only: ${{ inputs.run_upgrade_tests || github.base_ref != 'feature/daemonset-architecture' }}
     permissions:
       contents: read
   build:
