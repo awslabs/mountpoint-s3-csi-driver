@@ -131,7 +131,7 @@ func (dm *DaemonsetMounter) currentVolumeLimit(ctx context.Context) (int64, stri
 	const fallback = "its pair's mounter.maxVolumesPerNode"
 	switch {
 	case !found:
-		return dm.fallbackVolumeLimit, "no mounter runs on this node yet, so new S3 mounts on it fail " +
+		return dm.fallbackVolumeLimit, "no mounter this node can use runs yet, so new S3 mounts on it fail " +
 			"until one does. Until then it advertises " + fallback, false, nil
 	case maxVolumes < 0:
 		return dm.fallbackVolumeLimit, "its mounter has no valid " + MounterMaxVolumesLabel +

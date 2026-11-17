@@ -48,7 +48,7 @@ spec:
       nodeSelector:
         kubernetes.io/os: linux
         {{- range $k, $v := $node.nodeSelector }}
-        {{ $k }}: {{ include "aws-mountpoint-s3-csi-driver.labelValue" $v | quote }}
+        {{ $k | quote }}: {{ include "aws-mountpoint-s3-csi-driver.labelValue" $v | quote }}
         {{- end }}
       serviceAccountName: {{ $node.serviceAccount.name }}
       priorityClassName: system-node-critical

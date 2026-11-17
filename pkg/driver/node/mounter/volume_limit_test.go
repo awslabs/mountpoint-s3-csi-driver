@@ -117,7 +117,7 @@ func TestVolumeLimit(t *testing.T) {
 		dm.VolumeLimit(ctx)
 		dm.VolumeLimit(ctx)
 
-		assert.Equals(t, 1, strings.Count(logs.String(), "advertising no volume limit for node test-node: no mounter runs on this node yet"))
+		assert.Equals(t, 1, strings.Count(logs.String(), "advertising no volume limit for node test-node: no mounter this node can use runs yet"))
 		assert.Equals(t, 1, strings.Count(logs.String(), "advertising a volume limit of 3 for node test-node"))
 	})
 

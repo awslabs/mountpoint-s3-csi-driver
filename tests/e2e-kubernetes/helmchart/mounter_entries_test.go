@@ -28,6 +28,7 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 		{"no placement", `additionalDaemonSets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonSets.b.node: nodeSelector or affinity is required"},
 		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
 		{"same placement, as a number and as a string", `additionalDaemonSets: {a: {node: {nodeSelector: {x: 1}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
+		{"a null nodeSelector value", `additionalDaemonSets: {b: {node: {nodeSelector: {x: null}}}}`, "a nodeSelector value is null"},
 		{"the old daemonsetMounters", `daemonsetMounters: [{maxVolumesPerNode: 32}]`, "daemonsetMounters was replaced by mounter"},
 		{"same placement as the default", `{node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}, additionalDaemonSets: {b: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
 		{"an entry service account", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, serviceAccount: {name: b}}}}`, "additionalDaemonSets.b.node.serviceAccount: set it on node instead"},
@@ -176,10 +177,11 @@ func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
 
 func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 	// Unquoted, these render as a bool and numbers, which a nodeSelector can't hold; a large number must not become 1e+07.
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000}}}}`)
+	// A bare key like on is a bool to YAML too.
+	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x"}}}}`)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
-		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000", "on": "x"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
 	}
 }
 
