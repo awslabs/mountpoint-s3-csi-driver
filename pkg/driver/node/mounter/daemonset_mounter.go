@@ -909,12 +909,8 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 	return nil
 }
 
-// mountFailedError is the NodePublishVolume error for a mount the mounter reported failed with reason.
-//
-// The kubelet records it in a core/v1 FailedMount event after its own prefix and the target path. Those
-// have no length limit, but `kubectl describe` shows the message on one line, so the reason is capped at
-// errorfile.MaxBytes and the rest is kept short: with worst-case names (253-character PV and mounter pod,
-// 63-character namespace and bucket) the whole event stays under 2 KiB.
+// mountFailedError is the NodePublishVolume error for a mount the mounter reported failed with reason,
+// followed by the command that shows this mount's mounter log lines.
 func (dm *DaemonsetMounter) mountFailedError(commDir, volumeID, reason string) error {
 	reason = strings.TrimRight(reason, ". ")
 	if reason == "" {

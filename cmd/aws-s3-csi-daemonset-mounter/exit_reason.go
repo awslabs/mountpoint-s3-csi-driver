@@ -1,5 +1,5 @@
-// exit_reason.go turns how a Mountpoint process ended into the message written to its error file,
-// which writeErrorFile writes with [errorfile.Write] as one short line. The full stderr stays in this container's log.
+// exit_reason.go turns how a Mountpoint process ended into the message written to its error file. The
+// full stderr stays in this container's log.
 
 package main
 
@@ -10,12 +10,7 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 )
-
-// stderrTailLines is how many of the last stderr lines are kept when stderr holds no `Error:` line.
-const stderrTailLines = 3
 
 // exitStatus is how a Mountpoint process ended.
 type exitStatus struct {
@@ -49,8 +44,7 @@ func signalName(sig syscall.Signal) string {
 }
 
 // oomHints explain the usual sender of SIGKILL and the setting that sizes a Mountpoint's memory under
-// each memoryLimitStrategy; docs/MEMORY.md has the full guidance. They are kept short so most of
-// errorfile.MaxBytes is left for the stderr summary.
+// each memoryLimitStrategy; docs/MEMORY.md has the full guidance.
 var oomHints = map[memoryLimitStrategy]string{
 	memoryLimitEqualSplit: "If nobody killed it, it likely ran out of memory. memoryLimitStrategy=equalSplit sets " +
 		"--memory-target to (daemonsetMounters[].resources.requests.memory - 64Mi - in-memory cache) / " +
@@ -60,39 +54,14 @@ var oomHints = map[memoryLimitStrategy]string{
 }
 
 // exitReason is the error file content for a Mountpoint that ended with `status` in a container whose
-// memory is split by `strategy`; writeErrorFile formats it. A SIGKILL hint goes last and is never cut:
-// the status and stderr summary before it are formatted within what is left of errorfile.MaxBytes.
+// memory is split by `strategy`: how it ended, a hint on SIGKILL, then its stderr tail as it is.
 func exitReason(status exitStatus, stderr []byte, strategy memoryLimitStrategy) string {
 	msg := "Mountpoint " + status.String()
-	if summary := summarizeStderr(stderr); summary != "" {
-		msg += ": " + summary
+	if hint, ok := oomHints[strategy]; ok && status.signal == syscall.SIGKILL {
+		msg += ". " + hint
 	}
-	hint, ok := oomHints[strategy]
-	if !ok || status.signal != syscall.SIGKILL {
-		return msg
+	if tail := strings.TrimSpace(string(stderr)); tail != "" {
+		msg += ": " + tail
 	}
-	suffix := ". " + hint
-	return errorfile.FormatWithin(msg, errorfile.MaxBytes-len(suffix)) + suffix
-}
-
-// summarizeStderr keeps what explains a failure. Mountpoint logs to stdout when in the foreground, so
-// stderr holds mostly its final error, which Rust prints as `Error: <context>`, then `Caused by:`
-// and an indented chain. Without that, it keeps the last few lines, e.g. a panic.
-func summarizeStderr(stderr []byte) string {
-	var lines []string
-	for _, line := range strings.Split(string(stderr), "\n") {
-		if line = strings.TrimSpace(errorfile.StripANSI(line)); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	start := -1
-	for i, line := range lines {
-		if strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "error: ") {
-			start = i
-		}
-	}
-	if start < 0 {
-		start = max(0, len(lines)-stderrTailLines)
-	}
-	return strings.Join(lines[start:], " ")
+	return msg
 }

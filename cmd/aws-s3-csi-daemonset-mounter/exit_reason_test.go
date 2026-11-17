@@ -65,51 +65,10 @@ func launchAndEndWith(t *testing.T, memory memoryLimit, end func(*fakeProcessHan
 	return string(content)
 }
 
-// assertConcise checks what reaches NodePublishVolume (and the FailedMount event) is short and ASCII.
-func assertConcise(t *testing.T, msg string) {
-	t.Helper()
-	// The FailedMount event also carries kubelet's prefix and csi-node's hint; events.k8s.io caps a note at 1024.
-	if len(msg) > 600 {
-		t.Fatalf("error file is %d bytes, want at most 600; it starts %q", len(msg), msg[:200])
-	}
-	for i := 0; i < len(msg); i++ {
-		if c := msg[i]; c < ' ' || c > '~' {
-			t.Fatalf("error file has non-printable-ASCII byte %#x at %d: %q", c, i, msg)
-		}
-	}
-}
-
-func TestErrorFile_LongStderr_KeepsOnlyTheErrorChain(t *testing.T) {
-	// A full 1 MiB stderr ring (the default --stderr-capacity) of noise ahead of the error.
-	noise := strings.Repeat("2026-11-03T10:00:00Z  WARN mountpoint_s3_fs::fuse: lookup failed: inode error\n", 1024*1024/80)
-	msg := launchAndExit(t, 1, noise+mountpointBucketError)
-
-	assertConcise(t, msg)
-	assert.Contains(t, msg, "exited with code 1")
-	assert.Contains(t, msg, "Error: Failed to create S3 client")
-	assert.Contains(t, msg, "initial ListObjectsV2 failed for bucket does-not-exist in region us-east-1")
-	assert.Contains(t, msg, "Unknown response error")
-	assertNotContains(t, msg, "WARN")
-}
-
-func TestErrorFile_NoErrorLine_KeepsTheLastLines(t *testing.T) {
-	var lines []string
-	for i := 0; i < 50; i++ {
-		lines = append(lines, "line "+strings.Repeat("x", i))
-	}
-	lines = append(lines, "thread 'main' panicked at src/fs.rs:10:5: boom", "note: run with `RUST_BACKTRACE=1`")
-	msg := launchAndExit(t, 101, strings.Join(lines, "\n")+"\n")
-
-	assertConcise(t, msg)
-	assert.Contains(t, msg, "exited with code 101")
-	assert.Contains(t, msg, "panicked at src/fs.rs:10:5: boom")
-	assertNotContains(t, msg, "line x\n")
-}
-
-func TestErrorFile_StripsNonASCIIAndControlBytes(t *testing.T) {
-	msg := launchAndExit(t, 1, "Error: \x1b[31mbad\x1b[0m bucket éé name\r\n")
-	assertConcise(t, msg)
-	assert.Contains(t, msg, "Error: bad bucket")
+// The exit code comes first, then Mountpoint's stderr as it is.
+func TestErrorFile_ExitCodeThenStderr(t *testing.T) {
+	msg := launchAndExit(t, 1, mountpointBucketError)
+	assert.Equals(t, "Mountpoint exited with code 1: "+strings.TrimSpace(mountpointBucketError), msg)
 }
 
 func TestErrorFile_CleanExit_WritesNothing(t *testing.T) {

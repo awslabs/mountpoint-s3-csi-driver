@@ -6,17 +6,14 @@ import (
 	"io/fs"
 	"os"
 
-	"k8s.io/klog/v2"
+	"strings"
 
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
+	"k8s.io/klog/v2"
 )
 
-// maxErrorFileReadBytes bounds how much of an error file is read; the mounter writes at most errorfile.MaxBytes.
-const maxErrorFileReadBytes = 4096
-
-// consumeErrorFile reads and removes the error file the mounter wrote for a mount. It returns the reason,
-// formatted again in case of an older mounter, and whether a file was read. A file whose content formats
-// to nothing still counts; one that cannot be opened does not, so a poller tries again. A removal error is
+// consumeErrorFile reads and removes the error file the mounter wrote for a mount. It returns the reason
+// and whether a file was read. The mounter bounds the file with its --stderr-capacity. A file with no content still
+// counts; one that cannot be opened does not, so a poller tries again. A removal error is
 // returned with the reason.
 func consumeErrorFile(errFilePath string) (string, bool, error) {
 	f, err := os.Open(errFilePath)
@@ -26,12 +23,12 @@ func consumeErrorFile(errFilePath string) (string, bool, error) {
 		}
 		return "", false, nil
 	}
-	content, readErr := io.ReadAll(io.LimitReader(f, maxErrorFileReadBytes))
+	content, readErr := io.ReadAll(f)
 	f.Close()
 	if readErr != nil {
 		klog.Errorf("DaemonsetMounter: failed to read error file %s: %v", errFilePath, readErr)
 	}
-	reason := errorfile.Format(string(content))
+	reason := strings.TrimSpace(string(content))
 	if err := os.Remove(errFilePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return reason, true, err
 	}

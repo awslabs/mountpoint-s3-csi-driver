@@ -20,7 +20,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
@@ -470,13 +469,37 @@ func (pm *ProcessManager) chownWithDefault(path string, uid, gid int) error {
 }
 
 // writeErrorFile reports a mount failure to the driver, whose waitForMount polls for this file, the
-// only reply channel on the otherwise one-way mount socket. The driver returns it as the NodePublishVolume
-// error, so [errorfile.Write] formats it as one short line and writes it atomically.
+// only reply channel on the otherwise one-way mount socket. It is written to a temporary file and renamed
+// into place, so the driver never reads it part-written. No fsync: the driver needs the rename to be
+// atomic, not durable, and the exit path calls this holding pm.mu, where an fsync would stall launches.
 func (pm *ProcessManager) writeErrorFile(mountId string, msg string) {
 	errPath := filepath.Join(pm.commDir, mountId+errorFileExt)
-	if err := errorfile.Write(errPath, msg, errorFilePerm); err != nil {
+	if err := writeFileAtomically(errPath, []byte(msg)); err != nil {
 		klog.Errorf("[%s] Failed to write error file: %v", mountId, err)
 	}
+}
+
+// writeFileAtomically writes content to path with errorFilePerm, via a temporary file renamed into place.
+func writeFileAtomically(path string, content []byte) error {
+	// A fixed short name: one built from path's base could exceed NAME_MAX for a long volume ID.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".error-tmp-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(content)
+	if err == nil {
+		err = tmp.Chmod(errorFilePerm)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
 }
 
 // Shutdown sends SIGTERM to all processes and waits for them to exit.

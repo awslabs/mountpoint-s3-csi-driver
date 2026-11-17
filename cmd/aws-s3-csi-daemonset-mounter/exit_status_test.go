@@ -14,7 +14,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter/mountertest"
-	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/errorfile"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -53,7 +52,6 @@ func TestErrorFile_SIGKILL_ReportsSignalAndOOMHint(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			msg := launchAndEndWith(t, tc.memory, func(h *fakeProcessHandle) { h.Kill(syscall.SIGKILL, "") })
 
-			assertConcise(t, msg)
 			assert.Contains(t, msg, "killed by signal SIGKILL")
 			assertNotContains(t, msg, "code -1")
 			assert.Contains(t, msg, "out of memory")
@@ -74,19 +72,9 @@ func TestErrorFile_OtherSignal_ReportsSignalWithoutOOMHint(t *testing.T) {
 		h.Kill(syscall.SIGSEGV, "thread 'tokio' panicked at src/x.rs:1:1: bad\n")
 	})
 
-	assertConcise(t, msg)
 	assert.Contains(t, msg, "killed by signal SIGSEGV")
 	assert.Contains(t, msg, "panicked at src/x.rs:1:1: bad")
 	assertNotContains(t, msg, "out of memory")
-}
-
-// Every hint leaves most of the error file for the stderr summary.
-func TestOOMHints_LeaveRoomForTheSummary(t *testing.T) {
-	for strategy, hint := range oomHints {
-		if room := errorfile.MaxBytes - len("Mountpoint was killed by signal SIGKILL") - len(". "+hint); room < 180 {
-			t.Errorf("%s hint leaves %d bytes for the stderr summary, want at least 180", strategy, room)
-		}
-	}
 }
 
 // The CSI node's hint greps the mounter log for `[<mount-id>]`, so every line the mounter logs about a
@@ -174,16 +162,10 @@ func TestPrefixWriter_ConcurrentWritersNeverSplitALine(t *testing.T) {
 	}
 }
 
-// A long stderr summary is truncated, never the hint after it.
-func TestErrorFile_SIGKILL_LongStderrKeepsTheWholeHint(t *testing.T) {
-	for _, strategy := range []memoryLimitStrategy{memoryLimitEqualSplit, memoryLimitNone} {
-		stderr := "thread 'main' panicked at src/x.rs:1:1: " + strings.Repeat("allocation failed ", 100) + "ROOT CAUSE\n"
-		msg := launchAndEndWith(t, memoryLimit{strategy: strategy, shareMiB: 1008}, func(h *fakeProcessHandle) { h.Kill(syscall.SIGKILL, stderr) })
-
-		assertConcise(t, msg)
-		assert.Equals(t, true, len(msg) <= errorfile.MaxBytes)
-		assert.Equals(t, true, strings.HasPrefix(msg, "Mountpoint was killed by signal SIGKILL: th"))
-		assert.Equals(t, true, strings.HasSuffix(msg, ". "+oomHints[strategy]))
-		assert.Contains(t, msg, "ROOT CAUSE")
-	}
+// The SIGKILL hint comes before the stderr, so a long stderr never pushes it out of view.
+func TestErrorFile_SIGKILL_HintBeforeStderr(t *testing.T) {
+	msg := launchAndEndWith(t, memoryLimit{strategy: memoryLimitNone}, func(h *fakeProcessHandle) {
+		h.Kill(syscall.SIGKILL, "memory allocation failed\n")
+	})
+	assert.Equals(t, "Mountpoint was killed by signal SIGKILL. "+oomHints[memoryLimitNone]+": memory allocation failed", msg)
 }

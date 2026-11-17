@@ -68,20 +68,6 @@ func TestMountError_NamesThisNodesMounterPodAndLogPrefix(t *testing.T) {
 	assertNotContainsStr(t, msg, "-l app=s3-csi-daemonset-mounter`")
 }
 
-func TestMountError_OversizedErrorFileIsCapped(t *testing.T) {
-	testCtx := setupDM(t)
-	// An older mounter writes up to 1 MiB of raw stderr.
-	err := testCtx.failMountWithErrorFile("Error: first\n" + strings.Repeat("noise \x1b[0m line\n", 64*1024))
-
-	msg := err.Error()
-	if len(msg) > 1024 {
-		t.Fatalf("NodePublishVolume error is %d bytes, want at most 1024; it starts %.200q", len(msg), msg)
-	}
-	assert.Contains(t, msg, "Error: first")
-	assertNotContainsStr(t, msg, "\x1b")
-	assertNotContainsStr(t, msg, "\n")
-}
-
 func TestMountError_MounterNotDiscovered_HintIsNodeScoped(t *testing.T) {
 	kubeletPath := t.TempDir()
 	const volumeID = "pv-no-mounter"
@@ -102,11 +88,11 @@ func assertNotContainsStr(t *testing.T, got, unwanted string) {
 	}
 }
 
-// An error file whose content formats to nothing still fails the mount at once, with a readable message.
+// An error file with no content still fails the mount at once, with a readable message.
 func TestMountError_EmptyErrorFileFailsFastWithAMessage(t *testing.T) {
 	testCtx := setupDM(t)
 	start := time.Now()
-	err := testCtx.failMountWithErrorFile("\x1b[0m\n")
+	err := testCtx.failMountWithErrorFile("\n")
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("took %v; an empty error file must not wait for the mount timeout", time.Since(start))
 	}
