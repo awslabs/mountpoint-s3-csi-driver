@@ -104,9 +104,8 @@ const (
 	mounterContainerName = "mounter"
 )
 
-// Exported for error matching in tests and NodePublishVolume callers.
+// Exported for error matching in tests.
 var (
-	ErrCommDirNotReady        = errors.New("mounter pod not yet discovered or stale")
 	ErrCommDirDiscoveryFailed = errors.New("comm dir discovery failed")
 	ErrMultipleMounterPods    = errors.New("multiple running mounter pods found")
 	ErrNoRunningMounterPod    = errors.New("no running mounter pod found")
@@ -1411,14 +1410,13 @@ func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	}
 }
 
-// GetCommDir returns the cached comm dir path without blocking, exported for testing.
-// Returns an error if the mounter pod is not yet discovered or has been marked stale.
-func (dm *DaemonsetMounter) GetCommDir() (string, error) {
+// GetCommDir returns the discovered mounter pod's comm dir, or "" if there is none. Exported for testing.
+func (dm *DaemonsetMounter) GetCommDir() string {
 	mounter := dm.mounter.Load()
 	if mounter == nil {
-		return "", ErrCommDirNotReady
+		return ""
 	}
-	return mounter.commDir, nil
+	return mounter.commDir
 }
 
 // mountInfoProviderWithDefault delegates to mountInfoProvider if set, or falls back to parseMountInfoFromProc.

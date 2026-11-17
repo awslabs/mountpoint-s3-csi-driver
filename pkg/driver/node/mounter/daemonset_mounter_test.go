@@ -675,8 +675,7 @@ func TestDaemonsetMounter(t *testing.T) {
 		t.Run("Discovery resolves the mounter pod's comm directory", func(t *testing.T) {
 			testCtx := setupDM(t)
 
-			commDir, err := testCtx.dm.GetCommDir()
-			assert.NoError(t, err)
+			commDir := testCtx.dm.GetCommDir()
 			assert.Equals(t, testCtx.commDir, commDir)
 
 			// Also assert against literals to test accuracy of the comm dir path as well.
@@ -827,8 +826,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			assert.Contains(t, err.Error(), "failed to send mount options")
 
 			// Verify the mounter pod was nilled by the staleness detection
-			_, err = testCtx.dm.GetCommDir()
-			assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+			assert.Equals(t, "", testCtx.dm.GetCommDir())
 		})
 
 		t.Run("Cancelled context does not cause stale commDir", func(t *testing.T) {
@@ -862,8 +860,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			}
 
 			// Verify the mounter pod was NOT nilled by the cancelled context
-			_, err = testCtx.dm.GetCommDir()
-			assert.NoError(t, err)
+			assert.Equals(t, testCtx.commDir, testCtx.dm.GetCommDir())
 		})
 	})
 }
