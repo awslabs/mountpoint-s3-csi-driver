@@ -36,6 +36,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
@@ -1672,9 +1673,11 @@ func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 }
 
 // TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that when Mount is called with a
-// corrupted target (ENOTCONN), it returns nil without creating a meta file. This is the
-// churn-prevention invariant: a corrupted target causes an early bail, leaving cleanup to
-// the periodic job rather than churning mount/creds every republish.
+// corrupted target (ENOTCONN), it fails with a non-final Aborted error naming the volume and
+// the workload pod, without creating a meta file. This is the churn-prevention invariant: a
+// corrupted target causes an early bail, leaving cleanup to NodeUnpublishVolume and the periodic
+// job rather than churning mount/creds every republish. The error is what kubelet turns into a
+// FailedMount Warning Event on the workload pod.
 func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	kubeletPath := t.TempDir()
 	const volumeID = "pv-corrupted-target"
@@ -1702,11 +1705,19 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 		VolumeID:      volumeID,
 		WorkloadPodID: "pod-uid-123",
 	}
+	// kubelet sends the pod identity because the CSIDriver sets podInfoOnMount.
+	volumeCtx := map[string]string{
+		"csi.storage.k8s.io/pod.namespace": "team-a",
+		"csi.storage.k8s.io/pod.name":      "trainer-0",
+		"csi.storage.k8s.io/pod.uid":       "pod-uid-123",
+	}
 
-	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
+	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, volumeCtx, mountpoint.Args{}, "", nil)
 
-	// Mount should return nil (nothing to do, corrupted target).
-	assert.NoError(t, err)
+	// Aborted is non-final for kubelet: the volume stays in its actual state, so
+	// NodeUnpublishVolume is still called when the pod is deleted.
+	assert.Equals(t, codes.Aborted, status.Code(err))
+	assertDeadTargetMessage(t, status.Convert(err).Message(), volumeID, "team-a/trainer-0 (pod-uid-123)")
 
 	// No meta file should exist — Mount bailed before writing anything.
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)
@@ -1757,4 +1768,132 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)
 	_, statErr := os.Stat(metaPath)
 	assert.Equals(t, true, os.IsNotExist(statErr))
+}
+
+// TLS and endpoint settings Mountpoint would honour from its environment. csi-node's own environment
+// may carry any of them (set on the DaemonSet, or inherited), and none may reach a Mountpoint, which
+// would otherwise trust another CA, or talk to another (possibly plaintext) endpoint.
+var tlsAndEndpointEnv = []string{
+	"AWS_CA_BUNDLE",
+	"AWS_ENDPOINT_URL",
+	"AWS_ENDPOINT_URL_S3",
+	"AWS_ENDPOINT_URL_STS",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
+	"HTTPS_PROXY",
+	"HTTP_PROXY",
+}
+
+// Mountpoint arguments that change where, or whether securely and signed, S3 traffic goes.
+var tlsAndEndpointArgs = []string{
+	"--endpoint-url",
+	mountpoint.ArgCABundle,
+	"--no-sign-request",
+}
+
+// With nothing in the PV asking for it, the options csi-node sends a Mountpoint carry no TLS, endpoint or
+// signing override, so Mountpoint keeps its defaults: HTTPS to the regional S3 endpoint, signed with SigV4.
+// TLS itself is negotiated by Mountpoint's CRT client, outside this repository.
+func TestDaemonsetMounter_SendsNoTLSOrEndpointOverrideByDefault(t *testing.T) {
+	testCtx := setupDM(t)
+	for _, key := range tlsAndEndpointEnv {
+		t.Setenv(key, "https://attacker.example.com")
+	}
+
+	got := testCtx.mountAndServe(testCtx.podUID, nil)
+
+	for _, entry := range got.Env {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(tlsAndEndpointEnv, key) {
+			t.Errorf("csi-node passed its own %s to Mountpoint: %q", key, entry)
+		}
+	}
+	args := mountpoint.ParseArgs(got.Args)
+	for _, key := range tlsAndEndpointArgs {
+		if value, ok := args.Value(key); ok {
+			t.Errorf("csi-node added %s=%q to Mountpoint's arguments", key, value)
+		}
+	}
+}
+
+// csi-node hands credentials to the mounter in the options it sends; at the most verbose level it must
+// log that it sent them, never what they are. The provider here returns the credentials in the
+// environment, the most exposed place it could put them, so nothing short of logging the options hides them.
+func TestDaemonsetMounter_MountLogsNoCredentials(t *testing.T) {
+	const (
+		accessKeyID     = "AKIAIOSFODNN7EXAMPLE"
+		secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+		sessionToken    = "IQoJb3JpZ2luX2VjEXAMPLESESSIONTOKEN"
+	)
+	testCtx := setupDM(t)
+	provider := mock_credentialprovider.NewMockProviderInterface(gomock.NewController(t))
+	provider.EXPECT().Provide(gomock.Any(), gomock.Any()).Return(envprovider.Environment{
+		envprovider.EnvAccessKeyID:     accessKeyID,
+		envprovider.EnvSecretAccessKey: secretAccessKey,
+		envprovider.EnvSessionToken:    sessionToken,
+	}, credentialprovider.AuthenticationSourceDriver, nil).AnyTimes()
+	provider.EXPECT().Cleanup(gomock.Any()).Return(nil).AnyTimes()
+	testCtx.useCredProvider(provider)
+
+	logs := testutil.CaptureKlogAtVerbosity(t, 10)
+	got := testCtx.mountAndServe(testCtx.podUID, nil)
+	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, testCtx.targetPath(testCtx.podUID), credentialprovider.CleanupContext{
+		WritePath: testCtx.commDir,
+		PodID:     testCtx.podUID,
+		VolumeID:  testCtx.volumeID,
+		MountKind: credentialprovider.MountKindDaemonset,
+	}))
+
+	// Guards the check below: had the credentials not reached the options, there would be nothing to leak.
+	if !slices.Contains(got.Env, envprovider.EnvSecretAccessKey+"="+secretAccessKey) {
+		t.Fatalf("expected the provider's credentials in the options sent to the mounter, got %v", got.Env)
+	}
+	testutil.AssertNoCredentialsLogged(t, logs(), accessKeyID, secretAccessKey, sessionToken)
+}
+
+// With `requiresRepublish: true`, the kubelet calls NodePublishVolume on a running pod's target
+// periodically. A healthy mount must keep serving across those calls: never remounted, never unmounted.
+func TestDaemonsetMounter_HealthyMountKeepsServingAcrossRepublishes(t *testing.T) {
+	testCtx := setupDM(t)
+	target := testCtx.targetPath(testCtx.podUID)
+	source := mounter.SourceMountPath(testCtx.kubeletPath, testCtx.volumeID)
+	testCtx.mountAndServe(testCtx.podUID, nil)
+
+	// From here a FUSE mount would mean the healthy mount was replaced.
+	newFUSEMounts := 0
+	testCtx.mountSyscall = func(string, mpmounter.MountOptions) (int, error) {
+		newFUSEMounts++
+		return 0, errors.New("a republish of a healthy target must not mount again")
+	}
+
+	const republishes = 5
+	for range republishes {
+		err := testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, testCtx.driverProvideCtx(testCtx.podUID),
+			nil, mountpoint.ParseArgs(nil), "", nil)
+		assert.NoError(t, err)
+	}
+
+	assert.Equals(t, 0, newFUSEMounts)
+	for _, action := range testCtx.mount.GetLog() {
+		if action.Action == mountutils.FakeActionUnmount {
+			t.Errorf("a republish of a healthy target unmounted %s", action.Target)
+		}
+	}
+	mounted := func(path string) bool {
+		return slices.ContainsFunc(testCtx.mount.MountPoints, func(mp mountutils.MountPoint) bool { return mp.Path == path })
+	}
+	assert.Equals(t, true, mounted(source))
+	assert.Equals(t, true, mounted(target))
+
+	// Still one consumer: a republish is not a new pod, so the one unpublish tears the source down.
+	// Had the republishes counted as consumers, the source would outlive its only pod.
+	err := testCtx.dm.Unmount(testCtx.ctx, target, credentialprovider.CleanupContext{
+		WritePath: testCtx.commDir,
+		PodID:     testCtx.podUID,
+		VolumeID:  testCtx.volumeID,
+		MountKind: credentialprovider.MountKindDaemonset,
+	})
+	assert.NoError(t, err)
+	testCtx.assertUnmounted(target)
+	testCtx.assertUnmounted(source)
 }

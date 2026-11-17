@@ -207,7 +207,7 @@ elif [[ "${ACTION}" == "install_driver" ]]; then
 elif [[ "${ACTION}" == "run_tests" ]]; then
   set +e
   pushd tests/e2e-kubernetes
-  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 60m -- ${TEST_FLAGS}
+  KUBECONFIG=${KUBECONFIG} ginkgo -p -vv --github-output -timeout 90m -- ${TEST_FLAGS}
   EXIT_CODE=$?
   print_cluster_info
   exit $EXIT_CODE

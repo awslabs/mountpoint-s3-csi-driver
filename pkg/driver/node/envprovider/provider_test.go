@@ -308,10 +308,38 @@ func TestParseUserEnvFromVolumeContext(t *testing.T) {
 		},
 	}
 
+	// Only proxy settings are allowed, so a PV cannot point Mountpoint at another CA bundle or endpoint, or
+	// replace its credentials.
+	for _, tc := range []struct{ key, why string }{
+		{"AWS_CA_BUNDLE", "it would trust another CA bundle"},
+		{"AWS_ENDPOINT_URL", "it would send every request to another endpoint"},
+		{"AWS_ENDPOINT_URL_S3", "it would send S3 requests to another endpoint"},
+		{"AWS_ENDPOINT_URL_STS", "it would send STS requests to another endpoint"},
+		{"SSL_CERT_FILE", "it would trust another certificate file"},
+		{"SSL_CERT_DIR", "it would trust another certificate directory"},
+		{"AWS_ACCESS_KEY_ID", "it would replace the mount's credentials"},
+		{"AWS_SECRET_ACCESS_KEY", "it would replace the mount's credentials"},
+		{"AWS_PROFILE", "it would switch to another credentials profile"},
+	} {
+		testCases = append(testCases, struct {
+			name      string
+			volumeCtx map[string]string
+			want      envprovider.Environment
+			errMsg    string
+		}{
+			name:      "failed, mountpointEnv." + tc.key + " not allowed, as " + tc.why,
+			volumeCtx: map[string]string{"mountpointEnv." + tc.key: "http://attacker.example.com"},
+			errMsg:    "environment variable not allowed: mountpointEnv." + tc.key,
+		})
+	}
+
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			userEnv, err := envprovider.ParseUserEnvFromVolumeContext(testCase.volumeCtx)
 			if testCase.errMsg != "" {
+				if err == nil {
+					t.Fatalf("Expected error %q, but got environment %v", testCase.errMsg, userEnv)
+				}
 				if !strings.Contains(err.Error(), testCase.errMsg) {
 					t.Errorf("Expected error message %q, but got %q", testCase.errMsg, err.Error())
 				}

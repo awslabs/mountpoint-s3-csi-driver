@@ -34,6 +34,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -47,6 +49,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/targetpath"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
@@ -212,46 +215,42 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 
 // Mount mounts the given S3 bucket at the target path with pod-sharing support.
 //
+// Two mounts are involved: the source is the volume's single FUSE mount (one Mountpoint process,
+// shared by every pod on this node using the PV), and the target is this pod's bind mount of the
+// source. A Mountpoint exit kills both.
+//
 // Flow:
-//  1. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
-//  2. If source is mounted, check source health:
-//     - Dead source → mark sourceMounted=false (fall through to step 3)
+//  1. If the target is still mounted but dead, fail with Aborted before touching any state (see
+//     deadTargetError). The pod's containers already hold that bind mount, so remounting the source
+//     would not reach them; the workload pod must be recreated. The dead target is deliberately left
+//     mounted, so a container that restarts in the meantime fails closed ("Transport endpoint is not
+//     connected") instead of seeing an empty node directory.
+//  2. Acquire per-volume lock via MountMap (serializes concurrent NodePublishVolume for same PV)
+//  3. If source is mounted, check source health:
+//     - Dead source → mark sourceMounted=false (fall through to step 4). Safe to remount: a pod
+//     already bound to this source would have a dead target too and stopped at step 1.
 //     - Healthy source → validate compatibility (reject incompatible params before any cred writes)
-//  3. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
+//  4. If source not mounted (fresh, dead-source recovery, or prior failed attempt):
 //     - Clean up any stale resources via cleanupMount (idempotent); fail mount if cleanup fails
 //     - Claim a UID from the allocator unless the entry already holds one
 //     - Write meta file (the durable record of that UID), set SourcePath/CommDir on the entry
-//  4. Provision credentials, written owned by the entry's UID (under lock to avoid race with
+//  5. Provision credentials, written owned by the entry's UID (under lock to avoid race with
 //     cleanup on failure)
-//  5. If target is already mounted (republish/retry): creds refreshed above, return early
-//  6. If source is mounted (healthy) → bind mount to new target, bump refcount
-//  7. If source not mounted → FUSE mount at source, send the UID to the mounter so it runs
+//  6. If target is already mounted (republish/retry): creds refreshed above, return early
+//  7. If source is mounted (healthy) → bind mount to new target, bump refcount
+//  8. If source not mounted → FUSE mount at source, send the UID to the mounter so it runs
 //     Mountpoint under it, bind mount source → target, set sourceMounted=true and refcount=1
 //
 // Error handling:
 //   - If fuseMount or bindMount fails, cleanupMount is called. If cleanup succeeds, the meta file is
 //     removed, the UID released and the map entry deleted (clean slate for next retry). If cleanup
-//     fails, all three are preserved so the next retry enters step 3 and retries cleanup before
+//     fails, all three are preserved so the next retry enters step 4 and retries cleanup before
 //     proceeding.
 //   - If credential provisioning fails and the source is not yet mounted, the meta file is removed,
 //     the UID released and the map entry deleted. If the source is already mounted all three are
 //     preserved.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
-
-	// Check target health
-	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
-	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
-	//   - (TargetDead, nil):    target mount is dead/corrupted — return nil.
-	//   - (_, err):             UNKNOWN — let kubelet retry.
-	targetState, targetErr := dm.CheckTargetState(ctx, target)
-	if targetErr != nil {
-		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
-	}
-	if targetState == TargetDead {
-		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a corrupted mount; not proceeding, pod re-creation %s required for recovery", target, credentialCtx.VolumeID, credentialCtx.WorkloadPodID)
-		return nil
-	}
 
 	// Extract PV name from target path
 	// Target path format: /var/lib/kubelet/pods/<podUID>/volumes/kubernetes.io~csi/<pv-name>/mount.
@@ -260,6 +259,20 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		return fmt.Errorf("failed to parse target path %q: %w", target, err)
 	}
 	volumeID := parsedTarget.VolumeID // This is the PV name
+
+	// Check target health
+	//   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
+	//   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
+	//   - (TargetDead, nil):    target mount is dead/corrupted — return Aborted (step 1, see deadTargetError).
+	//   - (_, err):             UNKNOWN — let kubelet retry.
+	targetState, targetErr := dm.CheckTargetState(ctx, target)
+	if targetErr != nil {
+		return fmt.Errorf("cannot determine health of target %q for volume %s, will retry: %w", target, credentialCtx.VolumeID, targetErr)
+	}
+	if targetState == TargetDead {
+		klog.V(2).Infof("DaemonsetMounter: target %s for volume %s is a dead mount, returning Aborted", target, volumeID)
+		return deadTargetError(volumeID, credentialCtx.WorkloadPodID, volumeCtx)
+	}
 
 	// Handle legacy mounts — only for healthy mounted targets that are NOT already tracked
 	// as V3 mounts. A target tracked in the V3 MountMap is a V3 republish and must skip the
@@ -318,6 +331,39 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
 	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter.commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
+}
+
+// deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited, for
+// example because the mounter pod serving it on this node restarted (the s3-csi-daemonset-mounter pod, or
+// a legacy V2 Mountpoint Pod). "Dead" is any errno mount-utils IsCorruptedMnt treats as a corrupted mount
+// (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN, EWOULDBLOCK); IsHealthyMountpoint logs which one at V(2).
+// A running container keeps the dead mount: a new mount at the target is not visible to it, so today the
+// workload pod has to be recreated.
+//
+// The code is Aborted because kubelet treats it as non-final: the volume keeps its state in kubelet's
+// actual state of world (and the mount directory is not removed), so NodeUnpublishVolume still runs
+// when the pod is deleted and unmounts the dead target. kubelet records the message as a FailedMount
+// Warning Event on the workload pod. Mount bails before touching any state, so a republish of a dead
+// target never churns credentials or the shared source.
+//
+// The action comes first so a truncated Event still carries it. Nothing is logged here at Error level:
+// the gRPC interceptor already logs the returned error.
+func deadTargetError(pvName, podUID string, volumeCtx map[string]string) error {
+	namespace, name := volumeCtx[volumecontext.CSIPodNamespace], volumeCtx[volumecontext.CSIPodName]
+	var pod string
+	switch {
+	case namespace != "" && name != "":
+		pod = fmt.Sprintf("%s/%s (%s)", namespace, name, podUID)
+	case name != "":
+		pod = fmt.Sprintf("%s (%s)", name, podUID)
+	case namespace != "":
+		pod = fmt.Sprintf("with UID %s in namespace %s", podUID, namespace)
+	default:
+		pod = "with UID " + podUID
+	}
+	msg := fmt.Sprintf("Mountpoint has stopped; delete and recreate this pod to remount the volume. "+
+		"Volume %s, pod %s", pvName, pod)
+	return status.Error(codes.Aborted, msg)
 }
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
@@ -969,7 +1015,7 @@ const (
 // Callers interpret:
 //   - (TargetAbsent, nil):  target is absent/fresh — proceed with mount.
 //   - (TargetHealthy, nil): target is healthy and mounted (republish/legacy).
-//   - (TargetDead, nil):    target mount is dead/corrupted — do NOT proceed (return nil).
+//   - (TargetDead, nil):    target mount is dead/corrupted — do NOT proceed (Mount returns Aborted).
 //   - (_, err):             UNKNOWN — let kubelet retry.
 func (dm *DaemonsetMounter) CheckTargetState(ctx context.Context, target string) (TargetState, error) {
 	type result struct {
