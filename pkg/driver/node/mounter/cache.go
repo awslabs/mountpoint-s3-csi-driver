@@ -20,7 +20,7 @@ const (
 	CacheVolumeName = "cache"
 )
 
-// deprecatedVolumeAttributes are v2 PV settings for the cache volume in Mountpoint pods.
+// deprecatedVolumeAttributes are deprecated PV settings for the cache volume in Mountpoint pods.
 var deprecatedVolumeAttributes = []string{
 	volumecontext.CacheEmptyDirMedium,
 	volumecontext.CacheEmptyDirSizeLimit,
@@ -56,7 +56,7 @@ func cacheVolumeSummary(cacheVolume *corev1.Volume) string {
 }
 
 // validateCacheRequest returns whether this mount caches, or an InvalidArgument error for a cache request it cannot serve.
-func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, volumeID string, mounterHasCache, newTarget bool) (caches bool, err error) {
+func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, volumeID string, mounter *mounterPod, newTarget bool) (caches bool, err error) {
 	pvCache := volumeCtx[volumecontext.Cache]
 	cacheViaMountOptions := args.Has(mountpoint.ArgCache)
 
@@ -84,17 +84,18 @@ func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, vol
 			volumeID, volumecontext.Cache, pvCache, volumecontext.CacheEnabled, volumecontext.CacheDisabled)
 	}
 
-	if !mounterHasCache {
+	if mounter.cacheVolume == nil {
 		return false, status.Errorf(codes.InvalidArgument,
-			"Volume %s requests a local cache, but s3-csi-daemonset-mounter has no cache volume."+
-				" Add a cache block to this node's daemonsetMounters[] entry in the Helm values and restart its pods.", volumeID)
+			"Volume %s requests a local cache, but %s has no cache volume."+
+				" Add a cache block to its daemonsetMounters[] entry in the Helm values.", volumeID, mounter.daemonSetName)
 	}
 
 	return true, nil
 }
 
-// warnDeprecatedCacheSettings warns about a PV's v2 settings
-func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, nodeCache *corev1.Volume) {
+// warnDeprecatedCacheSettings warns about a PV's deprecated settings.
+func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, mounter *mounterPod) {
+	nodeCache := mounter.cacheVolume
 	pvCache := volumeCtx[volumecontext.Cache]
 	var mismatch string
 
@@ -115,8 +116,8 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, n
 	}
 	if mismatch != "" {
 		klog.Warningf("NodePublishVolume: volume %s requests cache %q, but its %s differs from this node's cache volume, which"+
-			" s3-csi-daemonset-mounter uses instead. Set %q to %q to use this node's cache without this warning.",
-			volumeID, pvCache, mismatch, volumecontext.Cache, volumecontext.CacheEnabled)
+			" %s uses instead. Set %q to %q to use this node's cache without this warning.",
+			volumeID, pvCache, mismatch, mounter.daemonSetName, volumecontext.Cache, volumecontext.CacheEnabled)
 	}
 
 	// No cache type mismatch: warn if v2 cache sizes are set (CacheEmptyDirSizeLimit / CacheEphemeralStorageResourceRequest)
@@ -128,11 +129,11 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, n
 		}
 	}
 	if len(deprecated) > 0 {
-		klog.Warningf("NodePublishVolume: volume %s sets the deprecated volume attributes %q. Remove them:"+
-			" every mount runs in this node's mounter pod, which its daemonsetMounters[] entry in the Helm values configures, and a PV opts in with %q set to %q.",
+		klog.Warningf("NodePublishVolume: volume %s sets the deprecated volume attributes %q. Remove them from the PV:"+
+			" a PV only needs %q set to %q to enable cache.",
 			volumeID, deprecated, volumecontext.Cache, volumecontext.CacheEnabled)
 	} else if mismatch == "" && (pvCache == volumecontext.CacheTypeEmptyDir || pvCache == volumecontext.CacheTypeEphemeral) {
-		klog.Warningf("NodePublishVolume: volume %s sets the v2 %q value %q. Set it to %q to use this node's cache without this warning.",
+		klog.Warningf("NodePublishVolume: volume %s sets the deprecated %q value %q. Set it to %q to use this node's cache without this warning.",
 			volumeID, volumecontext.Cache, pvCache, volumecontext.CacheEnabled)
 	}
 }

@@ -203,7 +203,11 @@ func TestValidateCacheRequest(t *testing.T) {
 				t.Run(testCase.name, func(t *testing.T) {
 					args := mountpoint.ParseArgs(testCase.mountOptions)
 
-					caches, err := validateCacheRequest(args, testCase.volumeCtx, volumeID, testCase.mounterHasCache, true)
+					mounter := &mounterPod{}
+					if testCase.mounterHasCache {
+						mounter.cacheVolume = &corev1.Volume{Name: CacheVolumeName}
+					}
+					caches, err := validateCacheRequest(args, testCase.volumeCtx, volumeID, mounter, true)
 
 					if testCase.expectedErrContains != "" {
 						if err == nil {
@@ -226,8 +230,8 @@ func TestCacheHelpersWithoutNodeCacheOrClaimTemplate(t *testing.T) {
 	noClaimTemplate := &corev1.Volume{VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}}
 	cacheVolumeSummary(noClaimTemplate)
 	for _, nodeCache := range []*corev1.Volume{nil, noClaimTemplate} {
-		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir}, "test-volume-id", nodeCache)
-		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral}, "test-volume-id", nodeCache)
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEmptyDir}, "test-volume-id", &mounterPod{cacheVolume: nodeCache})
+		warnDeprecatedCacheSettings(map[string]string{volumecontext.Cache: volumecontext.CacheTypeEphemeral}, "test-volume-id", &mounterPod{cacheVolume: nodeCache})
 	}
 }
 

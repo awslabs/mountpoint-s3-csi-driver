@@ -124,6 +124,9 @@ func setupDM(t *testing.T) *dmTestCtx {
 			Namespace: "kube-system",
 			UID:       types.UID(mounterPodUID),
 			Labels:    map[string]string{"app": "s3-csi-daemonset-mounter"},
+			OwnerReferences: []metav1.OwnerReference{
+				{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "s3-csi-daemonset-mounter-gpu", UID: "mounter-ds-uid", Controller: ptr.To(true)},
+			},
 		},
 		Spec: corev1.PodSpec{
 			NodeName: nodeName,
@@ -1382,7 +1385,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 				nodeCache: disk,
 				volumeCtx: map[string]string{"cache": "ephemeral", "cacheEphemeralStorageClassName": "gp3"},
 				wantWarnings: []string{
-					`requests cache "ephemeral", but its cache type differs from this node's cache volume, which s3-csi-daemonset-mounter uses instead`,
+					`requests cache "ephemeral", but its cache type differs from this node's cache volume, which s3-csi-daemonset-mounter-gpu uses instead`,
 					`sets the deprecated volume attributes ["cacheEphemeralStorageClassName"]`,
 				},
 			},
@@ -1421,7 +1424,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 				name:         "a plain emptyDir PV on a node disk cache is still warned about",
 				nodeCache:    disk,
 				volumeCtx:    map[string]string{"cache": "emptyDir", "cacheEmptyDirMedium": ""},
-				wantWarnings: []string{`sets the v2 "cache" value "emptyDir". Set it to "enabled"`},
+				wantWarnings: []string{`sets the deprecated "cache" value "emptyDir". Set it to "enabled"`},
 			},
 			// Sizes
 			{
