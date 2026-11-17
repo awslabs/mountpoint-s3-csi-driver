@@ -15,8 +15,8 @@ import (
 //
 // It is the MounterMaxVolumesLabel of this node's running mounter. A node pod with no mounter still serves the
 // volumes already on its node, which need unmounting (and those V1 and V2 mounted, credential refresh), so it
-// registers right away, advertising the fallback limit: the smallest maxVolumesPerNode of the chart's
-// daemonsetMounters entries, so no more than the mounter that comes to run here takes. The startup taint, not
+// registers right away, advertising the fallback limit: its own pair's mounter.maxVolumesPerNode, which the
+// mounter that comes to run here takes. The startup taint, not
 // registration, keeps workloads off a new node until its mounter runs.
 const (
 	// defaultStaleVolumeLimitWarnAfter is how long kubelet can keep a limit that no longer holds, without
@@ -117,9 +117,9 @@ func (dm *DaemonsetMounter) currentVolumeLimit(ctx context.Context) (int64, stri
 		running, err := dm.runningMounterPods(ctx)
 		switch {
 		case errors.Is(err, ErrMultipleMounterPods):
-			// New mounts fail until only one runs, and the fallback is no more than either takes.
+			// New mounts fail until only one runs, and the fallback is this pair's own limit.
 		case err != nil:
-			return 0, "", false, fmt.Errorf("can't tell whether an s3-csi-daemonset-mounter runs on node %s, so it can't "+
+			return 0, "", false, fmt.Errorf("can't tell whether a mounter runs on node %s, so it can't "+
 				"tell its volume limit: %w", dm.nodeID, err)
 		case len(running) == 1:
 			maxVolumes, found = mounterPodMaxVolumes(running[0]), true
@@ -128,20 +128,20 @@ func (dm *DaemonsetMounter) currentVolumeLimit(ctx context.Context) (int64, stri
 		}
 	}
 
-	const fallback = "the smallest maxVolumesPerNode of the daemonsetMounters entries"
+	const fallback = "its pair's mounter.maxVolumesPerNode"
 	switch {
 	case !found:
-		return dm.fallbackVolumeLimit, "no s3-csi-daemonset-mounter runs on this node yet, so new S3 mounts on it fail " +
+		return dm.fallbackVolumeLimit, "no mounter runs on this node yet, so new S3 mounts on it fail " +
 			"until one does. Until then it advertises " + fallback, false, nil
 	case maxVolumes < 0:
-		return dm.fallbackVolumeLimit, "its s3-csi-daemonset-mounter has no valid " + MounterMaxVolumesLabel +
+		return dm.fallbackVolumeLimit, "its mounter has no valid " + MounterMaxVolumesLabel +
 			" label, so it advertises " + fallback, true, nil
 	case maxVolumes == 0:
-		return 0, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label is 0. The scheduler will not " +
+		return 0, "its mounter's " + MounterMaxVolumesLabel + " label is 0. The scheduler will not " +
 			"limit the number of S3 volumes on this node, which may lead to resource exhaustion (memory OOM, or disk " +
-			"exhaustion when cache is enabled) on s3-csi-daemonset-mounter", true, nil
+			"exhaustion when cache is enabled) on the mounter", true, nil
 	default:
-		return maxVolumes, "its s3-csi-daemonset-mounter's " + MounterMaxVolumesLabel + " label", false, nil
+		return maxVolumes, "its mounter's " + MounterMaxVolumesLabel + " label", false, nil
 	}
 }
 
@@ -168,7 +168,7 @@ func (dm *DaemonsetMounter) warnIfVolumeLimitStale() {
 		return
 	}
 	s.staleWarned, s.staleWarnedFor = true, limit
-	klog.Warningf("DaemonsetMounter: the volume limit kubelet has for node %s is %s, but its s3-csi-daemonset-mounter's is %s, "+
+	klog.Warningf("DaemonsetMounter: the volume limit kubelet has for node %s is %s, but its mounter's is %s, "+
 		"and kubelet hasn't re-read it for %v. Kubelet re-reads it only where the MutableCSINodeAllocatableCount feature is on "+
 		"(EKS 1.34 and later, Kubernetes 1.35 and later); elsewhere, restart this node's s3-csi-node pod so it registers again: "+
 		"`kubectl delete pod -n %s -l app=s3-csi-node --field-selector spec.nodeName=%s`",

@@ -71,7 +71,7 @@ const (
 	mounterWaitBeforeServing = 5 * time.Second
 
 	// fallbackMaxVolumesPerNodeEnv is the volume limit to advertise while no mounter runs on this node, which the
-	// chart sets to the smallest daemonsetMounters[].maxVolumesPerNode. Unset means none.
+	// chart sets to this pair's mounter.maxVolumesPerNode. Unset means none.
 	fallbackMaxVolumesPerNodeEnv = "FALLBACK_MAX_VOLUMES_PER_NODE"
 )
 

@@ -814,7 +814,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error when the mounter pod is not discovered")
 			}
-			assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
+			assert.Contains(t, err.Error(), "no usable mounter on node")
 			if mountSyscallCalled {
 				t.Error("mountSyscall should not be called when the mounter pod is not available")
 			}
@@ -1376,7 +1376,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 
 		// A cache request now reports the missing mounter rather than reading the dropped cache volume.
 		err = mountWithoutServing(testCtx, testCtx.ctx, "pod-while-stale", cacheRequest)
-		assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
+		assert.Contains(t, err.Error(), "no usable mounter on node")
 
 		// Simulate mounter is back + rerun discovery, but has no cache volume;
 		// PV accepted above (reached Send before) is now rejected.
@@ -1808,7 +1808,7 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
 
 	// Mount should NOT return nil — it should proceed past the health check and eventually
-	// error out downstream (e.g. "no usable s3-csi-daemonset-mounter on node" since we didn't set up
+	// error out downstream (e.g. "no usable mounter on node" since we didn't set up
 	// the mounter pod). The key assertion is that err != nil (it tried to mount) rather
 	// than err == nil (it bailed like a corrupted target).
 	assert.Equals(t, true, err != nil)

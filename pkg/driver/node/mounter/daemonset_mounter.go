@@ -355,7 +355,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 }
 
 // deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited, for
-// example because the mounter pod serving it on this node restarted (the s3-csi-daemonset-mounter pod, or
+// example because the mounter pod serving it on this node restarted (the mounter pod, or
 // a legacy V2 Mountpoint Pod). "Dead" is any errno mount-utils IsCorruptedMnt treats as a corrupted mount
 // (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN, EWOULDBLOCK); IsHealthyMountpoint logs which one at V(2).
 // A running container keeps the dead mount: a new mount at the target is not visible to it, so today the
@@ -928,7 +928,7 @@ func helpMessageForGettingMounterLogs() string {
 func helpMessageForCheckingMounterPodStatus() string {
 	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
-		"More than one on a node means more than one daemonsetMounters entry selects it", mounterNamespace)
+		"More than one on a node means more than one pair matches it", mounterNamespace)
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.

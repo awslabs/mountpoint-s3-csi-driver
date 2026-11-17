@@ -90,7 +90,7 @@ func TestVolumeLimit(t *testing.T) {
 
 		_, err := dm.VolumeLimit(ctx)
 
-		assert.Contains(t, err.Error(), "can't tell whether an s3-csi-daemonset-mounter runs on node test-node")
+		assert.Contains(t, err.Error(), "can't tell whether a mounter runs on node test-node")
 		// Kubelet never got a limit, so there's none it has.
 		assert.Equals(t, true, dm.limit.advertisedAt.IsZero())
 	})
@@ -117,7 +117,7 @@ func TestVolumeLimit(t *testing.T) {
 		dm.VolumeLimit(ctx)
 		dm.VolumeLimit(ctx)
 
-		assert.Equals(t, 1, strings.Count(logs.String(), "advertising no volume limit for node test-node: no s3-csi-daemonset-mounter runs on this node yet"))
+		assert.Equals(t, 1, strings.Count(logs.String(), "advertising no volume limit for node test-node: no mounter runs on this node yet"))
 		assert.Equals(t, 1, strings.Count(logs.String(), "advertising a volume limit of 3 for node test-node"))
 	})
 
@@ -129,13 +129,13 @@ func TestVolumeLimit(t *testing.T) {
 		dm.setMounter(&mounterPod{maxVolumes: 0})
 		dm.VolumeLimit(ctx)
 
-		assert.Contains(t, logs.String(), "advertising no volume limit for node test-node: its s3-csi-daemonset-mounter's "+MounterMaxVolumesLabel+" label is 0")
+		assert.Contains(t, logs.String(), "advertising no volume limit for node test-node: its mounter's "+MounterMaxVolumesLabel+" label is 0")
 	})
 }
 
 func TestWarnIfVolumeLimitStale(t *testing.T) {
 	ctx := context.Background()
-	const stale = "the volume limit kubelet has for node test-node is none, but its s3-csi-daemonset-mounter's is 4"
+	const stale = "the volume limit kubelet has for node test-node is none, but its mounter's is 4"
 
 	t.Run("warns once when kubelet keeps a limit that no longer holds", func(t *testing.T) {
 		dm := limitDM(t)
@@ -164,7 +164,7 @@ func TestWarnIfVolumeLimitStale(t *testing.T) {
 
 		dm.warnIfVolumeLimitStale()
 
-		assert.Contains(t, logs.String(), "the volume limit kubelet has for node test-node is 2, but its s3-csi-daemonset-mounter's is 4")
+		assert.Contains(t, logs.String(), "the volume limit kubelet has for node test-node is 2, but its mounter's is 4")
 	})
 
 	t.Run("warns again when the same limit goes stale again after kubelet caught up", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestMountWithNoMounterLooksForOneRightAway(t *testing.T) {
 	err := dm.Mount(context.Background(), "bucket", target, credentialprovider.ProvideContext{VolumeID: "pv"},
 		nil, mountpoint.ParseArgs(nil), "", nil)
 
-	assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node test-node yet")
+	assert.Contains(t, err.Error(), "no usable mounter on node test-node yet")
 	select {
 	case <-dm.rediscoverCh:
 	default:
