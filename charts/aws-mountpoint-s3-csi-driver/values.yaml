@@ -268,7 +268,7 @@ mounter:
 #
 # Removing or renaming an entry, or changing placement so a pair no longer matches a node (such as
 # narrowing the default pair's), makes helm upgrade delete its mounter there, which breaks every S3 mount
-# on that node. Drain those nodes first, then upgrade, then uncordon them.
+# that mounter serves. Drain those nodes first, then upgrade, then uncordon them.
 #
 # For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
 # additionalDaemonSets:

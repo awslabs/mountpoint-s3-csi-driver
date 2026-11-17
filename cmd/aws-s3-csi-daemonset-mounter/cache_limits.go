@@ -120,8 +120,8 @@ func (l cacheLimit) maxCacheSizeFor(volumeId string, args mountpoint.Args) (size
 		if !hasDeclared {
 			klog.Warningf("Volume %s does not set %s in its PV mountOptions and cache.limitStrategy=%s, "+
 				"so nothing bounds its share of the cache volume. Together the mounts on this node can fill it. "+
-				"Set %s in the PV mountOptions, or set mounter.cache.limitStrategy=%s to "+
-				"divide the cache volume evenly.",
+				"Set %s in the PV mountOptions, or set cache.limitStrategy=%s "+
+				"in this mounter's Helm values (under mounter, or its additionalDaemonSets entry's mounter) to divide the cache volume evenly.",
 				volumeId, mountpoint.ArgMaxCacheSize, cacheLimitNone, mountpoint.ArgMaxCacheSize,
 				cacheLimitEqualSplit)
 		}

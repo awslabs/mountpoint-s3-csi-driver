@@ -47,9 +47,8 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
-        {{- /* Quoted, since a nodeSelector takes only strings and YAML reads true or 1 as other types. */}}
         {{- range $k, $v := $node.nodeSelector }}
-        {{ $k }}: {{ toString $v | quote }}
+        {{ $k }}: {{ include "aws-mountpoint-s3-csi-driver.labelValue" $v | quote }}
         {{- end }}
       serviceAccountName: {{ $node.serviceAccount.name }}
       priorityClassName: system-node-critical

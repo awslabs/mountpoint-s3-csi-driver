@@ -128,7 +128,7 @@ func (l memoryLimit) targetFor(volumeId string, args mountpoint.Args) int64 {
 			klog.Warningf("Volume %s does not set %s in its PV mountOptions and "+
 				"memoryLimitStrategy=%s, so its Mountpoint targets 95%% of the memory it detects. "+
 				"Together the mounts on this node can exhaust it. Set %s in the PV mountOptions, or set "+
-				"mounter.memoryLimitStrategy=%s to divide this container's %s evenly.",
+				"memoryLimitStrategy=%s in this mounter's Helm values (under mounter, or its additionalDaemonSets entry's mounter) to divide this container's %s evenly.",
 				volumeId, mountpoint.ArgMemoryTarget, memoryLimitNone, mountpoint.ArgMemoryTarget,
 				memoryLimitEqualSplit, requestField)
 		}
@@ -138,7 +138,7 @@ func (l memoryLimit) targetFor(volumeId string, args mountpoint.Args) int64 {
 	if hasDeclared {
 		klog.Warningf("Ignoring %s=%s from the PV mountOptions of volume %s: memoryLimitStrategy=%s "+
 			"gives every Mountpoint on this node an equal %d MiB share of this container's %s. Set "+
-			"mounter.memoryLimitStrategy=%s to honour per-volume targets.",
+			"memoryLimitStrategy=%s in this mounter's Helm values (under mounter, or its additionalDaemonSets entry's mounter) to honour per-volume targets.",
 			mountpoint.ArgMemoryTarget, declared, volumeId, memoryLimitEqualSplit, l.shareMiB,
 			requestField, memoryLimitNone)
 	}

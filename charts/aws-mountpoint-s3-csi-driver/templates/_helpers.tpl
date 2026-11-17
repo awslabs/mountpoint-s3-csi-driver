@@ -124,14 +124,34 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 {{- end -}}
 
 {{/*
+A nodeSelector value as the string a node label holds. YAML reads true or 10000000 as other types, and toString would
+write 10000000 as 1e+07.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.labelValue" -}}
+{{- if kindIs "string" . }}{{ . }}{{ else }}{{ toJson . }}{{ end }}
+{{- end }}
+
+{{/*
+A node's placement (nodeSelector and affinity) as JSON, with nodeSelector values as rendered, to compare two pairs'.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.placement" -}}
+{{- $selector := dict }}
+{{- range $k, $v := .nodeSelector }}{{- $_ := set $selector $k (include "aws-mountpoint-s3-csi-driver.labelValue" $v) }}{{- end }}
+{{- toJson (dict "nodeSelector" $selector "affinity" (.affinity | default dict)) }}
+{{- end }}
+
+{{/*
 Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default from node and mounter, then
 one per additionalDaemonSets entry, which copies both except placement (node.nodeSelector and node.affinity).
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
+{{- if hasKey .Values "daemonsetMounters" }}
+{{- fail "daemonsetMounters was replaced by mounter, for the default mounter, and additionalDaemonSets, for more CSI node and mounter pairs" }}
+{{- end }}
 {{- $base := omit .Values.node "nodeSelector" "affinity" }}
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
-{{- $placements := list (toJson (dict "nodeSelector" (.Values.node.nodeSelector | default dict) "affinity" (.Values.node.affinity | default dict))) }}
+{{- $placements := list (include "aws-mountpoint-s3-csi-driver.placement" .Values.node) }}
 {{- $entries := .Values.additionalDaemonSets | default dict }}
 {{- range $name := keys $entries | sortAlpha }}
 {{- $entry := get $entries $name | default dict }}
@@ -152,7 +172,7 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- if not (or $entryNode.nodeSelector $entryNode.affinity) }}
 {{- fail (printf "additionalDaemonSets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
 {{- end }}
-{{- $placement := toJson (dict "nodeSelector" ($entryNode.nodeSelector | default dict) "affinity" ($entryNode.affinity | default dict)) }}
+{{- $placement := include "aws-mountpoint-s3-csi-driver.placement" $entryNode }}
 {{- if has $placement $placements }}
 {{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another pair, so every node it matches would run two" $name) }}
 {{- end }}

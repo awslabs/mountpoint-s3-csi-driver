@@ -114,7 +114,7 @@ func assertDeadTargetMessage(t *testing.T, msg, pvName, pod string) {
 	if strings.Contains(msg, "Likely cause") {
 		t.Errorf("error message %q guesses the cause; the Event should carry only the action and identity", msg)
 	}
-	if strings.Contains(msg, "s3-csi-daemonset-mounter") {
+	if strings.Contains(msg, "s3-csi-mounter") || strings.Contains(msg, "s3-csi-daemonset-mounter") {
 		t.Errorf("error message %q names the V3 mounter pod, which is wrong for legacy V1/V2 targets", msg)
 	}
 	for _, r := range msg {

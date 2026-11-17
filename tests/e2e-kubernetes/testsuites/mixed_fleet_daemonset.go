@@ -138,8 +138,11 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 					return nodePodLogs(ctx, f, working)
 				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(ContainSubstring("multiple running mounter pods found"))
 				// The new CSI node stops at the lock, before it logs its mounter mode, so it never reads or changes the node's mounts.
-				waiting := nodePodLogs(ctx, f, nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA))
-				Expect(waiting).To(ContainSubstring("another CSI node on this node holds"))
+				var waiting string
+				Eventually(ctx, func(ctx context.Context) string {
+					waiting = nodePodLogs(ctx, f, nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA))
+					return waiting
+				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(ContainSubstring("another CSI node on this node holds"))
 				Expect(nodePodLogs(ctx, f, working)).To(ContainSubstring("Using daemonset mounter mode"))
 				Expect(waiting).NotTo(ContainSubstring("Using daemonset mounter mode"))
 

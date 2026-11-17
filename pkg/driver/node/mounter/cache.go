@@ -54,7 +54,7 @@ func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, vol
 	if !mounterHasCache {
 		return false, status.Errorf(codes.InvalidArgument,
 			"Volume %s requests a local cache, but the mounter has no cache volume."+
-				" Add a mounter.cache block to the Helm values and restart its pods.", volumeID)
+				" Add a cache block in this mounter's Helm values (under mounter, or its additionalDaemonSets entry's mounter) and restart its pods.", volumeID)
 	}
 
 	return true, nil

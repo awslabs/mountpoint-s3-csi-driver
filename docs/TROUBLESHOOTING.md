@@ -194,11 +194,11 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 
 ### My node runs more than one `s3-csi-node` Pod
 
-The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node and serving its mounts, and the others log "another CSI node on this node holds ... node.lock" and wait. If the node matched more than one pair from its first start, no mounter holds its mounts, so new mounts on the node fail.
+The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node and serving its mounts, and the others log "another CSI node on this node holds ... node.lock" and wait. If a `s3-csi-node` Pod starts while more than one mounter runs and none of them holds the node's mounts, for example on a node that matched more than one pair from its first start, new mounts on the node can fail until only one mounter runs.
 
 To recover:
 
-1. Find the mounter that started first on each affected node. It serves the node's mounts, and the others have none:
+1. Find the mounter that started first on each affected node. If any mounter serves the node's mounts, it's this one, and the others have none:
    ```bash
    $ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name> --sort-by=.status.startTime
    ```
@@ -230,4 +230,4 @@ $ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nod
 
 ### My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
 
-More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it or a second Helm release. Only the first one works on the node; the others wait, serving nothing, until it exits. To fix it, see [My node runs more than one `s3-csi-node` Pod](#my-node-runs-more-than-one-s3-csi-node-pod), and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
+More than one `s3-csi-node` Pod runs on the node, because more than one pair matches it or a second Helm release runs one. Only the first one works on the node; the others wait, serving nothing, until it exits. If more than one pair matches it, see [My node runs more than one `s3-csi-node` Pod](#my-node-runs-more-than-one-s3-csi-node-pod); if a second release runs one, uninstall it. Don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
