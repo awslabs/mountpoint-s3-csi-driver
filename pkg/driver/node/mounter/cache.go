@@ -120,7 +120,7 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, m
 			volumeID, pvCache, mismatch, mounter.daemonSetName, volumecontext.Cache, volumecontext.CacheEnabled)
 	}
 
-	// No cache type mismatch: warn if v2 cache sizes are set (CacheEmptyDirSizeLimit / CacheEphemeralStorageResourceRequest)
+	// No cache type mismatch: warn if deprecated v2 cache sizes are set (CacheEmptyDirSizeLimit / CacheEphemeralStorageResourceRequest)
 	// nodeCache can be nil on a node, but the deprecated config warnings below still apply
 	var deprecated []string
 	for _, attr := range deprecatedVolumeAttributes {
