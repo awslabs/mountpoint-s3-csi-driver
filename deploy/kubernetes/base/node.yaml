@@ -129,6 +129,7 @@ spec:
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+            - --http-endpoint=:9809
           env:
             - name: ADDRESS
               value: /csi/csi.sock
@@ -139,14 +140,12 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
           livenessProbe:
-            exec:
-              command:
-                - /csi-node-driver-registrar
-                - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-                - --mode=kubelet-registration-probe
+            httpGet:
+              path: /healthz
+              port: 9809
             initialDelaySeconds: 30
-            timeoutSeconds: 15
-            periodSeconds: 90
+            timeoutSeconds: 5
+            periodSeconds: 10
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
