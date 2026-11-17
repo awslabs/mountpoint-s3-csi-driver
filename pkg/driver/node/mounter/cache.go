@@ -80,7 +80,7 @@ func validateCacheRequest(args mountpoint.Args, volumeCtx map[string]string, vol
 		// The valid cache values all enable caching.
 	default:
 		return false, status.Errorf(codes.InvalidArgument,
-			"Volume %s sets the %q volume attribute to %q. Set it to %q to use this node's cache, or %q for none.",
+			"Volume %s sets the %q volume attribute to %q. Set it to %q to enable cache, or %q for none.",
 			volumeID, volumecontext.Cache, pvCache, volumecontext.CacheEnabled, volumecontext.CacheDisabled)
 	}
 
@@ -133,7 +133,7 @@ func warnDeprecatedCacheSettings(volumeCtx map[string]string, volumeID string, m
 			" a PV only needs %q set to %q to enable cache.",
 			volumeID, deprecated, volumecontext.Cache, volumecontext.CacheEnabled)
 	} else if mismatch == "" && (pvCache == volumecontext.CacheTypeEmptyDir || pvCache == volumecontext.CacheTypeEphemeral) {
-		klog.Warningf("NodePublishVolume: volume %s sets the deprecated %q value %q. Set it to %q to use this node's cache without this warning.",
+		klog.Warningf("NodePublishVolume: volume %s sets the deprecated %q value %q. Set it to %q to enable cache without this warning.",
 			volumeID, volumecontext.Cache, pvCache, volumecontext.CacheEnabled)
 	}
 }
