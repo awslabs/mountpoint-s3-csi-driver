@@ -14,7 +14,7 @@
 // Mount:
 //
 //	CheckTargetState -> load mounterPod -> validateCacheRequest -> ProvideCredentials -> Mount (FUSE) -> Send -> waitForMount
-//	Stale commDir path? -> store nil, signal rediscoverCh, return error
+//	Send finds the mounter stale? -> clear it unless the watcher already replaced it, signal rediscoverCh, return error
 //
 // Background (StartCommDirWatch -> checkCommDir):
 //
@@ -247,6 +247,8 @@ func (dm *DaemonsetMounter) SetS3PACache(cache client.Reader) {
 //   - If credential provisioning fails and the source is not yet mounted, the meta file is removed,
 //     the UID released and the map entry deleted. If the source is already mounted all three are
 //     preserved.
+//   - If the mounter is stale when sending the mount request, it is cleared (unless the watcher
+//     already replaced it) and the watcher is signaled to rediscover.
 func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target string,
 	credentialCtx credentialprovider.ProvideContext, volumeCtx map[string]string, args mountpoint.Args, fsGroup string, userEnv envprovider.Environment) error {
 
@@ -328,7 +330,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// All paths (republish, share, new mount) go through mountOrShareSource
 	// which holds the per-volume lock and validates compatibility before any
 	// credential writes.
-	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter.commDir, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
+	return dm.mountOrShareSource(ctx, bucketName, target, volumeID, mounter, credentialCtx, args, fsGroup, userEnv, targetState == TargetHealthy)
 }
 
 // deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited, for
@@ -366,7 +368,7 @@ func deadTargetError(pvName, podUID string, volumeCtx map[string]string) error {
 
 // mountOrShareSource implements the pod-sharing Mount flow using MountMap.
 func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName string, target string,
-	volumeID string, commDir string, credentialCtx credentialprovider.ProvideContext,
+	volumeID string, mounter *mounterPod, credentialCtx credentialprovider.ProvideContext,
 	args mountpoint.Args, fsGroup string, userEnv envprovider.Environment, targetIsMounted bool) error {
 
 	entry := dm.lockCanonicalEntry(volumeID)
@@ -388,7 +390,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	if !entry.sourceMounted {
-		if err := dm.prepareFreshMount(entry, volumeID, commDir, incomingParams, credentialCtx); err != nil {
+		if err := dm.prepareFreshMount(entry, volumeID, mounter.commDir, incomingParams, credentialCtx); err != nil {
 			return err
 		}
 	}
@@ -400,7 +402,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 	}
 
 	// Provision credentials under the lock. We always use entry.CommDir which is set above
-	// (either from an existing healthy entry, or freshly assigned from commDir on new mount).
+	// (either from an existing healthy entry, or freshly assigned from the mounter's comm dir on new mount).
 	// This ensures credentials are written to the same location that cleanup will look at.
 	credsEnv, authSource, err := dm.provideCredentials(ctx, entry.CommDir, volumeID, entry.Uid, &credentialCtx)
 	if err != nil {
@@ -433,7 +435,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 
 	// New mount: FUSE mount at source, then bind to target.
 
-	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, commDir, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
+	if err := dm.fuseMount(ctx, bucketName, entry.SourcePath, volumeID, mounter, entry.Uid, args, userEnv, credsEnv, authSource); err != nil {
 		if tearErr := dm.teardownEntry(volumeID, entry, credentialCtx.ToCleanupCtx()); tearErr != nil {
 			klog.Errorf("DaemonsetMounter: cleanup after fuseMount failed for volume %s: %v (will retry)", volumeID, tearErr)
 		}
@@ -547,9 +549,9 @@ func (dm *DaemonsetMounter) prepareFreshMount(entry *MountEntry, volumeID, commD
 
 // fuseMount performs the FUSE mount + FD send + wait cycle at the given path.
 // Credentials are already provisioned by the caller (Mount).
-// commDir comes from the caller's single mounterPod load per NodePublishVolume.
+// mounter is the caller's single mounterPod load per NodePublishVolume.
 func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mountPath string,
-	volumeID string, commDir string, uid uint32, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
+	volumeID string, mounter *mounterPod, uid uint32, args mountpoint.Args, userEnv envprovider.Environment, credsEnv envprovider.Environment, authSource credentialprovider.AuthenticationSource) error {
 
 	if err := os.MkdirAll(mountPath, targetDirPerm); err != nil {
 		return fmt.Errorf("failed to create mount directory %q: %w", mountPath, err)
@@ -591,8 +593,8 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 		env.Set(envprovider.EnvMaxAttempts, maxAttempts)
 	}
 
-	sockPath := filepath.Join(commDir, MountSockName)
-	errFilePath := filepath.Join(commDir, GetErrorFileName(volumeID))
+	sockPath := filepath.Join(mounter.commDir, MountSockName)
+	errFilePath := filepath.Join(mounter.commDir, GetErrorFileName(volumeID))
 	os.Remove(errFilePath)
 
 	klog.V(4).Infof("DaemonsetMounter: sending mount options (mount %s) to %s", volumeID, sockPath)
@@ -612,7 +614,8 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || os.IsPermission(err) || errors.Is(err, context.DeadlineExceeded) {
 			klog.V(4).Infof("DaemonsetMounter: comm dir may be stale, signaling re-discovery")
-			dm.mounter.Store(nil)
+			// Clear only the mounter this mount used, not one the watcher has rediscovered since.
+			dm.mounter.CompareAndSwap(mounter, nil)
 			select {
 			case dm.rediscoverCh <- struct{}{}:
 			default:
