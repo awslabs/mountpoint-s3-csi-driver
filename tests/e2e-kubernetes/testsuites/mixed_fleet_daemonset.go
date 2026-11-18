@@ -50,7 +50,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"daemonset-mixed-fleet", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
-	// Serial and Ordered: each Context reinstalls the mounters via Helm, which restarts every Mountpoint on every node.
+	// Serial and Ordered: each Context reinstalls the mounters, which restarts every Mountpoint on every node.
 	Describe("A mounter entry per kind of node", Ordered, ContinueOnFailure, Serial, func() {
 		var (
 			config     *storageframework.PerTestConfig

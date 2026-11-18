@@ -134,7 +134,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"daemonset-cache", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
-	// Serial and Ordered: each cache type reinstalls the mounter via Helm, which restarts every Mountpoint on every node.
+	// Serial and Ordered: each cache type reinstalls the mounter, which restarts every Mountpoint on every node.
 	// ContinueOnFailure, so a failed spec does not skip the cache types after it (a failed BeforeAll still does).
 	Describe("Local cache on the mounter DaemonSet", Ordered, ContinueOnFailure, Serial, func() {
 		var (

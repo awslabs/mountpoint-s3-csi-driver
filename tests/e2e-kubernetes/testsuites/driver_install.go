@@ -16,14 +16,15 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
-// Helpers for Serial e2e suites that reconfigure the installed driver with other values and restore the installed ones.
+// Helpers for Serial e2e suites that reconfigure the installed driver, a Helm release or the EKS add-on, with other values
+// and restore the installed ones.
 
 // TODO: the cache suite and the driver_install files borrow these from other files. The ones outside util.go could
 // move into util.go, or into driver_install_helm.go for the Helm ones, in a future refactor.
 //   - pod_sharing_daemonset.go: assertPodFailsToMount, isPodReady
 //   - process_isolation_daemonset.go: statPath, commDirHostPath, mountpointProcessRunningAs
 //   - cache.go: createEBSCacheSC, ebsCSIDriverDaemonSet, deleteObjectFromS3
-//   - credentials.go: contextWithVolumeAttributes
+//   - credentials.go: contextWithVolumeAttributes, ClusterName
 //   - upgrade_and_rollback.go: initHelmClient, helmChartSource, helmChartName, helmReleaseNamespace
 //   - taint_removal.go: mounterDaemonSetName
 //   - util.go: createVolumeResourceWithMountOptions, bucketNameFromVolumeResource, createPod, createPodWithoutWaiting,
@@ -61,13 +62,10 @@ type driverInstall interface {
 // setUpDriverRelease reads the driver's install and registers its restore. Call it from a BeforeAll in an Ordered, Serial container.
 func setUpDriverRelease(ctx context.Context, f *framework.Framework) *driverRelease {
 	GinkgoHelper()
-	_, helmCfg := initHelmClient()
-	ch, err := loader.Load(helmChartSource)
-	framework.ExpectNoError(err, "loading the working-tree chart at %s", helmChartSource)
-	r := &driverRelease{install: newHelmInstall(helmCfg, csiDriverReleaseName(helmCfg), ch), affinity: csiNodeAffinity(ctx, f)}
+	cleanupF := teardownSafeFramework(f)
+	r := &driverRelease{install: findDriverInstall(ctx, cleanupF), affinity: csiNodeAffinity(ctx, f)}
 	r.installed = r.install.read()
 
-	cleanupF := teardownSafeFramework(f)
 	DeferCleanup(func(ctx context.Context) { r.install.restore(ctx, cleanupF) })
 	return r
 }
@@ -84,6 +82,24 @@ func csiNodeAffinity(ctx context.Context, f *framework.Framework) map[string]any
 	return affinity
 }
 
+// findDriverInstall returns how the driver is installed: as the chart's one Helm release or, with none, as the EKS add-on.
+func findDriverInstall(ctx context.Context, f *framework.Framework) driverInstall {
+	GinkgoHelper()
+	_, helmCfg := initHelmClient()
+	names := csiDriverReleaseNames(helmCfg)
+	switch len(names) {
+	case 0:
+		return newAddonInstall(ctx, f)
+	case 1:
+		// Only a Helm install needs the chart, which helm upgrade renders. EKS renders the add-on's own.
+		ch, err := loader.Load(helmChartSource)
+		framework.ExpectNoError(err, "loading the working-tree chart at %s", helmChartSource)
+		return newHelmInstall(helmCfg, names[0], ch)
+	}
+	Fail(fmt.Sprintf("expected at most one installed %q release, found %v", helmChartName, names))
+	return nil
+}
+
 // teardownSafeFramework returns a framework a BeforeAll DeferCleanup can still use: those run *after* the framework's AfterEach
 // nils f.ClientSet, so closing over f panics. Every helper these cleanups call uses only ClientSet.
 func teardownSafeFramework(f *framework.Framework) *framework.Framework {
@@ -98,17 +114,17 @@ func (r *driverRelease) upgrade(ctx context.Context, f *framework.Framework, val
 	r.install.settle(ctx)
 }
 
-// upgradeOnly makes values the install's without replacing any driver pod, as a customer's helm upgrade does.
+// upgradeOnly makes values the install's without replacing any driver pod, as a customer's helm upgrade or update-addon does.
 func (r *driverRelease) upgradeOnly(ctx context.Context, values map[string]any) {
 	GinkgoHelper()
 	r.install.apply(ctx, values)
 	r.install.settle(ctx)
 }
 
-// restartDriverPods replaces the driver pods so they run the release as it is now.
+// restartDriverPods replaces the driver pods so they run the install as it is now.
 func restartDriverPods(ctx context.Context, f *framework.Framework) {
 	GinkgoHelper()
-	// The mounter is OnDelete, so a release change alone changes none of its pods.
+	// The mounter is OnDelete, so a change to the install alone changes none of its pods.
 	By("Restarting the mounter pods, then the s3-csi-node pods")
 	deletePods(ctx, f, mounterPodLabel)
 	for _, name := range daemonSetNames(ctx, f, mounterDaemonSetName) {

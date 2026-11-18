@@ -71,9 +71,9 @@ func (h *helmInstall) restore(ctx context.Context, f *framework.Framework) {
 	restartDriverPods(ctx, f)
 }
 
-// csiDriverReleaseName finds the installed release of this chart. Not helmReleaseName: CI installs that (scripts/run.sh) but
+// csiDriverReleaseNames finds the installed releases of this chart. Not helmReleaseName: CI installs that (scripts/run.sh) but
 // dev/mp-dev.sh installs `aws-mountpoint-s3-csi-driver`, and hardcoding either fails in the other.
-func csiDriverReleaseName(cfg *action.Configuration) string {
+func csiDriverReleaseNames(cfg *action.Configuration) []string {
 	GinkgoHelper()
 	list := action.NewList(cfg)
 	// All states: a run killed mid-upgrade leaves the release pending-upgrade, which the default list hides.
@@ -86,8 +86,5 @@ func csiDriverReleaseName(cfg *action.Configuration) string {
 			names = append(names, r.Name)
 		}
 	}
-	if len(names) != 1 {
-		Fail(fmt.Sprintf("expected exactly one installed %q release, found %v", helmChartName, names))
-	}
-	return names[0]
+	return names
 }
