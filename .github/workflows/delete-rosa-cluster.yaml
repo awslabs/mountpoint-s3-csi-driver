@@ -29,6 +29,8 @@ jobs:
           persist-credentials: false
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v4
+      - name: Install rosa CLI
+        run: tests/e2e-kubernetes/rosa/install-rosa-cli.sh
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -50,6 +52,13 @@ jobs:
             -backend-config="bucket=$TERRAFORM_BUCKET" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=$TF_VAR_aws_region"
+      - name: Delete OCM cluster missing from Terraform state
+        # A cancelled `terraform apply` can leave the cluster in OCM but not in state.
+        # `terraform destroy` then can't delete it, nor the subnets and OIDC config it uses.
+        working-directory: tests/e2e-kubernetes/rosa/
+        env:
+          CLUSTER_NAME: "s3-csi-${{ inputs.environment }}"
+        run: ./delete-orphaned-cluster.sh
       - name: Delete ROSA cluster
         working-directory: tests/e2e-kubernetes/rosa/
         env:
