@@ -118,7 +118,7 @@ func setupDM(t *testing.T) *dmTestCtx {
 	// Add s3-csi-daemonset-mounter label for commDir tests
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "s3-csi-daemonset-mounter-abcde",
+			Name:      "s3-csi-mounter-abcde",
 			Namespace: "kube-system",
 			UID:       types.UID(mounterPodUID),
 			Labels:    map[string]string{"app": "s3-csi-daemonset-mounter"},
@@ -235,12 +235,12 @@ func (testCtx *dmTestCtx) replaceMounterPod() string {
 	testCtx.t.Helper()
 
 	pods := testCtx.client.CoreV1().Pods("kube-system")
-	old, err := pods.Get(testCtx.ctx, "s3-csi-daemonset-mounter-abcde", metav1.GetOptions{})
+	old, err := pods.Get(testCtx.ctx, "s3-csi-mounter-abcde", metav1.GetOptions{})
 	assert.NoError(testCtx.t, err)
 	assert.NoError(testCtx.t, pods.Delete(testCtx.ctx, old.Name, metav1.DeleteOptions{}))
 
 	replacement := old.DeepCopy()
-	replacement.Name, replacement.UID, replacement.ResourceVersion = "s3-csi-daemonset-mounter-fghij", types.UID(uuid.New().String()), ""
+	replacement.Name, replacement.UID, replacement.ResourceVersion = "s3-csi-mounter-fghij", types.UID(uuid.New().String()), ""
 	_, err = pods.Create(testCtx.ctx, replacement, metav1.CreateOptions{})
 	assert.NoError(testCtx.t, err)
 

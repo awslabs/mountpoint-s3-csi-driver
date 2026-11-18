@@ -22,8 +22,9 @@ const (
 
 // renderedWorkload is a workload the chart renders, with the pod template it runs.
 type renderedWorkload struct {
-	kind, name string
-	pod        corev1.PodSpec
+	kind, name  string
+	pod         corev1.PodSpec
+	annotations map[string]string
 }
 
 // renderChart renders the whole chart with values, a values file's YAML, and returns its manifests by template
@@ -76,11 +77,11 @@ func renderWorkloads(t *testing.T, values string) []renderedWorkload {
 			case "DaemonSet":
 				var ds appsv1.DaemonSet
 				assert.NoError(t, yaml.Unmarshal([]byte(doc), &ds))
-				workloads = append(workloads, renderedWorkload{"DaemonSet", ds.Name, ds.Spec.Template.Spec})
+				workloads = append(workloads, renderedWorkload{"DaemonSet", ds.Name, ds.Spec.Template.Spec, ds.Spec.Template.Annotations})
 			case "Deployment":
 				var d appsv1.Deployment
 				assert.NoError(t, yaml.Unmarshal([]byte(doc), &d))
-				workloads = append(workloads, renderedWorkload{"Deployment", d.Name, d.Spec.Template.Spec})
+				workloads = append(workloads, renderedWorkload{"Deployment", d.Name, d.Spec.Template.Spec, d.Spec.Template.Annotations})
 			}
 		}
 	}
@@ -167,14 +168,16 @@ sidecars:
 	}
 }
 
-func TestControllerPlacement(t *testing.T) {
+func TestControllerValues(t *testing.T) {
 	affinity := &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
 		NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{
 			{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"controller"}}}}}}}}
 	controller := findWorkload(t, renderWorkloads(t, `controller:
   nodeSelector: {pool: system}
+  podAnnotations: {a: b}
   affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: role, operator: In, values: [controller]}]}]}}}`),
 		"Deployment", "s3-csi-controller")
 	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "pool": "system"}, controller.pod.NodeSelector)
 	assert.Equals(t, affinity, controller.pod.Affinity)
+	assert.Equals(t, map[string]string{"a": "b"}, controller.annotations)
 }

@@ -111,6 +111,7 @@ mounter:
     requests:
       memory: "6720Mi"   # 64Mi + 6144Mi + 512Mi
       cpu: "500m"
+  logLevel: 4
 ```
 
 ```yaml

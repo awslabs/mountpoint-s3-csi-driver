@@ -928,7 +928,7 @@ func helpMessageForGettingMounterLogs() string {
 func helpMessageForCheckingMounterPodStatus() string {
 	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
-		"More than one on a node means more than one pair matches it", mounterNamespace)
+		"More than one on a node means it matches both the top-level node values and an additionalDaemonSets entry, or two entries", mounterNamespace)
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.
@@ -1403,10 +1403,10 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 // How to fix a node that more than one pair matches. Keep the pair whose mounter serves the node's mounts: removing
 // the others needs no drain, since their mounters serve nothing.
 const (
-	keepPairAdvice = "keep its pair on this node and change the other pairs' node.nodeSelector or node.affinity " +
-		"(top-level, or additionalDaemonSets.<name>.node), so only that pair matches it"
+	keepPairAdvice = "keep the values that place it on this node and change the others' node.nodeSelector or node.affinity " +
+		"(top-level, or additionalDaemonSets.<name>.node), so only those match this node"
 	onePairAdvice = "change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), " +
-		"or this node's labels, so only one pair matches it"
+		"or this node's labels, so only the top-level values or one entry match it"
 )
 
 // checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.

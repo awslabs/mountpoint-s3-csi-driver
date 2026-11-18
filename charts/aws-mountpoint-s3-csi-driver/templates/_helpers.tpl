@@ -145,9 +145,6 @@ Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: th
 then one pair per additionalDaemonSets entry. An entry copies node and mounter, except node's placement.
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
-{{- if hasKey .Values "daemonsetMounters" }}
-{{- fail "daemonsetMounters was replaced by mounter, for the default mounter, and additionalDaemonSets, for more CSI node and mounter pairs" }}
-{{- end }}
 {{- $base := omit .Values.node "nodeSelector" "affinity" }}
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
@@ -178,7 +175,7 @@ then one pair per additionalDaemonSets entry. An entry copies node and mounter, 
 {{- end }}
 {{- $placement := include "aws-mountpoint-s3-csi-driver.placement" $entryNode }}
 {{- if has $placement $placements }}
-{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as another pair, so every node it matches would run two" $name) }}
+{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as the top-level node or another entry, so every node it matches would run two CSI nodes" $name) }}
 {{- end }}
 {{- $placements = append $placements $placement }}
 {{- $entryMounter := $entry.mounter | default dict }}

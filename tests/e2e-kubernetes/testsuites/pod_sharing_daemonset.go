@@ -1107,7 +1107,7 @@ func execInPodWithNamespace(ctx context.Context, f *framework.Framework, namespa
 
 // killCSINodePodOnNode kills only the CSI node pod (s3-csi-node) on the specified node.
 // This simulates a CSI node pod restart which loses the in-memory mount map.
-// The mounter pod (s3-csi-daemonset-mounter) is NOT killed — FUSE mounts stay alive.
+// The mounter pod (s3-csi-mounter) is NOT killed — FUSE mounts stay alive.
 func killCSINodePodOnNode(ctx context.Context, f *framework.Framework, nodeName string) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=s3-csi-node",
@@ -1187,7 +1187,7 @@ func checkMetaFileExists(ctx context.Context, f *framework.Framework, nodeName, 
 	return result
 }
 
-// killMounterPodOnNode kills the s3-csi-daemonset-mounter pod on the specified node.
+// killMounterPodOnNode kills the s3-csi-mounter pod on the specified node.
 // This kills all mount-s3 processes, making existing FUSE mounts dead.
 func killMounterPodOnNode(ctx context.Context, f *framework.Framework, nodeName string) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{

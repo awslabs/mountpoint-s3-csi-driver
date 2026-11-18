@@ -111,6 +111,7 @@ controller:
   nodeSelector: {}
   affinity: {}
   podLabels: {}
+  podAnnotations: {}
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -254,7 +255,8 @@ mounter:
   imagePullSecrets: []
 
 
-# Mixed fleet: each entry renders its own CSI node and mounter DaemonSets, s3-csi-node-<name> and
+# Mixed fleet: node and mounter above render the default pair of CSI node and mounter DaemonSets,
+# s3-csi-node and s3-csi-mounter. Each entry renders its own pair, s3-csi-node-<name> and
 # s3-csi-mounter-<name>, copied from node and mounter above, with the entry's values overriding the copy.
 # An entry's mounter.cache replaces the copied cache whole, and cache: null gives the entry no cache.
 # helm upgrade --reuse-values drops that null on Helm 3.20.0 and older, so the entry copies the cache again.
@@ -275,7 +277,8 @@ mounter:
 # change, then uncordon them. When fixing an overlap, a node that keeps the pair serving its mounts
 # doesn't need draining. See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
 #
-# For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
+# For example, three pairs, one per Karpenter NodePool: the default pair on general nodes (with
+# node.nodeSelector set to { karpenter.sh/nodepool: general }), bigmem on bigmem nodes and gpu on gpu nodes:
 # additionalDaemonSets:
 #   bigmem:
 #     node:
@@ -294,9 +297,9 @@ mounter:
 #           requiredDuringSchedulingIgnoredDuringExecution:
 #             nodeSelectorTerms:
 #               - matchExpressions:
-#                   - key: node.kubernetes.io/instance-type
+#                   - key: karpenter.sh/nodepool
 #                     operator: In
-#                     values: ["g5.xlarge", "g5.2xlarge"]
+#                     values: ["gpu"]
 #     mounter:
 #       maxVolumesPerNode: 8
 #       resources:

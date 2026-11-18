@@ -192,6 +192,8 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 
 ## V3 (daemonset mounter mode)
 
+A pair is one CSI node and one mounter DaemonSet, which run on the same nodes: `s3-csi-node` and `s3-csi-mounter` from the top-level `node` and `mounter` values, and `s3-csi-node-<name>` and `s3-csi-mounter-<name>` for each `additionalDaemonSets` entry.
+
 ### My node runs more than one `s3-csi-node` Pod
 
 The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node, and the others log "another CSI node on this node holds ... node.lock" and wait. The working one logs `multiple running mounter pods found` every 30 seconds, with the mounter that serves the node's mounts. If none does, for example on a node that matched more than one pair from its first start, new mounts on the node fail until only one mounter runs.

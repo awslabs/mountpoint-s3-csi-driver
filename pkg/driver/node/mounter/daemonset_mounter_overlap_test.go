@@ -28,7 +28,7 @@ func TestCheckForMultipleMounterPodsLogsAndKeepsMounter(t *testing.T) {
 	returnsPromptly(t, dm.checkForMultipleMounterPods)
 
 	assert.Contains(t, logs.String(), "multiple running mounter pods found on node test-node (expected exactly 1, got 2: mounter-first, mounter-second)")
-	assert.Contains(t, logs.String(), "Mounts on this node keep using mounter-first; keep its pair on this node")
+	assert.Contains(t, logs.String(), "Mounts on this node keep using mounter-first; keep the values that place it on this node")
 	assert.Equals(t, dm.commDirOf(*first), dm.mounter.Load().commDir)
 }
 

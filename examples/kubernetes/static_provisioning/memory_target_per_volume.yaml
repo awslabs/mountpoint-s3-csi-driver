@@ -12,6 +12,7 @@
 #       requests:
 #         memory: "6720Mi" # 64Mi for the mounter process + 6144Mi + 512Mi
 #         cpu: "500m"
+#     logLevel: 4
 #
 # With the same request, "equalSplit" would give each volume (6720 - 64) / 2 = 3328Mi: about half of
 # what the reader gets here, and 6.5 times what the logs volume needs.
