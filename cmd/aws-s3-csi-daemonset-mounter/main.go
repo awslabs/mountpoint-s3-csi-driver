@@ -15,15 +15,18 @@
 //  2. The mounter receives the options, spawns a Mountpoint child process with the FUSE fd,
 //     and closes the connection.
 //  3. If the mounter refuses a request with a valid mount-id, or the Mountpoint process exits with a non-zero
-//     code, the reason or its stderr is written to <comm-dir>/<mount-id>.error. Nothing is written on clean (zero) exit.
-//     The driver is responsible for removing this file during Unmount.
+//     code or is killed by a signal, the reason is written to <comm-dir>/<mount-id>.error: the exit code or
+//     signal, then the last --stderr-capacity bytes of its stderr. The full stderr is in this container's log,
+//     each line prefixed with [<mount-id>], as are the mounter's own lines about the mount. The file is written atomically (temporary file
+//     and rename). Nothing is written on clean (zero) exit. The driver returns or logs this file's content, then
+//     removes it.
 //
 // The mount-id (Options.VolumeId) must be unique per active mount (e.g. <WorkloadPodId>-<VolumeId>
 // or just <VolumeId> with pod sharing). Duplicate mount-ids are rejected, and so is a UID a running Mountpoint holds.
 //
 // Note: if Mountpoint crashes with non-zero exit after the driver has already completed Unmount,
 // a small .error file may be left behind. This is bounded by the number of such rare race
-// occurrences and each file is only a few KB of stderr.
+// occurrences and each file is at most a few KB of stderr.
 package main
 
 import (
@@ -44,7 +47,7 @@ var (
 	commDir                 = flag.String("comm-dir", "/comm", "Directory for communication socket and error files")
 	mountpointBinDir        = flag.String("mountpoint-bin-dir", os.Getenv("MOUNTPOINT_BIN_DIR"), "Directory of mount-s3 binary")
 	recvTimeout             = flag.Duration("recv-timeout", 30*time.Second, "Timeout for receiving mount options from a connection")
-	stderrCapacity          = flag.Uint("stderr-capacity", 1024*1024, "Maximum bytes of stderr to retain per Mountpoint process (tail)")
+	stderrCapacity          = flag.Uint("stderr-capacity", 4*1024, "Maximum bytes of a Mountpoint's stderr (its tail) to put in its error file, and so in the NodePublishVolume error; the full stderr is always logged")
 	maxVolumesPerNode       = flag.Int64("max-volumes-per-node", 0, "Maximum number of volume slots this container hosts: running Mountpoint processes plus cache directories still being removed. 0 means no cap")
 	memoryLimitStrategyFlag = flag.String("memory-limit-strategy", string(memoryLimitEqualSplit),
 		"How to size each Mountpoint's --memory-target: \"equalSplit\" to divide this container's memory "+

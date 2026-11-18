@@ -113,6 +113,8 @@ var (
 
 // mounterPod is what this node's driver needs from the mounter pod, resolved when it is discovered.
 type mounterPod struct {
+	// name is the mounter pod's name, for log hints.
+	name string
 	// comm directory for communicating with mounter pod.
 	commDir string
 	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
@@ -331,7 +333,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 		// Look again now rather than on the backed-off schedule, since a workload is waiting for it.
 		dm.requestRediscovery()
 		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes. "+
-			"Kubelet retries the mount until it can. %s", dm.nodeID, helpMessageForCheckingMounterPodStatus())
+			"Kubelet retries the mount until it can. %s", dm.nodeID, dm.helpMessageForCheckingMounterPodStatus())
 	}
 
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
@@ -433,7 +435,7 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 				klog.Errorf("DaemonsetMounter: cleanup after credential provisioning failed for volume %s: %v (will retry)", volumeID, tearErr)
 			}
 		}
-		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
+		return fmt.Errorf("failed to provide credentials for volume %s: %w. %s", volumeID, err, dm.helpMessageForGettingNodeLogs())
 	}
 
 	// Idempotency: if target is already mounted (republish/retry), creds are refreshed above, done.
@@ -616,7 +618,11 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 
 	sockPath := filepath.Join(mounter.commDir, MountSockName)
 	errFilePath := filepath.Join(mounter.commDir, GetErrorFileName(volumeID))
-	os.Remove(errFilePath)
+	// cleanupMount consumed any earlier file just before this, so one found here was written since, e.g. by a
+	// Mountpoint of a timed-out attempt exiting late. Removed so it is not taken as this mount's result.
+	if reason, found, err := consumeErrorFile(errFilePath); found {
+		klog.Warningf("DaemonsetMounter: removed a late error file of volume %s (%q), err=%v", volumeID, reason, err)
+	}
 
 	klog.V(4).Infof("DaemonsetMounter: sending mount options (mount %s) to %s", volumeID, sockPath)
 
@@ -639,7 +645,7 @@ func (dm *DaemonsetMounter) fuseMount(ctx context.Context, bucketName string, mo
 			dm.mounter.CompareAndSwap(mounter, nil)
 			dm.requestRediscovery()
 		}
-		return fmt.Errorf("failed to send mount options (mount %s): %w. %s", volumeID, err, helpMessageForGettingMounterLogs())
+		return fmt.Errorf("failed to send mount options (mount %s): %w. %s", volumeID, err, dm.helpMessageForGettingMounterLogs(mounter.commDir, volumeID))
 	}
 
 	dm.closeFUSEDevFD(fd)
@@ -892,8 +898,13 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 			klog.Errorf("DaemonsetMounter: cleanup credentials for volume %s: %v", entry.VolumeID, err)
 			errs = append(errs, err)
 		}
+		// A Mountpoint that died after its mount succeeded left this file, and nothing else reads it.
 		errFile := filepath.Join(entry.CommDir, GetErrorFileName(entry.VolumeID))
-		if err := os.Remove(errFile); err != nil && !os.IsNotExist(err) {
+		reason, found, err := consumeErrorFile(errFile)
+		if found {
+			klog.Errorf("DaemonsetMounter: volume %s: %s. %s", entry.VolumeID, reason, dm.helpMessageForGettingMounterLogs(entry.CommDir, entry.VolumeID))
+		}
+		if err != nil {
 			klog.Errorf("DaemonsetMounter: cleanup error file %s: %v", errFile, err)
 			errs = append(errs, err)
 		}
@@ -919,16 +930,52 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 	return nil
 }
 
-// helpMessageForGettingMounterLogs returns a help message with a command to get mounter logs.
-func helpMessageForGettingMounterLogs() string {
-	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-daemonset-mounter`", mounterNamespace)
+// mountFailedError is the NodePublishVolume error for a mount the mounter reported failed with reason,
+// followed by the command that shows this mount's mounter log lines.
+func (dm *DaemonsetMounter) mountFailedError(commDir, volumeID, reason string) error {
+	reason = strings.TrimRight(reason, ". ")
+	if reason == "" {
+		reason = "the mounter reported no reason"
+	}
+	return fmt.Errorf("%s. %s", reason, dm.helpMessageForGettingMounterLogs(commDir, volumeID))
 }
 
-// helpMessageForCheckingMounterPodStatus returns a help message with a command to check mounter pod status.
-func helpMessageForCheckingMounterPodStatus() string {
-	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
+// helpMessageForGettingMounterLogs returns a command that shows this node's Mountpoint log lines for
+// volumeID: the mounter prefixes each with `[<volumeID>]`. It names the mounter pod that owns commDir
+// when that is the one discovered, as a label selector would span every node's mounter and show only
+// 10 lines of each.
+func (dm *DaemonsetMounter) helpMessageForGettingMounterLogs(commDir, volumeID string) string {
+	logsOf := func(pod string) string {
+		return fmt.Sprintf("`kubectl logs %s%s -c %s | grep -F '[%s]'`", namespaceFlag(), pod, mounterContainerName, volumeID)
+	}
+	const previous = " (--previous after a mounter restart)"
+	if mp := dm.mounter.Load(); mp != nil && mp.name != "" && mp.commDir == commDir {
+		return "Logs: " + logsOf(mp.name) + previous
+	}
+	return dm.helpMessageForCheckingMounterPodStatus() + ", then: " + logsOf("<mounter-pod>") + previous
+}
+
+// helpMessageForGettingNodeLogs returns a command that finds this node's s3-csi-node pod, whose
+// s3-plugin container logs failures that happen before a Mountpoint is started.
+func (dm *DaemonsetMounter) helpMessageForGettingNodeLogs() string {
+	return fmt.Sprintf("You can find this node's s3-csi-node pod by running: `kubectl get pods %s-l app=s3-csi-node --field-selector spec.nodeName=%s`, then see its logs with `kubectl logs %s<pod> -c s3-plugin`",
+		namespaceFlag(), dm.nodeID, namespaceFlag())
+}
+
+// helpMessageForCheckingMounterPodStatus returns a command that shows this node's mounter pod, and what to look for.
+func (dm *DaemonsetMounter) helpMessageForCheckingMounterPodStatus() string {
+	return fmt.Sprintf("You can check this node's mounter pod by running: `kubectl get pods %s-l %s --field-selector spec.nodeName=%s`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
-		"More than one on a node means more than one daemonsetMounters entry selects it", mounterNamespace)
+		"More than one on a node means more than one daemonsetMounters entry selects it",
+		namespaceFlag(), mounterPodLabel, dm.nodeID)
+}
+
+// namespaceFlag is the `-n <namespace> ` of the mounter pods, or "" if unknown.
+func namespaceFlag() string {
+	if mounterNamespace == "" {
+		return ""
+	}
+	return "-n " + mounterNamespace + " "
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.
@@ -1602,6 +1649,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 		klog.Warning(msg)
 	}
 	return &mounterPod{
+		name:           running[0].Name,
 		commDir:        commDir,
 		hasCacheVolume: hasCacheVolume,
 		image:          image,
@@ -1709,12 +1757,16 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, volu
 	// Poll for error file
 	go func() {
 		wait.PollUntilContextCancel(ctx, mountReadyPollInterval, true, func(ctx context.Context) (bool, error) {
-			content, err := os.ReadFile(errFilePath)
-			if err != nil {
+			// The mounter writes the file atomically (temporary file and rename), so one that exists is complete;
+			// an older mounter that writes it in place can still be read part-written.
+			reason, found, err := consumeErrorFile(errFilePath)
+			if !found {
 				return false, nil
 			}
-			os.Remove(errFilePath)
-			mountResultCh <- fmt.Errorf("Mountpoint for mount %s failed: %s", volumeID, string(content))
+			if err != nil {
+				klog.Errorf("DaemonsetMounter: failed to remove error file %s: %v", errFilePath, err)
+			}
+			mountResultCh <- dm.mountFailedError(filepath.Dir(errFilePath), volumeID, reason)
 			return true, nil
 		})
 	}()
@@ -1726,7 +1778,7 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, volu
 			return isMounted, nil
 		})
 		if err != nil {
-			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s. %s", volumeID, target, helpMessageForGettingMounterLogs())
+			mountResultCh <- fmt.Errorf("timed out waiting for Mountpoint to serve mount %s at %s. %s", volumeID, target, dm.helpMessageForGettingMounterLogs(filepath.Dir(errFilePath), volumeID))
 		} else {
 			mountResultCh <- nil
 		}

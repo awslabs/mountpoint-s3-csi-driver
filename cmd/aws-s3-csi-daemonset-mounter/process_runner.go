@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -16,13 +17,14 @@ import (
 // ProcessHandle represents a started process that can be waited on.
 type ProcessHandle interface {
 	Pid() int
-	Wait() (exitCode int, stderr []byte)
+	Wait() (status exitStatus, stderr []byte)
 	Signal(sig os.Signal) error
 }
 
 // ProcessRunner starts a command and returns a handle to wait on it.
 type ProcessRunner interface {
-	Start(cmd *exec.Cmd) (ProcessHandle, error)
+	// Start starts cmd, the Mountpoint of mountId, which tags the log lines of the runner itself.
+	Start(mountId string, cmd *exec.Cmd) (ProcessHandle, error)
 }
 
 // defaultProcessRunner is the real implementation that starts OS processes.
@@ -30,7 +32,7 @@ type defaultProcessRunner struct {
 	stderrCapacity uint
 }
 
-func (r *defaultProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
+func (r *defaultProcessRunner) Start(mountId string, cmd *exec.Cmd) (ProcessHandle, error) {
 	stderrBuf, err := circbuf.NewBuffer(int64(r.stderrCapacity))
 	if err != nil {
 		return nil, err
@@ -43,30 +45,28 @@ func (r *defaultProcessRunner) Start(cmd *exec.Cmd) (ProcessHandle, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &defaultProcessHandle{cmd: cmd, stderrBuf: stderrBuf}, nil
+	return &defaultProcessHandle{mountId: mountId, cmd: cmd, stderrBuf: stderrBuf}, nil
 }
 
 type defaultProcessHandle struct {
+	mountId   string
 	cmd       *exec.Cmd
 	stderrBuf *circbuf.Buffer
 }
 
 func (h *defaultProcessHandle) Pid() int { return h.cmd.Process.Pid }
 
-func (h *defaultProcessHandle) Wait() (int, []byte) {
+func (h *defaultProcessHandle) Wait() (exitStatus, []byte) {
 	err := h.cmd.Wait()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			klog.Errorf("Unexpected error waiting for process %d: %v", h.cmd.Process.Pid, err)
-			exitCode = 1
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		// e.g. copying its output failed; the process itself may still have exited cleanly.
+		klog.Errorf("[%s] Unexpected error waiting for Mountpoint process %d: %v", h.mountId, h.cmd.Process.Pid, err)
+		if h.cmd.ProcessState == nil {
+			return exitStatus{code: 1}, h.stderrBuf.Bytes()
 		}
-	} else {
-		exitCode = h.cmd.ProcessState.ExitCode()
 	}
-	return exitCode, h.stderrBuf.Bytes()
+	return exitStatusOf(h.cmd.ProcessState), h.stderrBuf.Bytes()
 }
 
 func (h *defaultProcessHandle) Signal(sig os.Signal) error {
