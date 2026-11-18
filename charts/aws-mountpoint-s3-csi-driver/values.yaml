@@ -272,7 +272,8 @@ mounter:
 # When a pair stops matching a node, its mounter there is deleted, even with OnDelete, and every S3 mount
 # it serves breaks. That happens when you remove or rename an entry, change a pair's placement (such as
 # narrowing the default pair's), or change a node's labels. Drain those nodes first, then make the
-# change, then uncordon them.
+# change, then uncordon them. When fixing an overlap, a node that keeps the pair serving its mounts
+# doesn't need draining. See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
 #
 # For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
 # additionalDaemonSets:
