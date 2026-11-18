@@ -166,3 +166,15 @@ sidecars:
 		})
 	}
 }
+
+func TestControllerPlacement(t *testing.T) {
+	affinity := &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+		NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{
+			{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"controller"}}}}}}}}
+	controller := findWorkload(t, renderWorkloads(t, `controller:
+  nodeSelector: {pool: system}
+  affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: role, operator: In, values: [controller]}]}]}}}`),
+		"Deployment", "s3-csi-controller")
+	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "pool": "system"}, controller.pod.NodeSelector)
+	assert.Equals(t, affinity, controller.pod.Affinity)
+}
