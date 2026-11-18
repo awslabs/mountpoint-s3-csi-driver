@@ -1400,8 +1400,8 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 	return true
 }
 
-// The fix for a node that more than one pair matches. Keeping the pair whose mounter serves the node's mounts needs
-// no drain: the others' mounters have none.
+// How to fix a node that more than one pair matches. Keep the pair whose mounter serves the node's mounts: removing
+// the others needs no drain, since their mounters serve nothing.
 const (
 	keepPairAdvice = "keep its pair on this node and change the other pairs' node.nodeSelector or node.affinity " +
 		"(top-level, or additionalDaemonSets.<name>.node), so only that pair matches it"

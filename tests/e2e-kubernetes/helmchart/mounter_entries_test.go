@@ -83,7 +83,7 @@ additionalDaemonSets:
 	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.Containers[0].Args, "--v=2"))
 	assert.Equals(t, "bigmem", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Labels["x"])
 	assert.Equals(t, []corev1.LocalObjectReference{{Name: "bigmem"}}, daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.ImagePullSecrets)
-	// Both bigmem pods take its gpu toleration, and no catch-all, as it turns tolerateAllTaints off.
+	// Both bigmem pods get its gpu toleration, and not the tolerate-all one, since it sets tolerateAllTaints: false.
 	for _, name := range []string{"s3-csi-node-bigmem", "s3-csi-mounter-bigmem"} {
 		tolerations := daemonSets[name].Spec.Template.Spec.Tolerations
 		assert.Equals(t, true, slices.ContainsFunc(tolerations, func(t corev1.Toleration) bool { return t.Key == "gpu" }))
@@ -117,7 +117,7 @@ additionalDaemonSets:
   none: {node: {nodeSelector: {pool: none}}, mounter: {cache: null}}`)
 	assert.NoError(t, err)
 
-	// An entry copies mounter's cache, unless it sets its own, which replaces it whole, or null, which removes it.
+	// An entry copies the default cache, unless it sets its own cache or cache: null.
 	for name, want := range map[string]string{"s3-csi-mounter-copied": "emptyDir", "s3-csi-mounter-ebs": "ephemeral", "s3-csi-mounter-none": ""} {
 		ds, ok := daemonSets[name]
 		assert.Equals(t, true, ok)
@@ -134,7 +134,7 @@ additionalDaemonSets:
 }
 
 func TestAdditionalDaemonSetsNulls(t *testing.T) {
-	// null drops a Helm value: an entry set to null renders no pair, and a top-level cache: null no cache.
+	// An entry set to null renders no pair, and mounter.cache: null renders no cache.
 	daemonSets, err := renderDaemonSets(t, `mounter: {cache: null}
 additionalDaemonSets: {big: {node: {nodeSelector: {p: big}}}, gone: null}`)
 	assert.NoError(t, err)
@@ -145,7 +145,7 @@ additionalDaemonSets: {big: {node: {nodeSelector: {p: big}}}, gone: null}`)
 }
 
 func TestMounterLogLevel(t *testing.T) {
-	// null, which Helm keeps for a key the chart doesn't set, falls back to 4 rather than an empty --v=; 0 stays 0.
+	// logLevel: null falls back to 4, not an empty --v=, and 0 stays 0.
 	for values, want := range map[string]string{
 		`mounter: {logLevel: null}`: "--v=4",
 		`mounter: {logLevel: 0}`:    "--v=0",
@@ -191,15 +191,15 @@ func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
-	// Unquoted, these render as a bool and numbers, which a nodeSelector can't hold, and 10000000 must not become 1e+07.
-	// A bare key like on is a bool to YAML too, and a null value is the empty one.
+	// Each value must render as a quoted string: true, numbers, the key on, which YAML reads as a bool, and null,
+	// which becomes "".
 	values := `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
 	daemonSets, err := renderDaemonSets(t, values)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
 		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000", "on": "x", "empty": ""}, daemonSets[name].Spec.Template.Spec.NodeSelector)
 	}
-	// The typed parse above reads an unquoted true as "true" too, so check the rendered text.
+	// The parse above turns an unquoted true into "true" too, so also check the rendered text.
 	manifests, err := renderChart(t, values, map[string]any{"experimental": map[string]any{"mounterMode": "daemonset"}})
 	assert.NoError(t, err)
 	for _, file := range []string{"node.yaml", "mounter-daemonset.yaml"} {
@@ -211,7 +211,7 @@ func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsAffinityOnlyEntry(t *testing.T) {
-	// The default pair has no nodeSelector either, so only the affinity tells the two placements apart.
+	// The default pair has no nodeSelector either, so only the affinity makes the two placements different.
 	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
   big: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: pool, operator: In, values: [big]}]}]}}}}}`)
 	assert.NoError(t, err)

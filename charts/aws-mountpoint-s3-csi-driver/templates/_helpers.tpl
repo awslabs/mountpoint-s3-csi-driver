@@ -124,15 +124,15 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 {{- end -}}
 
 {{/*
-A nodeSelector value as the string a node label holds. YAML reads true or 10000000 as other types, and toString would
-write 10000000 as 1e+07. A null one, a key with nothing after it, is the empty value, as Kubernetes reads it.
+Renders a nodeSelector value as a string, since node labels are strings and YAML reads true or 1 as a bool or a
+number. null becomes "", which is how Kubernetes reads it.
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.labelValue" -}}
 {{- if kindIs "string" . }}{{ . }}{{ else if not (kindIs "invalid" .) }}{{ toJson . }}{{ end }}
 {{- end }}
 
 {{/*
-A node's placement (nodeSelector and affinity) as JSON, with nodeSelector values as rendered, to compare two pairs'.
+Returns a pair's nodeSelector and affinity as JSON, with nodeSelector values as rendered, so two pairs can be compared.
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.placement" -}}
 {{- $selector := dict }}
@@ -141,8 +141,8 @@ A node's placement (nodeSelector and affinity) as JSON, with nodeSelector values
 {{- end }}
 
 {{/*
-Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default from node and mounter, then
-one per additionalDaemonSets entry, which copies both except placement (node.nodeSelector and node.affinity).
+Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default pair from node and mounter,
+then one pair per additionalDaemonSets entry. An entry copies node and mounter, except node's placement.
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
 {{- if hasKey .Values "daemonsetMounters" }}
@@ -152,7 +152,7 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
 {{- $placements := list (include "aws-mountpoint-s3-csi-driver.placement" .Values.node) }}
-{{- /* A null entry is dropped, as null drops any Helm value, for example one a lower values file sets. */}}
+{{- /* Skip entries set to null, which is how Helm removes a value set in another values file. */}}
 {{- $entries := dict }}
 {{- range $name, $entry := .Values.additionalDaemonSets | default dict }}
 {{- if not (kindIs "invalid" $entry) }}{{- $_ := set $entries $name $entry }}{{- end }}
@@ -183,7 +183,7 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- $placements = append $placements $placement }}
 {{- $entryMounter := $entry.mounter | default dict }}
 {{- $pairMounter := mustMergeOverwrite (deepCopy $mounter) (deepCopy $entryMounter) }}
-{{- /* An entry's cache replaces the default's whole, and null removes it, as null does for any Helm default. */}}
+{{- /* An entry's cache replaces the default cache instead of merging with it. cache: null means no cache. */}}
 {{- if hasKey $entryMounter "cache" }}
 {{- $_ := unset $pairMounter "cache" }}
 {{- if not (kindIs "invalid" $entryMounter.cache) }}{{- $_ := set $pairMounter "cache" (deepCopy $entryMounter.cache) }}{{- end }}
@@ -192,7 +192,7 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
     "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode)) "mounter" $pairMounter) }}
 {{- end }}
 {{- range $pair := $pairs }}
-{{- /* On the raw value, since int turns anything that isn't a whole number into 0, which means no limit. */}}
+{{- /* Check the raw value: int turns anything that isn't a whole number into 0, which means no limit. */}}
 {{- if not (regexMatch "^[0-9]+$" (toString $pair.mounter.maxVolumesPerNode)) }}
 {{- fail (printf "%s.maxVolumesPerNode must be a whole number >= 0, got %v" $pair.where $pair.mounter.maxVolumesPerNode) }}
 {{- end }}

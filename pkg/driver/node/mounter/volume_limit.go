@@ -15,8 +15,8 @@ import (
 //
 // It is the MounterMaxVolumesLabel of this node's running mounter. A node pod with no mounter still serves the
 // volumes already on its node, which need unmounting (and those V1 and V2 mounted, credential refresh), so it
-// registers right away, advertising the fallback limit: its own pair's mounter.maxVolumesPerNode, which the
-// mounter that comes to run here takes. The startup taint, not
+// registers right away and advertises its pair's mounter.maxVolumesPerNode, the limit its mounter will have. The
+// startup taint, not
 // registration, keeps workloads off a new node until its mounter runs.
 const (
 	// defaultStaleVolumeLimitWarnAfter is how long kubelet can keep a limit that no longer holds, without
@@ -117,7 +117,7 @@ func (dm *DaemonsetMounter) currentVolumeLimit(ctx context.Context) (int64, stri
 		running, err := dm.runningMounterPods(ctx)
 		switch {
 		case errors.Is(err, ErrMultipleMounterPods):
-			// New mounts fail until only one runs, and the fallback is this pair's own limit.
+			// New mounts fail until only one mounter runs. Until then, advertise this pair's limit.
 		case err != nil:
 			return 0, "", false, fmt.Errorf("can't tell whether a mounter runs on node %s, so it can't "+
 				"tell its volume limit: %w", dm.nodeID, err)

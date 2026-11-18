@@ -267,10 +267,10 @@ mounter:
 # matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
 # To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
 #
-# Removing or renaming an entry, changing placement so a pair no longer matches a node (such as narrowing
-# the default pair's), or changing a node's labels so its pair no longer matches it deletes that pair's
-# mounter there, even with OnDelete, which breaks every S3 mount that mounter serves. Drain those nodes
-# first, then make the change, then uncordon them.
+# When a pair stops matching a node, its mounter there is deleted, even with OnDelete, and every S3 mount
+# it serves breaks. That happens when you remove or rename an entry, change a pair's placement (such as
+# narrowing the default pair's), or change a node's labels. Drain those nodes first, then make the
+# change, then uncordon them.
 #
 # For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
 # additionalDaemonSets:

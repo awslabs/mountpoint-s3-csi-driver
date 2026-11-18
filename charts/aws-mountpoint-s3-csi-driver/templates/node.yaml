@@ -8,7 +8,7 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
-{{- /* One CSI node per pair: in daemonset mode, each additionalDaemonSets entry adds one, with its own placement. */}}
+{{- /* One CSI node DaemonSet per pair. In daemonset mode, each additionalDaemonSets entry adds a pair. */}}
 {{- $pairs := list (dict "name" "" "node" .Values.node) }}
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
 {{- $pairs = (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}
@@ -139,7 +139,7 @@ spec:
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
-            # The volume limit to advertise while no mounter runs on this node: its own pair's mounter's.
+            # The volume limit to advertise until this node's mounter runs: this pair's maxVolumesPerNode.
             - name: FALLBACK_MAX_VOLUMES_PER_NODE
               value: {{ int $pair.mounter.maxVolumesPerNode | quote }}
             # This container's image, which the CSI node compares with the mounter's to warn about a mismatch.

@@ -158,7 +158,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 			It("hands node A to a waiting CSI node when the one working there goes", func(ctx context.Context) {
 				running, _ := writerOnNode(ctx, f, config, pattern, nodeA)
 				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, nodePodOf(ctx, f, csiDriverDaemonSetName+"-first", nodeA)))
-				// One of the waiting CSI nodes takes the lock: extra, or first's replacement, which the lock doesn't order.
+				// Either waiting CSI node can take the lock: extra, or the pod that replaces first's.
 				Eventually(ctx, func(ctx context.Context) (int, error) {
 					pods, err := podsOn(ctx, f, csiNodePodLabel, nodeA)
 					holders := 0
@@ -172,7 +172,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 					return holders, err
 				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(Equal(1))
 
-				// The new holder keeps using first's mounter, which serves the node's mounts, as the docs' fix relies on.
+				// The new holder keeps using first's mounter, which serves the node's mounts.
 				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(mounterOf(ctx, f, mounterDaemonSetName+"-first", nodeA)))
 				checkWriteAndRead(ctx, f, running)
