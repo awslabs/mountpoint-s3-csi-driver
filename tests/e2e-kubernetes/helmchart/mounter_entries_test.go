@@ -133,6 +133,17 @@ additionalDaemonSets:
 	}
 }
 
+func TestAdditionalDaemonSetsNulls(t *testing.T) {
+	// null drops a Helm value: an entry set to null renders no pair, and a top-level cache: null no cache.
+	daemonSets, err := renderDaemonSets(t, `mounter: {cache: null}
+additionalDaemonSets: {big: {node: {nodeSelector: {p: big}}}, gone: null}`)
+	assert.NoError(t, err)
+	assert.Equals(t, 4, len(daemonSets))
+	for _, volume := range daemonSets["s3-csi-mounter"].Spec.Template.Spec.Volumes {
+		assert.Equals(t, false, volume.Name == "cache")
+	}
+}
+
 func TestMounterLogLevel(t *testing.T) {
 	// null, which Helm keeps for a key the chart doesn't set, falls back to 4 rather than an empty --v=; 0 stays 0.
 	for values, want := range map[string]string{
@@ -220,6 +231,7 @@ func TestAdditionalDaemonSetsPairPodsShareScheduling(t *testing.T) {
 		assert.Equals(t, node.NodeSelector, mounter.NodeSelector)
 		assert.Equals(t, node.Affinity, mounter.Affinity)
 		assert.Equals(t, node.Tolerations, mounter.Tolerations)
+		assert.Equals(t, node.PriorityClassName, mounter.PriorityClassName)
 	}
 	catchAll := corev1.Toleration{Operator: corev1.TolerationOpExists}
 	assert.Equals(t, []corev1.Toleration{catchAll}, daemonSets["s3-csi-node"].Spec.Template.Spec.Tolerations)

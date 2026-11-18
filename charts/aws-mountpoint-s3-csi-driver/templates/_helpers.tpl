@@ -152,9 +152,13 @@ one per additionalDaemonSets entry, which copies both except placement (node.nod
 {{- $mounter := .Values.mounter | default dict }}
 {{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
 {{- $placements := list (include "aws-mountpoint-s3-csi-driver.placement" .Values.node) }}
-{{- $entries := .Values.additionalDaemonSets | default dict }}
+{{- /* A null entry is dropped, as null drops any Helm value, for example one a lower values file sets. */}}
+{{- $entries := dict }}
+{{- range $name, $entry := .Values.additionalDaemonSets | default dict }}
+{{- if not (kindIs "invalid" $entry) }}{{- $_ := set $entries $name $entry }}{{- end }}
+{{- end }}
 {{- range $name := keys $entries | sortAlpha }}
-{{- $entry := get $entries $name | default dict }}
+{{- $entry := get $entries $name }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
 {{- fail (printf "additionalDaemonSets: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSets" $name) }}
 {{- end }}

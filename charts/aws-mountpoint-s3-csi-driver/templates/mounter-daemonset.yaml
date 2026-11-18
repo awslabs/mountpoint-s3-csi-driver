@@ -17,7 +17,7 @@
 {{- end }}
 {{- $strategies := list "equalSplit" "none" }}
 {{- $memoryStrategy := $mounter.memoryLimitStrategy | default "" }}
-{{- $cacheEnabled := hasKey $mounter "cache" }}
+{{- $cacheEnabled := and (hasKey $mounter "cache") (not (kindIs "invalid" $mounter.cache)) }}
 {{- $cache := $mounter.cache | default dict }}
 {{- $cacheEmptyDir := $cache.emptyDir | default dict }}
 {{- $cacheEphemeral := $cache.ephemeral | default dict }}

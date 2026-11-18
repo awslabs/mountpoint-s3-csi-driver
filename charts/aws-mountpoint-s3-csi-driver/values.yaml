@@ -257,6 +257,7 @@ mounter:
 # Mixed fleet: each entry renders its own CSI node and mounter DaemonSets, s3-csi-node-<name> and
 # s3-csi-mounter-<name>, copied from node and mounter above, with the entry's values overriding the copy.
 # An entry's mounter.cache replaces the copied cache whole, and cache: null gives the entry no cache.
+# helm upgrade --reuse-values drops that null on Helm 3.20.0 and older, so the entry copies the cache again.
 #
 # Placement isn't copied: each entry must set node.nodeSelector, node.affinity or both, and no two
 # pairs may run on the same node, so narrow the default pair's placement to keep it off the
@@ -266,9 +267,10 @@ mounter:
 # matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
 # To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
 #
-# Removing or renaming an entry, or changing placement so a pair no longer matches a node (such as
-# narrowing the default pair's), makes helm upgrade delete its mounter there, which breaks every S3 mount
-# that mounter serves. Drain those nodes first, then upgrade, then uncordon them.
+# Removing or renaming an entry, changing placement so a pair no longer matches a node (such as narrowing
+# the default pair's), or changing a node's labels so its pair no longer matches it deletes that pair's
+# mounter there, even with OnDelete, which breaks every S3 mount that mounter serves. Drain those nodes
+# first, then make the change, then uncordon them.
 #
 # For example, with node.nodeSelector set to { karpenter.sh/nodepool: general }:
 # additionalDaemonSets:
