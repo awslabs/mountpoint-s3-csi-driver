@@ -28,7 +28,17 @@ func TestCheckForMultipleMounterPodsLogsAndKeepsMounter(t *testing.T) {
 	returnsPromptly(t, dm.checkForMultipleMounterPods)
 
 	assert.Contains(t, logs.String(), "multiple running mounter pods found on node test-node (expected exactly 1, got 2: mounter-first, mounter-second)")
+	assert.Contains(t, logs.String(), "Mounts on this node keep using the first mounter")
 	assert.Equals(t, dm.commDirOf(*first), dm.mounter.Load().commDir)
+}
+
+func TestCheckForMultipleMounterPodsWithNoneInUse(t *testing.T) {
+	dm := overlapDM(t, runningMounterPod("mounter-first"), runningMounterPod("mounter-second"))
+	logs := testutil.CaptureKlog(t)
+
+	dm.checkForMultipleMounterPods()
+
+	assert.Contains(t, logs.String(), "None of them holds this node's mounts, so new S3 mounts on it fail until only one runs")
 }
 
 func TestDiscoverMounterPicksMounterInUse(t *testing.T) {

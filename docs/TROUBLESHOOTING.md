@@ -150,6 +150,26 @@ F0919 20:25:04.161506       1 main.go:45] Failed to receive mount options from /
 One well-known cause of this issue is when <a href="#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status">volumes are specified without using a unique `volumeHandle` value</a>.
 There may be other issues related to the volume or pod spec that can lead to the workload pod being stuck in `ContainerCreating`, and the Mountpoint pod failing with this error.
 
+## My Pod is stuck at `ContainerCreating` with error "no usable s3-csi-daemonset-mounter on node"
+
+The S3 volumes on a node are served by the node's `s3-csi-daemonset-mounter` Pod. While it has none it can use, the node's `s3-csi-node` Pod fails new S3 mounts with this error, which the kubelet retries until it has one. It still unmounts the S3 volumes already on the node, and refreshes the credentials.
+
+To see why the node has no mounter it can use:
+
+```bash
+$ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter -o wide
+$ kubectl describe pod -n kube-system <mounter-pod-name>
+```
+
+- A `Pending` mounter usually doesn't fit on its node: its events show `Insufficient memory` or `Insufficient cpu` when the node has less free than the entry's `daemonsetMounters[].resources.requests`. Free up the node, use larger nodes for that entry, or lower its `resources.requests`.
+- More than one mounter Pod on the node means more than one `daemonsetMounters` entry selects it, and its `s3-csi-node` Pod logs `multiple running mounter pods found`. Change the entries' `nodeSelector` or `matchExpressions`, or the node's labels, so only one entry matches the node. If the node has S3 mounts, drain it first: the mounter of an entry that stops matching is deleted, which breaks its mounts.
+
+Until a mounter runs, the node's volume limit is the smallest `maxVolumesPerNode` of your `daemonsetMounters` entries. When the mounter runs, it becomes that mounter's entry's `maxVolumesPerNode`. On EKS 1.34 and later, and Kubernetes 1.35 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
+
+```bash
+$ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
+```
+
 ## My workload pods are getting "Transport endpoint is not connected" errors during node drain
 
 This error occurs when workload pods are terminated before the Mountpoint pod that provides their S3 volume mount. To prevent this, the CSI driver implements graceful eviction:
@@ -189,3 +209,9 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 **Recommendation:** Upgrade to Mountpoint S3 CSI driver v2.5.0 or later. The fix adds `cluster-autoscaler.kubernetes.io/daemonset-pod: "true"` annotation to MP pods, allowing the autoscaler to treat them as DaemonSet-managed pods instead of standalone pods that block scale-down.
 
 **Limitation:** Note that this may cause over-provisioning based on the templateNodeInfo mechanism. Overestimation of required pod slots is capped by the distinct S3 PV count (or the number of S3 pods on any running node), see: [podsExpectedOnFreshNode](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/simulator/node_info_utils.go#L177) and [how-does-scale-up-work](https://github.com/kubernetes/autoscaler/blob/62b135abda1b345d3faca699d1965729ad3566c8/cluster-autoscaler/FAQ.md#how-does-scale-up-work).
+
+## V3 (daemonset mounter mode)
+
+### My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
+
+More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it or a second Helm release. Only the first one works on the node; the others wait, serving nothing, until it exits. Make sure only one `s3-csi-node` Pod runs on each node, and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.

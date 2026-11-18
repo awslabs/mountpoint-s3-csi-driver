@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -47,6 +49,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/nodelock"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/version"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
@@ -56,9 +59,20 @@ import (
 const (
 	driverName = "s3.csi.aws.com"
 
+	// nodeLockCheckInterval is how often the CSI node checks its node lock file is still the one it holds.
+	nodeLockCheckInterval = 10 * time.Second
+
 	grpcServerMaxReceiveMessageSize = 1024 * 1024 * 2 // 2MB
 
 	unixSocketPerm = os.FileMode(0700) // only owner can write and read.
+
+	// mounterWaitBeforeServing is how long startup looks for this node's mounter before serving, so the first
+	// mount requests after a restart find it. Keep it well under the liveness probe's budget (about 18s).
+	mounterWaitBeforeServing = 5 * time.Second
+
+	// fallbackMaxVolumesPerNodeEnv is the volume limit to advertise while no mounter runs on this node, which the
+	// chart sets to the smallest daemonsetMounters[].maxVolumesPerNode. Unset means none.
+	fallbackMaxVolumesPerNodeEnv = "FALLBACK_MAX_VOLUMES_PER_NODE"
 )
 
 var (
@@ -83,6 +97,14 @@ type Driver struct {
 	NodeServer *node.S3NodeServer
 
 	Clientset kubernetes.Interface
+
+	// mounterFound, if set, is closed once this node can mount S3 volumes, which the agent-not-ready
+	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
+	mounterFound <-chan struct{}
+
+	// nodeLock is held for the process's lifetime, so no other CSI node works on this node meanwhile. Kept here so it
+	// stays reachable: a collected lock would release itself.
+	nodeLock *nodelock.Lock
 
 	stopCh chan struct{}
 }
@@ -123,15 +145,42 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 
 	credProvider := credentialprovider.New(clientset.CoreV1(), credentialprovider.RegionFromIMDSOnce)
 
+	// Before reading or changing anything on the node, wait until no other CSI node works on it. One that waits here
+	// never listens on the CSI socket, so it can't take it over from the one working, which keeps listening on it and
+	// serves every request kubelet sends there. A SIGTERM while waiting just ends the process, as main installs its
+	// signal handler only once NewDriver returns.
+	lockPath := filepath.Join(util.ContainerKubeletPath(), "plugins", driverName, nodelock.FileName)
+	lock, err := nodelock.Acquire(context.Background(), lockPath)
+	if err != nil {
+		return nil, err
+	}
+
 	stopCh := make(chan struct{})
 
+	go lock.Watch(stopCh, nodeLockCheckInterval, func(err error) {
+		// Exit without stopping the gRPC server: closing its listener would remove the CSI socket, which is now
+		// the other CSI node's. kubelet restarts this container, which then waits for the lock.
+		klog.Fatalf("%v; exiting so only one CSI node works on this node", err)
+	})
+
 	var nodeServer *node.S3NodeServer
+	var mounterFound <-chan struct{}
 
 	if mounterMode == mounterModeDaemonset {
 		klog.Info("Using daemonset mounter mode")
 		klog.Info("Note: s3-csi-daemonset-mounter uses OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
+		var fallbackVolumeLimit int64
+		if v := os.Getenv(fallbackMaxVolumesPerNodeEnv); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("%s must be a whole number >= 0, got %q", fallbackMaxVolumesPerNodeEnv, v)
+			}
+			fallbackVolumeLimit = n
+		}
+
 		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil, kubernetesVersion, variant)
+		dm.SetFallbackVolumeLimit(fallbackVolumeLimit)
 
 		// Rebuild mount map from persisted .meta.json files + kernel mount table.
 		// Fatal on failure: operating with an empty map while FUSE mounts exist
@@ -140,15 +189,13 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
 		}
 
-		if err := dm.DiscoverMounter(context.Background()); err != nil {
-			klog.Fatalf("Failed to discover mounter pod: %v", err)
-		}
-		go dm.StartCommDirWatch(stopCh)
-		go dm.StartPeriodicCleanup(stopCh)
-
 		// V2 legacy support: start PodUnmounter to handle source teardown for V2 Mountpoint Pods
 		// when the controller annotates them with needs-unmount. Also set up the S3PA informer
 		// cache used to resolve the committed IAM role ARN during V2 credential refresh.
+		//
+		// It starts before, and whether or not, this node's mounter is found: the V2 volumes on this node
+		// still need unmounting and credential refresh when no mounter runs here, for example because the
+		// node can't fit it.
 		if util.SupportLegacyPodMounts() {
 			klog.Info("V2 legacy pod mount support enabled — starting PodUnmounter and S3PA cache")
 			podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -164,18 +211,19 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			dm.SetS3PACache(s3paCache)
 		}
 
-		maxVolumesPerNode, ok := dm.MounterMaxVolumesPerNode()
-		if !ok {
-			return nil, fmt.Errorf("mounter pod on this node has no valid %s label", mounter.MounterMaxVolumesLabel)
+		// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
+		ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
+		if err := dm.DiscoverMounter(ctx); err != nil {
+			klog.Warningf("No s3-csi-daemonset-mounter this node can use yet (%v). Serving the volumes already on this node "+
+				"and failing new S3 mounts until there is one. V3 requires the %s startup taint on nodes, which keeps workloads off "+
+				"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
 		}
-		if maxVolumesPerNode == 0 {
-			klog.Warningf("%s is 0: volume limit is disabled (unbounded). The scheduler will not "+
-				"limit the number of S3 volumes per node, which may lead to resource exhaustion "+
-				"(memory OOM, or disk exhaustion when cache is enabled) on s3-csi-daemonset-mounter.",
-				mounter.MounterMaxVolumesLabel)
-		}
+		cancel()
+		go dm.StartCommDirWatch(stopCh)
+		go dm.StartPeriodicCleanup(stopCh)
 
-		nodeServer = node.NewS3NodeServer(nodeID, dm, maxVolumesPerNode)
+		nodeServer = node.NewS3NodeServer(nodeID, dm)
+		mounterFound = dm.MounterFound()
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -197,15 +245,17 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		if err != nil {
 			klog.Fatalln(err)
 		}
-		nodeServer = node.NewS3NodeServer(nodeID, podMounter, 0) // maxVolumesPerNode = 0 means no limit
+		nodeServer = node.NewS3NodeServer(nodeID, podMounter)
 	}
 
 	return &Driver{
-		Endpoint:   endpoint,
-		NodeID:     nodeID,
-		NodeServer: nodeServer,
-		Clientset:  clientset,
-		stopCh:     stopCh,
+		Endpoint:     endpoint,
+		NodeID:       nodeID,
+		NodeServer:   nodeServer,
+		Clientset:    clientset,
+		mounterFound: mounterFound,
+		nodeLock:     lock,
+		stopCh:       stopCh,
 	}, nil
 }
 
@@ -255,11 +305,25 @@ func (d *Driver) Run() error {
 
 	klog.Infof("Listening for connections on address: %#v", listener.Addr())
 
-	// Start taint watcher when gRPC server is ready to accept connections
+	// Start taint watcher when gRPC server is ready to accept connections, and the node can mount
 	if d.Clientset != nil {
-		go node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
+		go d.startTaintWatcherOnceMounting(d.stopCh)
 	}
 	return d.Srv.Serve(listener)
+}
+
+// startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node
+// can mount S3 volumes: right away, or in daemonset mode once its mounter is first found, so a node that
+// the taint keeps workloads off stays that way while its mounter isn't running.
+func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
+	if d.mounterFound != nil {
+		select {
+		case <-d.mounterFound:
+		case <-stopCh:
+			return
+		}
+	}
+	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
 }
 
 func (d *Driver) Stop() {

@@ -77,7 +77,7 @@ func TestMountError_MounterNotDiscovered_HintIsNodeScoped(t *testing.T) {
 
 	err := dm.Mount(context.Background(), "bucket", target,
 		credentialprovider.ProvideContext{VolumeID: volumeID, WorkloadPodID: "pod-uid-1"}, nil, mountpoint.Args{}, "", nil)
-	assert.ErrorIs(t, err, mounter.ErrCommDirNotReady)
+	assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node node-a")
 	assert.Contains(t, err.Error(), "--field-selector spec.nodeName=node-a")
 }
 
