@@ -2,13 +2,13 @@ package custom_testsuites
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,8 +40,8 @@ const (
 // driverRelease is the installed driver, which a Serial suite reconfigures in place and then restores.
 type driverRelease struct {
 	install driverInstall
-	// chart is the working-tree chart, whose defaults the value builders start from.
-	chart *chart.Chart
+	// affinity is s3-csi-node's at setup, the default pair's placement, which the value builders send or narrow.
+	affinity map[string]any
 	// installed is the install's user-supplied values: what every upgrade must resend (CI's image overrides).
 	installed map[string]any
 }
@@ -64,12 +64,24 @@ func setUpDriverRelease(ctx context.Context, f *framework.Framework) *driverRele
 	_, helmCfg := initHelmClient()
 	ch, err := loader.Load(helmChartSource)
 	framework.ExpectNoError(err, "loading the working-tree chart at %s", helmChartSource)
-	r := &driverRelease{install: newHelmInstall(helmCfg, csiDriverReleaseName(helmCfg), ch), chart: ch}
+	r := &driverRelease{install: newHelmInstall(helmCfg, csiDriverReleaseName(helmCfg), ch), affinity: csiNodeAffinity(ctx, f)}
 	r.installed = r.install.read()
 
 	cleanupF := teardownSafeFramework(f)
 	DeferCleanup(func(ctx context.Context) { r.install.restore(ctx, cleanupF) })
 	return r
+}
+
+// csiNodeAffinity returns s3-csi-node's affinity in the shape of values, as the chart renders node.affinity there as is.
+func csiNodeAffinity(ctx context.Context, f *framework.Framework) map[string]any {
+	GinkgoHelper()
+	ds, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).Get(ctx, csiDriverDaemonSetName, metav1.GetOptions{})
+	framework.ExpectNoError(err, "reading DaemonSet %s", csiDriverDaemonSetName)
+	encoded, err := json.Marshal(ds.Spec.Template.Spec.Affinity)
+	framework.ExpectNoError(err, "encoding the affinity of DaemonSet %s", csiDriverDaemonSetName)
+	affinity := map[string]any{}
+	framework.ExpectNoError(json.Unmarshal(encoded, &affinity), "decoding the affinity of DaemonSet %s", csiDriverDaemonSetName)
+	return affinity
 }
 
 // teardownSafeFramework returns a framework a BeforeAll DeferCleanup can still use: those run *after* the framework's AfterEach

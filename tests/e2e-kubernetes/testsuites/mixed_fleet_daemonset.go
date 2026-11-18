@@ -202,8 +202,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 // withAdditionalDaemonSets returns the installed values with entries as additionalDaemonSets, and the default pair kept
 // to nodes matching outside, a matchExpression, since no node may match two pairs.
 func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries map[string]any) map[string]any {
-	affinity := r.chart.Values["node"].(map[string]any)["affinity"].(map[string]any)
-	terms := affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
+	terms := r.affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
 	var narrowed []any
 	for _, term := range terms {
 		exprs := slices.Clone(term.(map[string]any)["matchExpressions"].([]any))

@@ -397,12 +397,11 @@ func withMounterCache(r *driverRelease, cache map[string]any, nodeSelector map[s
 	}
 	mounter["maxVolumesPerNode"] = defaultMaxVolumesPerNode
 
-	// Placement from the chart, not the install: an install pinned to the NVMe nodes would leave unpinned workloads on nodes
-	// without s3-csi-node. Both DaemonSets read node.nodeSelector.
+	// Placement as s3-csi-node had it at setup, narrowed to nodeSelector's nodes. Both DaemonSets read node.nodeSelector.
 	installedNode, _ := r.installed["node"].(map[string]any)
 	node := map[string]any{}
 	maps.Copy(node, installedNode)
-	node["affinity"] = r.chart.Values["node"].(map[string]any)["affinity"]
+	node["affinity"] = r.affinity
 	selector := map[string]any{}
 	for k, v := range nodeSelector {
 		selector[k] = v
