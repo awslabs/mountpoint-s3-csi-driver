@@ -153,12 +153,21 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 				expectNotRestarted(ctx, f, working)
 			})
 
-			It("hands node A to the waiting CSI node when the one working there goes", func(ctx context.Context) {
+			It("hands node A to a waiting CSI node when the one working there goes", func(ctx context.Context) {
 				running, _ := writerOnNode(ctx, f, config, pattern, nodeA)
 				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, nodePodOf(ctx, f, csiDriverDaemonSetName+"-first", nodeA)))
-				Eventually(ctx, func(ctx context.Context) string {
-					return nodePodLogs(ctx, f, nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA))
-				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(ContainSubstring("nodelock: holding"))
+				// One of the waiting CSI nodes takes the lock: extra, or first's replacement, which the lock doesn't order.
+				Eventually(ctx, func(ctx context.Context) int {
+					holders := 0
+					for _, pod := range nodePodsOn(ctx, f, nodeA) {
+						// The replacement may not have started yet, which has no logs.
+						logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, pod.Namespace, pod.Name, csiNodeContainerName)
+						if err == nil && strings.Contains(logs, "nodelock: holding") {
+							holders++
+						}
+					}
+					return holders
+				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(Equal(1))
 
 				// The new holder keeps using first's mounter, which serves the node's mounts, as the docs' fix relies on.
 				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
