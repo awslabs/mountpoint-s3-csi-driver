@@ -261,7 +261,9 @@ mounter:
 #
 # Placement isn't copied: each entry must set node.nodeSelector, node.affinity or both, and no two
 # pairs may run on the same node, so narrow the default pair's placement to keep it off the
-# entries' nodes. Only used when experimental.mounterMode is "daemonset".
+# entries' nodes. Set node.nodeSelector, as in the example below, or add an expression such as
+# { key: karpenter.sh/nodepool, operator: In, values: [general] } to each node.affinity term.
+# Only used when experimental.mounterMode is "daemonset".
 #
 # WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
 # matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
@@ -284,4 +286,19 @@ mounter:
 #         requests:
 #           memory: "32Gi"
 #           cpu: "2"
+#   gpu:
+#     node:
+#       affinity:
+#         nodeAffinity:
+#           requiredDuringSchedulingIgnoredDuringExecution:
+#             nodeSelectorTerms:
+#               - matchExpressions:
+#                   - key: node.kubernetes.io/instance-type
+#                     operator: In
+#                     values: ["g5.xlarge", "g5.2xlarge"]
+#     mounter:
+#       maxVolumesPerNode: 8
+#       resources:
+#         requests:
+#           memory: "8Gi"
 additionalDaemonSets: {}

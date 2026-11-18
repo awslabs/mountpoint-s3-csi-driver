@@ -203,7 +203,7 @@ To recover:
    $ kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
    $ kubectl logs -n kube-system <s3-csi-node-pod-name> -c s3-plugin | grep "multiple running mounter pods found" | tail -1
    ```
-   Change the placement of the other pairs so they no longer match these nodes. Their mounters have no mounts there, so you don't need to drain these nodes. If no mounter serves the node's mounts, keep any one pair. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
+   Change the placement of the other pairs so they no longer match these nodes, for example by changing an entry's `node.nodeSelector` or `node.affinity`. Their mounters have no mounts there, so you don't need to drain these nodes. If no mounter serves the node's mounts, keep any one pair. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
 2. Run `helm upgrade`, then uncordon any nodes you drained, and check the driver is registered again:
    ```bash
    $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'
