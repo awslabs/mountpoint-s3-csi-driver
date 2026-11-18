@@ -152,7 +152,7 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 		// Runs after the workloads are deleted, so that the nodes are gone before the driver gets uninstalled, and the
 		// next run starts from an empty pool again.
 		ginkgo.DeferCleanup(waitForEmptyNodePool, f)
-		// The chart has only the default pair (no additionalDaemonSets), so the pool's nodes have the same limit as the others.
+		// Only the default pair is installed, so the pool's nodes have the same limit as the others.
 		limit, err := getCSINodeLimits(ctx, f, getCSIDriverNode(ctx, f).Name, driverName)
 		framework.ExpectNoError(err)
 		scaleOut(ctx, 2*limit, limit, "")

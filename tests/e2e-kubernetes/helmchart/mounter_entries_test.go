@@ -28,7 +28,6 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 		{"no placement", `additionalDaemonSets: {b: {mounter: {maxVolumesPerNode: 8}}}`, "additionalDaemonSets.b.node: nodeSelector or affinity is required"},
 		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
 		{"same placement, as a number and as a string", `additionalDaemonSets: {a: {node: {nodeSelector: {x: 1}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
-		{"a null nodeSelector value", `additionalDaemonSets: {b: {node: {nodeSelector: {x: null}}}}`, "a nodeSelector value is null"},
 		{"the old daemonsetMounters", `daemonsetMounters: [{maxVolumesPerNode: 32}]`, "daemonsetMounters was replaced by mounter"},
 		{"same placement as the default", `{node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}, additionalDaemonSets: {b: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}}}}`, "additionalDaemonSets.b.node selects the same nodes as another pair"},
 		{"an entry service account", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, serviceAccount: {name: b}}}}`, "additionalDaemonSets.b.node.serviceAccount: set it on node instead"},
@@ -47,11 +46,12 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 
 func TestAdditionalDaemonSetsPlacementAndOverrides(t *testing.T) {
 	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5, podAnnotations: {a: node}}
-mounter: {maxVolumesPerNode: 6, resources: {requests: {memory: 6Gi}}, podAnnotations: {a: mounter}}
+mounter: {maxVolumesPerNode: 6, resources: {requests: {memory: 6Gi}}, podAnnotations: {a: mounter}, logLevel: 6}
 additionalDaemonSets:
   bigmem:
-    node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}, podAnnotations: {b: bigmem}, logLevel: 7, tolerateAllTaints: false, tolerations: [{key: gpu, operator: Exists}]}
-    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}, podLabels: {x: bigmem}, imagePullSecrets: [bigmem]}
+    node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}, podAnnotations: {b: bigmem}, logLevel: 7, tolerateAllTaints: false, tolerations: [{key: gpu, operator: Exists}],
+      kubeletPath: /var/lib/k0s/kubelet, resources: {requests: {cpu: "1"}}}
+    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}, podLabels: {x: bigmem}, imagePullSecrets: [bigmem], logLevel: 2}
   cached:
     node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}]}]}}}}`)
 	assert.NoError(t, err)
@@ -77,9 +77,13 @@ additionalDaemonSets:
 	assert.Equals(t, "ml", daemonSets["s3-csi-node-bigmem"].Spec.Template.Labels["cost"])
 	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-node-cached"].Spec.Template.Spec.Containers[0].Args, "--v=5"))
 	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-node-bigmem"].Spec.Template.Spec.Containers[0].Args, "--v=7"))
+	assert.Equals(t, "/var/lib/k0s/kubelet", envValue(daemonSets["s3-csi-node-bigmem"], "s3-plugin", "HOST_KUBELET_PATH"))
+	assert.Equals(t, "1", daemonSets["s3-csi-node-bigmem"].Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String())
+	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-mounter-cached"].Spec.Template.Spec.Containers[0].Args, "--v=6"))
+	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.Containers[0].Args, "--v=2"))
 	assert.Equals(t, "bigmem", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Labels["x"])
 	assert.Equals(t, []corev1.LocalObjectReference{{Name: "bigmem"}}, daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.ImagePullSecrets)
-	// Both of a pair's pods take the pair's tolerations: bigmem's gpu one, and no catch-all as it turns tolerateAllTaints off.
+	// Both bigmem pods take its gpu toleration, and no catch-all, as it turns tolerateAllTaints off.
 	for _, name := range []string{"s3-csi-node-bigmem", "s3-csi-mounter-bigmem"} {
 		tolerations := daemonSets[name].Spec.Template.Spec.Tolerations
 		assert.Equals(t, true, slices.ContainsFunc(tolerations, func(t corev1.Toleration) bool { return t.Key == "gpu" }))
@@ -176,13 +180,51 @@ func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
-	// Unquoted, these render as a bool and numbers, which a nodeSelector can't hold; a large number must not become 1e+07.
-	// A bare key like on is a bool to YAML too.
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x"}}}}`)
+	// Unquoted, these render as a bool and numbers, which a nodeSelector can't hold, and 10000000 must not become 1e+07.
+	// A bare key like on is a bool to YAML too, and a null value is the empty one.
+	values := `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
+	daemonSets, err := renderDaemonSets(t, values)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
-		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000", "on": "x"}, daemonSets[name].Spec.Template.Spec.NodeSelector)
+		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000", "on": "x", "empty": ""}, daemonSets[name].Spec.Template.Spec.NodeSelector)
 	}
+	// The typed parse above reads an unquoted true as "true" too, so check the rendered text.
+	manifests, err := renderChart(t, values, map[string]any{"experimental": map[string]any{"mounterMode": "daemonset"}})
+	assert.NoError(t, err)
+	for _, file := range []string{"node.yaml", "mounter-daemonset.yaml"} {
+		manifest := manifests["aws-mountpoint-s3-csi-driver/templates/"+file]
+		for _, want := range []string{`"gpu": "true"`, `"zone": "1"`, `"memory": "10000000"`, `"on": "x"`, `"empty": ""`} {
+			assert.Contains(t, manifest, want)
+		}
+	}
+}
+
+func TestAdditionalDaemonSetsAffinityOnlyEntry(t *testing.T) {
+	// The default pair has no nodeSelector either, so only the affinity tells the two placements apart.
+	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
+  big: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: pool, operator: In, values: [big]}]}]}}}}}`)
+	assert.NoError(t, err)
+	for _, name := range []string{"s3-csi-node-big", "s3-csi-mounter-big"} {
+		assert.Equals(t, []string{"pool In big"}, terms(daemonSets[name]))
+	}
+}
+
+func TestAdditionalDaemonSetsPairPodsShareScheduling(t *testing.T) {
+	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
+  defaults: {node: {nodeSelector: {p: defaults}, tolerateAllTaints: false}}
+  gpu: {node: {nodeSelector: {p: gpu}, tolerateAllTaints: false, defaultTolerations: false, tolerations: [{key: gpu, operator: Exists}]}}`)
+	assert.NoError(t, err)
+	// Both pods of a pair run on the same nodes, so they need the same placement and tolerations.
+	for _, pair := range []string{"", "-defaults", "-gpu"} {
+		node, mounter := daemonSets["s3-csi-node"+pair].Spec.Template.Spec, daemonSets["s3-csi-mounter"+pair].Spec.Template.Spec
+		assert.Equals(t, node.NodeSelector, mounter.NodeSelector)
+		assert.Equals(t, node.Affinity, mounter.Affinity)
+		assert.Equals(t, node.Tolerations, mounter.Tolerations)
+	}
+	catchAll := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	assert.Equals(t, []corev1.Toleration{catchAll}, daemonSets["s3-csi-node"].Spec.Template.Spec.Tolerations)
+	assert.Equals(t, false, slices.Contains(daemonSets["s3-csi-node-defaults"].Spec.Template.Spec.Tolerations, catchAll))
+	assert.Equals(t, []corev1.Toleration{{Key: "gpu", Operator: corev1.TolerationOpExists}}, daemonSets["s3-csi-node-gpu"].Spec.Template.Spec.Tolerations)
 }
 
 // The two default node.affinity rules: not Fargate, hybrid or Auto Mode, or Auto Mode outside the system NodePool.

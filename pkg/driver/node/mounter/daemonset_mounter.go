@@ -1400,17 +1400,32 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 	return true
 }
 
+// The fix for a node that more than one pair matches. Keeping the pair whose mounter serves the node's mounts needs
+// no drain: the others' mounters have none.
+const (
+	keepPairAdvice = "keep its pair on this node and change the other pairs' node.nodeSelector or node.affinity " +
+		"(top-level, or additionalDaemonSets.<name>.node), so only that pair matches it"
+	onePairAdvice = "change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), " +
+		"or this node's labels, so only one pair matches it"
+)
+
 // checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.
 func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	if _, err := dm.runningMounterPods(ctx); errors.Is(err, ErrMultipleMounterPods) {
-		effect := "Mounts on this node keep using the first mounter"
-		if dm.mounter.Load() == nil {
-			effect = "None of them holds this node's mounts, so new S3 mounts on it fail until only one runs"
-		}
-		klog.Errorf("DaemonsetMounter: %v. %s; change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), or this node's labels, so only one pair matches it", err, effect)
+	running, err := dm.runningMounterPods(ctx)
+	if !errors.Is(err, ErrMultipleMounterPods) {
+		return
 	}
+	var inUse *corev1.Pod
+	if m := dm.mounter.Load(); m != nil {
+		inUse = dm.podWithCommDir(running, m.commDir)
+	}
+	if inUse == nil {
+		klog.Errorf("DaemonsetMounter: %v. None of them holds this node's mounts, so new S3 mounts on it fail until only one runs; %s", err, onePairAdvice)
+		return
+	}
+	klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using %s; %s", err, inUse.Name, keepPairAdvice)
 }
 
 // GetCommDir returns the discovered mounter pod's comm dir, or "" if there is none. Exported for testing.
@@ -1582,7 +1597,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 			return nil, err
 		}
 		running = []corev1.Pod{*inUse}
-		klog.Errorf("DaemonsetMounter: %v. Using %s; change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), or this node's labels, so only one pair matches it", err, running[0].Name)
+		klog.Errorf("DaemonsetMounter: %v. Using %s; %s", err, running[0].Name, keepPairAdvice)
 	} else if err != nil {
 		return nil, err
 	}

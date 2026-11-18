@@ -125,11 +125,10 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 
 {{/*
 A nodeSelector value as the string a node label holds. YAML reads true or 10000000 as other types, and toString would
-write 10000000 as 1e+07. A null one, for example a key with nothing after it, would otherwise select the label "null".
+write 10000000 as 1e+07. A null one, a key with nothing after it, is the empty value, as Kubernetes reads it.
 */}}
 {{- define "aws-mountpoint-s3-csi-driver.labelValue" -}}
-{{- if kindIs "invalid" . }}{{ fail "a nodeSelector value is null: give it the label's value, quoted if it's a number or true/false" }}
-{{- else if kindIs "string" . }}{{ . }}{{ else }}{{ toJson . }}{{ end }}
+{{- if kindIs "string" . }}{{ . }}{{ else if not (kindIs "invalid" .) }}{{ toJson . }}{{ end }}
 {{- end }}
 
 {{/*

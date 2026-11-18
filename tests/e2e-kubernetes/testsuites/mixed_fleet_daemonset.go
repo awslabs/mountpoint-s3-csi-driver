@@ -137,7 +137,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 				Eventually(ctx, func(ctx context.Context) string {
 					return nodePodLogs(ctx, f, working)
 				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(ContainSubstring("multiple running mounter pods found"))
-				// The new CSI node stops at the lock, before it logs its mounter mode, so it never reads or changes the node's mounts.
+				// The new CSI node stops at the lock, before it logs its mounter mode, so it never touches the node's mounts.
 				var waiting string
 				Eventually(ctx, func(ctx context.Context) string {
 					waiting = nodePodLogs(ctx, f, nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA))
@@ -160,7 +160,9 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 					return nodePodLogs(ctx, f, nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA))
 				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(ContainSubstring("nodelock: holding"))
 
-				newPod, _ := writerOnNode(ctx, f, config, pattern, nodeA)
+				// The new holder keeps using first's mounter, which serves the node's mounts, as the docs' fix relies on.
+				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
+				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(mounterOf(ctx, f, mounterDaemonSetName+"-first", nodeA)))
 				checkWriteAndRead(ctx, f, running)
 				checkWriteAndRead(ctx, f, newPod)
 			})
@@ -169,6 +171,8 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 				running, _ := writerOnNode(ctx, f, config, pattern, nodeA)
 				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first()}))
 				Eventually(ctx, func(ctx context.Context) []v1.Pod { return nodePodsOn(ctx, f, nodeA) }).
+					WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(HaveLen(1))
+				Eventually(ctx, func(ctx context.Context) []v1.Pod { return mountersOn(ctx, f, nodeA) }).
 					WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(HaveLen(1))
 				Eventually(ctx, func(ctx context.Context) (*storagev1.CSINodeDriver, error) {
 					return csiNodeDriver(ctx, f, nodeA, driverName)
@@ -247,6 +251,18 @@ func nodePodOf(ctx context.Context, f *framework.Framework, daemonSet, node stri
 	}
 	framework.Failf("no pod of %s on node %s", daemonSet, node)
 	return nil
+}
+
+// mounterOf returns the name of daemonSet's mounter pod on node.
+func mounterOf(ctx context.Context, f *framework.Framework, daemonSet, node string) string {
+	GinkgoHelper()
+	for _, pod := range mountersOn(ctx, f, node) {
+		if pod.OwnerReferences[0].Name == daemonSet {
+			return pod.Name
+		}
+	}
+	framework.Failf("no pod of %s on node %s", daemonSet, node)
+	return ""
 }
 
 // nodePodLogs returns the logs of the CSI node pod's s3-plugin container.
