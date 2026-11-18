@@ -3,13 +3,11 @@ package custom_testsuites
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	v1 "k8s.io/api/core/v1"
@@ -18,10 +16,10 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
-// Helm helpers for Serial e2e suites that upgrade the driver's release to other values and restore the installed ones.
+// Helpers for Serial e2e suites that reconfigure the installed driver with other values and restore the installed ones.
 
-// TODO: the cache suite and this file borrow these from other files. The ones outside util.go could
-// move into util.go, or here for the Helm ones, in a future refactor.
+// TODO: the cache suite and the driver_install files borrow these from other files. The ones outside util.go could
+// move into util.go, or into driver_install_helm.go for the Helm ones, in a future refactor.
 //   - pod_sharing_daemonset.go: assertPodFailsToMount, isPodReady
 //   - process_isolation_daemonset.go: statPath, commDirHostPath, mountpointProcessRunningAs
 //   - cache.go: createEBSCacheSC, ebsCSIDriverDaemonSet, deleteObjectFromS3
@@ -33,79 +31,45 @@ import (
 //     execInMounterPod, podOnNode
 
 const (
-	// e2eUpgradedKey marks a release an upgrade changed (the chart ignores unknown keys). It alone tells "the install
-	// chose these values" from "a previous run's restore never ran", otherwise identical and both healthy.
-	e2eUpgradedKey = "e2eUpgraded"
-
 	// mounterRestartTimeout covers provisioning, attaching and mounting an ephemeral cache; an unbound one blocks 2m3s per attempt.
 	mounterRestartTimeout = 6 * time.Minute
 	// csiNodeRestartTimeout only covers pod start: the mounter it waits for is already Ready.
 	csiNodeRestartTimeout = 2 * time.Minute
 )
 
-// driverRelease is the driver's installed Helm release, which a Serial suite upgrades in place and then restores.
+// driverRelease is the installed driver, which a Serial suite reconfigures in place and then restores.
 type driverRelease struct {
-	helm  *action.Configuration
-	name  string
+	install driverInstall
+	// chart is the working-tree chart, whose defaults the value builders start from.
 	chart *chart.Chart
-	// installed is the release's user-supplied values: what every upgrade must resend (CI's image overrides).
+	// installed is the install's user-supplied values: what every upgrade must resend (CI's image overrides).
 	installed map[string]any
-	// revision is the release's revision at setup, which the restore rolls back to, chart and values alike.
-	revision int
 }
 
-// setUpDriverRelease reads the driver's release and registers its restore. Call it from a BeforeAll in an Ordered, Serial container.
+// driverInstall is how the driver is installed, which decides how its values are changed and restored.
+type driverInstall interface {
+	// read returns the install's user-supplied values at setup.
+	read() map[string]any
+	// apply makes values, the complete user-supplied set, the install's, without replacing any driver pod.
+	apply(ctx context.Context, values map[string]any)
+	// settle waits until the install reports apply's values in effect, once any pods they need replaced have been.
+	settle(ctx context.Context)
+	// restore returns the install to its values at setup and waits until the driver runs them.
+	restore(ctx context.Context, f *framework.Framework)
+}
+
+// setUpDriverRelease reads the driver's install and registers its restore. Call it from a BeforeAll in an Ordered, Serial container.
 func setUpDriverRelease(ctx context.Context, f *framework.Framework) *driverRelease {
 	GinkgoHelper()
 	_, helmCfg := initHelmClient()
 	ch, err := loader.Load(helmChartSource)
 	framework.ExpectNoError(err, "loading the working-tree chart at %s", helmChartSource)
-	r := &driverRelease{helm: helmCfg, name: csiDriverReleaseName(helmCfg), chart: ch}
-	installedRelease, err := action.NewGet(helmCfg).Run(r.name)
-	framework.ExpectNoError(err, "reading release %q", r.name)
-	r.revision = installedRelease.Version
-	// User-supplied only, so chart defaults are not written back as user overrides.
-	r.installed = installedRelease.Config
-
-	// go test's -timeout, or a killed run, exits without the restore; restoring the values read here would then report success.
-	if upgraded, _ := r.installed[e2eUpgradedKey].(bool); upgraded {
-		// A plain `helm rollback` goes to the previous revision, which an earlier upgrade of the same run may also have marked.
-		Fail(fmt.Sprintf("release %q still carries a previous run's values, so its restore did not run. Recover with:"+
-			" helm rollback %s <the newest revision whose `helm get values --revision` has no %s> -n %s,"+
-			" then kubectl delete pod -n %s -l %s", r.name, r.name, e2eUpgradedKey, helmReleaseNamespace,
-			csiDriverDaemonSetNamespace, mounterPodLabel))
-	}
+	r := &driverRelease{install: newHelmInstall(helmCfg, csiDriverReleaseName(helmCfg), ch), chart: ch}
+	r.installed = r.install.read()
 
 	cleanupF := teardownSafeFramework(f)
-	DeferCleanup(func(ctx context.Context) {
-		By(fmt.Sprintf("Rolling the driver's release back to revision %d", r.revision))
-		rollback := action.NewRollback(r.helm)
-		rollback.Version = r.revision
-		framework.ExpectNoError(rollback.Run(r.name), "rolling release %q back to revision %d", r.name, r.revision)
-		restartDriverPods(ctx, cleanupF)
-	})
+	DeferCleanup(func(ctx context.Context) { r.install.restore(ctx, cleanupF) })
 	return r
-}
-
-// csiDriverReleaseName finds the installed release of this chart. Not helmReleaseName: CI installs that (scripts/run.sh) but
-// dev/mp-dev.sh installs `aws-mountpoint-s3-csi-driver`, and hardcoding either fails in the other.
-func csiDriverReleaseName(cfg *action.Configuration) string {
-	GinkgoHelper()
-	list := action.NewList(cfg)
-	// All states: a run killed mid-upgrade leaves the release pending-upgrade, which the default list hides.
-	list.StateMask = action.ListAll
-	releases, err := list.Run()
-	framework.ExpectNoError(err, "listing Helm releases")
-	var names []string
-	for _, r := range releases {
-		if r.Chart != nil && r.Chart.Metadata != nil && r.Chart.Metadata.Name == helmChartName {
-			names = append(names, r.Name)
-		}
-	}
-	if len(names) != 1 {
-		Fail(fmt.Sprintf("expected exactly one installed %q release, found %v", helmChartName, names))
-	}
-	return names[0]
 }
 
 // teardownSafeFramework returns a framework a BeforeAll DeferCleanup can still use: those run *after* the framework's AfterEach
@@ -114,25 +78,19 @@ func teardownSafeFramework(f *framework.Framework) *framework.Framework {
 	return &framework.Framework{ClientSet: f.ClientSet}
 }
 
-// upgrade upgrades the release to values, the complete user-supplied set, and waits until the driver runs them.
+// upgrade makes values, the complete user-supplied set, the install's, and waits until the driver runs them.
 func (r *driverRelease) upgrade(ctx context.Context, f *framework.Framework, values map[string]any) {
 	GinkgoHelper()
-	r.upgradeOnly(ctx, values)
+	r.install.apply(ctx, values)
 	restartDriverPods(ctx, f)
+	r.install.settle(ctx)
 }
 
-// upgradeOnly upgrades the release to values without replacing any driver pod, as a customer's helm upgrade does.
+// upgradeOnly makes values the install's without replacing any driver pod, as a customer's helm upgrade does.
 func (r *driverRelease) upgradeOnly(ctx context.Context, values map[string]any) {
 	GinkgoHelper()
-	values = maps.Clone(values)
-	values[e2eUpgradedKey] = true
-	up := action.NewUpgrade(r.helm)
-	up.Namespace = helmReleaseNamespace
-	// values is complete; with an empty set Helm would otherwise reuse the release's current values.
-	up.ResetValues = true
-	// Not Wait: Helm would wait for every mounter pod to be updated, which an OnDelete DaemonSet never does by itself.
-	_, err := up.RunWithContext(ctx, r.name, r.chart, values)
-	framework.ExpectNoError(err, "upgrading release %q", r.name)
+	r.install.apply(ctx, values)
+	r.install.settle(ctx)
 }
 
 // restartDriverPods replaces the driver pods so they run the release as it is now.
