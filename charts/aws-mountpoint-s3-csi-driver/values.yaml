@@ -136,6 +136,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 customLabels: {}
+# Annotations for every driver pod. A pod's own podAnnotations (node, mounter, controller) win on the same key.
+podAnnotations: {}
 
 imagePullSecrets: []
 

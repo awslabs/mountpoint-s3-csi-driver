@@ -133,7 +133,7 @@ spec:
         {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with $mounter.podAnnotations }}
+      {{- with merge (dict) ($mounter.podAnnotations | default dict) (.Values.podAnnotations | default dict) }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

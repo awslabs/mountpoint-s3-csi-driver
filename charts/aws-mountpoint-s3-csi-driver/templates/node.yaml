@@ -40,7 +40,7 @@ spec:
         {{- if $node.podLabels }}
         {{- toYaml $node.podLabels | nindent 8 }}
         {{- end }}
-      {{- with $node.podAnnotations }}
+      {{- with merge (dict) ($node.podAnnotations | default dict) (.Values.podAnnotations | default dict) }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

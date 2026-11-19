@@ -181,3 +181,16 @@ func TestControllerValues(t *testing.T) {
 	assert.Equals(t, affinity, controller.pod.Affinity)
 	assert.Equals(t, map[string]string{"a": "b"}, controller.annotations)
 }
+
+func TestRootPodAnnotations(t *testing.T) {
+	// Every driver pod gets the root annotations, and a pod's own podAnnotations win on the same key.
+	workloads := renderWorkloads(t, `podAnnotations: {a: root, b: root}
+controller: {podAnnotations: {b: controller}}`)
+	for _, w := range workloads {
+		want := map[string]string{"a": "root", "b": "root"}
+		if w.name == "s3-csi-controller" {
+			want["b"] = "controller"
+		}
+		assert.Equals(t, want, w.annotations)
+	}
+}
