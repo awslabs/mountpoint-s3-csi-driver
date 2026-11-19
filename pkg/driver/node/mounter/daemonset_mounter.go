@@ -113,10 +113,12 @@ var (
 
 // mounterPod is what this node's driver needs from the mounter pod, resolved when it is discovered.
 type mounterPod struct {
+	// daemonSetName is the DaemonSet running the mounter pod, which the chart names after its daemonsetMounters[] entry.
+	daemonSetName string
 	// comm directory for communicating with mounter pod.
 	commDir string
-	// hasCacheVolume is whether the mounter pod mounts a volume named `cache` for its Mountpoints.
-	hasCacheVolume bool
+	// cacheVolume is the volume named `cache` the mounter pod mounts for its Mountpoints, or nil if it has none.
+	cacheVolume *corev1.Volume
 	// image is the mounter container's `image:` ("" if the container is missing). It is fixed for the
 	// pod's lifetime; a new mounter pod gets a new comm dir, which triggers re-discovery.
 	image string
@@ -334,8 +336,10 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 			"Kubelet retries the mount until it can. %s", dm.nodeID, helpMessageForCheckingMounterPodStatus())
 	}
 
+	newTarget := targetState == TargetAbsent
+
 	// Decide whether this mount caches, rejecting a cache request this node cannot serve.
-	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter.hasCacheVolume)
+	caches, err := validateCacheRequest(args, volumeCtx, volumeID, mounter, newTarget)
 	if err != nil {
 		return err
 	}
@@ -346,6 +350,10 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	// The mounter picks the PV's directory
 	if caches {
 		args.Set(mountpoint.ArgCache, mountpoint.ArgNoValue)
+	}
+	// The kubelet republishes a mounted target periodically, so a PV's deprecated settings are warned about on a new target only.
+	if newTarget {
+		warnDeprecatedCacheSettings(volumeCtx, volumeID, mounter)
 	}
 
 	// All paths (republish, share, new mount) go through mountOrShareSource
@@ -1602,7 +1610,7 @@ func (dm *DaemonsetMounter) RebuildMountMap() error {
 }
 
 // tryDiscoverMounter performs a single attempt to find the secondary mounter pod on this node and
-// resolve its comm dir, as seen from the primary daemonset, and whether it has a cache volume.
+// resolve its comm dir, as seen from the primary daemonset, and its cache volume.
 // With more than one running mounter pod, it returns the one in use, or an error if none is.
 func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod, error) {
 	running, err := dm.runningMounterPods(ctx)
@@ -1626,23 +1634,22 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 		return nil, fmt.Errorf("%w on node %s", ErrNoRunningMounterPod, dm.nodeID)
 	}
 
-	podUID := string(running[0].UID)
-	commDir := dm.commDirOf(running[0])
-	hasCacheVolume := mounterPodHasCacheVolume(running[0])
-	image := mounterPodImage(running[0])
-	maxVolumes := mounterPodMaxVolumes(running[0])
+	mounter := &mounterPod{
+		commDir:     dm.commDirOf(running[0]),
+		cacheVolume: mounterPodCacheVolume(running[0]),
+		image:       mounterPodImage(running[0]),
+		maxVolumes:  mounterPodMaxVolumes(running[0]),
+	}
+	if owner := metav1.GetControllerOf(&running[0]); owner != nil {
+		mounter.daemonSetName = owner.Name
+	}
 
-	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, cache volume: %t, image: %s",
-		running[0].Name, podUID, commDir, hasCacheVolume, image)
-	if msg := dm.imageMismatchWarning(image); msg != "" {
+	klog.V(4).Infof("DaemonsetMounter: discovered mounter pod %s (uid=%s), comm dir: %s, %s, image: %s",
+		running[0].Name, running[0].UID, mounter.commDir, cacheVolumeSummary(mounter.cacheVolume), mounter.image)
+	if msg := dm.imageMismatchWarning(mounter); msg != "" {
 		klog.Warning(msg)
 	}
-	return &mounterPod{
-		commDir:        commDir,
-		hasCacheVolume: hasCacheVolume,
-		image:          image,
-		maxVolumes:     maxVolumes,
-	}, nil
+	return mounter, nil
 }
 
 // mounterPodMaxVolumes returns pod's MounterMaxVolumesLabel, or -1 if it has no valid one.
@@ -1721,18 +1728,18 @@ func mounterPodImage(pod corev1.Pod) string {
 }
 
 // imageMismatchWarning returns a warning naming both images and how to update the mounter if this CSI node and the
-// mounter (running mounterImage) run different images, or "" if they match.
-func (dm *DaemonsetMounter) imageMismatchWarning(mounterImage string) string {
-	if dm.ownImage == "" || dm.ownImage == mounterImage {
+// mounter run different images, or "" if they match.
+func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
+	if dm.ownImage == "" || dm.ownImage == mounter.image {
 		return ""
 	}
-	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, s3-csi-daemonset-mounter runs %[3]q. "+
+	return fmt.Sprintf("image mismatch on node %[1]s: s3-csi-node runs %[2]q, %[5]s runs %[3]q. "+
 		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
 		"`kubectl cordon %[1]s`, "+
 		"`kubectl drain %[1]s --ignore-daemonsets`, "+
 		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`, "+
 		"then `kubectl uncordon %[1]s`. Deleting the mounter pod without draining the node first breaks all active mounts on it.",
-		dm.nodeID, dm.ownImage, mounterImage, mounterNamespace)
+		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace, mounter.daemonSetName)
 }
 
 // waitForMount waits until Mountpoint is serving at target or an error occurs.
