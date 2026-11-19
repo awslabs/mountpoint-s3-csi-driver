@@ -64,10 +64,9 @@ import (
 )
 
 const (
-	mounterPodLabel  = "app=s3-csi-daemonset-mounter"
-	CommVolumeName   = "comm"
-	MountSockName    = "mount.sock"
-	MountErrorSuffix = ".error"
+	mounterPodLabel = "app=s3-csi-daemonset-mounter"
+	CommVolumeName  = "comm"
+	MountSockName   = "mount.sock"
 
 	// TODO: lower sendOptionsTimeout once secondary has concurrent accept to reduce blocks on Mount -> Send -> dialWithRetry
 	sendOptionsTimeout = 15 * time.Second
@@ -877,7 +876,7 @@ func (dm *DaemonsetMounter) forgetMount(volumeID string, entry *MountEntry) {
 
 // GetErrorFileName returns the error file name for a given volume ID.
 func GetErrorFileName(volumeID string) string {
-	return volumeID + MountErrorSuffix
+	return mountoptions.ErrorFileName(volumeID)
 }
 
 // cleanupMount removes all resources associated with a mount entry.
@@ -1269,7 +1268,7 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 		return nil, "", fmt.Errorf("failed to create credential directory: %w", err)
 	}
 	credentialCtx.WritePath = mountCredDir
-	credentialCtx.EnvPath = filepath.Join("/comm", volumeID)
+	credentialCtx.EnvPath = filepath.Join("/comm", mountoptions.VolumeKey(volumeID))
 	credentialCtx.MountKind = credentialprovider.MountKindDaemonset
 	credentialCtx.Uid = uid
 
@@ -1283,7 +1282,7 @@ func (dm *DaemonsetMounter) provideCredentials(ctx context.Context, commDir, vol
 
 // cleanupCredentials removes the per-mount credential directory.
 func (dm *DaemonsetMounter) cleanupCredentials(commDir, volumeID string, cleanupCtx credentialprovider.CleanupContext) error {
-	mountCredDir := filepath.Join(commDir, volumeID)
+	mountCredDir := filepath.Join(commDir, mountoptions.VolumeKey(volumeID))
 	cleanupCtx.WritePath = mountCredDir
 	cleanupCtx.MountKind = credentialprovider.MountKindDaemonset
 	if err := dm.credProvider.Cleanup(cleanupCtx); err != nil {

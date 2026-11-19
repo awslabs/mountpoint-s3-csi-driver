@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
 const (
@@ -83,7 +84,7 @@ func (dm *DaemonsetMounter) secureSharedPaths(commDir string) error {
 // by others, nothing inside is reachable by another Mountpoint whatever mode the files carry.
 // Credentials are therefore written only after this returns.
 func (dm *DaemonsetMounter) ensureCredentialsDirOwnedBy(commDir, volumeID string, uid uint32) (string, error) {
-	dir := filepath.Join(commDir, volumeID)
+	dir := filepath.Join(commDir, mountoptions.VolumeKey(volumeID))
 	perm := credentialprovider.IsolatedCredentialDirPerm
 
 	if err := os.Mkdir(dir, perm); err != nil && !errors.Is(err, fs.ErrExist) {

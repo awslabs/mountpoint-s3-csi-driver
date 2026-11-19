@@ -9,13 +9,15 @@ import (
 
 	"k8s.io/klog/v2"
 	mountutils "k8s.io/mount-utils"
+
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 )
 
 // MetaFileName returns the path to the .meta.json file for a given volume.
-// Meta files live in a dedicated directory separate from FUSE source mounts to avoid
-// collisions with PV names that could end in ".meta.json".
+// Meta files live in a dedicated directory separate from FUSE source mounts. The file is named by
+// the volume's [mountoptions.VolumeKey], so a PV name of any valid length fits within NAME_MAX.
 func MetaFileName(kubeletPath, volumeID string) string {
-	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta", volumeID+".meta.json")
+	return filepath.Join(kubeletPath, "plugins", "s3.csi.aws.com", "meta", mountoptions.VolumeKey(volumeID)+".meta.json")
 }
 
 // MountMeta is the JSON-serializable structure persisted alongside each source mount.
