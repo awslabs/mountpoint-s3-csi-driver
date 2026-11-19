@@ -23,7 +23,7 @@ See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/m
 
 ## Local Data Cache
 
-One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts all `mount-s3` process, one per PersistentVolume mounted on the node. All `mount-s3` processes share a single cache volume if configured, with each PV using its own sub-directory. A PV's cache on a node is deleted once no pod there uses the PV. The mounter empties the cache volume at startup and exit, so cached data does not survive mounter restarts.
+One `s3-csi-daemonset-mounter` DaemonSet Pod runs on each node and hosts all `mount-s3` processes, one per PersistentVolume mounted on the node. All `mount-s3` processes share a single cache volume if configured, with each PV using its own sub-directory. A PV's cache on a node is deleted once no pod there uses the PV. The mounter empties the cache volume at startup and exit, so cached data does not survive mounter restarts.
 
 See [Mountpoint's documentation](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#local-cache) for more details about local cache.
 
@@ -33,7 +33,7 @@ If upgrading from v1/v2 to v3, start with [Upgrading to v3](UPGRADING_TO_V3.md).
 
 Mountpoint processes do not know how much cache the other processes use, so without a cap on each PV, one PV can take the cache space that the others need.
 
-`cache.limitStrategy` decides where each PV's `max-cache-size` comes from. Note `maxVolumesPerNode` is the scheduler's limit of S3 volumes per node; [Sizing the mounter memory request](MEMORY.md#sizing-the-mounter-memory-request) in MEMORY.md shows how to choose it.
+`cache.limitStrategy` decides where each PV's `max-cache-size` comes from. Note `maxVolumesPerNode` is the limit of S3 volumes per node, and both the scheduler and the driver enforces this limit - see [Sizing the mounter memory request](MEMORY.md#sizing-the-mounter-memory-request) in MEMORY.md shows how to choose it.
 
 We recommend `equalSplit` strategy. `equalSplit` gives every PV on a node an equal share of the cache volume. Choose `none` strategy only if PVs on the same node need different cache sizes, or you need to disable the limit on S3 volumes per node (via `maxVolumesPerNode: 0`).
 
@@ -52,7 +52,7 @@ The 5% is reserved headroom because Mountpoint evicts cached data only after a w
 
 Since the scheduler counts S3 volumes instead of cache sizes, any `maxVolumesPerNode` of your cache-enabled PVs can land on one node. With `maxVolumesPerNode: 0`, nothing bounds the total cache size. 
 
-We highly recommend you to set `max-cache-size` on every PV that enables cache:
+We highly recommend setting `max-cache-size` on every PV that enables cache:
 
 ```yaml
 spec:
@@ -174,7 +174,7 @@ spec:
 | `emptyDir` or `ephemeral` (v2 values) | uses the node's cache, whatever its type |
 | anything else                         | the PV fails to mount                    |
 
-Note: on a node whose with no configured cache volume, a PV that sets `cache: enabled` will fail to mount.
+Note: on a node with no configured cache volume, a PV that sets `cache: enabled` will fail to mount.
 
 ### Verifying the configuration
 
