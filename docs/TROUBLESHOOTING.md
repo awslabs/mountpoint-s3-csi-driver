@@ -196,16 +196,19 @@ A pair is one CSI node and one mounter DaemonSet, which run on the same nodes: `
 
 ### My node runs more than one `s3-csi-node` Pod
 
-The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node, and the others log "another CSI node on this node holds ... node.lock" and wait. The working one logs `multiple running mounter pods found` every 30 seconds, with the mounter that serves the node's mounts. If none does, for example on a node that matched more than one pair from its first start, new mounts on the node fail until only one mounter runs.
+The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node, and the others log "another CSI node on this node holds ... node.lock" and wait. The working one logs `multiple running mounter pods found` every 30 seconds, with the mounter that serves the node's mounts. If no mounter serves any of the node's mounts yet, for example on a new node that matched more than one pair from the start, the `s3-csi-node` Pod can't tell which mounter to use, so new mounts on the node fail until only one mounter runs.
 
 To recover:
 
-1. Find the mounter that serves each affected node's mounts, which the working `s3-csi-node` Pod names:
+1. Find the mounter that serves each affected node's mounts, which the working `s3-csi-node` Pod names, and the pair it belongs to:
    ```bash
    $ kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
    $ kubectl logs -n kube-system <s3-csi-node-pod-name> -c s3-plugin | grep "multiple running mounter pods found" | tail -1
+   $ kubectl get pod -n kube-system <mounter-pod-name> -o jsonpath='{.metadata.ownerReferences[0].name}'
    ```
-   Change the placement of the other pairs so they no longer match these nodes, for example by changing an entry's `node.nodeSelector` or `node.affinity`. Their mounters have no mounts there, so you don't need to drain these nodes. If no mounter serves the node's mounts, keep any one pair. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
+   The last command prints `s3-csi-mounter` for the default pair, or `s3-csi-mounter-<name>` for the `additionalDaemonSets` entry `<name>`. Keep that pair. It may not be the pair of the working `s3-csi-node` Pod; removing that Pod's pair from the node is safe, since the mounts are held by the mounter and the kept pair's `s3-csi-node` Pod takes over when it exits. If no mounter serves the node's mounts, keep any one pair.
+
+   Change the other pairs' placement (`node.nodeSelector` or `node.affinity`, top-level or `additionalDaemonSets.<name>.node`) so only the kept pair matches these nodes. Their mounters have no mounts there, so you don't need to drain these nodes. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
 2. Run `helm upgrade`, then uncordon any nodes you drained, and check the driver is registered again:
    ```bash
    $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'

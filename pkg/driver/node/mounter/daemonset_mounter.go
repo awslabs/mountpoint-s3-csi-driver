@@ -1414,7 +1414,7 @@ const (
 	keepPairAdvice = "keep the values that place it on this node and change the others' node.nodeSelector or node.affinity " +
 		"(top-level, or additionalDaemonSets.<name>.node), so only those match this node"
 	onePairAdvice = "change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), " +
-		"or this node's labels, so only the top-level values or one entry match it"
+		"so only the top-level values or one entry match it"
 )
 
 // checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.
