@@ -512,19 +512,17 @@ See [Authenticate to another account with IRSA](https://docs.aws.amazon.com/eks/
 ### values.yaml overview
 
 The driver is configured at install time through Helm values. The chart's [values.yaml](../charts/aws-mountpoint-s3-csi-driver/values.yaml) lists each value with its default.
-<!-- #1060 lays values.yaml out as `node`, `mounter` and `additionalDaemonSets`. -->
 
 ### Driver node Pods (`node`)
 
 - `node.nodeSelector`: the labels a node needs to run the driver and its mounter.
 - `node.affinity`: node affinity for the driver and its mounter. The default skips Fargate, hybrid nodes and EKS Auto Mode's built-in `system` NodePool.
-- `node.tolerations`, `node.tolerateAllTaints` and `node.defaultTolerations`: the taints the driver and its mounter tolerate. See [Configure driver toleration settings](#configure-driver-toleration-settings).
+- `node.tolerations`, `node.tolerateAllTaints` and `node.defaultTolerations`: the taints the node pod and its mounter pod tolerate. See [Configure driver toleration settings](#configure-driver-toleration-settings).
 - `node.podLabels`: extra labels on the `s3-csi-node` Pods.
-<!-- #1060 adds `node.podAnnotations`, extra annotations on the `s3-csi-node` Pods. -->
+- `node.podAnnotations`: extra annotations on the `s3-csi-node` Pods.
 
 #### Configure driver toleration settings
-Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all nodes, add
-policies to `Value.node.tolerations` to configure customized toleration for nodes.
+Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all tainted nodes, set `node.tolerateAllTaints` to `false` and add policies to `node.tolerations` for the taints it should tolerate. `node.defaultTolerations`, on by default, also tolerates `CriticalAddonsOnly`, the startup taint and any `NoExecute` taint for 300 seconds.
 
 The mounter DaemonSet inherits these same `node.*` settings, so you configure tolerations once for both driver pods.
 
@@ -549,7 +547,7 @@ The field relies on the `VolumeLimitScaling` feature gate, which is enabled by d
 If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, the default from Cluster Autoscaler 1.37. Node groups that scale from zero also need the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag on the Auto Scaling group or EKS managed node group, with `s3.csi.aws.com` in its comma-separated value. Without the tag, Cluster Autoscaler doesn't scale those node groups up for Pods that use S3 volumes. See the [Cluster Autoscaler AWS documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md) for details. Karpenter doesn't use the field, so it needs no extra configuration.
 
 ### Mounter Pods (`daemonsetMounters`)
-<!-- #1060 renames `daemonsetMounters` to `mounter`, with extra entries under `additionalDaemonSets`. -->
+<!-- TODO update name from daemonsetMounters, ref PR 1060. -->
 
 - Memory for the mounter: see [MEMORY.md](MEMORY.md).
 - An optional local cache: see [CACHING.md](CACHING.md).
@@ -562,10 +560,10 @@ If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs wit
 
 A single Pod that needs more S3 volumes than the limit never schedules on a node that runs the driver: it stays `Pending` with `node(s) exceed max volume count`.
 
-To raise the limit, do remember to raise the mounter's memory request and cache size as well, since by default each volume gets an equal share of memory/cache space. Please also check that it fits your smallest node. See [MEMORY.md](MEMORY.md#sizing-the-mounter-memory-request) and [CACHING.md](CACHING.md) for more details.
+When you raise the limit, also raise the mounter's memory request and cache size, since with `memoryLimitStrategy` and `cache.limitStrategy` set to `equalSplit` each volume gets an equal share of both values. Also check that they still fit your smallest node. See [MEMORY.md](MEMORY.md#sizing-the-mounter-memory-request) and [CACHING.md](CACHING.md) for more details.
 <!-- TODO: link to correct section in CACHING.md -->
 
-If you are using autoscalers, the volume limit only applies with the [node startup taint](#configure-node-startup-taint) configured, so please add the startup taint to your NodeGroups. To set a different limit on some nodes, give them their own entry; see [Mixed fleet](#mixed-fleet).
+If you are using autoscalers or are creating new nodes, use the [node startup taint](#configure-node-startup-taint) so Pods wait until the driver has registered and its mounter runs. On a new node, the scheduler only sees the limit once the driver has registered there, so before that it can place more S3 volumes there than the limit. To set a different limit on some nodes, give them their own entry; see [Mixed fleet](#mixed-fleet).
 
 ### Other values
 
