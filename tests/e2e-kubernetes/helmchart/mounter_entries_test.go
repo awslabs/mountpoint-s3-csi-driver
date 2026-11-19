@@ -12,8 +12,9 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
-// offEntries keeps the default pair off the entries' nodes, which the chart requires with any entry.
-const offEntries = "node: {nodeSelector: {pool: default}}\n"
+// narrowDefault gives the default pair its own nodeSelector, so it doesn't run on the entries' nodes.
+// The chart rejects any additionalDaemonSets entry without it.
+const narrowDefault = "node: {nodeSelector: {pool: default}}\n"
 
 func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 	for _, testCase := range []struct {
@@ -23,7 +24,7 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 	}{
 		{"limit that isn't a number", `mounter: {maxVolumesPerNode: "abc"}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
 		{"decimal limit", `mounter: {maxVolumesPerNode: 4.5}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
-		{"negative limit on an entry", offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonSets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"negative limit on an entry", narrowDefault + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonSets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
 		{"a name with an uppercase letter", `additionalDaemonSets: {BigMem: {node: {nodeSelector: {x: "1"}}}}`, `name "BigMem" must be lowercase letters`},
 		{"a name with an underscore", `additionalDaemonSets: {big_mem: {node: {nodeSelector: {x: "1"}}}}`, `name "big_mem" must be lowercase letters`},
 		{"a name ending in '-'", `additionalDaemonSets: {big-: {node: {nodeSelector: {x: "1"}}}}`, `name "big-" must be lowercase letters`},
@@ -37,7 +38,7 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 		{"an entry with the default placement unchanged", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets needs the default s3-csi-node and s3-csi-mounter kept off the entries' nodes"},
 		{"an entry service account", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, serviceAccount: {name: b}}}}`, "additionalDaemonSets.b.node.serviceAccount: set it on node instead"},
 		{"an entry preventPodSchedulingIfMissing", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, preventPodSchedulingIfMissing: true}}}`, "additionalDaemonSets.b.node.preventPodSchedulingIfMissing: set it on node instead"},
-		{"invalid entry mounter", offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
+		{"invalid entry mounter", narrowDefault + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := renderDaemonSets(t, testCase.values)
@@ -115,7 +116,7 @@ additionalDaemonSets:
 }
 
 func TestAdditionalDaemonSetsCache(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, offEntries+`mounter: {cache: {limitStrategy: equalSplit, emptyDir: {sizeLimit: 8Gi}}}
+	daemonSets, err := renderDaemonSets(t, narrowDefault+`mounter: {cache: {limitStrategy: equalSplit, emptyDir: {sizeLimit: 8Gi}}}
 additionalDaemonSets:
   copied: {node: {nodeSelector: {pool: copied}}}
   ebs: {node: {nodeSelector: {pool: ebs}}, mounter: {cache: {limitStrategy: none, ephemeral: {storageClassName: gp3, resourceRequests: 100Gi}}}}
@@ -140,7 +141,7 @@ additionalDaemonSets:
 
 func TestAdditionalDaemonSetsNulls(t *testing.T) {
 	// An entry set to null renders no pair, and mounter.cache: null renders no cache.
-	daemonSets, err := renderDaemonSets(t, offEntries+`mounter: {cache: null}
+	daemonSets, err := renderDaemonSets(t, narrowDefault+`mounter: {cache: null}
 additionalDaemonSets: {big: {node: {nodeSelector: {p: big}}}, gone: null}`)
 	assert.NoError(t, err)
 	assert.Equals(t, 4, len(daemonSets))
@@ -154,7 +155,7 @@ func TestMounterLogLevel(t *testing.T) {
 	for values, want := range map[string]string{
 		`mounter: {logLevel: null}`: "--v=4",
 		`mounter: {logLevel: 0}`:    "--v=0",
-		offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {logLevel: null}}}`: "--v=4",
+		narrowDefault + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {logLevel: null}}}`: "--v=4",
 	} {
 		daemonSets, err := renderDaemonSets(t, values)
 		assert.NoError(t, err)
@@ -185,7 +186,7 @@ func TestAdditionalDaemonSetsDefaultInstall(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, offEntries+`additionalDaemonSets:
+	daemonSets, err := renderDaemonSets(t, narrowDefault+`additionalDaemonSets:
   big: {node: {nodeSelector: {pool: big}}, mounter: {maxVolumesPerNode: 32, memoryLimitStrategy: none}}
   unbounded: {node: {nodeSelector: {pool: free}}, mounter: {maxVolumesPerNode: 0, memoryLimitStrategy: none}}`)
 	assert.NoError(t, err)
@@ -198,7 +199,7 @@ func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
 func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 	// Each value must render as a quoted string: true, numbers, the key on, which YAML reads as a bool, and null,
 	// which becomes "".
-	values := offEntries + `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
+	values := narrowDefault + `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
 	daemonSets, err := renderDaemonSets(t, values)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
@@ -227,7 +228,7 @@ additionalDaemonSets:
 }
 
 func TestAdditionalDaemonSetsPairPodsShareScheduling(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, offEntries+`additionalDaemonSets:
+	daemonSets, err := renderDaemonSets(t, narrowDefault+`additionalDaemonSets:
   defaults: {node: {nodeSelector: {p: defaults}, tolerateAllTaints: false}}
   gpu: {node: {nodeSelector: {p: gpu}, tolerateAllTaints: false, defaultTolerations: false, tolerations: [{key: gpu, operator: Exists}]}}`)
 	assert.NoError(t, err)
