@@ -1,4 +1,7 @@
 # Unreleased
+# v1.16.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v1.16.0/README.md)
 
 ### Notable changes
 * Support Mountpoint [version 1.25.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.25.0)
@@ -17,6 +20,13 @@
   * Fixes: incremental upload with very large write part sizes ([#1538](https://github.com/awslabs/mountpoint-s3/pull/1538)), panic on unlink race ([#1596](https://github.com/awslabs/mountpoint-s3/pull/1596)), "file does not exist" during concurrent listing ([#1648](https://github.com/awslabs/mountpoint-s3/pull/1648)), I/O errors after closing a truncated file ([#1781](https://github.com/awslabs/mountpoint-s3/pull/1781)), default data cache limit validation ([#1779](https://github.com/awslabs/mountpoint-s3/pull/1779)), STS Web Identity with source profile ([#1889](https://github.com/awslabs/mountpoint-s3/pull/1889)); reduced append-upload memory ([#1882](https://github.com/awslabs/mountpoint-s3/pull/1882)); CRT updates ([#1778](https://github.com/awslabs/mountpoint-s3/pull/1778), [#1819](https://github.com/awslabs/mountpoint-s3/pull/1819)).
   * Fixes (1.25.0): new files reported as missing with negative metadata caching ([#1985](https://github.com/awslabs/mountpoint-s3/pull/1985)), directories appearing as missing and listings ending early on empty S3 listing pages ([#1954](https://github.com/awslabs/mountpoint-s3/pull/1954), [#2023](https://github.com/awslabs/mountpoint-s3/pull/2023)), a file system hang on concurrent forget and rename or listing ([#1995](https://github.com/awslabs/mountpoint-s3/pull/1995)), `incremental-upload` not detecting concurrent writes when appending at offset 0 ([#1970](https://github.com/awslabs/mountpoint-s3/pull/1970)).
 * Ignore `aws-max-attempts` mount option values that are not positive integers, and log a warning. Mountpoint fails to start with them since v1.25.0; with the value ignored, it uses its default number of attempts, as before.
+* Add support for Kubernetes 1.37. ([#1055](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1055))
+* Add support for Ubuntu 24.04, and Ubuntu 26.04 on Kubernetes 1.35+. ([#1046](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1046), [#1053](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1053), [#1056](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1056))
+* Drop support for Kubernetes 1.25 to 1.30. The Helm chart now requires Kubernetes 1.31 or later. ([#775](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/775), [#874](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/874))
+* Deprecate Amazon Linux 2, Ubuntu 20.04 and Ubuntu 22.04. ([#1053](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1053))
+* Update container base image from Amazon Linux 2 to Amazon Linux 2023. ([#1053](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1053))
+* Migrate CSI sidecar images in Helm chart values to `public.ecr.aws/csi-components` registry, and update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.6 and livenessprobe:v2.20.0-eksbuild.6. ([#1053](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1053), [#1079](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1079))
+* Update Go to 1.27.4 and Go dependencies with known vulnerabilities. ([#1045](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1045), [#1079](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1079))
 
 # v1.15.0
 
