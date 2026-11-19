@@ -154,6 +154,9 @@ then one pair per additionalDaemonSets entry. An entry copies node and mounter, 
 {{- range $name, $entry := .Values.additionalDaemonSets | default dict }}
 {{- if not (kindIs "invalid" $entry) }}{{- $_ := set $entries $name $entry }}{{- end }}
 {{- end }}
+{{- if and $entries (not .Values.node.nodeSelector) (not .Values.node.affinity) }}
+{{- fail "node.nodeSelector or node.affinity is required with additionalDaemonSets: with neither set, s3-csi-node and s3-csi-mounter run on every node, so every node an entry matches would run two CSI nodes" }}
+{{- end }}
 {{- range $name := keys $entries | sortAlpha }}
 {{- $entry := get $entries $name }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
