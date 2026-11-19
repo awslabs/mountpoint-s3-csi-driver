@@ -171,7 +171,7 @@ After a `helm upgrade`, a node shows the new values only once its mounter Pod ha
 To find the mounter Pod on a particular node:
 
 ```sh
-kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node>
+kubectl get pods -n kube-system -l app=s3-csi-mounter --field-selector spec.nodeName=<node>
 ```
 
 Under `equalSplit`, the mounter also repeats the effective share in its periodic status line, alongside the live mount count:

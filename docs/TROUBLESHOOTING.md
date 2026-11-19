@@ -218,7 +218,7 @@ The S3 volumes on a node are served by the node's mounter Pod (`s3-csi-mounter`,
 To see why the node has no mounter it can use:
 
 ```bash
-$ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter -o wide
+$ kubectl get pods -n kube-system -l app=s3-csi-mounter -o wide
 $ kubectl describe pod -n kube-system <mounter-pod-name>
 ```
 

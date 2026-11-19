@@ -1191,7 +1191,7 @@ func checkMetaFileExists(ctx context.Context, f *framework.Framework, nodeName, 
 // This kills all mount-s3 processes, making existing FUSE mounts dead.
 func killMounterPodOnNode(ctx context.Context, f *framework.Framework, nodeName string) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	framework.ExpectNoError(err)
@@ -1208,7 +1208,7 @@ func killMounterPodOnNode(ctx context.Context, f *framework.Framework, nodeName 
 func waitForMounterPodReady(ctx context.Context, f *framework.Framework, nodeName string) {
 	gomega.Eventually(ctx, func(ctx context.Context) (bool, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app=s3-csi-daemonset-mounter",
+			LabelSelector: "app=s3-csi-mounter",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
@@ -1442,7 +1442,7 @@ func waitForCSINodePodStable(ctx context.Context, f *framework.Framework, nodeNa
 // Returns the count or -1 on error. Callers should use Eventually for retry logic.
 func countMountpointProcessesForVolume(ctx context.Context, f *framework.Framework, nodeName, bucketName string) int {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil || len(pods.Items) == 0 {
@@ -1469,7 +1469,7 @@ func countMountpointProcessesForVolume(ctx context.Context, f *framework.Framewo
 // This is a debugging helper — non-fatal on failure.
 func dumpMountpointProcesses(ctx context.Context, f *framework.Framework, nodeName, label string) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil || len(pods.Items) == 0 {
@@ -1494,7 +1494,7 @@ func dumpMountpointProcesses(ctx context.Context, f *framework.Framework, nodeNa
 // listCommDirContents dumps the contents of /comm/ inside the mounter pod for debugging.
 func listCommDirContents(ctx context.Context, f *framework.Framework, nodeName, volumeID string) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil || len(pods.Items) == 0 {
@@ -1514,7 +1514,7 @@ func listCommDirContents(ctx context.Context, f *framework.Framework, nodeName, 
 // Returns an error if the exec fails or the mounter pod is not found.
 func queryCredentialDirStatus(ctx context.Context, f *framework.Framework, nodeName, volumeID string) (string, error) {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil || len(pods.Items) == 0 {

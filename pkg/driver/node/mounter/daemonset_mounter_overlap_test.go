@@ -131,7 +131,7 @@ func runningMounterPod(name string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: mounterNamespace, UID: types.UID(name),
-			Labels: map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels: map[string]string{"app": "s3-csi-mounter"},
 		},
 		Spec:   corev1.PodSpec{NodeName: "test-node"},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},

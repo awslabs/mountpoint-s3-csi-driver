@@ -186,7 +186,7 @@ func (t *s3CSIProxyTestSuite) DefineTests(driver storageframework.TestDriver, pa
 			// each log line with the mount id (the PV name). Match a line that is both for this
 			// volume ("[<pv-name>]") and shows the proxy tunnel, so we don't match other volumes.
 			mounterPods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: "app=s3-csi-daemonset-mounter",
+				LabelSelector: "app=s3-csi-mounter",
 			})
 			framework.ExpectNoError(err)
 

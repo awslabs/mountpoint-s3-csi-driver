@@ -64,7 +64,7 @@ import (
 )
 
 const (
-	mounterPodLabel  = "app=s3-csi-daemonset-mounter"
+	mounterPodLabel  = "app=s3-csi-mounter"
 	CommVolumeName   = "comm"
 	MountSockName    = "mount.sock"
 	MountErrorSuffix = ".error"
@@ -929,12 +929,12 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 
 // helpMessageForGettingMounterLogs returns a help message with a command to get mounter logs.
 func helpMessageForGettingMounterLogs() string {
-	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-daemonset-mounter`", mounterNamespace)
+	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-mounter`", mounterNamespace)
 }
 
 // helpMessageForCheckingMounterPodStatus returns a help message with a command to check mounter pod status.
 func helpMessageForCheckingMounterPodStatus() string {
-	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
+	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-mounter -o wide`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
 		"More than one on a node means it matches both the top-level node values and an additionalDaemonSets entry, or two entries", mounterNamespace)
 }
@@ -1716,7 +1716,7 @@ func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
 		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
 		"`kubectl cordon %[1]s`, "+
 		"`kubectl drain %[1]s --ignore-daemonsets`, "+
-		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`, "+
+		"`kubectl delete pod -n %[4]s -l app=s3-csi-mounter --field-selector spec.nodeName=%[1]s`, "+
 		"then `kubectl uncordon %[1]s`. Deleting the mounter pod without draining the node first breaks all active mounts on it.",
 		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace, mounter.daemonSetName)
 }

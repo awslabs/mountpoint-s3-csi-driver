@@ -24,7 +24,7 @@ Node recycling (EKS node group update, Karpenter drift/expiration) completes the
 If node recycling is not feasible, update the node's mounter in place:
 kubectl cordon <node-name>
 kubectl drain <node-name> --ignore-daemonsets
-kubectl delete pod -n {{ .Release.Namespace }} -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=<node-name>
+kubectl delete pod -n {{ .Release.Namespace }} -l app=s3-csi-mounter --field-selector spec.nodeName=<node-name>
 kubectl uncordon <node-name>
 Deleting the mounter pod without draining the node first breaks all active mounts on that node.
 {{- else if eq .Values.experimental.mounterMode "pod" }}

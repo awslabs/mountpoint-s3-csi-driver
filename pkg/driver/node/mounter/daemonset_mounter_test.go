@@ -117,13 +117,13 @@ func setupDM(t *testing.T) *dmTestCtx {
 	err = os.MkdirAll(commDir, 0750)
 	assert.NoError(t, err)
 
-	// Add s3-csi-daemonset-mounter label for commDir tests
+	// Add s3-csi-mounter label for commDir tests
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "s3-csi-mounter-abcde",
 			Namespace: "kube-system",
 			UID:       types.UID(mounterPodUID),
-			Labels:    map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels:    map[string]string{"app": "s3-csi-mounter"},
 			OwnerReferences: []metav1.OwnerReference{
 				{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "s3-csi-mounter-gpu", UID: "mounter-ds-uid", Controller: ptr.To(true)},
 			},
@@ -1557,7 +1557,7 @@ func mounterPod(name string, phase corev1.PodPhase) *corev1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: "kube-system",
 			UID:    types.UID(uuid.New().String()),
-			Labels: map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels: map[string]string{"app": "s3-csi-mounter"},
 		},
 		Spec:   corev1.PodSpec{NodeName: "test-node"},
 		Status: corev1.PodStatus{Phase: phase},

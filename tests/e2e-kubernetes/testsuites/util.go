@@ -423,7 +423,7 @@ func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName 
 // indicating the driver is deployed in daemonset architecture mode.
 func isDaemonsetMounterMode(ctx context.Context, f *framework.Framework) bool {
 	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=s3-csi-daemonset-mounter",
+		LabelSelector: "app=s3-csi-mounter",
 	})
 	if err != nil {
 		return false
@@ -487,7 +487,7 @@ func checkWriteToPathFailsEventually(ctx context.Context, f *framework.Framework
 
 // Labels and container names of the two driver daemonsets.
 const (
-	mounterPodLabel      = "app=s3-csi-daemonset-mounter"
+	mounterPodLabel      = "app=s3-csi-mounter"
 	mounterContainerName = "mounter"
 	csiNodePodLabel      = "app=s3-csi-node"
 	csiNodeContainerName = "s3-plugin"

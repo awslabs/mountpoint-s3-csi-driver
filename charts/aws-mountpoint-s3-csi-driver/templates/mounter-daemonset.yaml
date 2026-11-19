@@ -121,12 +121,12 @@ spec:
     type: OnDelete
   selector:
     matchLabels:
-      app: s3-csi-daemonset-mounter
+      app: s3-csi-mounter
       {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: s3-csi-daemonset-mounter
+        app: s3-csi-mounter
         # The node pod reads this from its mounter and advertises it to the scheduler.
         s3.csi.aws.com/max-volumes-per-node: {{ $maxVolumes | quote }}
         {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}

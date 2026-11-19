@@ -41,7 +41,7 @@ func TestDaemonsetMounterImageMismatch(t *testing.T) {
 		for _, step := range []string{
 			"kubectl cordon " + testCtx.nodeName,
 			"kubectl drain " + testCtx.nodeName + " --ignore-daemonsets",
-			"-l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=" + testCtx.nodeName,
+			"-l app=s3-csi-mounter --field-selector spec.nodeName=" + testCtx.nodeName,
 			"kubectl uncordon " + testCtx.nodeName,
 		} {
 			assert.Contains(t, logs.String(), step)
