@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+
 	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -221,7 +223,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 		pvc, err := f.ClientSet.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, claim, metav1.GetOptions{})
 		framework.ExpectNoError(err)
 		node := pod.Spec.NodeName
-		credDir := filepath.Join(commDirHostPath(ctx, f, node), pvc.Spec.VolumeName)
+		credDir := filepath.Join(commDirHostPath(ctx, f, node), mountoptions.VolumeKey(pvc.Spec.VolumeName))
 		owner := statPath(ctx, f, node, credDir).uid
 		gomega.Expect(owner).NotTo(gomega.Equal(0), "the mount's credential directory %s must belong to the mount's UID", credDir)
 

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -1170,7 +1172,7 @@ func checkMetaFileExists(ctx context.Context, f *framework.Framework, nodeName, 
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", mountoptions.VolumeKey(volumeID))
 		cmd := fmt.Sprintf("test -f %s && echo EXISTS || echo MISSING", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
@@ -1257,7 +1259,7 @@ func readMetaFileContent(ctx context.Context, f *framework.Framework, nodeName, 
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", mountoptions.VolumeKey(volumeID))
 		cmd := fmt.Sprintf("cat %s 2>/dev/null || echo ''", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
@@ -1320,7 +1322,7 @@ func getMetaFileMtime(ctx context.Context, f *framework.Framework, nodeName, vol
 		}
 
 		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
+		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", mountoptions.VolumeKey(volumeID))
 		cmd := fmt.Sprintf("stat -c '%%Y' %s 2>/dev/null || echo ''", metaPath)
 
 		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
@@ -1501,7 +1503,7 @@ func listCommDirContents(ctx context.Context, f *framework.Framework, nodeName, 
 		framework.Logf("DEBUG: Could not find mounter pod for listing: %v", err)
 		return
 	}
-	cmd := fmt.Sprintf("echo '--- /comm/ top-level ---'; ls -la /comm/ 2>&1; echo '--- /comm/%s/ ---'; ls -la /comm/%s/ 2>&1 || true", volumeID, volumeID)
+	cmd := fmt.Sprintf("echo '--- /comm/ top-level ---'; ls -la /comm/ 2>&1; echo '--- /comm/%s/ ---'; ls -la /comm/%s/ 2>&1 || true", volumeID, mountoptions.VolumeKey(volumeID))
 	stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, pods.Items[0].Name, "mounter", []string{"/bin/sh", "-c", cmd})
 	if err != nil {
 		framework.Logf("DEBUG: listing /comm/ failed: %v", err)
@@ -1522,7 +1524,7 @@ func queryCredentialDirStatus(ctx context.Context, f *framework.Framework, nodeN
 	}
 
 	mounterPod := &pods.Items[0]
-	credDir := fmt.Sprintf("/comm/%s", volumeID)
+	credDir := fmt.Sprintf("/comm/%s", mountoptions.VolumeKey(volumeID))
 	cmd := fmt.Sprintf("test -d %s && echo EXISTS || echo MISSING", credDir)
 
 	stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, mounterPod.Name, "mounter", []string{"/bin/sh", "-c", cmd})
