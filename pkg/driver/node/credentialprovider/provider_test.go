@@ -694,9 +694,10 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				cleanupPodId: testMountpointPodID,
 			},
 			{
-				name:          "DaemonsetMounter",
-				mountKind:     credentialprovider.MountKindDaemonset,
-				wantTokenName: testWebIdentityServiceAccountToken,
+				name:                  "DaemonsetMounter",
+				mountKind:             credentialprovider.MountKindDaemonset,
+				serviceAccountRoleARN: testRoleARN,
+				wantTokenName:         testWebIdentityServiceAccountToken,
 				wantEnv: envprovider.Environment{
 					"AWS_ROLE_ARN":                testRoleARN,
 					"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
@@ -749,6 +750,66 @@ func TestProvidingPodLevelCredentials(t *testing.T) {
 				})
 				assert.NoError(t, err)
 				assert.FileNotExists(t, filepath.Join(writePath, tc.wantTokenName))
+			})
+		}
+	})
+
+	t.Run("DaemonsetMounter uses the given role instead of the service account annotation", func(t *testing.T) {
+		t.Setenv("EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI", testContainerCredentialsFullURI)
+		const resolvedRoleARN = "arn:aws:iam::111122223333:role/resolved-role"
+		for _, tc := range []struct {
+			name         string
+			resolvedRole string
+			wantEnv      envprovider.Environment
+		}{
+			{
+				name:         "empty role means EKS Pod Identity",
+				resolvedRole: "",
+				wantEnv: envprovider.Environment{
+					"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": filepath.Join(testEnvPath, testEKSPodIdentityServiceAccountToken),
+					"AWS_CONTAINER_CREDENTIALS_FULL_URI":     testContainerCredentialsFullURI,
+					"AWS_EC2_METADATA_DISABLED":              "true",
+				},
+			},
+			{
+				name:         "IRSA role",
+				resolvedRole: resolvedRoleARN,
+				wantEnv: envprovider.Environment{
+					"AWS_ROLE_ARN":                resolvedRoleARN,
+					"AWS_WEB_IDENTITY_TOKEN_FILE": filepath.Join(testEnvPath, testWebIdentityServiceAccountToken),
+					"AWS_EC2_METADATA_DISABLED":   "true",
+					"AWS_REGION":                  testIMDSRegion,
+					"AWS_DEFAULT_REGION":          testIMDSRegion,
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// The service account's annotation names a different role, and must be ignored.
+				clientset := fake.NewSimpleClientset(serviceAccount(testPodServiceAccount, testPodNamespace, map[string]string{
+					"eks.amazonaws.com/role-arn": testRoleARN,
+				}))
+				provider := credentialprovider.New(clientset.CoreV1(), dummyRegionProvider)
+
+				provideCtx := credentialprovider.ProvideContext{
+					AuthenticationSource: credentialprovider.AuthenticationSourcePod,
+					WritePath:            t.TempDir(),
+					EnvPath:              testEnvPath,
+					WorkloadPodID:        testPodID,
+					VolumeID:             testVolumeID,
+					PodNamespace:         testPodNamespace,
+					ServiceAccountName:   testPodServiceAccount,
+					ServiceAccountTokens: serviceAccountTokens(t, tokens{
+						serviceAccountTokenAudienceSTS: {Token: testWebIdentityToken},
+						serviceAccountTokenAudienceEKS: {Token: testContainerAuthorizationToken},
+					}),
+					MountKind: credentialprovider.MountKindDaemonset,
+				}
+				provideCtx.SetServiceAccountEKSRoleARN(tc.resolvedRole)
+
+				env, source, err := provider.Provide(context.Background(), provideCtx)
+				assert.NoError(t, err)
+				assert.Equals(t, credentialprovider.AuthenticationSourcePod, source)
+				assert.Equals(t, tc.wantEnv, env)
 			})
 		}
 	})

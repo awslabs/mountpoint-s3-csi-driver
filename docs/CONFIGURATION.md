@@ -388,6 +388,13 @@ spec:
 
 Pods mounting the specified PV will use the pod's own Service Account for EKS Pod Identity or IRSA authentication.
 
+> [!NOTE]
+> Pods on the same node that use the same PV share one Mountpoint process. With `authenticationSource: pod`, they must use the same namespace,
+> Service Account and IAM role. A pod that differs fails to mount the PV on that node until every pod using it there is gone.
+> The IAM role is fixed when the PV is first mounted on a node. If you add, change or remove the `eks.amazonaws.com/role-arn` annotation on the
+> Service Account, pods already using the PV keep using the old role, and new pods on those nodes fail to mount it.
+> A rolling update that keeps old pods running until new ones are ready can therefore stall; scale the workload down and back up on those nodes instead.
+
 
 #### Pod-Level Identity Service Account configuration for EKS Clusters
 

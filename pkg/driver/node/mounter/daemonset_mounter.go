@@ -397,13 +397,27 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 
 	// Build mount params for this request — used for validation and stored on first mount.
 	incomingParams := MountParams{
-		MountOptions:             args.SortedList(),
-		AuthenticationSource:     credentialCtx.AuthenticationSource,
-		ServiceAccountName:       credentialCtx.ServiceAccountName,
-		ServiceAccountEKSRoleARN: credentialCtx.ServiceAccountEKSRoleARN,
-		PodNamespace:             credentialCtx.PodNamespace,
-		FSGroup:                  fsGroup,
-		VolumeHandle:             credentialCtx.VolumeID,
+		MountOptions:         args.SortedList(),
+		AuthenticationSource: credentialCtx.AuthenticationSource,
+		ServiceAccountName:   credentialCtx.ServiceAccountName,
+		PodNamespace:         credentialCtx.PodNamespace,
+		FSGroup:              fsGroup,
+		VolumeHandle:         credentialCtx.VolumeID,
+	}
+
+	// The role is the one field read from the cluster rather than the request: the service account's
+	// current one, or for a republish the one the volume was mounted with.
+	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		roleARN, err := dm.podRoleARN(ctx, entry, credentialCtx, targetIsMounted)
+		if err != nil {
+			// Drop the blank entry GetOrCreate inserted for a first mount, as prepareFreshMount does;
+			// periodic cleanup skips entries with an empty SourcePath.
+			if !entry.sourceMounted && entry.SourcePath == "" {
+				dm.mountMap.Delete(volumeID)
+			}
+			return err
+		}
+		incomingParams.ServiceAccountEKSRoleARN = roleARN
 	}
 
 	if err := dm.resolveExistingSource(ctx, entry, volumeID, &incomingParams); err != nil {
@@ -414,6 +428,12 @@ func (dm *DaemonsetMounter) mountOrShareSource(ctx context.Context, bucketName s
 		if err := dm.prepareFreshMount(entry, volumeID, mounter.commDir, incomingParams, credentialCtx); err != nil {
 			return err
 		}
+	}
+
+	// The Mountpoint process got its credential environment when it started, so keep providing the
+	// role it started with (entry.Params, which matches incomingParams unless this is a republish).
+	if credentialCtx.AuthenticationSource == credentialprovider.AuthenticationSourcePod {
+		credentialCtx.SetServiceAccountEKSRoleARN(entry.Params.ServiceAccountEKSRoleARN)
 	}
 
 	// Lock down the paths every mount shares before writing this mount's credentials, so no
@@ -492,6 +512,22 @@ func (dm *DaemonsetMounter) lockCanonicalEntry(volumeID string) *MountEntry {
 		}
 		entry.mu.Unlock()
 	}
+}
+
+// podRoleARN returns the IAM role ARN a pod-level mount request is for, "" meaning EKS Pod Identity.
+// Caller must hold entry.mu.
+//
+// A volume's Mountpoint keeps the credential environment it started with: for IRSA the role ARN, for EKS
+// Pod Identity the agent's URI. So a republish of an already mounted target keeps the role the source was
+// mounted with, without reading the service account. Any other request uses the service account's current
+// role, so a pod whose role differs from the mounted one is rejected by ValidateCompatibility rather than
+// served by the old role.
+func (dm *DaemonsetMounter) podRoleARN(ctx context.Context, entry *MountEntry,
+	credentialCtx credentialprovider.ProvideContext, targetIsMounted bool) (string, error) {
+	if targetIsMounted && entry.sourceMounted {
+		return entry.Params.ServiceAccountEKSRoleARN, nil
+	}
+	return credentialprovider.ServiceAccountRoleARN(ctx, dm.clientset.CoreV1(), credentialCtx.PodNamespace, credentialCtx.ServiceAccountName)
 }
 
 // resolveExistingSource decides what to do with an entry that believes its source is mounted: share
