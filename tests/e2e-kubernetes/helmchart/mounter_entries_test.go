@@ -12,6 +12,9 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
+// offEntries keeps the default pair off the entries' nodes, which the chart requires with any entry.
+const offEntries = "node: {nodeSelector: {pool: default}}\n"
+
 func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 	for _, testCase := range []struct {
 		name                string
@@ -20,7 +23,7 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 	}{
 		{"limit that isn't a number", `mounter: {maxVolumesPerNode: "abc"}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
 		{"decimal limit", `mounter: {maxVolumesPerNode: 4.5}`, "mounter.maxVolumesPerNode must be a whole number >= 0"},
-		{"negative limit on an entry", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonSets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
+		{"negative limit on an entry", offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {maxVolumesPerNode: -1}}}`, "additionalDaemonSets.b.mounter.maxVolumesPerNode must be a whole number >= 0"},
 		{"a name with an uppercase letter", `additionalDaemonSets: {BigMem: {node: {nodeSelector: {x: "1"}}}}`, `name "BigMem" must be lowercase letters`},
 		{"a name with an underscore", `additionalDaemonSets: {big_mem: {node: {nodeSelector: {x: "1"}}}}`, `name "big_mem" must be lowercase letters`},
 		{"a name ending in '-'", `additionalDaemonSets: {big-: {node: {nodeSelector: {x: "1"}}}}`, `name "big-" must be lowercase letters`},
@@ -29,10 +32,12 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 		{"same placement as another entry", `additionalDaemonSets: {a: {node: {nodeSelector: {x: "1"}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as the top-level node or another entry"},
 		{"same placement, as a number and as a string", `additionalDaemonSets: {a: {node: {nodeSelector: {x: 1}}}, b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets.b.node selects the same nodes as the top-level node or another entry"},
 		{"same placement as the default", `{node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}, additionalDaemonSets: {b: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: x, operator: In, values: ["1"]}]}]}}}}}}}`, "additionalDaemonSets.b.node selects the same nodes as the top-level node or another entry"},
-		{"an entry with no default placement", `{node: {affinity: null}, additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "node.nodeSelector or node.affinity is required with additionalDaemonSets"},
+		{"an entry with no default placement", `{node: {affinity: null}, additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}}`, "additionalDaemonSets needs the default s3-csi-node and s3-csi-mounter kept off the entries' nodes"},
+		// Also checks the chart's copy of the default node.affinity still matches values.yaml.
+		{"an entry with the default placement unchanged", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}`, "additionalDaemonSets needs the default s3-csi-node and s3-csi-mounter kept off the entries' nodes"},
 		{"an entry service account", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, serviceAccount: {name: b}}}}`, "additionalDaemonSets.b.node.serviceAccount: set it on node instead"},
 		{"an entry preventPodSchedulingIfMissing", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}, preventPodSchedulingIfMissing: true}}}`, "additionalDaemonSets.b.node.preventPodSchedulingIfMissing: set it on node instead"},
-		{"invalid entry mounter", `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
+		{"invalid entry mounter", offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {memoryLimitStrategy: halves}}}`, "additionalDaemonSets.b.mounter: memoryLimitStrategy must be one of"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := renderDaemonSets(t, testCase.values)
@@ -110,7 +115,7 @@ additionalDaemonSets:
 }
 
 func TestAdditionalDaemonSetsCache(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `mounter: {cache: {limitStrategy: equalSplit, emptyDir: {sizeLimit: 8Gi}}}
+	daemonSets, err := renderDaemonSets(t, offEntries+`mounter: {cache: {limitStrategy: equalSplit, emptyDir: {sizeLimit: 8Gi}}}
 additionalDaemonSets:
   copied: {node: {nodeSelector: {pool: copied}}}
   ebs: {node: {nodeSelector: {pool: ebs}}, mounter: {cache: {limitStrategy: none, ephemeral: {storageClassName: gp3, resourceRequests: 100Gi}}}}
@@ -135,7 +140,7 @@ additionalDaemonSets:
 
 func TestAdditionalDaemonSetsNulls(t *testing.T) {
 	// An entry set to null renders no pair, and mounter.cache: null renders no cache.
-	daemonSets, err := renderDaemonSets(t, `mounter: {cache: null}
+	daemonSets, err := renderDaemonSets(t, offEntries+`mounter: {cache: null}
 additionalDaemonSets: {big: {node: {nodeSelector: {p: big}}}, gone: null}`)
 	assert.NoError(t, err)
 	assert.Equals(t, 4, len(daemonSets))
@@ -149,7 +154,7 @@ func TestMounterLogLevel(t *testing.T) {
 	for values, want := range map[string]string{
 		`mounter: {logLevel: null}`: "--v=4",
 		`mounter: {logLevel: 0}`:    "--v=0",
-		`additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {logLevel: null}}}`: "--v=4",
+		offEntries + `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}, mounter: {logLevel: null}}}`: "--v=4",
 	} {
 		daemonSets, err := renderDaemonSets(t, values)
 		assert.NoError(t, err)
@@ -180,7 +185,7 @@ func TestAdditionalDaemonSetsDefaultInstall(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
+	daemonSets, err := renderDaemonSets(t, offEntries+`additionalDaemonSets:
   big: {node: {nodeSelector: {pool: big}}, mounter: {maxVolumesPerNode: 32, memoryLimitStrategy: none}}
   unbounded: {node: {nodeSelector: {pool: free}}, mounter: {maxVolumesPerNode: 0, memoryLimitStrategy: none}}`)
 	assert.NoError(t, err)
@@ -193,7 +198,7 @@ func TestAdditionalDaemonSetsFallbackVolumeLimit(t *testing.T) {
 func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 	// Each value must render as a quoted string: true, numbers, the key on, which YAML reads as a bool, and null,
 	// which becomes "".
-	values := `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
+	values := offEntries + `additionalDaemonSets: {gpu: {node: {nodeSelector: {gpu: true, zone: 1, memory: 10000000, "on": "x", empty: null}}}}`
 	daemonSets, err := renderDaemonSets(t, values)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-gpu", "s3-csi-mounter-gpu"} {
@@ -211,8 +216,9 @@ func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsAffinityOnlyEntry(t *testing.T) {
-	// The default pair has no nodeSelector either, so only the affinity makes the two placements different.
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
+	// Neither pair has a nodeSelector, so only the affinity makes the two placements different.
+	daemonSets, err := renderDaemonSets(t, `node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: pool, operator: NotIn, values: [big]}]}]}}}}
+additionalDaemonSets:
   big: {node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: pool, operator: In, values: [big]}]}]}}}}}`)
 	assert.NoError(t, err)
 	for _, name := range []string{"s3-csi-node-big", "s3-csi-mounter-big"} {
@@ -221,7 +227,7 @@ func TestAdditionalDaemonSetsAffinityOnlyEntry(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsPairPodsShareScheduling(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `additionalDaemonSets:
+	daemonSets, err := renderDaemonSets(t, offEntries+`additionalDaemonSets:
   defaults: {node: {nodeSelector: {p: defaults}, tolerateAllTaints: false}}
   gpu: {node: {nodeSelector: {p: gpu}, tolerateAllTaints: false, defaultTolerations: false, tolerations: [{key: gpu, operator: Exists}]}}`)
 	assert.NoError(t, err)

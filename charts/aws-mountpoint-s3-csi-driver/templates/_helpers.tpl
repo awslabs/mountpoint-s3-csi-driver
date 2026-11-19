@@ -141,6 +141,20 @@ Returns a pair's nodeSelector and affinity as JSON, with nodeSelector values as 
 {{- end }}
 
 {{/*
+The chart's default node.affinity in values.yaml, so the chart can tell when it is left unchanged. Keep the two the same.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.defaultNodeAffinity" -}}
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - {key: eks.amazonaws.com/compute-type, operator: NotIn, values: [fargate, hybrid, auto]}
+      - matchExpressions:
+          - {key: eks.amazonaws.com/compute-type, operator: In, values: [auto]}
+          - {key: karpenter.sh/nodepool, operator: NotIn, values: [system]}
+{{- end }}
+
+{{/*
 Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default pair from node and mounter,
 then one pair per additionalDaemonSets entry. An entry copies node and mounter, except node's placement.
 */}}
@@ -153,9 +167,6 @@ then one pair per additionalDaemonSets entry. An entry copies node and mounter, 
 {{- $entries := dict }}
 {{- range $name, $entry := .Values.additionalDaemonSets | default dict }}
 {{- if not (kindIs "invalid" $entry) }}{{- $_ := set $entries $name $entry }}{{- end }}
-{{- end }}
-{{- if and $entries (not .Values.node.nodeSelector) (not .Values.node.affinity) }}
-{{- fail "node.nodeSelector or node.affinity is required with additionalDaemonSets: with neither set, s3-csi-node and s3-csi-mounter run on every node, so every node an entry matches would run two CSI nodes" }}
 {{- end }}
 {{- range $name := keys $entries | sortAlpha }}
 {{- $entry := get $entries $name }}
@@ -190,6 +201,11 @@ then one pair per additionalDaemonSets entry. An entry copies node and mounter, 
 {{- end }}
 {{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonSets.%s.mounter" $name)
     "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode)) "mounter" $pairMounter) }}
+{{- end }}
+{{- $defaultAffinity := include "aws-mountpoint-s3-csi-driver.defaultNodeAffinity" . | fromYaml }}
+{{- $unchanged := or (not .Values.node.affinity) (eq (toJson .Values.node.affinity) (toJson $defaultAffinity)) }}
+{{- if and $entries (not .Values.node.nodeSelector) $unchanged }}
+{{- fail "additionalDaemonSets needs the default s3-csi-node and s3-csi-mounter kept off the entries' nodes: set node.nodeSelector or change node.affinity. Without that they run on every node, so every node an entry matches would run two CSI nodes" }}
 {{- end }}
 {{- range $pair := $pairs }}
 {{- /* Check the raw value: int turns anything that isn't a whole number into 0, which means no limit. */}}
