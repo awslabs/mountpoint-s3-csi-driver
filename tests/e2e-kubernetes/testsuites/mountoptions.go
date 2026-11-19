@@ -66,7 +66,7 @@ func (t *s3CSIMountOptionsTestSuite) DefineTests(driver storageframework.TestDri
 		l local
 	)
 
-	f := framework.NewFrameworkWithCustomTimeouts("mountoptions", storageframework.GetDriverTimeouts(driver))
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"mountoptions", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
 
 	cleanup := func(ctx context.Context) {

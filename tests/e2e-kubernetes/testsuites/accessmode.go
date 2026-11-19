@@ -45,7 +45,7 @@ func (t *s3CSIAccessModeTestSuite) DefineTests(driver storageframework.TestDrive
 		l local
 	)
 
-	f := framework.NewFrameworkWithCustomTimeouts("accessmode", storageframework.GetDriverTimeouts(driver))
+	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"accessmode", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelRestricted
 
 	cleanup := func(ctx context.Context) {

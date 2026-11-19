@@ -185,6 +185,10 @@ jobs:
           TAG: "untested_${{ inputs.ref }}"
           CSI_DRIVER_IRSA_ROLE_ARN: "arn:aws:iam::${{ steps.aws-creds.outputs.aws-account-id }}:role/s3-csi-${{ inputs.environment }}-driver-irsa"
         run: tests/e2e-kubernetes/scripts/run.sh
+      - name: Pre e2e cleanup
+        env:
+          ACTION: "e2e_cleanup"
+        run: tests/e2e-kubernetes/scripts/run.sh
       - name: Run E2E Tests
         env:
           ACTION: "run_tests"
