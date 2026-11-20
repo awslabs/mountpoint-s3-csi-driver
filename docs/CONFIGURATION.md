@@ -6,84 +6,6 @@ Most Mountpoint-specific configuration can be found in [the Mountpoint documenta
 One notable exception is for Mountpoint's local data caching, which should be specified using volume attributes. See the dedicated [Mountpoint S3 CSI driver caching documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md) for more information on cache configuration.
 Mountpoint's memory usage is configured through the driver's Helm values. See the dedicated [Mountpoint S3 CSI driver memory documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md) for how to size it.
 
-## Static Provisioning
-
-The CSI driver supports only static provisioning for an existing S3 bucket.
-Supported bucket types include general purpose, directory, and Outposts buckets.
-In the 'bucketName' field, provide the full S3 bucket name.
-For Outposts buckets, only access point ARN or alias is supported.
-
-To use Static Provisioning, set the `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (an empty string).
-To ensure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
-
-```yaml
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: s3-pv
-spec:
-  accessModes:
-    - ReadWriteMany     # Supported options: ReadWriteMany / ReadOnlyMany
-  capacity:
-    storage: 1200Gi     # Value is ignored but required by Kubernetes
-  storageClassName: ""  # Empty string required for static provisioning
-  claimRef:             # To ensure no other PVCs can claim this PV
-    namespace: default  # Namespace is required even though it's in "default" namespace.
-    name: s3-pvc        # Name of your PVC
-  mountOptions:         # Optional: Configure Mountpoint for Amazon S3 flags
-    - region us-east-1  # See https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md for all options
-  csi:
-    driver: s3.csi.aws.com
-    volumeHandle: s3-csi-driver-volume  # Must be unique
-    volumeAttributes:
-      # ----- BUCKET CONFIGURATION -----
-      bucketName: amzn-s3-demo-bucket   # Required: S3 bucket name or ARN (for Outpost)
-
-      # ----- AUTHENTICATION CONFIGURATION -----
-      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials
-      authenticationSource: driver      # Optional: Authentication source [driver (default) | pod]
-      stsRegion: us-east-1              # Optional: Region for AWS STS endpoint when using pod-level identity with IRSA
-
-      # ----- LOCAL CACHE CONFIGURATION -----
-      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md
-      cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
-
-      # emptyDir cache options:
-      cacheEmptyDirSizeLimit: 1Gi       # Optional: Maximum size for emptyDir cache
-      cacheEmptyDirMedium: ""           # Optional: Storage medium ["" (default) | Memory]
-
-      # ephemeral cache options (both required if `cache: ephemeral`):
-      cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
-      cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
-
-      # ----- ENVIRONMENT VARIABLE CONFIGURATION -----
-      # Optional: Pass extra environment variables to the mount-s3 process. Default: none.
-      # Supported variables: HTTPS_PROXY, NO_PROXY
-      mountpointEnv.HTTPS_PROXY: "http://proxy.example.com:3128"
-      mountpointEnv.NO_PROXY: "sts.us-east-1.amazonaws.com"
-
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: s3-pvc         # Must match name referenced in PV's claimRef
-spec:
-  accessModes:
-    - ReadWriteMany    # Supported options: ReadWriteMany / ReadOnlyMany
-  storageClassName: "" # Empty string required for static provisioning
-  resources:
-    requests:
-      storage: 1200Gi  # Value is ignored but required by Kubernetes
-  volumeName: s3-pv    # Must match the name of your PV
-```
-
-See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
-
-> [!IMPORTANT]
-> Ensure that your volumeHandle is unique, since Kubernetes only processes a volume once per `volumeHandle`.
-> If multiple PVs use the same `volumeHandle`, only one is processed.
-> For more information, see ["I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status"](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide.
-
 ## AWS Credentials
 
 The driver requires IAM permissions to access your Amazon S3 bucket.
@@ -453,33 +375,7 @@ csi:
 
 Alternatively, the CSI Driver will detect the `--region` argument specified in the Mountpoint options.
 
-## Configure driver toleration settings
-Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all nodes, add
-policies to `Value.node.tolerations` to configure customized toleration for nodes.
-
-The mounter DaemonSet inherits these same `node.*` settings, so you configure tolerations once for both driver pods.
-
-Whatever tolerations you give the driver, make sure your workloads are never more tolerant of a `NoExecute` taint than the driver is. Because the driver serves your mounts, a workload that out-tolerates it keeps running after the driver is evicted, on a mount that no longer works.
-
-Prefer giving the driver every toleration your workloads have, with no `tolerationSeconds` limit. If you must use `tolerationSeconds` for a `NoExecute` taint, set the driver's value longer than your workloads' `tolerationSeconds` plus their `terminationGracePeriodSeconds`. That keeps the driver running until your workloads have stopped and their volumes are unmounted; if the driver is evicted first, those mounts are not cleaned up.
-
-## Configure node startup taint
-There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
-
-This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
-
-## Prevent scheduling on nodes without the driver
-On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off nodes where the Mountpoint CSI Driver isn't registered, such as nodes that `node.affinity` or `node.nodeSelector` exclude. Otherwise, these Pods can be scheduled on such nodes and get stuck in `ContainerCreating`. To enable it, set `node.preventPodSchedulingIfMissing` to `true`.
-
-The chart then sets [`preventPodSchedulingIfMissing`](https://kubernetes.io/docs/concepts/storage/storage-limits/) on the `s3.csi.aws.com` CSIDriver object. If the driver isn't registered on any suitable node, the Pod stays `Pending` with `s3.csi.aws.com CSI driver is not installed on the node`.
-
-Keep using the [startup taint](#configure-node-startup-taint) with it. The scheduler doesn't retry a waiting Pod when the driver registers ([kubernetes/kubernetes#144009](https://github.com/kubernetes/kubernetes/issues/144009)). The driver removes the taint only after it registers, and removing the taint makes the scheduler retry the Pod right away.
-
-The field relies on the `VolumeLimitScaling` feature gate, which is enabled by default from Kubernetes 1.37.
-
-If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, the default from Cluster Autoscaler 1.37. Node groups that scale from zero also need the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag on the Auto Scaling group or EKS managed node group, with `s3.csi.aws.com` in its comma-separated value. Without the tag, Cluster Autoscaler doesn't scale those node groups up for Pods that use S3 volumes. See the [Cluster Autoscaler AWS documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md) for details. Karpenter doesn't use the field, so it needs no extra configuration.
-
-## Cross-account bucket access
+### Cross-account bucket access
 Mountpoint's CSI driver supports cross-account bucket access.
 Combined with [Pod-Level Credentials](#pod-level-credentials), you have granularity to configure access to different S3 buckets from different AWS accounts in each Kubernetes Pod.
 
@@ -508,7 +404,7 @@ flowchart LR
 
 You can either use bucket policies or cross-account EKS Pod Identity/IRSA to access the bucket.
 
-### Cross-account bucket access using bucket policies
+#### Cross-account bucket access using bucket policies
 You can grant access Amazon S3 buckets from different AWS accounts using [bucket policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html).
 
 1. Allow Pod A in AWS Account A (`111122223333`) to access S3 Bucket (`amzn-s3-demo-bucket`) in AWS Account B (`444455556666`)
@@ -596,12 +492,12 @@ assuming only Pod A in AWS Account A (`111122223333`) is allowed to assume this 
 See [AWS global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html) for more details on conditions you can use.
 
 
-### Cross-account bucket access using EKS Pod Identity
+#### Cross-account bucket access using EKS Pod Identity
 You can grant access Amazon S3 buckets from different AWS accounts by using EKS Pod Identity.
 See "How to perform cross account access with Amazon EKS Pod Identity" section in [Amazon EKS Pod Identity: a new way for applications on EKS to obtain IAM credentials](https://aws.amazon.com/blogs/containers/amazon-eks-pod-identity-a-new-way-for-applications-on-eks-to-obtain-iam-credentials) for more details.
 
 
-### Cross-account bucket access using IRSA with an identity provider from a different account
+#### Cross-account bucket access using IRSA with an identity provider from a different account
 You can grant access Amazon S3 buckets from different AWS accounts by using IRSA.
 See [Authenticate to another account with IRSA](https://docs.aws.amazon.com/eks/latest/userguide/cross-account-access.html) for more details.
 
@@ -610,3 +506,163 @@ See [Authenticate to another account with IRSA](https://docs.aws.amazon.com/eks/
 2. Create and assign an IAM role in AWS Account B (`444455556666`) that trusts the cluster and the Pod in AWS Account A (`111122223333`)
   - Follow [Assign IAM roles to Kubernetes service accounts](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html) to configure the IAM role.
     Ensure to add permissions to access S3 Bucket (`amzn-s3-demo-bucket`).
+
+## values.yaml configuration
+
+### values.yaml overview
+
+The driver is configured at install time through Helm values. The chart's [values.yaml](../charts/aws-mountpoint-s3-csi-driver/values.yaml) lists each value with its default.
+
+### Driver node Pods (`node`)
+
+- `node.nodeSelector`: the labels a node needs to run the driver and its mounter.
+- `node.affinity`: node affinity for the driver and its mounter. The default skips Fargate, hybrid nodes and EKS Auto Mode's built-in `system` NodePool.
+- `node.tolerations`, `node.tolerateAllTaints` and `node.defaultTolerations`: the taints the node pod and its mounter pod tolerate. See [Configure driver toleration settings](#configure-driver-toleration-settings).
+- `node.podLabels`: extra labels on the `s3-csi-node` Pods.
+- `node.podAnnotations`: extra annotations on the `s3-csi-node` Pods.
+
+#### Configure driver toleration settings
+Toleration of all taints for the node daemon is set to `true` by default. If you don't want to deploy the driver on all tainted nodes, set `node.tolerateAllTaints` to `false` and add policies to `node.tolerations` for the taints it should tolerate. `node.defaultTolerations`, on by default, also tolerates `CriticalAddonsOnly`, the startup taint and any `NoExecute` taint for 300 seconds.
+
+The mounter DaemonSet inherits these same `node.*` settings, so you configure tolerations once for both driver pods.
+
+Whatever tolerations you give the driver, make sure your workloads are never more tolerant of a `NoExecute` taint than the driver is. Because the driver serves your mounts, a workload that out-tolerates it keeps running after the driver is evicted, on a mount that no longer works.
+
+Prefer giving the driver every toleration your workloads have, with no `tolerationSeconds` limit. If you must use `tolerationSeconds` for a `NoExecute` taint, set the driver's value longer than your workloads' `tolerationSeconds` plus their `terminationGracePeriodSeconds`. That keeps the driver running until your workloads have stopped and their volumes are unmounted; if the driver is evicted first, those mounts are not cleaned up.
+
+#### Configure node startup taint
+There are potential race conditions on node startup (especially when a node is first joining the cluster) where pods/processes that rely on the Mountpoint CSI Driver can act on a node before the Mountpoint CSI Driver is able to startup up and become fully ready. To combat this, the Mountpoint CSI Driver contains a feature to automatically remove a taint from the node on startup. Users can taint their nodes when they join the cluster and/or on startup, to prevent other pods from running and/or being scheduled on the node prior to the Mountpoint CSI Driver becoming ready.
+
+This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
+
+#### Prevent scheduling on nodes without the driver
+On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off nodes where the Mountpoint CSI Driver isn't registered, such as nodes that `node.affinity` or `node.nodeSelector` exclude. Otherwise, these Pods can be scheduled on such nodes and get stuck in `ContainerCreating`. To enable it, set `node.preventPodSchedulingIfMissing` to `true`.
+
+The chart then sets [`preventPodSchedulingIfMissing`](https://kubernetes.io/docs/concepts/storage/storage-limits/) on the `s3.csi.aws.com` CSIDriver object. If the driver isn't registered on any suitable node, the Pod stays `Pending` with `s3.csi.aws.com CSI driver is not installed on the node`.
+
+Keep using the [startup taint](#configure-node-startup-taint) with it. The scheduler doesn't retry a waiting Pod when the driver registers ([kubernetes/kubernetes#144009](https://github.com/kubernetes/kubernetes/issues/144009)). The driver removes the taint only after it registers, and removing the taint makes the scheduler retry the Pod right away.
+
+The field relies on the `VolumeLimitScaling` feature gate, which is enabled by default from Kubernetes 1.37.
+
+If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, the default from Cluster Autoscaler 1.37. Node groups that scale from zero also need the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag on the Auto Scaling group or EKS managed node group, with `s3.csi.aws.com` in its comma-separated value. Without the tag, Cluster Autoscaler doesn't scale those node groups up for Pods that use S3 volumes. See the [Cluster Autoscaler AWS documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md) for details. Karpenter doesn't use the field, so it needs no extra configuration.
+
+### Mounter Pods (`daemonsetMounters`)
+<!-- TODO update name from daemonsetMounters, ref PR 1060. -->
+
+- Memory for the mounter: see [MEMORY.md](MEMORY.md).
+- An optional local cache: see [CACHING.md](CACHING.md).
+
+<!-- TODO: MOUNTER_CONFIG.md (or similar) replaces MEMORY.md, with maxVolumesPerNode, memory and CPU, and "Updating configurations" (mounter changes need cordon, drain, delete, uncordon). -->
+
+#### Limit S3 volumes per node (`maxVolumesPerNode`)
+
+`maxVolumesPerNode` sets how many distinct S3 volumes one node can mount at once. The driver advertises it to the Kubernetes scheduler, which places Pods within it, and the mounter refuses mounts past it. The default is 4.
+
+A single Pod that needs more S3 volumes than the limit never schedules on a node that runs the driver: it stays `Pending` with `node(s) exceed max volume count`.
+
+When you raise the limit, also raise the mounter's memory request and cache size, since with `memoryLimitStrategy` and `cache.limitStrategy` set to `equalSplit` each volume gets an equal share of both values. Also check that they still fit your smallest node. See [MEMORY.md](MEMORY.md#sizing-the-mounter-memory-request) and [CACHING.md](CACHING.md) for more details.
+<!-- TODO: link to correct section in CACHING.md -->
+
+If you are using autoscalers or are creating new nodes, use the [node startup taint](#configure-node-startup-taint) so Pods wait until the driver has registered and its mounter runs. On a new node, the scheduler only sees the limit once the driver has registered there, so before that it can place more S3 volumes there than the limit. To set a different limit on some nodes, give them their own entry; see [Mixed fleet](#mixed-fleet).
+
+### Other values
+
+For the controller (`controller`) and the other values, see the comments in [values.yaml](../charts/aws-mountpoint-s3-csi-driver/values.yaml).
+
+### Mixed fleet
+
+To give different nodes different settings, see [MIXED_FLEET_CONFIG.md](MIXED_FLEET_CONFIG.md).
+<!-- TODO: write MIXED_FLEET_CONFIG.md (or ADDITIONAL_DAEMONSET.md); this link 404s until then. Today the example at the end of values.yaml shows extra `daemonsetMounters` entries. -->
+
+## Configuring PVs
+
+### Static Provisioning
+
+The CSI driver supports only static provisioning for an existing S3 bucket.
+Supported bucket types include general purpose, directory, and Outposts buckets.
+In the 'bucketName' field, provide the full S3 bucket name.
+For Outposts buckets, only access point ARN or alias is supported.
+
+To use Static Provisioning, set the `storageClassName` field of your PersistentVolume (PV) and PersistentVolumeClaim (PVC) to `""` (an empty string).
+To ensure no other PVCs can claim your PV, you should define a one-to-one mapping using `claimRef`:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-pv
+spec:
+  accessModes:
+    - ReadWriteMany     # Supported options: ReadWriteMany / ReadOnlyMany
+  capacity:
+    storage: 1200Gi     # Value is ignored but required by Kubernetes
+  storageClassName: ""  # Empty string required for static provisioning
+  claimRef:             # To ensure no other PVCs can claim this PV
+    namespace: default  # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc        # Name of your PVC
+  mountOptions:         # Optional: Configure Mountpoint for Amazon S3 flags
+    - region us-east-1  # See https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md for all options
+  csi:
+    driver: s3.csi.aws.com
+    volumeHandle: s3-csi-driver-volume  # Must be unique
+    volumeAttributes:
+      # ----- BUCKET CONFIGURATION -----
+      bucketName: amzn-s3-demo-bucket   # Required: S3 bucket name or ARN (for Outpost)
+
+      # ----- AUTHENTICATION CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CONFIGURATION.md#aws-credentials
+      authenticationSource: driver      # Optional: Authentication source [driver (default) | pod]
+      stsRegion: us-east-1              # Optional: Region for AWS STS endpoint when using pod-level identity with IRSA
+
+      # ----- LOCAL CACHE CONFIGURATION -----
+      # See more details in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/CACHING.md
+      cache: emptyDir                   # Optional: Local cache type [emptyDir | ephemeral]. Default: no local cache.
+
+      # emptyDir cache options:
+      cacheEmptyDirSizeLimit: 1Gi       # Optional: Maximum size for emptyDir cache
+      cacheEmptyDirMedium: ""           # Optional: Storage medium ["" (default) | Memory]
+
+      # ephemeral cache options (both required if `cache: ephemeral`):
+      cacheEphemeralStorageClassName: gp2       # Storage class for ephemeral cache volume
+      cacheEphemeralStorageResourceRequest: 1Gi # Size of the ephemeral cache volume
+
+      # ----- ENVIRONMENT VARIABLE CONFIGURATION -----
+      # Optional: Pass extra environment variables to the mount-s3 process. Default: none.
+      # Supported variables: HTTPS_PROXY, NO_PROXY
+      mountpointEnv.HTTPS_PROXY: "http://proxy.example.com:3128"
+      mountpointEnv.NO_PROXY: "sts.us-east-1.amazonaws.com"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-pvc         # Must match name referenced in PV's claimRef
+spec:
+  accessModes:
+    - ReadWriteMany    # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Empty string required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi  # Value is ignored but required by Kubernetes
+  volumeName: s3-pv    # Must match the name of your PV
+```
+
+See [Reserving a PersistentVolume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reserving-a-persistentvolume) for more details.
+
+> [!IMPORTANT]
+> Ensure that your volumeHandle is unique, since Kubernetes only processes a volume once per `volumeHandle`.
+> If multiple PVs use the same `volumeHandle`, only one is processed.
+> For more information, see ["I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status"](./TROUBLESHOOTING.md#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status) in our troubleshooting guide.
+
+### Process sharing
+
+For how several workloads share one Mountpoint instance, see [MOUNTPOINT_POD_SHARING.md](MOUNTPOINT_POD_SHARING.md).
+<!-- TODO: PROCESS_SHARING.md replaces MOUNTPOINT_POD_SHARING.md later. -->
+
+## Other features
+
+- Metrics: see [METRICS.md](METRICS.md).
+
+## Troubleshooting
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
