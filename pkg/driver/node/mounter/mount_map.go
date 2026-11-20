@@ -22,7 +22,8 @@ type MountParams struct {
 	ServiceAccountName string
 
 	// ServiceAccountEKSRoleARN is the IAM role ARN from the service account's
-	// eks.amazonaws.com/role-arn annotation. Empty when authenticationSource is "driver".
+	// eks.amazonaws.com/role-arn annotation when the volume was first mounted. For pod-level
+	// authentication an empty value means EKS Pod Identity; for "driver" it is always empty.
 	ServiceAccountEKSRoleARN string
 
 	// PodNamespace is the namespace of the pod.
@@ -64,8 +65,12 @@ func (existing *MountParams) ValidateCompatibility(incoming *MountParams) error 
 				existing.ServiceAccountName, incoming.ServiceAccountName)
 		}
 
+		// Only the role can differ for the same service account: its annotation changed after the volume
+		// was mounted on this node (an empty ARN means EKS Pod Identity).
 		if existing.ServiceAccountEKSRoleARN != incoming.ServiceAccountEKSRoleARN {
-			return fmt.Errorf("serviceAccountEKSRoleARN mismatch: existing=%q, incoming=%q",
+			return fmt.Errorf("serviceAccountEKSRoleARN mismatch: existing=%q, incoming=%q. "+
+				"The volume is mounted on this node with the IAM role the service account had then, so it mounts "+
+				"with the new role only after every pod using it on this node is gone",
 				existing.ServiceAccountEKSRoleARN, incoming.ServiceAccountEKSRoleARN)
 		}
 	}
