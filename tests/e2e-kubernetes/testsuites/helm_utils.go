@@ -141,12 +141,14 @@ func restartDriverPods(ctx context.Context, f *framework.Framework) {
 	// The mounter is OnDelete, so a release change alone changes none of its pods.
 	By("Restarting the mounter pods, then the s3-csi-node pods")
 	deletePods(ctx, f, mounterPodLabel)
-	for _, name := range mounterDaemonSetNames(ctx, f) {
+	for _, name := range daemonSetNames(ctx, f, mounterDaemonSetName) {
 		waitForDaemonSetReady(ctx, f, name, mounterPodLabel, mounterRestartTimeout)
 	}
 	// After the mounters, so each s3-csi-node finds its mounter at startup and registers its limit right away.
 	deletePods(ctx, f, csiNodePodLabel)
-	waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
+	for _, name := range daemonSetNames(ctx, f, csiDriverDaemonSetName) {
+		waitForDaemonSetReady(ctx, f, name, csiNodePodLabel, csiNodeRestartTimeout)
+	}
 }
 
 // deletePods deletes the driver pods matching label, waiting for each to go.
@@ -192,14 +194,15 @@ func waitForDaemonSetReady(ctx context.Context, f *framework.Framework, name, la
 	}).WithTimeout(timeout).WithPolling(5*time.Second).Should(BeTrue(), func() string { return describePods(ctx, f, label) })
 }
 
-// mounterDaemonSetNames returns the release's mounter DaemonSets, one per daemonsetMounters entry.
-func mounterDaemonSetNames(ctx context.Context, f *framework.Framework) []string {
+// daemonSetNames returns the release's DaemonSets of one kind, named prefix: the default pair's, and one per
+// additionalDaemonSets entry.
+func daemonSetNames(ctx context.Context, f *framework.Framework, prefix string) []string {
 	GinkgoHelper()
 	list, err := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{})
 	framework.ExpectNoError(err, "listing DaemonSets")
 	var names []string
 	for _, ds := range list.Items {
-		if strings.HasPrefix(ds.Name, mounterDaemonSetName) {
+		if strings.HasPrefix(ds.Name, prefix) {
 			names = append(names, ds.Name)
 		}
 	}

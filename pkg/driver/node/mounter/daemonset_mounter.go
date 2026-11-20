@@ -1,6 +1,6 @@
 // DaemonsetMounter is the primary side of the two-daemonset architecture: where the primary daemonset
 // (s3-csi-node, privileged) performs FUSE mounts and passes file descriptors (fds) to the secondary
-// daemonset (s3-csi-daemonset-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
+// daemonset (s3-csi-mounter, unprivileged) which runs mount-s3 to serve S3 I/O.
 //
 // The two daemonsets communicate through the secondary daemonset's emptyDir volume (commDir). The
 // primary daemonset discovers the secondary pod, its comm dir and whether it has a cache volume,
@@ -64,7 +64,7 @@ import (
 )
 
 const (
-	mounterPodLabel  = "app=s3-csi-daemonset-mounter"
+	mounterPodLabel  = "app=s3-csi-mounter"
 	CommVolumeName   = "comm"
 	MountSockName    = "mount.sock"
 	MountErrorSuffix = ".error"
@@ -100,7 +100,7 @@ const (
 	// csiNodeImageEnv carries this CSI node's own image reference. The chart renders it with the same
 	// helper as the s3-plugin and mounter container images, so it equals the CSI node's `image:`.
 	csiNodeImageEnv = "CSI_NODE_IMAGE"
-	// mounterContainerName is the container in the s3-csi-daemonset-mounter pod that runs Mountpoint.
+	// mounterContainerName is the container in the s3-csi-mounter pod that runs Mountpoint.
 	mounterContainerName = "mounter"
 )
 
@@ -113,7 +113,7 @@ var (
 
 // mounterPod is what this node's driver needs from the mounter pod, resolved when it is discovered.
 type mounterPod struct {
-	// daemonSetName is the DaemonSet running the mounter pod, which the chart names after its daemonsetMounters[] entry.
+	// daemonSetName is the DaemonSet running the mounter pod: s3-csi-mounter, or s3-csi-mounter-<name> for an additionalDaemonSets entry.
 	daemonSetName string
 	// comm directory for communicating with mounter pod.
 	commDir string
@@ -195,7 +195,7 @@ func NewDaemonsetMounter(clientset kubernetes.Interface, nodeID string, mount *m
 	credProvider credentialprovider.ProviderInterface, mountSyscall mountSyscallFunc, bindMountSyscall bindMountSyscallFunc, mountInfoProvider mountInfoProviderFunc, kubernetesVersion string, variant cluster.Variant) *DaemonsetMounter {
 	ownImage := os.Getenv(csiNodeImageEnv)
 	if ownImage == "" {
-		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / s3-csi-daemonset-mounter image check is disabled", csiNodeImageEnv)
+		klog.Warningf("DaemonsetMounter: %s is not set; the s3-csi-node / mounter image check is disabled", csiNodeImageEnv)
 	}
 	return &DaemonsetMounter{
 		ownImage:          ownImage,
@@ -332,7 +332,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 	if mounter == nil {
 		// Look again now rather than on the backed-off schedule, since a workload is waiting for it.
 		dm.requestRediscovery()
-		return fmt.Errorf("no usable s3-csi-daemonset-mounter on node %s yet, so it can't mount new S3 volumes. "+
+		return fmt.Errorf("no usable mounter on node %s yet, so it can't mount new S3 volumes. "+
 			"Kubelet retries the mount until it can. %s", dm.nodeID, helpMessageForCheckingMounterPodStatus())
 	}
 
@@ -363,7 +363,7 @@ func (dm *DaemonsetMounter) Mount(ctx context.Context, bucketName string, target
 }
 
 // deadTargetError reports a target whose bind mount still exists but whose Mountpoint has exited, for
-// example because the mounter pod serving it on this node restarted (the s3-csi-daemonset-mounter pod, or
+// example because the mounter pod serving it on this node restarted (the mounter pod, or
 // a legacy V2 Mountpoint Pod). "Dead" is any errno mount-utils IsCorruptedMnt treats as a corrupted mount
 // (ENOTCONN, ESTALE, EIO, EACCES, EHOSTDOWN, EWOULDBLOCK); IsHealthyMountpoint logs which one at V(2).
 // A running container keeps the dead mount: a new mount at the target is not visible to it, so today the
@@ -929,14 +929,14 @@ func (dm *DaemonsetMounter) cleanupMount(entry *MountEntry, credentialCtx creden
 
 // helpMessageForGettingMounterLogs returns a help message with a command to get mounter logs.
 func helpMessageForGettingMounterLogs() string {
-	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-daemonset-mounter`", mounterNamespace)
+	return fmt.Sprintf("You can see mounter logs by running: `kubectl logs -n %s -l app=s3-csi-mounter`", mounterNamespace)
 }
 
 // helpMessageForCheckingMounterPodStatus returns a help message with a command to check mounter pod status.
 func helpMessageForCheckingMounterPodStatus() string {
-	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-daemonset-mounter -o wide`. "+
+	return fmt.Sprintf("You can check mounter pod status by running: `kubectl get pods -n %s -l app=s3-csi-mounter -o wide`. "+
 		"A Pending one shows why in `kubectl describe pod`, for example not enough free memory or CPU on the node for its resources.requests. "+
-		"More than one on a node means more than one daemonsetMounters entry selects it", mounterNamespace)
+		"More than one on a node means it matches both the top-level node values and an additionalDaemonSets entry, or two entries", mounterNamespace)
 }
 
 // requestRediscovery wakes StartCommDirWatch to look for the mounter now, unless a wake-up is already pending.
@@ -1330,7 +1330,7 @@ func (dm *DaemonsetMounter) DiscoverMounter(ctx context.Context) error {
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%w, check that s3-csi-daemonset-mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
+		return fmt.Errorf("%w, check that the mounter is running on this node (last: %w): %w", ErrCommDirDiscoveryFailed, lastErr, err)
 	}
 	return nil
 }
@@ -1408,17 +1408,32 @@ func (dm *DaemonsetMounter) checkCommDir() bool {
 	return true
 }
 
+// How to fix a node that more than one pair matches. Keep the pair whose mounter serves the node's mounts: removing
+// the others needs no drain, since their mounters serve nothing.
+const (
+	keepPairAdvice = "keep the values that place it on this node and change the others' node.nodeSelector or node.affinity " +
+		"(top-level, or additionalDaemonSets.<name>.node), so only those match this node"
+	onePairAdvice = "change node.nodeSelector or node.affinity (top-level, or additionalDaemonSets.<name>.node), " +
+		"so only the top-level values or one entry match it"
+)
+
 // checkForMultipleMounterPods logs an error if more than one mounter pod is running on this node, and keeps the mounter it has.
 func (dm *DaemonsetMounter) checkForMultipleMounterPods() {
 	ctx, cancel := context.WithTimeout(context.Background(), commDirRediscoveryTimeout)
 	defer cancel()
-	if _, err := dm.runningMounterPods(ctx); errors.Is(err, ErrMultipleMounterPods) {
-		effect := "Mounts on this node keep using the first mounter"
-		if dm.mounter.Load() == nil {
-			effect = "None of them holds this node's mounts, so new S3 mounts on it fail until only one runs"
-		}
-		klog.Errorf("DaemonsetMounter: %v. %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, effect)
+	running, err := dm.runningMounterPods(ctx)
+	if !errors.Is(err, ErrMultipleMounterPods) {
+		return
 	}
+	var inUse *corev1.Pod
+	if m := dm.mounter.Load(); m != nil {
+		inUse = dm.podWithCommDir(running, m.commDir)
+	}
+	if inUse == nil {
+		klog.Errorf("DaemonsetMounter: %v. None of them holds this node's mounts, so new S3 mounts on it fail until only one runs; %s", err, onePairAdvice)
+		return
+	}
+	klog.Errorf("DaemonsetMounter: %v. Mounts on this node keep using %s; %s", err, inUse.Name, keepPairAdvice)
 }
 
 // GetCommDir returns the discovered mounter pod's comm dir, or "" if there is none. Exported for testing.
@@ -1590,7 +1605,7 @@ func (dm *DaemonsetMounter) tryDiscoverMounter(ctx context.Context) (*mounterPod
 			return nil, err
 		}
 		running = []corev1.Pod{*inUse}
-		klog.Errorf("DaemonsetMounter: %v. Using %s; change the entries' nodeSelector or matchExpressions, or this node's labels, so only one mounter entry matches it", err, running[0].Name)
+		klog.Errorf("DaemonsetMounter: %v. Using %s; %s", err, running[0].Name, keepPairAdvice)
 	} else if err != nil {
 		return nil, err
 	}
@@ -1701,7 +1716,7 @@ func (dm *DaemonsetMounter) imageMismatchWarning(mounter *mounterPod) string {
 		"Mounts are still served. Recycling the node updates the mounter; if that is not feasible, update it in place: "+
 		"`kubectl cordon %[1]s`, "+
 		"`kubectl drain %[1]s --ignore-daemonsets`, "+
-		"`kubectl delete pod -n %[4]s -l app=s3-csi-daemonset-mounter --field-selector spec.nodeName=%[1]s`, "+
+		"`kubectl delete pod -n %[4]s -l app=s3-csi-mounter --field-selector spec.nodeName=%[1]s`, "+
 		"then `kubectl uncordon %[1]s`. Deleting the mounter pod without draining the node first breaks all active mounts on it.",
 		dm.nodeID, dm.ownImage, mounter.image, mounterNamespace, mounter.daemonSetName)
 }

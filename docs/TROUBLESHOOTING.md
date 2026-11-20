@@ -150,26 +150,6 @@ F0919 20:25:04.161506       1 main.go:45] Failed to receive mount options from /
 One well-known cause of this issue is when <a href="#im-trying-to-use-multiple-s3-volumes-in-the-same-pod-but-my-pod-is-stuck-at-containercreating-status">volumes are specified without using a unique `volumeHandle` value</a>.
 There may be other issues related to the volume or pod spec that can lead to the workload pod being stuck in `ContainerCreating`, and the Mountpoint pod failing with this error.
 
-## My Pod is stuck at `ContainerCreating` with error "no usable s3-csi-daemonset-mounter on node"
-
-The S3 volumes on a node are served by the node's `s3-csi-daemonset-mounter` Pod. While it has none it can use, the node's `s3-csi-node` Pod fails new S3 mounts with this error, which the kubelet retries until it has one. It still unmounts the S3 volumes already on the node, and refreshes the credentials.
-
-To see why the node has no mounter it can use:
-
-```bash
-$ kubectl get pods -n kube-system -l app=s3-csi-daemonset-mounter -o wide
-$ kubectl describe pod -n kube-system <mounter-pod-name>
-```
-
-- A `Pending` mounter usually doesn't fit on its node: its events show `Insufficient memory` or `Insufficient cpu` when the node has less free than the entry's `daemonsetMounters[].resources.requests`. Free up the node, use larger nodes for that entry, or lower its `resources.requests`.
-- More than one mounter Pod on the node means more than one `daemonsetMounters` entry selects it, and its `s3-csi-node` Pod logs `multiple running mounter pods found`. Change the entries' `nodeSelector` or `matchExpressions`, or the node's labels, so only one entry matches the node. If the node has S3 mounts, drain it first: the mounter of an entry that stops matching is deleted, which breaks its mounts.
-
-Until a mounter runs, the node's volume limit is the smallest `maxVolumesPerNode` of your `daemonsetMounters` entries. When the mounter runs, it becomes that mounter's entry's `maxVolumesPerNode`. On EKS 1.34 and later, and Kubernetes 1.35 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
-
-```bash
-$ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
-```
-
 ## My workload pods are getting "Transport endpoint is not connected" errors during node drain
 
 This error occurs when workload pods are terminated before the Mountpoint pod that provides their S3 volume mount. To prevent this, the CSI driver implements graceful eviction:
@@ -212,6 +192,48 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 
 ## V3 (daemonset mounter mode)
 
+A pair is one CSI node and one mounter DaemonSet, which run on the same nodes: `s3-csi-node` and `s3-csi-mounter` from the top-level `node` and `mounter` values, and `s3-csi-node-<name>` and `s3-csi-mounter-<name>` for each `additionalDaemonSets` entry.
+
+### My node runs more than one `s3-csi-node` Pod
+
+The node matches more than one pair: two or more `additionalDaemonSets` entries, or an entry and the default pair. The driver supports one CSI node and mounter per node. The `s3-csi-node` Pod that started first keeps working on the node, and the others log "another CSI node on this node holds ... node.lock" and wait. The working one logs `multiple running mounter pods found` every 30 seconds, with the mounter that serves the node's mounts. If no mounter serves any of the node's mounts yet, for example on a new node that matched more than one pair from the start, the `s3-csi-node` Pod can't tell which mounter to use, so new mounts on the node fail until only one mounter runs.
+
+To recover:
+
+1. Find the mounter that serves each affected node's mounts, which the working `s3-csi-node` Pod names, and the pair it belongs to:
+   ```bash
+   $ kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
+   $ kubectl logs -n kube-system <s3-csi-node-pod-name> -c s3-plugin | grep "multiple running mounter pods found" | tail -1
+   $ kubectl get pod -n kube-system <mounter-pod-name> -o jsonpath='{.metadata.ownerReferences[0].name}'
+   ```
+   The last command prints `s3-csi-mounter` for the default pair, or `s3-csi-mounter-<name>` for the `additionalDaemonSets` entry `<name>`. Keep that pair. It may not be the pair of the working `s3-csi-node` Pod; removing that Pod's pair from the node is safe, since the mounts are held by the mounter and the kept pair's `s3-csi-node` Pod takes over when it exits. If no mounter serves the node's mounts, keep any one pair.
+
+   Change the other pairs' placement (`node.nodeSelector` or `node.affinity`, top-level or `additionalDaemonSets.<name>.node`) so only the kept pair matches these nodes. Their mounters have no mounts there, so you don't need to drain these nodes. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
+2. Run `helm upgrade`, then uncordon any nodes you drained, and check the driver is registered again:
+   ```bash
+   $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'
+   ```
+
+### My Pod is stuck at `ContainerCreating` with error "no usable mounter on node"
+
+The S3 volumes on a node are served by the node's mounter Pod (`s3-csi-mounter`, or `s3-csi-mounter-<name>` for an `additionalDaemonSets` entry). While it has none it can use, the node's `s3-csi-node` Pod fails new S3 mounts with this error, which the kubelet retries until it has one. It still unmounts the S3 volumes already on the node, and refreshes the credentials.
+
+To see why the node has no mounter it can use:
+
+```bash
+$ kubectl get pods -n kube-system -l app=s3-csi-mounter -o wide
+$ kubectl describe pod -n kube-system <mounter-pod-name>
+```
+
+- A `Pending` mounter usually doesn't fit on its node: its events show `Insufficient memory` or `Insufficient cpu` when the node has less free than its pair's `mounter.resources.requests`. Free up the node, use larger nodes for that pair, or lower its `resources.requests`.
+- More than one mounter Pod on the node means more than one pair matches it: see [My node runs more than one `s3-csi-node` Pod](#my-node-runs-more-than-one-s3-csi-node-pod).
+
+Until a mounter runs, the node's volume limit is its pair's `mounter.maxVolumesPerNode`. When the mounter runs, it becomes that mounter's `maxVolumesPerNode`. On EKS 1.34 and later, and Kubernetes 1.35 and later, the kubelet reads the new limit within 10 seconds. On earlier versions, the kubelet reads it only when `s3-csi-node` starts, so if the `s3-csi-node` Pod logs "the volume limit kubelet has for node", restart it:
+
+```bash
+$ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
+```
+
 ### My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
 
-More than one `s3-csi-node` Pod runs on the node, for example because two DaemonSets match it or a second Helm release. Only the first one works on the node; the others wait, serving nothing, until it exits. Make sure only one `s3-csi-node` Pod runs on each node, and don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.
+More than one `s3-csi-node` Pod runs on the node, because more than one pair matches it or a second Helm release runs one. Only the first one works on the node; the others wait, serving nothing, until it exits. If more than one pair matches it, see [My node runs more than one `s3-csi-node` Pod](#my-node-runs-more-than-one-s3-csi-node-pod); if a second release runs one, uninstall it. Don't delete `node.lock` in `/var/lib/kubelet/plugins/s3.csi.aws.com/`, since that can let two of them work on the node for a few seconds.

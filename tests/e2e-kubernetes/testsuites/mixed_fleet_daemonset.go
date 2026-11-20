@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -81,25 +83,23 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 		// Node A's entries request 2Gi, not the chart's 4Gi, so two of their mounters fit on one node during the overlap.
 		nodeAResources := map[string]any{"requests": map[string]any{"memory": "2Gi"}}
 		first := func() map[string]any {
-			return map[string]any{"name": "first", "nodeSelector": map[string]any{"kubernetes.io/hostname": nodeA}, "maxVolumesPerNode": 3,
-				"resources": nodeAResources}
-		}
-		rest := func() map[string]any {
-			return map[string]any{"name": "rest", "maxVolumesPerNode": 5,
-				"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": []any{nodeA}}}}
+			return map[string]any{
+				"node":    map[string]any{"nodeSelector": map[string]any{"kubernetes.io/hostname": nodeA}},
+				"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
+			}
 		}
 
-		Context("with two entries", func() {
+		Context("with an entry for node A, and the default pair on the other nodes", func() {
 			BeforeAll(func(ctx context.Context) {
-				release.upgrade(ctx, f, withMounterEntries(release, first(), rest()))
+				release.upgrade(ctx, f, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first()}))
 			})
 
-			It("runs each node's own entry's mounter and advertises its limit", func(ctx context.Context) {
+			It("runs each node's own pair's mounter and advertises its limit", func(ctx context.Context) {
 				expectOneMounterPerNode(ctx, f, driverName, func(node string) string {
 					if node == nodeA {
 						return mounterDaemonSetName + "-first"
 					}
-					return mounterDaemonSetName + "-rest"
+					return mounterDaemonSetName
 				})
 				Expect(getCSINodeLimits(ctx, f, nodeA, driverName)).To(Equal(3))
 				Expect(getCSINodeLimits(ctx, f, otherNode(ctx, f, nodeA), driverName)).To(Equal(5))
@@ -113,28 +113,85 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 			})
 		})
 
-		Context("with a third entry that also matches node A", func() {
-			It("keeps node A's mounter in use, logging the overlap", func(ctx context.Context) {
+		Context("with a second entry that also matches node A", func() {
+			It("keeps node A's CSI node and mounter in use, logging the overlap, while the new pair's CSI node waits", func(ctx context.Context) {
 				running, runningPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				servedBy := servingMounter(ctx, f, nodeA, runningPV)
+				working := nodePodOf(ctx, f, csiDriverDaemonSetName+"-first", nodeA)
 
-				// A different rule from first's, as two identical selections are rejected at install, and first's limit, so node A
+				// A different rule from first's, as two identical placements are rejected at install, and first's limit, so node A
 				// advertises 3 whichever mounter it picks.
-				extra := map[string]any{"name": "extra", "maxVolumesPerNode": 3, "resources": nodeAResources,
-					"matchExpressions": []any{map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}
-				// Only the node pod rolls, as its rules change, so node A's new node pod starts while a mount uses first's mounter.
-				release.upgradeOnly(ctx, withMounterEntries(release, first(), rest(), extra))
+				extra := map[string]any{
+					"node": map[string]any{"affinity": map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+						"nodeSelectorTerms": []any{map[string]any{"matchExpressions": []any{
+							map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{nodeA}}}}}}}}},
+					"mounter": map[string]any{"maxVolumesPerNode": 3, "resources": nodeAResources},
+				}
+				// The new pair's CSI node waits for node A's lock, while a mount uses first's mounter.
+				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first(), "extra": extra}))
 				waitForDaemonSetReady(ctx, f, mounterDaemonSetName+"-extra", mounterPodLabel, mounterRestartTimeout)
-				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName, csiNodePodLabel, csiNodeRestartTimeout)
+				waitForDaemonSetReady(ctx, f, csiDriverDaemonSetName+"-extra", csiNodePodLabel, csiNodeRestartTimeout)
 
 				Expect(mountersOn(ctx, f, nodeA)).To(HaveLen(2))
 				Expect(getCSINodeLimits(ctx, f, nodeA, driverName)).To(Equal(3))
-				Eventually(ctx, func(ctx context.Context) bool {
-					return verifyCSINodeLogs(ctx, f, nodeA, "multiple running mounter pods found")
-				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(BeTrue())
+				Eventually(ctx, func(ctx context.Context) (string, error) {
+					return e2epod.GetPodLogs(ctx, f.ClientSet, working.Namespace, working.Name, csiNodeContainerName)
+				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(ContainSubstring("multiple running mounter pods found"))
+				// The new CSI node stops at the lock, before it logs its mounter mode, so it never touches the node's mounts.
+				waitingPod := nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA)
+				var waiting string
+				Eventually(ctx, func(ctx context.Context) (string, error) {
+					var err error
+					waiting, err = e2epod.GetPodLogs(ctx, f.ClientSet, waitingPod.Namespace, waitingPod.Name, csiNodeContainerName)
+					return waiting, err
+				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(ContainSubstring("another CSI node on this node holds"))
+				Expect(nodePodLogs(ctx, f, working)).To(ContainSubstring("Using daemonset mounter mode"))
+				Expect(waiting).NotTo(ContainSubstring("Using daemonset mounter mode"))
 
 				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(servedBy))
+				checkWriteAndRead(ctx, f, running)
+				checkWriteAndRead(ctx, f, newPod)
+				expectNotRestarted(ctx, f, working)
+			})
+
+			It("hands node A to a waiting CSI node when the one working there goes", func(ctx context.Context) {
+				running, _ := writerOnNode(ctx, f, config, pattern, nodeA)
+				framework.ExpectNoError(e2epod.DeletePodWithWait(ctx, f.ClientSet, nodePodOf(ctx, f, csiDriverDaemonSetName+"-first", nodeA)))
+				// Either waiting CSI node can take the lock: extra, or the pod that replaces first's.
+				Eventually(ctx, func(ctx context.Context) (int, error) {
+					pods, err := podsOn(ctx, f, csiNodePodLabel, nodeA)
+					holders := 0
+					for _, pod := range pods {
+						// The replacement may not have started yet, which has no logs.
+						logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, pod.Namespace, pod.Name, csiNodeContainerName)
+						if err == nil && strings.Contains(logs, "nodelock: holding") {
+							holders++
+						}
+					}
+					return holders, err
+				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(Equal(1))
+
+				// The new holder keeps using first's mounter, which serves the node's mounts.
+				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
+				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(mounterOf(ctx, f, mounterDaemonSetName+"-first", nodeA)))
+				checkWriteAndRead(ctx, f, running)
+				checkWriteAndRead(ctx, f, newPod)
+			})
+
+			It("serves node A from one pair again once the second entry stops matching it", func(ctx context.Context) {
+				running, _ := writerOnNode(ctx, f, config, pattern, nodeA)
+				release.upgradeOnly(ctx, withAdditionalDaemonSets(release, notOn(nodeA), map[string]any{"first": first()}))
+				Eventually(ctx, func(ctx context.Context) ([]v1.Pod, error) { return podsOn(ctx, f, csiNodePodLabel, nodeA) }).
+					WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(HaveLen(1))
+				Eventually(ctx, func(ctx context.Context) ([]v1.Pod, error) { return podsOn(ctx, f, mounterPodLabel, nodeA) }).
+					WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(HaveLen(1))
+				Eventually(ctx, func(ctx context.Context) (*storagev1.CSINodeDriver, error) {
+					return csiNodeDriver(ctx, f, nodeA, driverName)
+				}).
+					WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).ShouldNot(BeNil())
+
+				newPod, _ := writerOnNode(ctx, f, config, pattern, nodeA)
 				checkWriteAndRead(ctx, f, running)
 				checkWriteAndRead(ctx, f, newPod)
 			})
@@ -142,22 +199,31 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 	})
 }
 
-// withMounterEntries returns the installed values with one complete daemonsetMounters element per entry.
-func withMounterEntries(r *driverRelease, entries ...map[string]any) map[string]any {
-	// Helm replaces a list whole, so each element starts from the chart's: a partial one renders an absent logLevel as `--v=`.
-	chartMounter := r.chart.Values["daemonsetMounters"].([]any)[0].(map[string]any)
-	var mounters []any
-	for _, entry := range entries {
-		mounter := maps.Clone(chartMounter)
-		if installed, _ := r.installed["daemonsetMounters"].([]any); len(installed) > 0 {
-			maps.Copy(mounter, installed[0].(map[string]any))
-		}
-		maps.Copy(mounter, entry)
-		mounters = append(mounters, mounter)
+// withAdditionalDaemonSets returns the installed values with entries as additionalDaemonSets, and the default pair kept
+// to nodes matching outside, a matchExpression, since no node may match two pairs.
+func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries map[string]any) map[string]any {
+	affinity := r.chart.Values["node"].(map[string]any)["affinity"].(map[string]any)
+	terms := affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
+	var narrowed []any
+	for _, term := range terms {
+		exprs := slices.Clone(term.(map[string]any)["matchExpressions"].([]any))
+		narrowed = append(narrowed, map[string]any{"matchExpressions": append(exprs, outside)})
 	}
+	node := map[string]any{}
+	if installed, _ := r.installed["node"].(map[string]any); installed != nil {
+		maps.Copy(node, installed)
+	}
+	node["affinity"] = map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{"nodeSelectorTerms": narrowed}}}
 	values := maps.Clone(r.installed)
-	values["daemonsetMounters"] = mounters
+	values["node"] = node
+	values["mounter"] = map[string]any{"maxVolumesPerNode": 5}
+	values["additionalDaemonSets"] = entries
 	return values
+}
+
+// notOn matches every node but node.
+func notOn(node string) map[string]any {
+	return map[string]any{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": []any{node}}
 }
 
 // expectOneMounterPerNode checks each node runs one mounter, from daemonSetFor's DaemonSet, and advertises its limit label.
@@ -173,6 +239,68 @@ func expectOneMounterPerNode(ctx context.Context, f *framework.Framework, driver
 		limit, err := strconv.Atoi(mounters[0].Labels[mounterMaxVolumesLabel])
 		framework.ExpectNoError(err, "the mounter on node %s has no %s label", node, mounterMaxVolumesLabel)
 		Expect(getCSINodeLimits(ctx, f, node, driverName)).To(Equal(limit), "the limit node %s advertises", node)
+	}
+}
+
+// podsOn returns the driver pods matching label on node, with the error for Eventually to retry on.
+func podsOn(ctx context.Context, f *framework.Framework, label, node string) ([]v1.Pod, error) {
+	pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: label,
+		FieldSelector: "spec.nodeName=" + node,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pods.Items, nil
+}
+
+// nodePodsOn returns the CSI node pods on node.
+func nodePodsOn(ctx context.Context, f *framework.Framework, node string) []v1.Pod {
+	GinkgoHelper()
+	pods, err := podsOn(ctx, f, csiNodePodLabel, node)
+	framework.ExpectNoError(err)
+	return pods
+}
+
+// nodePodOf returns daemonSet's CSI node pod on node.
+func nodePodOf(ctx context.Context, f *framework.Framework, daemonSet, node string) *v1.Pod {
+	GinkgoHelper()
+	for _, pod := range nodePodsOn(ctx, f, node) {
+		if pod.OwnerReferences[0].Name == daemonSet {
+			return &pod
+		}
+	}
+	framework.Failf("no pod of %s on node %s", daemonSet, node)
+	return nil
+}
+
+// mounterOf returns the name of daemonSet's mounter pod on node.
+func mounterOf(ctx context.Context, f *framework.Framework, daemonSet, node string) string {
+	GinkgoHelper()
+	for _, pod := range mountersOn(ctx, f, node) {
+		if pod.OwnerReferences[0].Name == daemonSet {
+			return pod.Name
+		}
+	}
+	framework.Failf("no pod of %s on node %s", daemonSet, node)
+	return ""
+}
+
+// nodePodLogs returns the logs of the CSI node pod's s3-plugin container.
+func nodePodLogs(ctx context.Context, f *framework.Framework, pod *v1.Pod) string {
+	GinkgoHelper()
+	logs, err := e2epod.GetPodLogs(ctx, f.ClientSet, pod.Namespace, pod.Name, csiNodeContainerName)
+	framework.ExpectNoError(err)
+	return logs
+}
+
+// expectNotRestarted checks that pod still runs, with none of its containers restarted since pod was read.
+func expectNotRestarted(ctx context.Context, f *framework.Framework, pod *v1.Pod) {
+	GinkgoHelper()
+	now, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	framework.ExpectNoError(err, "pod %s is gone", pod.Name)
+	for i, status := range now.Status.ContainerStatuses {
+		Expect(status.RestartCount).To(Equal(pod.Status.ContainerStatuses[i].RestartCount), "container %s of %s restarted", status.Name, pod.Name)
 	}
 }
 

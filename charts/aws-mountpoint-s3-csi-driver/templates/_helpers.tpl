@@ -124,74 +124,94 @@ Suffixes follow the quantity spec at https://kubernetes.io/docs/reference/kubern
 {{- end -}}
 
 {{/*
-Checks the daemonsetMounters entries. Each entry becomes its own mounter DaemonSet, so names must not repeat, and with
-two or more entries each must say which nodes it applies to.
+Renders a nodeSelector value as a string, since node labels are strings and YAML reads true or 1 as a bool or a
+number. null becomes "", which is how Kubernetes reads it.
 */}}
-{{- define "aws-mountpoint-s3-csi-driver.validateMounterEntries" -}}
-{{- $entries := .Values.daemonsetMounters }}
-{{- if lt (len $entries) 1 }}
-{{- fail "daemonsetMounters must have at least one entry" }}
-{{- end }}
-{{- $names := list }}
-{{- $selections := list }}
-{{- $unnamed := 0 }}
-{{- range $m := $entries }}
-{{- /* On the raw value, since int turns anything that isn't a whole number into 0, which means no limit. */}}
-{{- if not (regexMatch "^[0-9]+$" (toString $m.maxVolumesPerNode)) }}
-{{- fail (printf "daemonsetMounters[%s].maxVolumesPerNode must be a whole number >= 0, got %v" ($m.name | default "") $m.maxVolumesPerNode) }}
-{{- end }}
-{{- if $m.name }}
-{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $m.name) }}
-{{- fail (printf "daemonsetMounters: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSet" $m.name) }}
-{{- end }}
-{{- if has $m.name $names }}
-{{- fail (printf "daemonsetMounters: two entries are named %q; each entry needs its own name" $m.name) }}
-{{- end }}
-{{- $names = append $names $m.name }}
-{{- else }}
-{{- $unnamed = add1 $unnamed }}
-{{- end }}
-{{- if and (gt (len $entries) 1) (not $m.nodeSelector) (not $m.matchExpressions) }}
-{{- fail (printf "daemonsetMounters[%s]: nodeSelector or matchExpressions is required when there is more than one entry, or its mounter would run on every node" ($m.name | default "")) }}
-{{- end }}
-{{- $selection := toJson (dict "nodeSelector" $m.nodeSelector "matchExpressions" $m.matchExpressions) }}
-{{- if has $selection $selections }}
-{{- fail (printf "daemonsetMounters: two entries select the same nodes with %s" $selection) }}
-{{- end }}
-{{- $selections = append $selections $selection }}
-{{- range $k, $_ := $m.nodeSelector }}
-{{- if hasKey ($.Values.node.nodeSelector | default dict) $k }}
-{{- fail (printf "daemonsetMounters[%s].nodeSelector and node.nodeSelector both set %q" ($m.name | default "") $k) }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- if gt $unnamed 1 }}
-{{- fail "daemonsetMounters: at most one entry may leave out name" }}
-{{- end }}
+{{- define "aws-mountpoint-s3-csi-driver.labelValue" -}}
+{{- if kindIs "string" . }}{{ . }}{{ else if not (kindIs "invalid" .) }}{{ toJson . }}{{ end }}
 {{- end }}
 
 {{/*
-Returns .affinity with each required node term repeated once per list in .exprLists, with that list's expressions
-added. Kubernetes ORs the terms, so the result matches a node if any list does. Other rules are kept as they are.
-With no lists, .affinity is returned unchanged.
+Returns a pair's nodeSelector and affinity as JSON, with nodeSelector values as rendered, so two pairs can be compared.
 */}}
-{{- define "aws-mountpoint-s3-csi-driver.addToNodeTerms" -}}
-{{- $affinity := deepCopy (.affinity | default dict) }}
-{{- if .exprLists }}
-{{- $nodeAffinity := $affinity.nodeAffinity | default dict }}
-{{- $required := $nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | default dict }}
-{{- $nodeTerms := $required.nodeSelectorTerms | default (list (dict)) }}
-{{- $terms := list }}
-{{- range $n := $nodeTerms }}
-{{- range $exprs := $.exprLists }}
-{{- $term := dict "matchExpressions" (concat ($n.matchExpressions | default list) $exprs) }}
-{{- with $n.matchFields }}{{- $_ := set $term "matchFields" . }}{{- end }}
-{{- $terms = append $terms $term }}
+{{- define "aws-mountpoint-s3-csi-driver.placement" -}}
+{{- $selector := dict }}
+{{- range $k, $v := .nodeSelector }}{{- $_ := set $selector $k (include "aws-mountpoint-s3-csi-driver.labelValue" $v) }}{{- end }}
+{{- toJson (dict "nodeSelector" $selector "affinity" (.affinity | default dict)) }}
+{{- end }}
+
+{{/*
+The chart's default node.affinity in values.yaml, so the chart can tell when it is left unchanged. Keep the two the same.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.defaultNodeAffinity" -}}
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - {key: eks.amazonaws.com/compute-type, operator: NotIn, values: [fargate, hybrid, auto]}
+      - matchExpressions:
+          - {key: eks.amazonaws.com/compute-type, operator: In, values: [auto]}
+          - {key: karpenter.sh/nodepool, operator: NotIn, values: [system]}
+{{- end }}
+
+{{/*
+Returns, as JSON {"pairs": [...]}, every CSI node and mounter pair to render: the default pair from node and mounter,
+then one pair per additionalDaemonSets entry. An entry copies node and mounter, except node's placement.
+*/}}
+{{- define "aws-mountpoint-s3-csi-driver.daemonsetPairs" -}}
+{{- $base := omit .Values.node "nodeSelector" "affinity" }}
+{{- $mounter := .Values.mounter | default dict }}
+{{- $pairs := list (dict "name" "" "where" "mounter" "node" .Values.node "mounter" $mounter) }}
+{{- $placements := list (include "aws-mountpoint-s3-csi-driver.placement" .Values.node) }}
+{{- /* Skip entries set to null, which is how Helm removes a value set in another values file. */}}
+{{- $entries := dict }}
+{{- range $name, $entry := .Values.additionalDaemonSets | default dict }}
+{{- if not (kindIs "invalid" $entry) }}{{- $_ := set $entries $name $entry }}{{- end }}
+{{- end }}
+{{- range $name := keys $entries | sortAlpha }}
+{{- $entry := get $entries $name }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
+{{- fail (printf "additionalDaemonSets: name %q must be lowercase letters, numbers and '-', and start and end with a letter or number, since it names the entry's DaemonSets" $name) }}
+{{- end }}
+{{- range $key, $_ := $entry }}
+{{- if not (has $key (list "node" "mounter")) }}
+{{- fail (printf "additionalDaemonSets.%s.%s: an entry only takes node and mounter, which override the top-level node and mounter values" $name $key) }}
 {{- end }}
 {{- end }}
-{{- $_ := set $required "nodeSelectorTerms" $terms }}
-{{- $_ := set $nodeAffinity "requiredDuringSchedulingIgnoredDuringExecution" $required }}
-{{- $_ := set $affinity "nodeAffinity" $nodeAffinity }}
+{{- $entryNode := $entry.node | default dict }}
+{{- range $key := list "serviceAccount" "preventPodSchedulingIfMissing" }}
+{{- if hasKey $entryNode $key }}
+{{- fail (printf "additionalDaemonSets.%s.node.%s: set it on node instead, since the chart applies it to every CSI node" $name $key) }}
 {{- end }}
-{{- toYaml $affinity }}
+{{- end }}
+{{- if not (or $entryNode.nodeSelector $entryNode.affinity) }}
+{{- fail (printf "additionalDaemonSets.%s.node: nodeSelector or affinity is required, since an entry doesn't copy node's placement and would otherwise run on every node" $name) }}
+{{- end }}
+{{- $placement := include "aws-mountpoint-s3-csi-driver.placement" $entryNode }}
+{{- if has $placement $placements }}
+{{- fail (printf "additionalDaemonSets.%s.node selects the same nodes as the top-level node or another entry, so every node it matches would run two CSI nodes" $name) }}
+{{- end }}
+{{- $placements = append $placements $placement }}
+{{- $entryMounter := $entry.mounter | default dict }}
+{{- $pairMounter := mustMergeOverwrite (deepCopy $mounter) (deepCopy $entryMounter) }}
+{{- /* An entry's cache replaces the default cache instead of merging with it. cache: null means no cache. */}}
+{{- if hasKey $entryMounter "cache" }}
+{{- $_ := unset $pairMounter "cache" }}
+{{- if not (kindIs "invalid" $entryMounter.cache) }}{{- $_ := set $pairMounter "cache" (deepCopy $entryMounter.cache) }}{{- end }}
+{{- end }}
+{{- $pairs = append $pairs (dict "name" $name "where" (printf "additionalDaemonSets.%s.mounter" $name)
+    "node" (mustMergeOverwrite (deepCopy $base) (deepCopy $entryNode)) "mounter" $pairMounter) }}
+{{- end }}
+{{- $defaultAffinity := include "aws-mountpoint-s3-csi-driver.defaultNodeAffinity" . | fromYaml }}
+{{- $unchanged := or (not .Values.node.affinity) (eq (toJson .Values.node.affinity) (toJson $defaultAffinity)) }}
+{{- if and $entries (not .Values.node.nodeSelector) $unchanged }}
+{{- fail "additionalDaemonSets needs the default s3-csi-node and s3-csi-mounter kept off the entries' nodes: set node.nodeSelector or change node.affinity. Without that they run on every node, so every node an entry matches would run two CSI nodes" }}
+{{- end }}
+{{- range $pair := $pairs }}
+{{- /* Check the raw value: int turns anything that isn't a whole number into 0, which means no limit. */}}
+{{- if not (regexMatch "^[0-9]+$" (toString $pair.mounter.maxVolumesPerNode)) }}
+{{- fail (printf "%s.maxVolumesPerNode must be a whole number >= 0, got %v" $pair.where $pair.mounter.maxVolumesPerNode) }}
+{{- end }}
+{{- end }}
+{{- toJson (dict "pairs" $pairs) }}
 {{- end }}

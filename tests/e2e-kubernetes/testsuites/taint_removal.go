@@ -28,7 +28,7 @@ import (
 
 const (
 	agentNotReadyTaintKey = "s3.csi.aws.com/agent-not-ready"
-	mounterDaemonSetName  = "s3-csi-daemonset-mounter"
+	mounterDaemonSetName  = "s3-csi-mounter"
 )
 
 type s3CSITaintRemovalTestSuite struct {
@@ -366,7 +366,7 @@ func patchMounterAffinity(ctx context.Context, f *framework.Framework, affinity 
 func waitForNoMounterPod(ctx context.Context, f *framework.Framework, nodeName string) {
 	gomega.Eventually(ctx, func(ctx context.Context) ([]v1.Pod, error) {
 		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app=s3-csi-daemonset-mounter",
+			LabelSelector: "app=s3-csi-mounter",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		return pods.Items, err

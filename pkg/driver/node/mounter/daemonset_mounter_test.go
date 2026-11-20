@@ -117,15 +117,15 @@ func setupDM(t *testing.T) *dmTestCtx {
 	err = os.MkdirAll(commDir, 0750)
 	assert.NoError(t, err)
 
-	// Add s3-csi-daemonset-mounter label for commDir tests
+	// Add s3-csi-mounter label for commDir tests
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "s3-csi-daemonset-mounter-abcde",
+			Name:      "s3-csi-mounter-abcde",
 			Namespace: "kube-system",
 			UID:       types.UID(mounterPodUID),
-			Labels:    map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels:    map[string]string{"app": "s3-csi-mounter"},
 			OwnerReferences: []metav1.OwnerReference{
-				{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "s3-csi-daemonset-mounter-gpu", UID: "mounter-ds-uid", Controller: ptr.To(true)},
+				{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "s3-csi-mounter-gpu", UID: "mounter-ds-uid", Controller: ptr.To(true)},
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -240,12 +240,12 @@ func (testCtx *dmTestCtx) replaceMounterPod() string {
 	testCtx.t.Helper()
 
 	pods := testCtx.client.CoreV1().Pods("kube-system")
-	old, err := pods.Get(testCtx.ctx, "s3-csi-daemonset-mounter-abcde", metav1.GetOptions{})
+	old, err := pods.Get(testCtx.ctx, "s3-csi-mounter-abcde", metav1.GetOptions{})
 	assert.NoError(testCtx.t, err)
 	assert.NoError(testCtx.t, pods.Delete(testCtx.ctx, old.Name, metav1.DeleteOptions{}))
 
 	replacement := old.DeepCopy()
-	replacement.Name, replacement.UID, replacement.ResourceVersion = "s3-csi-daemonset-mounter-fghij", types.UID(uuid.New().String()), ""
+	replacement.Name, replacement.UID, replacement.ResourceVersion = "s3-csi-mounter-fghij", types.UID(uuid.New().String()), ""
 	_, err = pods.Create(testCtx.ctx, replacement, metav1.CreateOptions{})
 	assert.NoError(testCtx.t, err)
 
@@ -819,7 +819,7 @@ func TestDaemonsetMounter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error when the mounter pod is not discovered")
 			}
-			assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
+			assert.Contains(t, err.Error(), "no usable mounter on node")
 			if mountSyscallCalled {
 				t.Error("mountSyscall should not be called when the mounter pod is not available")
 			}
@@ -1385,7 +1385,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 				nodeCache: disk,
 				volumeCtx: map[string]string{"cache": "ephemeral", "cacheEphemeralStorageClassName": "gp3"},
 				wantWarnings: []string{
-					`requests cache "ephemeral", but its cache type differs from this node's cache volume, which s3-csi-daemonset-mounter-gpu uses instead`,
+					`requests cache "ephemeral", but its cache type differs from this node's cache volume, which s3-csi-mounter-gpu uses instead`,
 					`sets the deprecated volume attributes ["cacheEphemeralStorageClassName"]`,
 				},
 			},
@@ -1519,7 +1519,7 @@ func TestDaemonsetMounter_Cache(t *testing.T) {
 
 		// A cache request now reports the missing mounter rather than reading the dropped cache volume.
 		err = mountWithoutServing(testCtx, testCtx.ctx, "pod-while-stale", cacheRequest)
-		assert.Contains(t, err.Error(), "no usable s3-csi-daemonset-mounter on node")
+		assert.Contains(t, err.Error(), "no usable mounter on node")
 
 		// Simulate mounter is back + rerun discovery, but has no cache volume;
 		// PV accepted above (reached Send before) is now rejected.
@@ -1557,7 +1557,7 @@ func mounterPod(name string, phase corev1.PodPhase) *corev1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: "kube-system",
 			UID:    types.UID(uuid.New().String()),
-			Labels: map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels: map[string]string{"app": "s3-csi-mounter"},
 		},
 		Spec:   corev1.PodSpec{NodeName: "test-node"},
 		Status: corev1.PodStatus{Phase: phase},
@@ -1951,7 +1951,7 @@ func TestMount_AbsentTarget_ProceedsToMount(t *testing.T) {
 	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, nil, mountpoint.Args{}, "", nil)
 
 	// Mount should NOT return nil — it should proceed past the health check and eventually
-	// error out downstream (e.g. "no usable s3-csi-daemonset-mounter on node" since we didn't set up
+	// error out downstream (e.g. "no usable mounter on node" since we didn't set up
 	// the mounter pod). The key assertion is that err != nil (it tried to mount) rather
 	// than err == nil (it bailed like a corrupted target).
 	assert.Equals(t, true, err != nil)

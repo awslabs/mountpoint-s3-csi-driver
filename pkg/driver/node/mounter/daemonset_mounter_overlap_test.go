@@ -28,7 +28,7 @@ func TestCheckForMultipleMounterPodsLogsAndKeepsMounter(t *testing.T) {
 	returnsPromptly(t, dm.checkForMultipleMounterPods)
 
 	assert.Contains(t, logs.String(), "multiple running mounter pods found on node test-node (expected exactly 1, got 2: mounter-first, mounter-second)")
-	assert.Contains(t, logs.String(), "Mounts on this node keep using the first mounter")
+	assert.Contains(t, logs.String(), "Mounts on this node keep using mounter-first; keep the values that place it on this node")
 	assert.Equals(t, dm.commDirOf(*first), dm.mounter.Load().commDir)
 }
 
@@ -131,7 +131,7 @@ func runningMounterPod(name string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: mounterNamespace, UID: types.UID(name),
-			Labels: map[string]string{"app": "s3-csi-daemonset-mounter"},
+			Labels: map[string]string{"app": "s3-csi-mounter"},
 		},
 		Spec:   corev1.PodSpec{NodeName: "test-node"},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},

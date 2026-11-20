@@ -19,6 +19,10 @@ spec:
         {{- if .Values.controller.podLabels }}
         {{- toYaml .Values.controller.podLabels | nindent 8 }}
         {{- end }}
+      {{- with merge (dict) (.Values.controller.podAnnotations | default dict) (.Values.podAnnotations | default dict) }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       nodeSelector:
         kubernetes.io/os: linux

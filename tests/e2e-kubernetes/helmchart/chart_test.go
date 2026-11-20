@@ -17,13 +17,14 @@ import (
 
 const (
 	nodePluginContainer = "s3-plugin"
-	mounterDaemonSet    = "s3-csi-daemonset-mounter"
+	mounterDaemonSet    = "s3-csi-mounter"
 )
 
 // renderedWorkload is a workload the chart renders, with the pod template it runs.
 type renderedWorkload struct {
-	kind, name string
-	pod        corev1.PodSpec
+	kind, name  string
+	pod         corev1.PodSpec
+	annotations map[string]string
 }
 
 // renderChart renders the whole chart with values, a values file's YAML, and returns its manifests by template
@@ -76,11 +77,11 @@ func renderWorkloads(t *testing.T, values string) []renderedWorkload {
 			case "DaemonSet":
 				var ds appsv1.DaemonSet
 				assert.NoError(t, yaml.Unmarshal([]byte(doc), &ds))
-				workloads = append(workloads, renderedWorkload{"DaemonSet", ds.Name, ds.Spec.Template.Spec})
+				workloads = append(workloads, renderedWorkload{"DaemonSet", ds.Name, ds.Spec.Template.Spec, ds.Spec.Template.Annotations})
 			case "Deployment":
 				var d appsv1.Deployment
 				assert.NoError(t, yaml.Unmarshal([]byte(doc), &d))
-				workloads = append(workloads, renderedWorkload{"Deployment", d.Name, d.Spec.Template.Spec})
+				workloads = append(workloads, renderedWorkload{"Deployment", d.Name, d.Spec.Template.Spec, d.Spec.Template.Annotations})
 			}
 		}
 	}
@@ -109,10 +110,10 @@ func findWorkload(t *testing.T, workloads []renderedWorkload, kind, name string)
 var daemonsetModeValues = map[string]string{
 	"in daemonset mode without a cache": `
 experimental: {mounterMode: daemonset}
-daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none}]`,
+mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none}`,
 	"in daemonset mode with a cache": `
 experimental: {mounterMode: daemonset}
-daemonsetMounters: [{maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}]`,
+mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}`,
 }
 
 func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
@@ -164,5 +165,32 @@ sidecars:
 				}
 			}
 		})
+	}
+}
+
+func TestControllerValues(t *testing.T) {
+	affinity := &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+		NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{
+			{Key: "role", Operator: corev1.NodeSelectorOpIn, Values: []string{"controller"}}}}}}}}
+	controller := findWorkload(t, renderWorkloads(t, `controller:
+  nodeSelector: {pool: system}
+  podAnnotations: {a: b}
+  affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: role, operator: In, values: [controller]}]}]}}}`),
+		"Deployment", "s3-csi-controller")
+	assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "pool": "system"}, controller.pod.NodeSelector)
+	assert.Equals(t, affinity, controller.pod.Affinity)
+	assert.Equals(t, map[string]string{"a": "b"}, controller.annotations)
+}
+
+func TestRootPodAnnotations(t *testing.T) {
+	// Every driver pod gets the root annotations, and a pod's own podAnnotations win on the same key.
+	workloads := renderWorkloads(t, `podAnnotations: {a: root, b: root}
+controller: {podAnnotations: {b: controller}}`)
+	for _, w := range workloads {
+		want := map[string]string{"a": "root", "b": "root"}
+		if w.name == "s3-csi-controller" {
+			want["b"] = "controller"
+		}
+		assert.Equals(t, want, w.annotations)
 	}
 }

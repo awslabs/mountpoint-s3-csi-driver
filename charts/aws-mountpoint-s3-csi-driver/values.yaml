@@ -37,6 +37,7 @@ node:
     # annotations:
     # "eks.amazonaws.com/role-arn": ""
   podLabels: {}
+  podAnnotations: {}
   nodeSelector: {}
   resources:
     requests:
@@ -106,10 +107,11 @@ sidecars:
 controller:
   # Consider deploying the controller component to special nodes for controller components.
   # See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/INSTALL.md#configuring-nodeSelector-for-the-controller-component for more details.
-  # For example:
-  # nodeSelector:
-  #   kubernetes.io/role: control-plane
+  # For example: nodeSelector: { kubernetes.io/role: control-plane }
+  nodeSelector: {}
+  affinity: {}
   podLabels: {}
+  podAnnotations: {}
   serviceAccount:
     # Specifies whether a service account should be created
     create: true
@@ -134,6 +136,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 customLabels: {}
+# Annotations for every driver pod. A pod's own podAnnotations (node, mounter, controller) win on the same key.
+podAnnotations: {}
 
 imagePullSecrets: []
 
@@ -174,135 +178,133 @@ experimental:
   mounterMode: "daemonset"
 
 # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
-# Configuration for the secondary mounter daemonset(s).
+# The default mounter DaemonSet, s3-csi-mounter, which runs every Mountpoint process on the nodes the
+# default CSI node (node above) runs on. Only used when experimental.mounterMode is "daemonset".
+mounter:
+  # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
+  # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
+  # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
+  # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
+  # 0 is only allowed with memoryLimitStrategy "none".
+  # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to
+  # track volume usage.
+  maxVolumesPerNode: 4
+  # How each Mountpoint process gets its --memory-target, which bounds how much memory it uses.
+  # All Mountpoint processes on a node share the mounter container's memory, so an unbounded one
+  # can OOM-kill every mount on the node.
+  #
+  # See more in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md
+  #
+  #   "equalSplit" — the mounter reserves 64Mi of resources.requests.memory for its own process and
+  #                  divides the rest equally by maxVolumesPerNode, so the defaults below give each
+  #                  of 4 Mountpoint processes (4Gi - 64Mi) / 4 = 1008Mi. resources.requests.memory
+  #                  and a non-zero maxVolumesPerNode are both required, and each share must be
+  #                  >= 512Mi (Mountpoint's minimum), so size resources.requests.memory as roughly
+  #                  maxVolumesPerNode × per-mount memory (e.g. 4 × 512Mi + 64Mi, or 10 × 4Gi + 64Mi).
+  #                  A --memory-target in a PV's mountOptions is ignored, with a warning.
+  #   "none"       — --memory-target is left entirely to each PV's mountOptions. A PV that sets none
+  #                  gets a Mountpoint targeting 95% of the memory it detects, logged as a warning.
+  memoryLimitStrategy: equalSplit
+  # Resource requests and limits for the mounter container.
+  # requests.memory is required when memoryLimitStrategy is "equalSplit".
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "500m"
+  # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
+  # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: enabled`
+  # in its volumeAttributes, and cache.limitStrategy decides how much of the volume it gets.
+  # Set either emptyDir or ephemeral cache type.
+  #
+  # cache.limitStrategy decides how each Mountpoint process gets its --max-cache-size, which
+  # bounds how much of the cache volume it may fill. All of them share that one volume.
+  #
+  #   "equalSplit" - the mounter divides 95% of the cache volume equally by maxVolumesPerNode, so
+  #                  a 4Gi volume gives each of 4 Mountpoint processes 972Mi. Recommended. The volume's size is
+  #                  required, as is a non-zero maxVolumesPerNode, and a `max-cache-size` in a
+  #                  PV's mountOptions is ignored with a warning.
+  #   "none"       - --max-cache-size is left to each PV's mountOptions, and we recommend setting it
+  #                  on every PV that caches to prevent unbounded cache growth, before applying this
+  #                  strategy.
+
+  # A cache on the node's disk:
+  # cache:
+  #   emptyDir:
+  #     sizeLimit: "2Gi"
+  #   limitStrategy: equalSplit
+
+  # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
+  # memoryLimitStrategy=equalSplit divides only what it leaves: raise resources.requests.memory by sizeLimit.
+  # Always set sizeLimit: under cache.limitStrategy=none it is optional, but an unbounded tmpfs can get the
+  # mounter OOM-killed, taking every mount on the node with it.
+  # cache:
+  #   emptyDir:
+  #     sizeLimit: "1Gi"
+  #     medium: "Memory"
+  #   limitStrategy: equalSplit
+
+  # A cache in an EBS volume:
+  # cache:
+  #   ephemeral:
+  #     storageClassName: gp3
+  #     resourceRequests: 10Gi
+  #   limitStrategy: equalSplit
+  logLevel: 4
+  podLabels: {}
+  podAnnotations: {}
+  # The mounter runs on the same nodes as the CSI node: it uses node.nodeSelector, node.affinity and the
+  # node tolerations (node.tolerateAllTaints, node.defaultTolerations, node.tolerations).
+  imagePullSecrets: []
+
+
+# Mixed fleet: node and mounter above render the default pair of CSI node and mounter DaemonSets,
+# s3-csi-node and s3-csi-mounter. Each entry renders its own pair, s3-csi-node-<name> and
+# s3-csi-mounter-<name>, copied from node and mounter above, with the entry's values overriding the copy.
+# An entry's mounter.cache replaces the copied cache whole, and cache: null gives the entry no cache.
+# helm upgrade --reuse-values drops that null on Helm 3.20.0 and older, so the entry copies the cache again.
+#
+# Placement isn't copied: each entry must set node.nodeSelector, node.affinity or both, and no two
+# pairs may run on the same node, so narrow the default pair's placement to keep it off the
+# entries' nodes. Set node.nodeSelector, as in the example below, or add an expression such as
+# { key: karpenter.sh/nodepool, operator: In, values: [general] } to each node.affinity term.
 # Only used when experimental.mounterMode is "daemonset".
-# Helm replaces this list wholesale rather than merging it with the defaults below, so an override
-# must restate each field it needs (e.g. memoryLimitStrategy and resources).
-daemonsetMounters:
-    # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
-    # Advertised to the Kubernetes scheduler via MaxVolumesPerNode. Until a node's mounter
-    # runs, the node advertises the smallest maxVolumesPerNode of all entries instead.
-    # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
-    # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
-    # 0 is only allowed with memoryLimitStrategy "none".
-    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to
-    # track volume usage.
-  - maxVolumesPerNode: 4
-    # How each Mountpoint process gets its --memory-target, which bounds how much memory it uses.
-    # All Mountpoint processes on a node share the mounter container's memory, so an unbounded one
-    # can OOM-kill every mount on the node.
-    #
-    # See more in https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MEMORY.md
-    #
-    #   "equalSplit" — the mounter reserves 64Mi of resources.requests.memory for its own process and
-    #                  divides the rest equally by maxVolumesPerNode, so the defaults below give each
-    #                  of 4 Mountpoint processes (4Gi - 64Mi) / 4 = 1008Mi. resources.requests.memory
-    #                  and a non-zero maxVolumesPerNode are both required, and each share must be
-    #                  >= 512Mi (Mountpoint's minimum), so size resources.requests.memory as roughly
-    #                  maxVolumesPerNode × per-mount memory (e.g. 4 × 512Mi + 64Mi, or 10 × 4Gi + 64Mi).
-    #                  A --memory-target in a PV's mountOptions is ignored, with a warning.
-    #   "none"       — --memory-target is left entirely to each PV's mountOptions. A PV that sets none
-    #                  gets a Mountpoint targeting 95% of the memory it detects, logged as a warning.
-    memoryLimitStrategy: equalSplit
-    # Resource requests and limits for the mounter container.
-    # requests.memory is required when memoryLimitStrategy is "equalSplit".
-    resources:
-      requests:
-        memory: "4Gi"
-        cpu: "500m"
-    # Local cache for Mountpoint. Uncomment exactly one `cache` block below to give this node a
-    # shared cache volume, with a subdirectory per PV. A PV then opts in with `cache: enabled`
-    # in its volumeAttributes, and cache.limitStrategy decides how much of the volume it gets.
-    # Set either emptyDir or ephemeral cache type.
-    #
-    # cache.limitStrategy decides how each Mountpoint process gets its --max-cache-size, which
-    # bounds how much of the cache volume it may fill. All of them share that one volume.
-    #
-    #   "equalSplit" - the mounter divides 95% of the cache volume equally by maxVolumesPerNode, so
-    #                  a 4Gi volume gives each of 4 Mountpoint processes 972Mi. Recommended. The volume's size is
-    #                  required, as is a non-zero maxVolumesPerNode, and a `max-cache-size` in a
-    #                  PV's mountOptions is ignored with a warning.
-    #   "none"       - --max-cache-size is left to each PV's mountOptions, and we recommend setting it
-    #                  on every PV that caches to prevent unbounded cache growth, before applying this
-    #                  strategy.
-
-    # A cache on the node's disk:
-    # cache:
-    #   emptyDir:
-    #     sizeLimit: "2Gi"
-    #   limitStrategy: equalSplit
-
-    # A cache in memory, which is a tmpfs. Its pages are charged to this container's memory, so
-    # memoryLimitStrategy=equalSplit divides only what it leaves: raise resources.requests.memory by sizeLimit.
-    # Always set sizeLimit: under cache.limitStrategy=none it is optional, but an unbounded tmpfs can get the
-    # mounter OOM-killed, taking every mount on the node with it.
-    # cache:
-    #   emptyDir:
-    #     sizeLimit: "1Gi"
-    #     medium: "Memory"
-    #   limitStrategy: equalSplit
-
-    # A cache in an EBS volume:
-    # cache:
-    #   ephemeral:
-    #     storageClassName: gp3
-    #     resourceRequests: 10Gi
-    #   limitStrategy: equalSplit
-
-    # Log verbosity (--v) of the mounter process. Optional; defaults to 4 when omitted.
-    logLevel: 4
-    podLabels: {}
-    # The mounter inherits the node pod's nodeSelector, affinity and tolerations (node.nodeSelector,
-    # node.affinity, node.tolerateAllTaints, node.defaultTolerations, node.tolerations).
-    imagePullSecrets: []
-
-  # To give different nodes different settings, add more entries. Each entry becomes its own
-  # mounter DaemonSet, s3-csi-daemonset-mounter-<name>, so each needs a name, except one that may
-  # leave it out and keep s3-csi-daemonset-mounter. Each also needs a nodeSelector,
-  # matchExpressions, or both, to say which nodes it applies to. Set maxVolumesPerNode,
-  # memoryLimitStrategy and resources in each entry too, since this list replaces the default
-  # entry.
-  #
-  # Make sure no node matches two entries. If one does, its node pod logs an error and keeps
-  # using the mounter it has, and the other mounter is unused. A node pod that starts then uses the
-  # mounter this node's mounts use. If it has none, new mounts on that node fail until only one
-  # entry matches it.
-  #
-  # Any change that makes a node stop matching an entry deletes that node's mounter, which breaks
-  # every S3 mount on it, even with OnDelete. That includes renaming an entry, adding a name to the
-  # unnamed one, removing an entry, giving the unnamed entry a selection when you add a second
-  # one, and changing an entry's nodeSelector or matchExpressions, node.nodeSelector, node.affinity
-  # or a node's labels. Drain the affected nodes first, then upgrade, then uncordon them.
-  #
-  # Entries for a Karpenter NodePool, giving nodes with 64GiB of memory or more a higher limit.
-  # Each mount gets about 1Gi in both: (4Gi - 64Mi) / 4 and (32Gi - 64Mi) / 32.
-  # - name: general
-  #   nodeSelector:
-  #     karpenter.sh/nodepool: general
-  #   matchExpressions:
-  #     - key: karpenter.k8s.aws/instance-memory
-  #       operator: Lt
-  #       values:
-  #         - "65536"
-  #   maxVolumesPerNode: 4
-  #   memoryLimitStrategy: equalSplit
-  #   resources:
-  #     requests:
-  #       memory: "4Gi"
-  #       cpu: "500m"
-  #   logLevel: 4
-  # - name: bigmem
-  #   nodeSelector:
-  #     karpenter.sh/nodepool: general
-  #   matchExpressions:
-  #     - key: karpenter.k8s.aws/instance-memory
-  #       operator: Gt
-  #       values:
-  #         - "65535"
-  #   maxVolumesPerNode: 32
-  #   memoryLimitStrategy: equalSplit
-  #   resources:
-  #     requests:
-  #       memory: "32Gi"
-  #       cpu: "2"
-  #   logLevel: 4
+#
+# WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
+# matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
+# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
+#
+# When a pair stops matching a node, its mounter there is deleted, even with OnDelete, and every S3 mount
+# it serves breaks. That happens when you remove or rename an entry, change a pair's placement (such as
+# narrowing the default pair's), or change a node's labels. Drain those nodes first, then make the
+# change, then uncordon them. When fixing an overlap, a node that keeps the pair serving its mounts
+# doesn't need draining. See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
+#
+# For example, three pairs, one per Karpenter NodePool: the default pair on general nodes (with
+# node.nodeSelector set to { karpenter.sh/nodepool: general }), bigmem on bigmem nodes and gpu on gpu nodes:
+# additionalDaemonSets:
+#   bigmem:
+#     node:
+#       nodeSelector:
+#         karpenter.sh/nodepool: bigmem
+#     mounter:
+#       maxVolumesPerNode: 32
+#       resources:
+#         requests:
+#           memory: "32Gi"
+#           cpu: "2"
+#   gpu:
+#     node:
+#       affinity:
+#         nodeAffinity:
+#           requiredDuringSchedulingIgnoredDuringExecution:
+#             nodeSelectorTerms:
+#               - matchExpressions:
+#                   - key: karpenter.sh/nodepool
+#                     operator: In
+#                     values: ["gpu"]
+#     mounter:
+#       maxVolumesPerNode: 8
+#       resources:
+#         requests:
+#           memory: "8Gi"
+additionalDaemonSets: {}
