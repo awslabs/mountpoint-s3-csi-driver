@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Github Environment"
+        description: "GitHub Environment whose ROSA cluster to delete"
         required: true
-        type: string
+        type: choice
+        options:
+          - rosa-untrusted
+          - rosa-trusted
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
