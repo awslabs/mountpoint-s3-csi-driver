@@ -158,6 +158,127 @@ With this configuration, once the mounter Pod is scheduled onto a node, the EBS 
 
 The EBS volume and the mounter Pod (therefore its ephemeral PVC) will be automatically cleaned up once the mounter Pod is deleted, for example when its node is removed. We highly recommend you use `reclaimPolicy: Delete` in your StorageClass to ensure the EBS volume is cleaned up as part of this process.
 
+##### Using Local Volume Static Provisioner to use local NVMe
+
+Some Amazon EC2 instances offer non-volatile memory express (NVMe) solid state drives (SSD) instance store volumes. You can utilize [Local Volume Static Provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner) to use instance store as cache. See [Instance store volume limits for EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-store-volumes.html) for more details about instance store support on EC2 instances, and [EKS Persistent Volumes for Instance Store](https://aws.amazon.com/blogs/containers/eks-persistent-volumes-for-instance-store/) on using instance storage in EKS.
+
+The Local Volume Static Provisioner allows you to configure various options. You can find more details in their [Getting started guide](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner/blob/master/docs/getting-started.md).
+
+As an example, you can configure your [eksctl](https://eksctl.io/) configuration to mount available NVMe instance storage disks at `/dev/disk/kubernetes`:
+
+```yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: cluster-with-storage
+  region: eu-central-1
+managedNodeGroups:
+  - name: storage-nvme
+    desiredCapacity: 2
+    instanceType: i3.8xlarge
+    amiFamily: AmazonLinux2023
+    preBootstrapCommands:
+      - |
+          cat <<EOF > /etc/udev/rules.d/90-kubernetes-discovery.rules
+          # Discover Instance Storage disks so kubernetes local provisioner can pick them up from /dev/disk/kubernetes
+          KERNEL=="nvme[0-9]*n[0-9]*", ENV{DEVTYPE}=="disk", ATTRS{model}=="Amazon EC2 NVMe Instance Storage", ATTRS{serial}=="?*", SYMLINK+="disk/kubernetes/nvme-\\\$attr{model}_\\\$attr{serial}", OPTIONS="string_escape=replace"
+          EOF
+      - udevadm control --reload && udevadm trigger
+```
+
+The `i3.8xlarge` instance type provides four NVMe instance storage disks. After applying your changes using `eksctl`, you can install the example EKS NVMe manifest:
+
+```bash
+$ kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/sig-storage-local-static-provisioner/refs/heads/master/helm/generated_examples/eks-nvme-ssd.yaml
+```
+
+This should create a StorageClass named `nvme-ssd` and eight PVs for each local NVMe instance storage disk attached to two instances (four for each instance):
+
+```bash
+$ kubectl get sc nvme-ssd
+NAME       PROVISIONER                    RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+nvme-ssd   kubernetes.io/no-provisioner   Delete          WaitForFirstConsumer   false                  17s
+
+$ kubectl get pv
+NAME                CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+local-pv-12305867   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          60s
+local-pv-12342524   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          60s
+local-pv-30a97d4d   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          60s
+local-pv-5a838bd7   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          60s
+local-pv-743f383d   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          49s
+local-pv-dae2484    1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          49s
+local-pv-ea190b38   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          49s
+local-pv-ef5d9823   1769Gi     RWO            Delete           Available           nvme-ssd       <unset>                          49s
+```
+
+You can now specify StorageClass `nvme-ssd` in the `cache` block of an `additionalDaemonSets` entry that selects only the NVMe nodes.
+
+```yaml
+node:
+  nodeSelector:
+    alpha.eksctl.io/nodegroup-name: general     # your default node group
+...
+additionalDaemonSets:
+  nvme:
+    node:
+      nodeSelector:
+        alpha.eksctl.io/nodegroup-name: storage-nvme
+    mounter:
+      maxVolumesPerNode: 4
+      cache:
+        ephemeral:
+          storageClassName: nvme-ssd
+          resourceRequests: 1769Gi     # each of 4 PVs gets 1769 Gi / 4 * 95% = 430220 MiB
+        limitStrategy: equalSplit
+```
+
+Set `resourceRequests` to at most the PV's `CAPACITY` above. The claim binds a whole disk, but `equalSplit` divides `resourceRequests`, not the disk.
+
+One thing to note is that, since the local NVMe instance storage disks are local to the nodes, you need to ensure your workload is scheduled onto a node with local NVMe. You can use [`nodeSelector`](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector) or [Node affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) rules to achieve that. 
+
+Also note that the label in `nodeSelector` must not clash with the default group in `node.nodeSelector`. In the example above, the `nvme` pair (`s3-csi-node-nvme` and `s3-csi-mounter-nvme`) runs only on the `storage-nvme` nodes, and the default pair on the `general` nodes.
+
+For example, this configuration would ensure that your workload is scheduled on a node from the `eksctl` node group `storage-nvme`:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: workload
+spec:
+  containers:
+    # ...
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: s3-pvc
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: alpha.eksctl.io/nodegroup-name
+                operator: In
+                values:
+                  - storage-nvme
+          # OR using node name
+          # - matchExpressions:
+          #     - key: kubernetes.io/hostname
+          #       operator: In
+          #       values:
+          #         - ip-192-0-2-0.region-code.compute.internal
+```
+
+Each mounter Pod gets its own PVC for its cache volume, named `<mounter-pod>-cache`. Once the mounter Pods are scheduled, check that each PVC is `Bound` to a local NVMe PV:
+
+```bash
+$ kubectl get pvc -n kube-system -l s3.csi.aws.com/type=local-ephemeral-cache
+```
+
+Note that if a selected node has no local NVMe PV available, its mounter Pod stays `Pending`, and no S3 volume mounts on that node, cached or not. You can `kubectl describe pods -n kube-system -l app=s3-csi-mounter` to see if a mounter Pod has any unsatisfied requirements.
+
+Ensure you check [other configurations of Local Volume Static Provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner/tree/master?tab=readme-ov-file#user-guide) including [Local Volume Node Cleanup Controller](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner/blob/master/docs/node-cleanup-controller.md) for volume cleanup and other details.
+
 ### Step 3: Enable the cache on a PV
 
 ```yaml
