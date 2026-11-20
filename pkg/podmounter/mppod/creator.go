@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -87,6 +88,7 @@ type Config struct {
 	CSIDriverVersion            string
 	PodLabels                   map[string]string
 	HeadroomPodLabels           map[string]string
+	ImagePullSecrets            []corev1.LocalObjectReference
 }
 
 // A Creator allows creating specification for Mountpoint Pods to schedule.
@@ -123,6 +125,7 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			AnnotationClusterAutoscalerDaemonsetPod: "true",
 		},
 		Spec: corev1.PodSpec{
+			ImagePullSecrets: slices.Clone(c.config.ImagePullSecrets),
 			NodeSelector: map[string]string{
 				corev1.LabelOSStable: "linux",
 			},

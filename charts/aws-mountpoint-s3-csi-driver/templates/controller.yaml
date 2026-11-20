@@ -67,6 +67,8 @@ spec:
               value: {{ include "csiDriverImageName" . }}
             - name: MOUNTPOINT_IMAGE_PULL_POLICY
               value: {{ .Values.image.pullPolicy }}
+            - name: MOUNTPOINT_IMAGE_PULL_SECRETS
+              value: {{ toJson .Values.imagePullSecrets | quote }}
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: MOUNTPOINT_PRIORITY_CLASS_NAME

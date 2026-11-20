@@ -73,6 +73,7 @@ func TestCreatingHeadroomPod(t *testing.T) {
 			mppod.LabelHeadroomForVolume: pv.Name,
 		}, hrPod.Labels)
 		assert.Equals(t, headroomPriorityClassName, hrPod.Spec.PriorityClassName)
+		assert.Equals(t, []corev1.LocalObjectReference{{Name: "registry-secret"}}, hrPod.Spec.ImagePullSecrets)
 		assert.Equals(t, []corev1.PodAffinityTerm{
 			{
 				LabelSelector: &metav1.LabelSelector{
@@ -259,6 +260,7 @@ func createTestConfig(clusterVariant cluster.Variant) mppod.Config {
 		ClusterVariant:    clusterVariant,
 		PodLabels:         map[string]string{},
 		HeadroomPodLabels: map[string]string{},
+		ImagePullSecrets:  []corev1.LocalObjectReference{{Name: "registry-secret"}},
 	}
 }
 
@@ -281,6 +283,7 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		}, mpPod.Annotations)
 
 		assert.Equals(t, expectedPriorityClassName, mpPod.Spec.PriorityClassName)
+		assert.Equals(t, []corev1.LocalObjectReference{{Name: "registry-secret"}}, mpPod.Spec.ImagePullSecrets)
 		assert.Equals(t, corev1.RestartPolicyOnFailure, mpPod.Spec.RestartPolicy)
 		assert.Equals(t, ptr.To(int64(mppod.TerminationGracePeriodSeconds)), mpPod.Spec.TerminationGracePeriodSeconds)
 		assert.Equals(t, expectedRunAsUser, mpPod.Spec.SecurityContext.FSGroup)
@@ -343,6 +346,27 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 
 		assert.NoError(t, err)
 		verifyDefaultValues(mpPod, priorityClassName)
+	})
+
+	t.Run("Image pull secrets are not shared between Pods", func(t *testing.T) {
+		pv := &corev1.PersistentVolume{
+			Name: testVolName,
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
+					},
+				},
+			},
+		}
+
+		firstPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+		firstPod.Spec.ImagePullSecrets[0].Name = "mutated"
+
+		secondPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+		verifyDefaultValues(secondPod, priorityClassName)
 	})
 
 	t.Run("Mount Options", func(t *testing.T) {
