@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Github Environment"
+        description: "GitHub Environment whose clusters to delete"
+        required: true
+        type: choice
+        options:
+          - us-east-1-untrusted
+          - trusted
 
 concurrency:
   group: e2e-cluster-${{ inputs.environment }}
