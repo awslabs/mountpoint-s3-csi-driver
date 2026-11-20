@@ -27,7 +27,7 @@ Whichever strategy you use:
 
 ## Memory and throughput
 
-**More memory per mount lets Mountpoint prefetch further ahead and keep more data in flight, which raises throughput until something else becomes the limit**, such as the instance's network bandwidth or CPU, FUSE overhead, or how your application reads and writes. Once one of those is the limit, raising the target adds no more throughput.
+**More memory per mount lets Mountpoint prefetch further ahead and keep more data in flight, which raises throughput until something else becomes the limit**, such as the instance's network bandwidth or [CPU](#cpu), FUSE overhead, or how your application reads and writes. Once one of those is the limit, raising the target adds no more throughput.
 
 The target at which throughput stops improving depends on the instance type and the workload, so there is no single recommended value. On smaller instances, network bandwidth or CPU is often already the limit at the default target of 1008 MiB, while on high-bandwidth instances a larger target can raise throughput substantially. Benchmark your own workload before settling on a value.
 
@@ -154,6 +154,28 @@ For example, with `maxVolumesPerNode: 2` and three PVs with targets of 6144, 409
 > A PV with no `--memory-target` gets Mountpoint's default: 95% of the mounter container's `resources.limits.memory`, or of roughly the whole node's memory if no limit is set. Every such mount computes the same figure independently; it is not divided between them. Set `--memory-target` on every PV when using `none`. The mounter logs a warning naming any volume that doesn't.
 
 `memoryLimitStrategy: none` is also the only strategy compatible with `maxVolumesPerNode: 0` (no scheduler volume limit), since there is then nothing to divide the budget by. With both, nothing bounds how much memory the mounts on a node can use.
+
+## CPU
+
+All Mountpoint processes on a node also share the mounter container's CPU. By default the mounter requests `500m` of CPU and sets no CPU limit, so it can use any idle CPU on the node; the request only guarantees it a share when the node is busy. Mounted volumes with no I/O use almost no CPU.
+
+The mounter's CPU use grows with the node's total S3 throughput, which can't exceed the instance's network bandwidth. As a rough guide, these are results from tests where each busy volume had one application reading a large file sequentially, in 256 KiB blocks, for 30 seconds, all at the same time:
+
+| Instance | vCPUs | Network | Busy volumes | Total read throughput | Mounter CPU |
+| --- | --- | --- | --- | --- | --- |
+| `t3.xlarge` | 4 | up to 5 Gbps | 4 | about 4 Gbps | about 2.2 vCPU (half the node) |
+| `c5.2xlarge` | 8 | up to 10 Gbps | 4 | about 9.3 Gbps (close to the network limit) | about 3.2 vCPU |
+| `c6in.16xlarge` | 64 | 100 Gbps | 1 | about 14 Gbps | about 2.4 vCPU |
+| `c6in.16xlarge` | 64 | 100 Gbps | 16 | about 76 Gbps | about 25 vCPU |
+
+On instances with 4 vCPUs, the mounter and your application compete for the same CPUs. Once the network is the limit, more busy volumes add little throughput but still add some CPU, because each Mountpoint process has its own overhead. For example, on the `c5.2xlarge` going from 2 to 4 busy volumes raised throughput by under 10% and the mounter's CPU by about 30%.
+
+Random reads in 256 KiB blocks are limited by S3 latency, not CPU, and used under 1 vCPU even with 16 busy volumes.
+
+> [!WARNING]
+> We recommend not setting `resources.limits.cpu`. A CPU limit caps the S3 throughput of every volume on the node.
+
+If your applications keep the node's CPU busy and you need sustained S3 throughput, raise `requests.cpu` so the mounter is guaranteed the CPU it needs. Benchmark your own workload before settling on a value.
 
 ## Verifying the configuration
 
