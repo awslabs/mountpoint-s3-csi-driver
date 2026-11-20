@@ -306,7 +306,7 @@ func TestProcessManager_Launch_HappyPath(t *testing.T) {
 	assert.Equals(t, 0, len(pm.processes))
 	pm.mu.Unlock()
 
-	_, err = os.ReadFile(filepath.Join(commDir, "mount-123.error"))
+	_, err = os.ReadFile(filepath.Join(commDir, mountoptions.ErrorFileName("mount-123")))
 	assert.Equals(t, true, os.IsNotExist(err))
 }
 
@@ -779,7 +779,7 @@ func TestProcessManager_CacheCleanupFailure(t *testing.T) {
 
 		assertCleanupPending(t, pm, uid)
 		// The error file is still written, so csi-node sees the failure at once.
-		_, err := os.Stat(filepath.Join(pm.commDir, mountId+errorFileExt))
+		_, err := os.Stat(filepath.Join(pm.commDir, mountoptions.ErrorFileName(mountId)))
 		assert.NoError(t, err)
 		// Another PV on that UID is refused, without naming the mount.
 		err = pm.Launch("mount-456", "/usr/bin/mount-s3", cachedOptions(t, uid))
@@ -1055,11 +1055,11 @@ func TestProcessManager_Launch_MultipleProcesses(t *testing.T) {
 	pm.mu.Unlock()
 
 	// Error file written for mount-a, not for mount-b
-	errBytes, err := os.ReadFile(filepath.Join(commDir, "mount-a.error"))
+	errBytes, err := os.ReadFile(filepath.Join(commDir, mountoptions.ErrorFileName("mount-a")))
 	assert.NoError(t, err)
 	assert.Equals(t, "oom killed", string(errBytes))
 
-	_, err = os.ReadFile(filepath.Join(commDir, "mount-b.error"))
+	_, err = os.ReadFile(filepath.Join(commDir, mountoptions.ErrorFileName("mount-b")))
 	assert.Equals(t, true, os.IsNotExist(err))
 
 	// Shutdown signals remaining and waits
@@ -1419,7 +1419,7 @@ func TestHandleConnection_RefusedLaunchWritesErrorFile(t *testing.T) {
 	handleConnection(conn.(*net.UnixConn), "/opt/mount-s3", pm, 5*time.Second)
 	<-sendDone
 
-	errBytes, err := os.ReadFile(filepath.Join(commDir, "s3-pv.error"))
+	errBytes, err := os.ReadFile(filepath.Join(commDir, mountoptions.ErrorFileName("s3-pv")))
 	assert.NoError(t, err)
 	assert.Contains(t, string(errBytes), "has no cache volume")
 	assert.Equals(t, 0, len(fr.handles))
@@ -1442,7 +1442,7 @@ func TestProcessManager_Launch_ErrorExit_WritesErrorFile(t *testing.T) {
 	fr.handles[0].Exit(1, "credential error")
 	pm.Shutdown()
 
-	errPath := filepath.Join(commDir, "mount-abc.error")
+	errPath := filepath.Join(commDir, mountoptions.ErrorFileName("mount-abc"))
 	errBytes, err := os.ReadFile(errPath)
 	assert.NoError(t, err)
 	assert.Equals(t, "credential error", string(errBytes))
@@ -1457,7 +1457,7 @@ func TestProcessManager_Launch_RemovesAnEarlierErrorFile(t *testing.T) {
 	commDir := t.TempDir()
 	fr := &fakeProcessRunner{}
 	pm := NewProcessManager(commDir, "", fr, memoryLimit{strategy: memoryLimitNone}, cacheLimit{strategy: cacheLimitNone})
-	errFile := filepath.Join(commDir, "mount-abc.error")
+	errFile := filepath.Join(commDir, mountoptions.ErrorFileName("mount-abc"))
 	assert.NoError(t, os.WriteFile(errFile, []byte("credential error"), 0600))
 
 	dev := mountertest.OpenDevNull(t)
@@ -1561,7 +1561,7 @@ func TestHandleConnection_LogsNoCredentials(t *testing.T) {
 	handle.Exit(1, "Error: Failed to create S3 client\n")
 	pm.Shutdown()
 	// Shutdown returns once the exit is handled; the error file proves the failure path ran.
-	_, err = os.Stat(filepath.Join(commDir, "s3-pv"+errorFileExt))
+	_, err = os.Stat(filepath.Join(commDir, mountoptions.ErrorFileName("s3-pv")))
 	assert.NoError(t, err)
 
 	testutil.AssertNoCredentialsLogged(t, logs(), accessKeyID, secretAccessKey, sessionToken, webIdentityToken)

@@ -17,6 +17,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
@@ -45,7 +46,7 @@ func TestMount_DeadTargetLifecycle(t *testing.T) {
 
 	// Absent target: a fresh mount goes all the way through.
 	testCtx.mountVolume()
-	uid := uint32(testCtx.ownerOf(filepath.Join(testCtx.commDir, testCtx.volumeID))[0])
+	uid := uint32(testCtx.ownerOf(filepath.Join(testCtx.commDir, mountoptions.VolumeKey(testCtx.volumeID)))[0])
 	assert.Equals(t, true, testCtx.dm.UIDInUseForTesting(uid))
 
 	provideCtx := credentialprovider.ProvideContext{WorkloadPodID: testCtx.podUID, VolumeID: testCtx.volumeID}

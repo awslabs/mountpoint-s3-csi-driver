@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	. "github.com/onsi/ginkgo/v2"
@@ -311,7 +313,7 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 						e2epod.MakePod(f.Namespace.Name, tc.nodeSelector, []*v1.PersistentVolumeClaim{vol.Pvc}, admissionapi.LevelBaseline, ""))
 					framework.ExpectNoError(err)
 					DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
-					uid := statPath(ctx, f, pod.Spec.NodeName, filepath.Join(commDirHostPath(ctx, f, pod.Spec.NodeName), vol.Pv.Name)).uid
+					uid := statPath(ctx, f, pod.Spec.NodeName, filepath.Join(commDirHostPath(ctx, f, pod.Spec.NodeName), mountoptions.VolumeKey(vol.Pv.Name))).uid
 					m := cachedMount{vol: vol, pod: pod, node: pod.Spec.NodeName, uid: uid,
 						cacheDir: filepath.Join(cacheMountPath, fmt.Sprintf("uid-%d", uid))}
 
@@ -438,7 +440,7 @@ func mountCachedVolume(ctx context.Context, f *framework.Framework, config *stor
 	framework.ExpectNoError(err)
 	DeferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, pod) })
 	// s3-csi-node chowns the mount's credential directory to the UID it allocated, so the UID does not come from the mounter.
-	uid := statPath(ctx, f, pod.Spec.NodeName, filepath.Join(commDirHostPath(ctx, f, pod.Spec.NodeName), vol.Pv.Name)).uid
+	uid := statPath(ctx, f, pod.Spec.NodeName, filepath.Join(commDirHostPath(ctx, f, pod.Spec.NodeName), mountoptions.VolumeKey(vol.Pv.Name))).uid
 	return cachedMount{vol: vol, pod: pod, node: pod.Spec.NodeName, uid: uid,
 		cacheDir: filepath.Join(cacheMountPath, fmt.Sprintf("uid-%d", uid))}
 }
