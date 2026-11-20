@@ -93,6 +93,43 @@ There are some possible workarounds:
 
 There is also [a feature request on Mountpoint](https://github.com/awslabs/mountpoint-s3/issues/1055) to improve this behaviour, and if the provided workarounds wouldn't work for you, we'd recommend adding +1 (via 👍 emoji on the original post) to help us to track interest on this feature.
 
+## My Pods using `subPath` fail with `CreateContainerConfigError` and "failed to create subPath directory"
+
+_This issue only affects Kubernetes versions before v1.37.0._
+
+When multiple Pods that [share a single Mountpoint instance](./MOUNTPOINT_POD_SHARING.md) use the same `subPath`, are started on the same node at the same time, and the `subPath` directory doesn't exist yet, some of the containers may fail to start. The container's status shows `CreateContainerConfigError`, and the Pod has an event like:
+
+```
+Warning  Failed  ...  kubelet  Error: failed to create subPath directory for volumeMount "data" of container "app"
+```
+
+On Kubernetes v1.31 to v1.35, the kubelet logs on the node also show the underlying `file exists` error (on v1.36, this log line doesn't include the error):
+
+```
+"Failed to create subPath directory for volumeMount of the container" err="cannot create directory /var/lib/kubelet/pods/<pod-uid>/volumes/kubernetes.io~csi/<pv-name>/mount/<sub-path>: file exists" containerName="app" volumeMountName="data"
+```
+
+This is caused by a [kubelet race condition](https://github.com/kubernetes/kubernetes/issues/94198) during concurrent `subPath` directory creation: kubelet checks whether the directory exists, and then fails if another Pod created it in the meantime. It is more likely with the CSI Driver v2, because Pods that share a Mountpoint instance see each other's directories. The race is [fixed](https://github.com/kubernetes/kubernetes/pull/134540) in Kubernetes v1.37.0.
+
+The failure is usually transient: kubelet retries starting the container, and by then the directory usually exists, so kubelet doesn't try to create it. However, Pod startup is delayed until the retry succeeds.
+
+There are some possible workarounds:
+- Upgrade your cluster to Kubernetes v1.37.0 or later.
+- Make sure the `subPath` directory exists before the Pods start, for example by uploading a marker object such as `some-prefix/.keep` to your bucket. Mountpoint [infers directories from the `/` separator in your object keys](https://github.com/awslabs/mountpoint-s3/blob/main/doc/SEMANTICS.md#directories), and kubelet only creates the `subPath` directory if it doesn't exist.
+- Use the `prefix` mount option of Mountpoint instead of Kubernetes `subPath`. With this option, [only objects in your bucket that begin with the given prefix will be visible with Mountpoint](https://github.com/awslabs/mountpoint-s3/blob/main/doc/CONFIGURATION.md#mounting-a-bucket-prefix), so kubelet doesn't need to create a directory. The prefix must end with `/`, and you need a separate PersistentVolume, with a unique `volumeHandle`, for each prefix. Pods using different PersistentVolumes don't share a Mountpoint instance, so this can increase the number of Mountpoint Pods on your nodes:
+  ```yaml
+  apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    name: s3-pv
+  spec:
+    # ...
+    mountOptions:
+      # ...
+      - prefix some-prefix/ # <-
+  ```
+  Then remove `subPath` from the `volumeMounts` of your Pods.
+
 ## I'm using an S3 Outposts bucket and am getting 'The bucket does not exist' errors
 
 When using S3 Outposts, it is required to include the full ARN for your Outpost bucket in the `bucketName` field.
