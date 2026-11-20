@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -124,7 +125,7 @@ func (c *Creator) MountpointPod(node string, pv *corev1.PersistentVolume, priori
 			AnnotationClusterAutoscalerDaemonsetPod: "true",
 		},
 		Spec: corev1.PodSpec{
-			ImagePullSecrets: c.config.ImagePullSecrets,
+			ImagePullSecrets: slices.Clone(c.config.ImagePullSecrets),
 			NodeSelector: map[string]string{
 				corev1.LabelOSStable: "linux",
 			},

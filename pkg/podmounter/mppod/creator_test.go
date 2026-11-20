@@ -348,6 +348,27 @@ func createAndVerifyPod(t *testing.T, clusterVariant cluster.Variant, expectedRu
 		verifyDefaultValues(mpPod, priorityClassName)
 	})
 
+	t.Run("Image pull secrets are not shared between Pods", func(t *testing.T) {
+		pv := &corev1.PersistentVolume{
+			Name: testVolName,
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeHandle: testVolID,
+					},
+				},
+			},
+		}
+
+		firstPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+		firstPod.Spec.ImagePullSecrets[0].Name = "mutated"
+
+		secondPod, err := creator.MountpointPod(testNode, pv, mppod.DefaultPriorityClass)
+		assert.NoError(t, err)
+		verifyDefaultValues(secondPod, priorityClassName)
+	})
+
 	t.Run("Mount Options", func(t *testing.T) {
 		t.Run("With cache", func(t *testing.T) {
 			mpPod, err := creator.MountpointPod(testNode, &corev1.PersistentVolume{

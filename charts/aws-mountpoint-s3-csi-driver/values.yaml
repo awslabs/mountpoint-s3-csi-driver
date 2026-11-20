@@ -123,7 +123,8 @@ fullnameOverride: ""
 customLabels: {}
 
 # Image pull Secret names used by chart-managed controller/node Pods and
-# dynamically created Mountpoint/Headroom Pods.
+# dynamically created Mountpoint/Headroom Pods. Secrets are resolved in each Pod's
+# namespace, so they must exist in both the release namespace and `mountpointPod.namespace`.
 imagePullSecrets: []
 
 awsAccessSecret:
