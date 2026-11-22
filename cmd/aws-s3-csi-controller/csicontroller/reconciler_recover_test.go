@@ -188,9 +188,18 @@ func newReconcilerWithObjects(t *testing.T, objs ...client.Object) (client.Clien
 	t.Helper()
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme()).
+		WithIndex(&crdv2.MountpointS3PodAttachment{}, crdv2.FieldNodeName, func(obj client.Object) []string {
+			return []string{obj.(*crdv2.MountpointS3PodAttachment).Spec.NodeName}
+		}).
 		WithObjects(objs...).
 		Build()
-	return c, &Reconciler{Client: c, mountpointPodConfig: testPodConfig(), s3paExpectations: newExpectations()}
+	podConfig := testPodConfig()
+	return c, &Reconciler{
+		Client:               c,
+		mountpointPodConfig:  podConfig,
+		mountpointPodCreator: mppod.NewCreator(podConfig, logr.Discard()),
+		s3paExpectations:     newExpectations(),
+	}
 }
 
 func testPodConfig() mppod.Config {

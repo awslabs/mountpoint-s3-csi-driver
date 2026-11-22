@@ -12,6 +12,7 @@
   * Fix a deadlock that could make the file system hang when the kernel forgets a file or directory while another file in the same directory is renamed, or while the directory is opened for listing with files still being written in it. ([#1995](https://github.com/awslabs/mountpoint-s3/pull/1995))
   * Make `incremental-upload` consistently check for concurrent writes when appending (i.e. without `O_TRUNC`), even at offset 0. Previously, appending to an existing empty object could silently overwrite another writer's changes instead of failing with `EIO`. ([#1970](https://github.com/awslabs/mountpoint-s3/pull/1970))
 * Ignore `aws-max-attempts` mount option values that are not positive integers, and log a warning. Mountpoint fails to start with them since v1.25.0; with the value ignored, it uses its default number of attempts, as before. ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
+* Fix workloads waiting for an S3 volume getting stuck when their Mountpoint Pod fails (for example, evicted by kubelet because of node pressure). The controller now moves such workloads to a new Mountpoint Pod and deletes the failed one. Workloads that are already running keep a broken mount and need to be restarted. ([#575](https://github.com/awslabs/mountpoint-s3-csi-driver/issues/575))
 
 # v2.9.2
 

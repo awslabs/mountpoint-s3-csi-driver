@@ -16,6 +16,7 @@ import (
 	storageutil "k8s.io/kubectl/pkg/util/storage"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -77,6 +78,8 @@ type Reconciler struct {
 	//
 	// Note: Reconcile() processes events sequentially, but the stale attachment cleaner can access expectations concurrently.
 	s3paExpectations *expectations
+	// replacementBackoff rate-limits replacing failed Mountpoint Pods, see [replacementBackoff].
+	replacementBackoff replacementBackoff
 	client.Client
 }
 
@@ -92,6 +95,8 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(Name).
 		For(&corev1.Pod{}).
+		// A failed Mountpoint Pod never recovers, wake up its workloads so they get a new one.
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.workloadPodsOfFailedMountpointPod)).
 		Complete(r)
 }
 
@@ -130,7 +135,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return r.reconcileWorkloadPod(ctx, pod)
 }
 
-// reconcileMountpointPod reconciles given Mountpoint `pod`, and deletes it if its completed.
+// reconcileMountpointPod reconciles given Mountpoint `pod`, and deletes it if its completed or failed (once nothing references it).
 func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	log := logf.FromContext(ctx).WithValues("mountpointPod", pod.Name)
 
@@ -147,10 +152,14 @@ func (r *Reconciler) reconcileMountpointPod(ctx context.Context, pod *corev1.Pod
 		}
 		log.Info("Pod succeeded and successfully deleted")
 	case corev1.PodFailed:
-		// TODO: We should probably delete failed Pods after some time to trigger a retry on the whole operation.
-		//       Maybe just returning a `reconcile.Result{RequeueAfter: ...}`
-		//       and deleting in next cycle would be a good way?
+		// A failed Pod (e.g., evicted by kubelet) never comes back. Its workloads are moved to a new Mountpoint Pod
+		// by their own reconciliation (see `handleWorkloadOfFailedMountpointPod`), here we only clean up the failed Pod
+		// once nothing references it.
 		log.Info("Pod failed", "reason", pod.Status.Reason)
+		if err := r.cleanupFailedMountpointPod(ctx, pod); err != nil {
+			log.Error(err, "Failed to clean up failed Pod")
+			return reconcile.Result{}, err
+		}
 	}
 
 	return reconcile.Result{}, nil
@@ -541,6 +550,11 @@ func (r *Reconciler) handleExistingS3PodAttachment(
 	}
 
 	if s3paContainsWorkload(s3pa, string(workloadPod.UID)) {
+		handled, requeue, err := r.handleWorkloadOfFailedMountpointPod(ctx, workloadPod, pv, s3pa, priorityClassKind, log)
+		if handled || err != nil {
+			return requeue, err
+		}
+
 		log.Info("MountpointS3PodAttachment already has this workload UID")
 		return DontRequeue, nil
 	}
@@ -894,6 +908,11 @@ func (r *Reconciler) getMountpointPod(ctx context.Context, name string) (*corev1
 
 // shouldAssignNewWorkloadToMountpointPod returns whether a new workload should be assigned to the Mountpoint Pod `mpPod`.
 func (r *Reconciler) shouldAssignNewWorkloadToMountpointPod(mpPod *corev1.Pod, log logr.Logger) bool {
+	if mpPod.Status.Phase == corev1.PodFailed {
+		log.Info("Mountpoint Pod is failed - not suitable for a new workload", "reason", mpPod.Status.Reason)
+		return false
+	}
+
 	if mpPod.Annotations != nil {
 		if mpPod.Annotations[mppod.AnnotationNeedsUnmount] == "true" {
 			log.Info("Mountpoint Pod is annotated as 'needs-unmount' - not suitable for a new workload")
@@ -1053,6 +1072,8 @@ func (r *Reconciler) findIRSAServiceAccountRole(ctx context.Context, pod *corev1
 
 // addNeedsUnmountAnnotation add "s3.csi.aws.com/needs-unmount" to Mountpoint Pod.
 // This will trigger CSI Driver Node to cleanly unmount and Mountpoint Pod will become 'Succeeded'.
+// A failed Mountpoint Pod has nothing to unmount cleanly (e.g., it was evicted), so it is deleted instead,
+// which lets CSI Driver Node clean up its stale mount.
 func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName string, log logr.Logger) error {
 	// Get the pod
 	mpPod, err := r.getMountpointPod(ctx, mpPodName)
@@ -1063,6 +1084,10 @@ func (r *Reconciler) addNeedsUnmountAnnotation(ctx context.Context, mpPodName st
 		}
 		log.Error(err, "Failed to get Pod")
 		return err
+	}
+
+	if mpPod.Status.Phase == corev1.PodFailed {
+		return r.deleteMountpointPod(ctx, mpPod)
 	}
 
 	if mpPod.Annotations == nil {
