@@ -1241,38 +1241,6 @@ func assertPodIOFails(ctx context.Context, f *framework.Framework, pod *v1.Pod, 
 		"expected I/O failure after mounter crash, got: %s", combinedOutput)
 }
 
-// readMetaFileContent reads the .meta.json file content for a given volume from the CSI node pod.
-// Returns the raw JSON string, or empty string if the file doesn't exist.
-// Retries on transient exec errors for up to 30 seconds.
-func readMetaFileContent(ctx context.Context, f *framework.Framework, nodeName, volumeID string) string {
-	var result string
-	gomega.Eventually(ctx, func(ctx context.Context) (string, error) {
-		pods, err := f.ClientSet.CoreV1().Pods(csiDriverDaemonSetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app=s3-csi-node",
-			FieldSelector: "spec.nodeName=" + nodeName,
-		})
-		if err != nil || len(pods.Items) == 0 {
-			framework.Logf("Failed to find CSI node pod on node %s (retrying): %v", nodeName, err)
-			return "", fmt.Errorf("CSI node pod not found on node %s", nodeName)
-		}
-
-		csiPod := &pods.Items[0]
-		metaPath := fmt.Sprintf("/var/lib/kubelet/plugins/s3.csi.aws.com/meta/%s.meta.json", volumeID)
-		cmd := fmt.Sprintf("cat %s 2>/dev/null || echo ''", metaPath)
-
-		stdout, _, err := execInPodWithNamespace(ctx, f, csiDriverDaemonSetNamespace, csiPod.Name, "s3-plugin", []string{"/bin/sh", "-c", cmd})
-		if err != nil {
-			framework.Logf("Failed to read meta file (retrying): %v", err)
-			return "", fmt.Errorf("exec failed: %w", err)
-		}
-
-		result = strings.TrimSpace(stdout)
-		// Return a sentinel so Eventually knows exec succeeded
-		return "exec-ok", nil
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal("exec-ok"))
-	return result
-}
-
 // checkDeviceIDAtSourcePath checks if the given device ID is the active (topmost) FUSE mount
 // at the source path for the volume. Returns true if the device ID is still serving.
 // Retries on transient exec errors for up to 30 seconds.

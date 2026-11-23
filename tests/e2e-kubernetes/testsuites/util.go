@@ -452,39 +452,6 @@ func checkWriteToPathSucceedEventually(ctx context.Context, f *framework.Framewo
 	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
 }
 
-// checkListingPathSucceedEventually retries listing a path in a pod, tolerating
-// transient errors
-func checkListingPathSucceedEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string) {
-	cmd := fmt.Sprintf("ls %s", path)
-	gomega.Eventually(ctx, func(ctx context.Context) error {
-		return e2epod.VerifyExecInPodSucceed(ctx, f, pod, cmd)
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
-}
-
-// checkListingPathWithEntriesEventually retries listing a path and verifying its entries,
-// tolerating transient errors
-func checkListingPathWithEntriesEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, entries []string) {
-	cmd := fmt.Sprintf("ls %s", path)
-	gomega.Eventually(ctx, func(ctx context.Context) ([]string, error) {
-		stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(ctx, f, pod.Name, cmd)
-		if err != nil {
-			return nil, fmt.Errorf("%q failed: %v\nstdout: %s\nstderr: %s", cmd, err, stdout, stderr)
-		}
-		return strings.Fields(stdout), nil
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Equal(entries))
-}
-
-// checkWriteToPathFailsEventually retries verifying that a write to a path fails with exit code 1,
-// tolerating transient errors
-func checkWriteToPathFailsEventually(ctx context.Context, f *framework.Framework, pod *v1.Pod, path string, toWrite int, seed int64) {
-	data := genBinDataFromSeed(toWrite, seed)
-	encoded := base64.StdEncoding.EncodeToString(data)
-	cmd := fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, path, toWrite)
-	gomega.Eventually(ctx, func(ctx context.Context) error {
-		return e2epod.VerifyExecInPodFail(ctx, f, pod, cmd, 1)
-	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(gomega.Succeed())
-}
-
 // Labels and container names of the two driver daemonsets.
 const (
 	mounterPodLabel      = "app=s3-csi-mounter"
