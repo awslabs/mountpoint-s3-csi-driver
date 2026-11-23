@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 const errorFilePerm = fs.FileMode(0600)
@@ -507,7 +508,8 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 		if _, err := pw.w.Write([]byte(pw.prefix)); err != nil {
 			return 0, err
 		}
-		if _, err := pw.w.Write(line); err != nil {
+		// Each line stays one record tagged with the mount: escape a CR or other control character in it.
+		if _, err := pw.w.Write([]byte(utillog.EscapeControlChars(string(line)))); err != nil {
 			return 0, err
 		}
 		if _, err := pw.w.Write([]byte("\n")); err != nil {

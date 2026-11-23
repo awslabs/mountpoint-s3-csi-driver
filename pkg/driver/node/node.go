@@ -20,6 +20,7 @@ import (
 	"context"
 	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 var (
@@ -102,6 +104,12 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
+	// Mountpoint can write a value we pass it (an argument, or an environment variable such as AWS_REGION) as is to
+	// its stderr, which the mounter relays line by line. None of these values can be valid with control
+	// characters, so reject them here, with the value escaped. Mount options are checked below.
+	if key, value, found := volumeAttributeWithControlChars(volumeCtx); found {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s %q: it must not contain control characters", key, value)
+	}
 
 	targetHost := req.GetTargetPath()
 	if len(targetHost) == 0 {
@@ -132,6 +140,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
+		for _, option := range mountFlags {
+			if hasControlChars(option) {
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid mount option %q: it must not contain control characters", option)
+			}
+		}
 		mountpointArgs = append(mountpointArgs, mountFlags...)
 	}
 
@@ -424,4 +437,21 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 func isPositiveInteger(value string) bool {
 	n, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
 	return err == nil && n > 0
+}
+
+// hasControlChars reports whether s has a character that EscapeControlChars escapes, such as CR or LF.
+func hasControlChars(s string) bool {
+	return utillog.EscapeControlChars(s) != s
+}
+
+// volumeAttributeWithControlChars returns the first volume attribute, in key order, that is passed on to Mountpoint
+// and has control characters: bucketName, stsRegion (Mountpoint's AWS_REGION) or a mountpointEnv.* variable.
+func volumeAttributeWithControlChars(volumeCtx map[string]string) (key, value string, found bool) {
+	for _, key := range slices.Sorted(maps.Keys(volumeCtx)) {
+		passedOn := key == volumecontext.BucketName || key == volumecontext.STSRegion || envprovider.IsUserEnvKey(key)
+		if passedOn && hasControlChars(volumeCtx[key]) {
+			return key, volumeCtx[key], true
+		}
+	}
+	return "", "", false
 }

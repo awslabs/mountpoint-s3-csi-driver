@@ -77,6 +77,11 @@ func Default() Environment {
 	return environment
 }
 
+// IsUserEnvKey reports whether a volume attribute key sets an environment variable of Mountpoint (mountpointEnv.*).
+func IsUserEnvKey(key string) bool {
+	return strings.HasPrefix(key, mountpointEnvPrefix)
+}
+
 func ParseUserEnvFromVolumeContext(volumeCtx map[string]string) (Environment, error) {
 	env := Environment{}
 	for key, value := range volumeCtx {
