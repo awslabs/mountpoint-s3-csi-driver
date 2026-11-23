@@ -213,9 +213,14 @@ func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries 
 		maps.Copy(node, installed)
 	}
 	node["affinity"] = map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{"nodeSelectorTerms": narrowed}}}
+	mounter := map[string]any{}
+	if installed, _ := r.installed["mounter"].(map[string]any); installed != nil {
+		maps.Copy(mounter, installed)
+	}
+	mounter["maxVolumesPerNode"] = 5
 	values := maps.Clone(r.installed)
 	values["node"] = node
-	values["mounter"] = map[string]any{"maxVolumesPerNode": 5}
+	values["mounter"] = mounter
 	values["additionalDaemonSets"] = entries
 	return values
 }
