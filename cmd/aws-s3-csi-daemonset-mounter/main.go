@@ -38,6 +38,8 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
+
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 var (
@@ -65,42 +67,42 @@ const (
 )
 
 func main() {
-	klog.InitFlags(nil)
+	utillog.InitKlog()
 	flag.Parse()
 
 	memoryLimitStrategy, err := parseMemoryLimitStrategy(*memoryLimitStrategyFlag)
 	if err != nil {
-		klog.Fatalf("Invalid --memory-limit-strategy: %v", err)
+		klog.Exitf("Invalid --memory-limit-strategy: %v", err)
 	}
 
 	memoryRequestBytes, err := containerMemoryRequestBytes()
 	if err != nil {
-		klog.Fatalf("Invalid memory request: %v", err)
+		klog.Exitf("Invalid memory request: %v", err)
 	}
 	cacheVolumeBytes, err := cacheCapacityBytes()
 	if err != nil {
-		klog.Fatalf("Invalid cache volume size: %v", err)
+		klog.Exitf("Invalid cache volume size: %v", err)
 	}
 
 	memoryLimit, err := newMemoryLimit(memoryLimitStrategy, memoryRequestBytes,
 		tmpfsCacheBytes(*cacheMediumFlag, cacheVolumeBytes), *maxVolumesPerNode)
 	if err != nil {
-		klog.Fatalf("Invalid Mountpoint memory configuration: %v", err)
+		klog.Exitf("Invalid Mountpoint memory configuration: %v", err)
 	}
 
 	// The chart passes --cache-limit-strategy only with a cache volume; without one no mount here caches, so there is nothing to limit.
 	cacheLimit := cacheLimit{strategy: cacheLimitNone}
 	if *cacheLimitStrategyFlag == "" && (*cacheDir != "" || cacheVolumeBytes > 0 || *cacheMediumFlag != "") {
-		klog.Fatalf("This container has a cache volume (--cache-dir, %s or --cache-medium is set) but no --cache-limit-strategy", cacheCapacityEnvName)
+		klog.Exitf("This container has a cache volume (--cache-dir, %s or --cache-medium is set) but no --cache-limit-strategy", cacheCapacityEnvName)
 	}
 	if *cacheLimitStrategyFlag != "" {
 		cacheLimitStrategy, err := parseCacheLimitStrategy(*cacheLimitStrategyFlag)
 		if err != nil {
-			klog.Fatalf("Invalid --cache-limit-strategy: %v", err)
+			klog.Exitf("Invalid --cache-limit-strategy: %v", err)
 		}
 		cacheLimit, err = newCacheLimit(cacheLimitStrategy, cacheVolumeBytes, *maxVolumesPerNode)
 		if err != nil {
-			klog.Fatalf("Invalid Mountpoint cache configuration: %v", err)
+			klog.Exitf("Invalid Mountpoint cache configuration: %v", err)
 		}
 	}
 
@@ -124,7 +126,7 @@ func main() {
 	go pm.LogStatusPeriodically(logStatusInterval)
 
 	if err := serve(pm, sockPath, mountpointPath, stop); err != nil {
-		klog.Fatalf("%v", err)
+		klog.Exitf("%v", err)
 	}
 }
 
