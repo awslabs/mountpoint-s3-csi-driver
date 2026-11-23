@@ -98,7 +98,7 @@ jobs:
         with:
           oc: "latest"
       - name: Get ROSA Token
-        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        uses: aws-actions/aws-secretsmanager-get-secrets@v4
         with:
           secret-ids: |
             RosaToken
@@ -167,7 +167,7 @@ jobs:
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
         run: terraform apply --auto-approve
       - name: Get OpenShift credentials
-        uses: aws-actions/aws-secretsmanager-get-secrets@v3
+        uses: aws-actions/aws-secretsmanager-get-secrets@v4
         with:
           secret-ids: |
             OPENSHIFT_CREDS,s3-csi-${{ inputs.environment }}-openshift-credentials
