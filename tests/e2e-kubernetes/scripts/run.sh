@@ -98,7 +98,7 @@ function install_tools() {
 
   eksctl_install "${BIN_DIR}"
 
-  (cd "${BASE_DIR}/.." && go install github.com/onsi/ginkgo/v2/ginkgo)
+  (cd "${BASE_DIR}/.." && "${BASE_DIR}/../../../hack/retry.sh" go install github.com/onsi/ginkgo/v2/ginkgo)
 }
 
 function create_cluster() {
