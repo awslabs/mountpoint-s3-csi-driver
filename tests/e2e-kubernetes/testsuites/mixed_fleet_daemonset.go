@@ -50,7 +50,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"daemonset-mixed-fleet", storageframework.GetDriverTimeouts(driver))
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
-	// Serial and Ordered: each Context reinstalls the mounters via Helm, which restarts every Mountpoint on every node.
+	// Serial and Ordered: each Context reinstalls the mounters, which restarts every Mountpoint on every node.
 	Describe("A mounter entry per kind of node", Ordered, ContinueOnFailure, Serial, func() {
 		var (
 			config     *storageframework.PerTestConfig
@@ -202,8 +202,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 // withAdditionalDaemonSets returns the installed values with entries as additionalDaemonSets, and the default pair kept
 // to nodes matching outside, a matchExpression, since no node may match two pairs.
 func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries map[string]any) map[string]any {
-	affinity := r.chart.Values["node"].(map[string]any)["affinity"].(map[string]any)
-	terms := affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
+	terms := r.affinity["nodeAffinity"].(map[string]any)["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)["nodeSelectorTerms"].([]any)
 	var narrowed []any
 	for _, term := range terms {
 		exprs := slices.Clone(term.(map[string]any)["matchExpressions"].([]any))
@@ -214,9 +213,14 @@ func withAdditionalDaemonSets(r *driverRelease, outside map[string]any, entries 
 		maps.Copy(node, installed)
 	}
 	node["affinity"] = map[string]any{"nodeAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{"nodeSelectorTerms": narrowed}}}
+	mounter := map[string]any{}
+	if installed, _ := r.installed["mounter"].(map[string]any); installed != nil {
+		maps.Copy(mounter, installed)
+	}
+	mounter["maxVolumesPerNode"] = 5
 	values := maps.Clone(r.installed)
 	values["node"] = node
-	values["mounter"] = map[string]any{"maxVolumesPerNode": 5}
+	values["mounter"] = mounter
 	values["additionalDaemonSets"] = entries
 	return values
 }
