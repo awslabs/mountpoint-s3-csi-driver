@@ -257,54 +257,18 @@ mounter:
   imagePullSecrets: []
 
 
-# Mixed fleet: node and mounter above render the default pair of CSI node and mounter DaemonSets,
-# s3-csi-node and s3-csi-mounter. Each entry renders its own pair, s3-csi-node-<name> and
-# s3-csi-mounter-<name>, copied from node and mounter above, with the entry's values overriding the copy.
-# An entry's mounter.cache replaces the copied cache whole, and cache: null gives the entry no cache.
-# helm upgrade --reuse-values drops that null on Helm 3.20.0 and older, so the entry copies the cache again.
-#
-# Placement isn't copied: each entry must set node.nodeSelector, node.affinity or both, and no two
-# pairs may run on the same node, so narrow the default pair's placement to keep it off the
-# entries' nodes. Set node.nodeSelector, as in the example below, or add an expression such as
-# { key: karpenter.sh/nodepool, operator: In, values: [general] } to each node.affinity term.
+# Mixed fleet: node and mounter above render the default pair of CSI node and mounter DaemonSets, and each
+# entry adds its own pair, s3-csi-node-<name> and s3-csi-mounter-<name>, copied from node and mounter,
+# with the entry's values overriding the copy. Placement isn't copied, so each entry must set
+# node.nodeSelector or node.affinity. No node may match more than one pair, so also narrow
+# node.nodeSelector or node.affinity above to keep the default pair off the entries' nodes.
 # Only used when experimental.mounterMode is "daemonset".
 #
-# WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
-# matches more than one pair, including the default pair; otherwise new mounts on that node can fail.
-# To recover, see https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
+# WARNING: Removing or renaming an entry, changing a pair's placement, or changing a node's labels deletes
+# the mounter on the nodes a pair stops matching, even with OnDelete, and breaks every S3 mount there.
+# Cordon and drain those nodes first.
 #
-# When a pair stops matching a node, its mounter there is deleted, even with OnDelete, and every S3 mount
-# it serves breaks. That happens when you remove or rename an entry, change a pair's placement (such as
-# narrowing the default pair's), or change a node's labels. Drain those nodes first, then make the
-# change, then uncordon them. When fixing an overlap, a node that keeps the pair serving its mounts
-# doesn't need draining. See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/TROUBLESHOOTING.md#my-node-runs-more-than-one-s3-csi-node-pod
-#
-# For example, three pairs, one per Karpenter NodePool: the default pair on general nodes (with
-# node.nodeSelector set to { karpenter.sh/nodepool: general }), bigmem on bigmem nodes and gpu on gpu nodes:
-# additionalDaemonSets:
-#   bigmem:
-#     node:
-#       nodeSelector:
-#         karpenter.sh/nodepool: bigmem
-#     mounter:
-#       maxVolumesPerNode: 32
-#       resources:
-#         requests:
-#           memory: "32Gi"
-#           cpu: "2"
-#   gpu:
-#     node:
-#       affinity:
-#         nodeAffinity:
-#           requiredDuringSchedulingIgnoredDuringExecution:
-#             nodeSelectorTerms:
-#               - matchExpressions:
-#                   - key: karpenter.sh/nodepool
-#                     operator: In
-#                     values: ["gpu"]
-#     mounter:
-#       maxVolumesPerNode: 8
-#       resources:
-#         requests:
-#           memory: "8Gi"
+# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MIXED_FLEET_CONFIG.md for how to
+# set up and change entries, with an example.
+# TODO: also link the V3 upgrade docs here once they exist.
 additionalDaemonSets: {}

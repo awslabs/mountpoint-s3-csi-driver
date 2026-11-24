@@ -1,0 +1,83 @@
+# A workload pinned to one kind of node in a mixed fleet, so its volume is served with that node's
+# mounter settings.
+#
+# Install the driver with a pair for the bigmem Karpenter NodePool, and the default pair narrowed to
+# the general NodePool so no node matches both:
+#
+#   node:
+#     nodeSelector:
+#       karpenter.sh/nodepool: general
+#   additionalDaemonSets:
+#     bigmem:
+#       node:
+#         nodeSelector:
+#           karpenter.sh/nodepool: bigmem
+#       mounter:
+#         maxVolumesPerNode: 32
+#         resources:
+#           requests:
+#             memory: "32Gi"
+#             cpu: "2"
+#
+# This assumes every node that runs S3 workloads is in the general or bigmem NodePool. If your
+# cluster has other nodes, such as managed node groups or other NodePools, narrow the default pair
+# with node.affinity instead (see "Setting up a mixed fleet" in MIXED_FLEET_CONFIG.md), so it keeps
+# running on them.
+#
+# The PV needs no node affinity: the volume is mounted on whatever node the Pod is scheduled to, by
+# that node's pair. The Pod's nodeSelector puts it on a bigmem node, so s3-csi-mounter-bigmem serves it.
+#
+# See https://github.com/awslabs/mountpoint-s3-csi-driver/blob/main/docs/MIXED_FLEET_CONFIG.md
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-pv
+spec:
+  capacity:
+    storage: 1200Gi # ignored, required
+  accessModes:
+    - ReadWriteMany # supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  claimRef: # To ensure no other PVCs can claim this PV
+    namespace: default # Namespace is required even though it's in "default" namespace.
+    name: s3-pvc # Name of your PVC
+  mountOptions:
+    - region us-west-2
+  csi:
+    driver: s3.csi.aws.com # required
+    volumeHandle: s3-csi-driver-volume # Must be unique
+    volumeAttributes:
+      bucketName: s3-csi-driver
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-pvc
+spec:
+  accessModes:
+    - ReadWriteMany # Supported options: ReadWriteMany / ReadOnlyMany
+  storageClassName: "" # Required for static provisioning
+  resources:
+    requests:
+      storage: 1200Gi # Ignored, required
+  volumeName: s3-pv # Name of your PV
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-app
+spec:
+  nodeSelector:
+    karpenter.sh/nodepool: bigmem
+  containers:
+    - name: app
+      image: ubuntu
+      command: ["/bin/sh"]
+      args: ["-c", "echo 'Hello from the container!' >> /data/$(date -u).txt; tail -f /dev/null"]
+      volumeMounts:
+        - name: persistent-storage
+          mountPath: /data
+  volumes:
+    - name: persistent-storage
+      persistentVolumeClaim:
+        claimName: s3-pvc
