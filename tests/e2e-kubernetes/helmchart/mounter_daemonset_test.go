@@ -199,3 +199,31 @@ func TestMounterIsUnprivilegedAndCannotEscalate(t *testing.T) {
 		})
 	}
 }
+
+// The comm volume holds every mount's credentials, which must never be written to the node's disk.
+func TestMounterCommVolumeIsAMemoryBackedTmpfs(t *testing.T) {
+	daemonSets, err := renderDaemonSets(t, narrowDefault+`additionalDaemonSets:
+  big: {node: {nodeSelector: {pool: big}}, mounter: {maxVolumesPerNode: 32, memoryLimitStrategy: none}}`)
+	assert.NoError(t, err)
+	mounters := 0
+	for name, ds := range daemonSets {
+		if !strings.HasPrefix(name, mounterDaemonSet) {
+			continue
+		}
+		mounters++
+		var comm *corev1.Volume
+		for i, v := range ds.Spec.Template.Spec.Volumes {
+			if v.Name == "comm" {
+				comm = &ds.Spec.Template.Spec.Volumes[i]
+			}
+		}
+		if comm == nil || comm.EmptyDir == nil {
+			t.Fatalf("%s: no comm emptyDir volume", name)
+		}
+		assert.Equals(t, corev1.StorageMediumMemory, comm.EmptyDir.Medium)
+		if comm.EmptyDir.SizeLimit == nil || comm.EmptyDir.SizeLimit.String() != "10Mi" {
+			t.Errorf("%s: comm sizeLimit is %v, want 10Mi", name, comm.EmptyDir.SizeLimit)
+		}
+	}
+	assert.Equals(t, 2, mounters)
+}
