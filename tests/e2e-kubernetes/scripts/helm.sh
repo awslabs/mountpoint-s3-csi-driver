@@ -5,11 +5,11 @@ set -euox pipefail
 function helm_install() {
   INSTALL_PATH=${1}
   if [[ ! -e ${INSTALL_PATH}/helm ]]; then
-    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+    curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
     chmod 700 get_helm.sh
     export USE_SUDO=false
     export HELM_INSTALL_DIR=${INSTALL_PATH}
-    ./get_helm.sh
+    "${BASE_DIR}/../../../hack/retry.sh" ./get_helm.sh
     rm get_helm.sh
   fi
 }
@@ -36,6 +36,8 @@ function helm_uninstall_driver() {
   else
     echo "driver does not seem to be installed"
   fi
+  # A cancelled credentials test can leave aws-secret behind, and the CSI node would use its test credentials.
+  $KUBECTL_BIN delete secret aws-secret -n kube-system --ignore-not-found --timeout=60s --kubeconfig "$KUBECONFIG"
   # Clean up the mount-s3 namespace before reinstalling. A previous run may
   # have left Mountpoint pods in mount-s3 that are still running, and
   # Kubernetes rejects new resource creation in a namespace that is being terminated.
