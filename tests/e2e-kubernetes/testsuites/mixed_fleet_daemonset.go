@@ -60,9 +60,6 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 		)
 
 		BeforeAll(func(ctx context.Context) {
-			if !isDaemonsetMounterMode(ctx, f) {
-				Skip("mounter entries are DaemonSets, which only exist in daemonset mode")
-			}
 			nodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
 			framework.ExpectNoError(err)
 			if len(nodes.Items) < 2 {

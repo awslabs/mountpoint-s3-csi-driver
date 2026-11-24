@@ -209,7 +209,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 	// expectCredentialFilesOwnedByMount checks the credential files csi-node wrote for pod's mount are owner-only and
 	// owned by the mount's UID (the owner of the mount's credential directory), so no other mount on the node can read
-	// them, both as first written and after a republish rewrites them. Only daemonset mode gives each mount its own UID.
+	// them, both as first written and after a republish rewrites them.
 	expectCredentialFilesOwnedByMount := func(ctx context.Context, pod *v1.Pod, files ...string) {
 		GinkgoHelper()
 		var claim string
@@ -553,9 +553,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should keep the driver's token file owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
-					if !isDaemonsetMounterMode(ctx, f) {
-						Skip("only daemonset mode gives each mount its own UID")
-					}
 					updateCSIDriversServiceAccountRole(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(ctx, pod)
@@ -595,9 +592,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should keep the driver's token file owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
-					if !isDaemonsetMounterMode(ctx, f) {
-						Skip("only daemonset mode gives each mount its own UID")
-					}
 					updateCSIDriversServiceAccountRoleEKSPodIdentity(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(ctx, pod)
@@ -631,9 +625,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				})
 
 				It("should keep the credentials and config files owner-only and owned by the mount's UID, also after a refresh", func(ctx context.Context) {
-					if !isDaemonsetMounterMode(ctx, f) {
-						Skip("only daemonset mode gives each mount its own UID")
-					}
 					updateDriverLevelKubernetesSecret(ctx, iamPolicyS3FullAccess)
 					pod := createPodAllowsDelete(ctx)
 					expectFullAccess(ctx, pod)
@@ -804,9 +795,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 				// the refresh path itself: the rewritten file keeps its owner-only mode and the mount's UID, and
 				// the mount keeps working with it.
 				It("should keep a refreshed token file owner-only and owned by the mount's UID, with the mount still working", func(ctx context.Context) {
-					if !isDaemonsetMounterMode(ctx, f) {
-						Skip("checks the daemonset mounter's per-mount token file")
-					}
 					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
 					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
 					deferCleanup(vol.CleanupResource)
@@ -903,39 +891,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 					pod, _ := createPodWithServiceAccountAndPolicy(ctx, iamPolicyS3ReadOnlyAccess, true, false)
 					expectReadOnly(ctx, pod)
-				})
-
-				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
-					// In daemonset mode, pods with different service accounts sharing the same PV
-					// on the same node will be rejected by ValidateCompatibility. This test relies
-					// on both pods mounting successfully which only works with per-pod Mountpoint processes.
-					if isDaemonsetMounterMode(ctx, f) {
-						Skip("Skipping in daemonset mode: different SAs cannot share the same FUSE source mount on the same node")
-					}
-
-					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
-					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
-					deferCleanup(vol.CleanupResource)
-
-					saFullAccess := createServiceAccountWithPolicy(ctx, iamPolicyS3FullAccess)
-					saReadOnlyAccess := createServiceAccountWithPolicy(ctx, iamPolicyS3ReadOnlyAccess)
-
-					podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saFullAccess.Name)
-					framework.ExpectNoError(err)
-					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess) })
-
-					podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saReadOnlyAccess.Name)
-					framework.ExpectNoError(err)
-					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
-
-					expectReadOnly(ctx, podReadOnlyAccess)
-					expectFullAccess(ctx, podFullAccess)
-
-					// Write a file on full-access pod and expect it to be readable by read-only pod,
-					// but writes from read-only pod should still fail.
-					writtenFile := expectWriteToSucceed(ctx, podFullAccess)
-					expectReadToSucceed(ctx, podReadOnlyAccess, writtenFile)
-					expectWriteToFail(ctx, podReadOnlyAccess)
 				})
 
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {
@@ -1048,39 +1003,6 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 
 					pod, _ := createPodWithServiceAccountAndPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess, true, false)
 					expectReadOnly(ctx, pod)
-				})
-
-				It("should not mix different pod's service account tokens even when they are using the same volume", func(ctx context.Context) {
-					// In daemonset mode, pods with different service accounts sharing the same PV
-					// on the same node will be rejected by ValidateCompatibility. This test relies
-					// on both pods mounting successfully which only works with per-pod Mountpoint processes.
-					if isDaemonsetMounterMode(ctx, f) {
-						Skip("Skipping in daemonset mode: different SAs cannot share the same FUSE source mount on the same node")
-					}
-
-					mountOptions := []string{"allow-delete", fmt.Sprintf("region %s", DefaultRegion)}
-					vol := createVolumeResourceWithMountOptions(enablePodLevelIdentity(ctx), l.config, pattern, mountOptions)
-					deferCleanup(vol.CleanupResource)
-
-					saFullAccess, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3FullAccess)
-					saReadOnlyAccess, _ := createServiceAccountWithPolicyEKS(ctx, iamPolicyS3ReadOnlyAccess)
-
-					podFullAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saFullAccess.Name)
-					framework.ExpectNoError(err)
-					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podFullAccess) })
-
-					podReadOnlyAccess, err := createPodWithServiceAccount(ctx, f.ClientSet, f.Namespace.Name, []*v1.PersistentVolumeClaim{vol.Pvc}, saReadOnlyAccess.Name)
-					framework.ExpectNoError(err)
-					deferCleanup(func(ctx context.Context) error { return e2epod.DeletePodWithWait(ctx, f.ClientSet, podReadOnlyAccess) })
-
-					expectReadOnly(ctx, podReadOnlyAccess)
-					expectFullAccess(ctx, podFullAccess)
-
-					// Write a file on full-access pod and expect it to be readable by read-only pod,
-					// but writes from read-only pod should still fail.
-					writtenFile := expectWriteToSucceed(ctx, podFullAccess)
-					expectReadToSucceed(ctx, podReadOnlyAccess, writtenFile)
-					expectWriteToFail(ctx, podReadOnlyAccess)
 				})
 
 				It("should not use pod's service account's role if 'authenticationSource' is 'driver'", func(ctx context.Context) {

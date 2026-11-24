@@ -143,9 +143,6 @@ func (t *s3CSIDaemonsetCacheTestSuite) DefineTests(driver storageframework.TestD
 		)
 
 		BeforeAll(func(ctx context.Context) {
-			if !isDaemonsetMounterMode(ctx, f) {
-				Skip("the cache volume is configured on the mounter DaemonSet, which only exists in daemonset mode")
-			}
 			// Registered before the restore, so cleanup (LIFO) removes it last, after the restore has removed the cache PVCs using it.
 			createEBSCacheSC(ctx, teardownSafeFramework(f), daemonsetCacheStorageClassName)
 			release = setUpDriverRelease(ctx, f)

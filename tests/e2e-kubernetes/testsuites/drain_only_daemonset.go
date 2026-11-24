@@ -66,10 +66,6 @@ func (t *s3CSIDrainOnlyDaemonsetTestSuite) DefineTests(driver storageframework.T
 
 	ginkgo.Describe("Drain-Only Controller (Daemonset Architecture)", func() {
 		ginkgo.BeforeEach(func(ctx context.Context) {
-			// Only meaningful in daemonset mode, where the controller runs the drain-only cleaner.
-			if !isDaemonsetMounterMode(ctx, f) {
-				ginkgo.Skip("drain-only controller test requires daemonset mounter mode")
-			}
 			driver.PrepareTest(ctx, f)
 		})
 
