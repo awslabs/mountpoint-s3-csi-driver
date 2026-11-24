@@ -13,8 +13,8 @@ function eksctl_install() {
   PLATFORM=$(uname -s)_$ARCH
 
   if [[ ! -e ${INSTALL_PATH}/eksctl ]]; then
-    curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
-    curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep "eksctl_$PLATFORM.tar.gz$" | sha256sum --check
+    curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -O "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+    curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep "eksctl_$PLATFORM.tar.gz$" | sha256sum --check
     tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
     sudo install -m 0755 /tmp/eksctl ${INSTALL_PATH} && rm /tmp/eksctl
   fi
