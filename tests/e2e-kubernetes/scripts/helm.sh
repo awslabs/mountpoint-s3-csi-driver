@@ -9,7 +9,7 @@ function helm_install() {
     chmod 700 get_helm.sh
     export USE_SUDO=false
     export HELM_INSTALL_DIR=${INSTALL_PATH}
-    ./get_helm.sh
+    "${BASE_DIR}/../../../hack/retry.sh" ./get_helm.sh
     rm get_helm.sh
   fi
 }
