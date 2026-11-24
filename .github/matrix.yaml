@@ -22,7 +22,7 @@ matrix:
       "UbuntuPro2604",
     ]
   kubernetes-version:
-    ["1.31.0", "1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1", "1.37.0"]
+    ["1.32.1", "1.33.2", "1.34.1", "1.35.0", "1.36.1", "1.37.0"]
   include:
     # Enable enforcing mode for SELinux in AL2023, it's easier to list it in "include"
     # field rather than trying to exclude all other variants.
@@ -55,9 +55,6 @@ matrix:
     # Ubuntu 26.04 EKS AMIs are only published for EKS >= 1.35.
     - cluster-type: "eksctl"
       family: "UbuntuPro2604"
-      kubernetes-version: "1.31.0"
-    - cluster-type: "eksctl"
-      family: "UbuntuPro2604"
       kubernetes-version: "1.32.1"
     - cluster-type: "eksctl"
       family: "UbuntuPro2604"
@@ -69,6 +66,30 @@ matrix:
 # Combinations CI no longer tests, whose clusters earlier runs or other branch runs may have left behind.
 # delete-cluster.yaml deletes these as well as everything in `matrix`.
 retired:
+  - cluster-type: "eksctl"
+    arch: "x86"
+    family: "AmazonLinux2023"
+    kubernetes-version: "1.31.0"
+  - cluster-type: "eksctl"
+    arch: "arm"
+    family: "AmazonLinux2023"
+    kubernetes-version: "1.31.0"
+  - cluster-type: "eksctl"
+    arch: "x86"
+    family: "Bottlerocket"
+    kubernetes-version: "1.31.0"
+  - cluster-type: "eksctl"
+    arch: "arm"
+    family: "Bottlerocket"
+    kubernetes-version: "1.31.0"
+  - cluster-type: "eksctl"
+    arch: "x86"
+    family: "UbuntuPro2404"
+    kubernetes-version: "1.31.0"
+  - cluster-type: "eksctl"
+    arch: "arm"
+    family: "UbuntuPro2404"
+    kubernetes-version: "1.31.0"
   - cluster-type: "eksctl"
     arch: "x86"
     family: "Ubuntu2404"
