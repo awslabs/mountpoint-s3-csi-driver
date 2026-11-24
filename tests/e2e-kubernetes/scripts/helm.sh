@@ -36,6 +36,8 @@ function helm_uninstall_driver() {
   else
     echo "driver does not seem to be installed"
   fi
+  # A cancelled credentials test can leave aws-secret behind, and the CSI node would use its test credentials.
+  $KUBECTL_BIN delete secret aws-secret -n kube-system --ignore-not-found --timeout=60s --kubeconfig "$KUBECONFIG"
   # Clean up the mount-s3 namespace before reinstalling. A previous run may
   # have left Mountpoint pods in mount-s3 that are still running, and
   # Kubernetes rejects new resource creation in a namespace that is being terminated.
