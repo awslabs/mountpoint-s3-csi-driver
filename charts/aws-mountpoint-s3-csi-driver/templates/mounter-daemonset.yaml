@@ -243,8 +243,13 @@ spec:
           {{- toYaml . | nindent 12 }}
         {{- end }}
       volumes:
+      # Holds every mount's credentials, so it is a tmpfs and they never reach the node's disk. Each file's
+      # pages are charged to the container that writes it: the CSI node for credentials, the mounter for
+      # error files. sizeLimit caps the whole tmpfs.
       - name: comm
-        emptyDir: {}
+        emptyDir:
+          medium: Memory
+          sizeLimit: 10Mi
       {{- /* Cache volume */}}
       {{- if $cacheEnabled }}
       - name: cache
