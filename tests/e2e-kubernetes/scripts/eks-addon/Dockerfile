@@ -79,7 +79,6 @@ fi
 
 exec ginkgo -vv -timeout 60m \
     --skip="should automatically detect the STS region if IMDS is available" \
-    --skip="should share Mountpoint Pod if pod namespaces and service accounts are the same \(authenticationSource=pod\)" \
     /usr/local/bin/e2e.test \
     -- \
     --bucket-region="${REGION}" \

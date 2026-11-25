@@ -21,7 +21,6 @@ import (
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
@@ -385,38 +384,6 @@ func waitForKubernetesObject[T any](ctx context.Context, get framework.GetFunc[T
 	return framework.Gomega().Eventually(ctx, framework.RetryNotFound(get)).
 		WithTimeout(1 * time.Minute).
 		ShouldNot(gomega.BeNil())
-}
-
-func waitForKubernetesObjectToDisappear[T any](ctx context.Context, get framework.GetFunc[T], timeout time.Duration, interval time.Duration) error {
-	return framework.Gomega().Eventually(ctx, framework.HandleRetry(func(ctx context.Context) (*T, error) {
-		v, err := get(ctx)
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return &v, err
-	})).WithTimeout(timeout).WithPolling(interval).Should(gomega.BeNil())
-}
-
-// findMountpointPods locates all Mountpoint pods for a specific volume on a node
-func findMountpointPods(ctx context.Context, cs clientset.Interface, volumeName string) ([]*v1.Pod, error) {
-	pods, err := cs.CoreV1().Pods(mountpointNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods in %s namespace: %w", mountpointNamespace, err)
-	}
-
-	var matchingPods []*v1.Pod
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.Annotations[volumeNameAnnotation] == volumeName {
-			matchingPods = append(matchingPods, pod)
-		}
-	}
-
-	if len(matchingPods) == 0 {
-		return nil, fmt.Errorf("no Mountpoint pods found for volume %s", volumeName)
-	}
-
-	return matchingPods, nil
 }
 
 // checkReadFromPathSucceedEventually retries reading from a path in a pod, tolerating
