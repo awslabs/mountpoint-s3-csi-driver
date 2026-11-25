@@ -1866,11 +1866,10 @@ func TestCheckTargetState_TimeoutIsUnknown(t *testing.T) {
 }
 
 // TestMount_CorruptedTarget_NoMapEntryNoMeta verifies that when Mount is called with a
-// corrupted target (ENOTCONN), it fails with a non-final Aborted error naming the volume and
-// the workload pod, without creating a meta file. This is the churn-prevention invariant: a
-// corrupted target causes an early bail, leaving cleanup to NodeUnpublishVolume and the periodic
-// job rather than churning mount/creds every republish. The error is what kubelet turns into a
-// FailedMount Warning Event on the workload pod.
+// corrupted target (ENOTCONN), it returns success and logs a warning naming the volume and the
+// workload pod, without creating a meta file. This is the churn-prevention invariant: a corrupted
+// target causes an early bail, leaving cleanup to NodeUnpublishVolume and the periodic job rather
+// than churning mount/creds every republish.
 func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 	kubeletPath := t.TempDir()
 	const volumeID = "pv-corrupted-target"
@@ -1905,12 +1904,13 @@ func TestMount_CorruptedTarget_NoMapEntryNoMeta(t *testing.T) {
 		"csi.storage.k8s.io/pod.uid":       "pod-uid-123",
 	}
 
+	logs := testutil.CaptureKlog(t)
 	err := dm.Mount(ctx, "test-bucket", targetDir, credCtx, volumeCtx, mountpoint.Args{}, "", nil)
 
-	// Aborted is non-final for kubelet: the volume stays in its actual state, so
-	// NodeUnpublishVolume is still called when the pod is deleted.
-	assert.Equals(t, codes.Aborted, status.Code(err))
-	assertDeadTargetMessage(t, status.Convert(err).Message(), volumeID, "team-a/trainer-0 (pod-uid-123)")
+	// Success, so kubelet's per-volume backoff (shared with healthy pods) does not grow; the warning
+	// names the pod to recreate.
+	assert.NoError(t, err)
+	assertDeadTargetMessage(t, deadTargetWarning(t, logs.String()), volumeID, "team-a/trainer-0 (pod-uid-123)")
 
 	// No meta file should exist — Mount bailed before writing anything.
 	metaPath := mounter.MetaFileName(kubeletPath, volumeID)

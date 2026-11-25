@@ -72,11 +72,13 @@ func TestMount_DeadTargetLifecycle(t *testing.T) {
 	assert.Equals(t, false, testCtx.dm.UIDInUseForTesting(uid))
 	assert.Equals(t, true, testCtx.isMounted(target)) // cleanup never touches workload targets
 
-	// kubelet's republish of the dead target fails with Aborted naming the pod.
+	// kubelet's republish of the dead target succeeds (an error would grow kubelet's per-volume backoff
+	// shared with healthy pods) and logs a warning naming the pod.
+	logs := testutil.CaptureKlog(t)
 	err = testCtx.dm.Mount(testCtx.ctx, testCtx.bucketName, target, provideCtx, volumeCtx, mountpoint.ParseArgs(nil), "", nil)
-	assert.Equals(t, codes.Aborted, status.Code(err))
-	assertDeadTargetMessage(t, status.Convert(err).Message(), testCtx.volumeID, "team-a/trainer-0 ("+testCtx.podUID+")")
-	// The failed republish touched nothing: no new source, no UID taken, and the dead target is still
+	assert.NoError(t, err)
+	assertDeadTargetMessage(t, deadTargetWarning(t, logs.String()), testCtx.volumeID, "team-a/trainer-0 ("+testCtx.podUID+")")
+	// The republish touched nothing: no new source, no UID taken, and the dead target is still
 	// mounted, so a container restarting now fails closed instead of seeing an empty node directory.
 	assert.Equals(t, true, testCtx.isMounted(target))
 	for _, action := range testCtx.mount.GetLog() {
@@ -98,8 +100,24 @@ func TestMount_DeadTargetLifecycle(t *testing.T) {
 	assert.NoError(t, testCtx.dm.Unmount(testCtx.ctx, target, cleanupCtx))
 }
 
-// assertDeadTargetMessage checks the dead-target message: printable ASCII, the action first (so a
-// truncated Event keeps it), then the volume and pod identity.
+// deadTargetWarning returns the dead-target warning Mount logged, failing the test if there is not
+// exactly one.
+func deadTargetWarning(t *testing.T, logs string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.HasPrefix(line, "W") && strings.Contains(line, "Mountpoint has stopped") {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one dead-target warning, got %d in logs:\n%s", len(found), logs)
+	}
+	return found[0]
+}
+
+// assertDeadTargetMessage checks the dead-target message: printable ASCII, the action first, then the
+// volume and pod identity.
 func assertDeadTargetMessage(t *testing.T, msg, pvName, pod string) {
 	t.Helper()
 	const action = "delete and recreate this pod to remount the volume"
@@ -151,32 +169,14 @@ func TestMount_DeadTargetPodIdentity(t *testing.T) {
 			assert.NoError(t, os.MkdirAll(targetDir, 0750))
 
 			dm := newHealthDM(&fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)})
+			logs := testutil.CaptureKlog(t) // after construction, which warns about CSI_NODE_IMAGE
 			err := dm.Mount(context.Background(), "test-bucket", targetDir,
 				credentialprovider.ProvideContext{VolumeID: "handle-1", WorkloadPodID: "pod-uid-789"},
 				tt.volumeCtx, mountpoint.Args{}, "", nil)
 
-			assert.Equals(t, codes.Aborted, status.Code(err))
-			assertDeadTargetMessage(t, status.Convert(err).Message(), volumeID, tt.wantPod)
+			assert.NoError(t, err)
+			assertDeadTargetMessage(t, deadTargetWarning(t, logs.String()), volumeID, tt.wantPod)
 		})
-	}
-}
-
-// TestMount_DeadTargetLogsNoError checks the dead-target path adds no Error line of its own: the gRPC
-// interceptor (driver.go) already logs every returned error, and kubelet retries for as long as the pod lives.
-func TestMount_DeadTargetLogsNoError(t *testing.T) {
-	targetDir := filepath.Join(t.TempDir(), "pods", "pod-uid-555", "volumes", "kubernetes.io~csi", "pv-log", "mount")
-	assert.NoError(t, os.MkdirAll(targetDir, 0750))
-
-	dm := newHealthDM(&fakeHealthMount{isMountPointErr: healthPathErr(syscall.ENOTCONN)})
-	logs := testutil.CaptureKlog(t) // after construction, which warns about CSI_NODE_IMAGE
-	err := dm.Mount(context.Background(), "test-bucket", targetDir,
-		credentialprovider.ProvideContext{VolumeID: "pv-log", WorkloadPodID: "pod-uid-555"}, nil, mountpoint.Args{}, "", nil)
-
-	assert.Equals(t, codes.Aborted, status.Code(err))
-	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.HasPrefix(line, "E") || strings.HasPrefix(line, "W") {
-			t.Errorf("dead-target Mount logged at Warning/Error level: %q", line)
-		}
 	}
 }
 
