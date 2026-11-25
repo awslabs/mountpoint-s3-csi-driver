@@ -27,6 +27,8 @@ ACTION=delete_cluster tests/e2e-kubernetes/scripts/run.sh
 ```
 
 ## Prerequisites
+`helm` (v3) and `kubectl` must be on your `PATH`: `install_tools` only installs eksctl and ginkgo.
+
 To run command above its expected that you have AWS credentials in ENVs with the following policies attached:
 ```
 AmazonEC2FullAccess
