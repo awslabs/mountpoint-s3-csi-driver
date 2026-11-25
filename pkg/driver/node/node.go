@@ -39,7 +39,6 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/volumecontext"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
-	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 var (
@@ -105,10 +104,15 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
 	// Mountpoint can write a value we pass it (an argument, or an environment variable such as AWS_REGION) as is to
-	// its stderr, which the mounter relays line by line. None of these values can be valid with control
-	// characters, so reject them here, with the value escaped. Mount options are checked below.
-	if key, value, found := volumeAttributeWithControlChars(volumeCtx); found {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s %q: it must not contain control characters", key, value)
+	// its stderr, which the mounter DaemonSet relays one record per line, so reject a line break in it here. Mount
+	// options are checked below. The mounter DaemonSet escapes other control characters, such as a tab, in each line.
+	if key, value, found := volumeAttributeWithLineBreak(volumeCtx); found {
+		if envprovider.IsUserEnvKey(key) {
+			// An environment variable can hold a secret, such as a proxy password, and this error reaches the Pod's
+			// events: name it, but don't echo it.
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s: it must not contain a line break", key)
+		}
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s %q: it must not contain a line break", key, value)
 	}
 
 	targetHost := req.GetTargetPath()
@@ -141,8 +145,8 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
 		for _, option := range mountFlags {
-			if hasControlChars(option) {
-				return nil, status.Errorf(codes.InvalidArgument, "Invalid mount option %q: it must not contain control characters", option)
+			if hasLineBreak(option) {
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid mount option %q: it must not contain a line break", option)
 			}
 		}
 		mountpointArgs = append(mountpointArgs, mountFlags...)
@@ -439,17 +443,18 @@ func isPositiveInteger(value string) bool {
 	return err == nil && n > 0
 }
 
-// hasControlChars reports whether s has a character that EscapeControlChars escapes, such as CR or LF.
-func hasControlChars(s string) bool {
-	return utillog.EscapeControlChars(s) != s
+// hasLineBreak reports whether s has a CR, LF, NEL, U+2028 or U+2029, which would end a log record (in some log
+// viewers, for the last three) if Mountpoint printed s as is.
+func hasLineBreak(s string) bool {
+	return strings.ContainsAny(s, "\r\n\u0085\u2028\u2029")
 }
 
-// volumeAttributeWithControlChars returns the first volume attribute, in key order, that is passed on to Mountpoint
-// and has control characters: bucketName, stsRegion (Mountpoint's AWS_REGION) or a mountpointEnv.* variable.
-func volumeAttributeWithControlChars(volumeCtx map[string]string) (key, value string, found bool) {
+// volumeAttributeWithLineBreak returns the first volume attribute, in key order, that is passed on to Mountpoint and
+// has a line break: bucketName, stsRegion (Mountpoint's AWS_REGION) or a mountpointEnv.* variable.
+func volumeAttributeWithLineBreak(volumeCtx map[string]string) (key, value string, found bool) {
 	for _, key := range slices.Sorted(maps.Keys(volumeCtx)) {
 		passedOn := key == volumecontext.BucketName || key == volumecontext.STSRegion || envprovider.IsUserEnvKey(key)
-		if passedOn && hasControlChars(volumeCtx[key]) {
+		if passedOn && hasLineBreak(volumeCtx[key]) {
 			return key, volumeCtx[key], true
 		}
 	}

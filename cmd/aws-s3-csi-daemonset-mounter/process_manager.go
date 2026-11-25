@@ -505,14 +505,9 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 		if len(line) == 0 && i == len(lines)-1 {
 			break
 		}
-		if _, err := pw.w.Write([]byte(pw.prefix)); err != nil {
-			return 0, err
-		}
-		// Each line stays one record tagged with the mount: escape a CR or other control character in it.
-		if _, err := pw.w.Write([]byte(utillog.EscapeControlChars(string(line)))); err != nil {
-			return 0, err
-		}
-		if _, err := pw.w.Write([]byte("\n")); err != nil {
+		// Write the tag, the line with its control characters escaped, and the newline at once, so a line from
+		// another mount writing to the same stderr cannot land inside this one.
+		if _, err := pw.w.Write([]byte(pw.prefix + utillog.EscapeControlChars(string(line)) + "\n")); err != nil {
 			return 0, err
 		}
 	}

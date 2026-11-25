@@ -19,3 +19,30 @@ func TestPrefixWriterEscapesControlCharacters(t *testing.T) {
 		t.Errorf("got %q, want %q", out.String(), want)
 	}
 }
+
+// recordingWriter keeps each Write call, as os.Stderr gets them.
+type recordingWriter struct{ writes []string }
+
+func (w *recordingWriter) Write(p []byte) (int, error) {
+	w.writes = append(w.writes, string(p))
+	return len(p), nil
+}
+
+// Every line goes out in one Write, tag and newline included, so lines from concurrent mounts sharing stderr cannot
+// interleave within a line.
+func TestPrefixWriterWritesEachLineOnce(t *testing.T) {
+	w := &recordingWriter{}
+	pw := newPrefixWriter(w, "pv-a")
+	if _, err := pw.Write([]byte("first\nsecond\n")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"[pv-a] first\n", "[pv-a] second\n"}
+	if len(w.writes) != len(want) {
+		t.Fatalf("got %d writes %q, want %q", len(w.writes), w.writes, want)
+	}
+	for i := range want {
+		if w.writes[i] != want[i] {
+			t.Errorf("write %d = %q, want %q", i, w.writes[i], want[i])
+		}
+	}
+}

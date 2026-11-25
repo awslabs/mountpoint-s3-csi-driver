@@ -10,7 +10,8 @@ import (
 
 // noStderrThreshold is a klog -stderrthreshold above FATAL, the highest severity. klog writes an entry at or above
 // the threshold to os.Stderr as is, in addition to the output InitKlog sets, so no entry may reach it. (klog.Fatal
-// still writes the goroutine stacks to os.Stderr as is; use klog.Exit for an error that needs no stacks.)
+// still writes the current goroutine's stack to os.Stderr as is, and the full stack dump, escaped, once per
+// severity; use klog.Exit for an error that needs no stacks.)
 const noStderrThreshold = "4"
 
 // escapingStderrWriter writes each klog entry to stderr as one line, with its control characters escaped.
