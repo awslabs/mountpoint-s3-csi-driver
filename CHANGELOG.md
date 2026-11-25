@@ -3,6 +3,7 @@
 ### Notable changes
 * Add support for Kubernetes 1.37.
 * Add support for Ubuntu 26.04 on Kubernetes 1.35+.
+* Drop support for Kubernetes 1.31.
 * Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver doesn't run. It doesn't replace the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details.
 * Support Mountpoint [version 1.25.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.25.0) ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
   * **Breaking**: Mountpoint now fails to start when `AWS_MAX_ATTEMPTS`, set with the `aws-max-attempts` mount option, is not a positive integer. Previously `0` selected 4 attempts and other invalid values were silently ignored. `aws-max-attempts 1` no longer retries failed S3 requests, and values above 64 no longer prevent Mountpoint from starting. ([#1996](https://github.com/awslabs/mountpoint-s3/pull/1996), [#2010](https://github.com/awslabs/mountpoint-s3/pull/2010))
