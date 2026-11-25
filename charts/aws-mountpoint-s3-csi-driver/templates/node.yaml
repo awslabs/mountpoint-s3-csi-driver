@@ -8,11 +8,8 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
-{{- /* One CSI node DaemonSet per pair. In daemonset mode, each additionalDaemonSets entry adds a pair. */}}
-{{- $pairs := list (dict "name" "" "node" .Values.node) }}
-{{- if eq .Values.experimental.mounterMode "daemonset" }}
-{{- $pairs = (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}
-{{- end }}
+{{- /* One CSI node DaemonSet per pair. Each additionalDaemonSets entry adds a pair. */}}
+{{- $pairs := (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}
 {{- range $pair := $pairs }}
 {{- $node := $pair.node }}
 {{- with $ }}
@@ -121,22 +118,14 @@ spec:
               value: {{ $node.kubeletPath }}
             - name: SUPPORT_LEGACY_SYSTEMD_MOUNTS
               value: "{{ .Values.supportLegacySystemDMounts }}"
-            {{- if eq .Values.experimental.mounterMode "daemonset" }}
-            # SUPPORT_LEGACY_POD_MOUNTS only affects the daemonset (V3) code path (draining/refreshing
-            # existing V2 pod mounts during a V2 -> V3 upgrade). It is never read in pod mode, so we
-            # only emit it in daemonset mode.
             - name: SUPPORT_LEGACY_POD_MOUNTS
               value: "{{ .Values.supportLegacyPodMounts }}"
-            {{- end }}
             - name: MOUNTPOINT_NAMESPACE
               value: {{ .Values.mountpointPod.namespace }}
             - name: EKS_POD_IDENTITY_AGENT_CONTAINER_CREDENTIALS_FULL_URI
               value: {{ .Values.eksPodIdentityAgent.containerCredentialsFullURI }}
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else if .Values.isHelmRepo }}helm{{ else }}helm-dev{{ end }}
-            {{- if eq .Values.experimental.mounterMode "daemonset" }}
-            - name: MOUNTER_MODE
-              value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
             # The volume limit to advertise until this node's mounter runs: this pair's maxVolumesPerNode.
@@ -145,7 +134,6 @@ spec:
             # This container's image, which the CSI node compares with the mounter's to warn about a mismatch.
             - name: CSI_NODE_IMAGE
               value: {{ include "csiDriverImageName" . }}
-            {{- end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

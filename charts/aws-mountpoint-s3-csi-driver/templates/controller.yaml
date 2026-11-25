@@ -77,10 +77,9 @@ spec:
               value: {{ .Values.mountpointPod.priorityClassName }}
             - name: MOUNTPOINT_POD_LABELS
               value: {{ toJson .Values.mountpointPod.podLabels | quote }}
-            {{- if eq .Values.experimental.mounterMode "daemonset" }}
+            # The controller only drains V2 Mountpoint Pods; without this it runs the V2 Reconciler, which creates them.
             - name: MOUNTER_MODE
               value: "daemonset"
-            {{- end }}
             {{- if .Values.experimental.reserveHeadroomForMountpointPods }}
             - name: MOUNTPOINT_HEADROOM_POD_LABELS
               value: {{ toJson .Values.experimental.headroomPodLabels | quote }}

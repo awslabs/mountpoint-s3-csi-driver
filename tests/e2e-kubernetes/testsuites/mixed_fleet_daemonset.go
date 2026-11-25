@@ -134,7 +134,7 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 				Eventually(ctx, func(ctx context.Context) (string, error) {
 					return e2epod.GetPodLogs(ctx, f.ClientSet, working.Namespace, working.Name, csiNodeContainerName)
 				}).WithTimeout(90 * time.Second).WithPolling(5 * time.Second).Should(ContainSubstring("multiple running mounter pods found"))
-				// The new CSI node stops at the lock, before it logs its mounter mode, so it never touches the node's mounts.
+				// The new CSI node waits at the lock without ever holding it, so it never touches the node's mounts.
 				waitingPod := nodePodOf(ctx, f, csiDriverDaemonSetName+"-extra", nodeA)
 				var waiting string
 				Eventually(ctx, func(ctx context.Context) (string, error) {
@@ -142,8 +142,8 @@ func (t *s3CSIMixedFleetDaemonsetTestSuite) DefineTests(driver storageframework.
 					waiting, err = e2epod.GetPodLogs(ctx, f.ClientSet, waitingPod.Namespace, waitingPod.Name, csiNodeContainerName)
 					return waiting, err
 				}).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(ContainSubstring("another CSI node on this node holds"))
-				Expect(nodePodLogs(ctx, f, working)).To(ContainSubstring("Using daemonset mounter mode"))
-				Expect(waiting).NotTo(ContainSubstring("Using daemonset mounter mode"))
+				Expect(nodePodLogs(ctx, f, working)).To(ContainSubstring("nodelock: holding"))
+				Expect(waiting).NotTo(ContainSubstring("nodelock: holding"))
 
 				newPod, newPV := writerOnNode(ctx, f, config, pattern, nodeA)
 				Expect(servingMounter(ctx, f, nodeA, newPV)).To(Equal(servedBy))

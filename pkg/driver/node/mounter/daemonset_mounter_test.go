@@ -42,6 +42,8 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil/assert"
 )
 
+const testK8sVersion = "v1.28.0"
+
 type dmTestCtx struct {
 	t   *testing.T
 	ctx context.Context

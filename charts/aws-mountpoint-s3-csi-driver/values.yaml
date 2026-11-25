@@ -170,16 +170,10 @@ experimental:
   reserveHeadroomForMountpointPods: false
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10
   headroomPodLabels: {}
-  # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
-  # In-place updates with daemonset mode may not be supported.
-  # Mounter mode: "pod" (V2 default) or "daemonset" (experimental two-daemonset architecture).
-  # In daemonset mode, one mounter daemonset pod handles all mountpoint processes instead of 
-  # one mountpoint pod per workload in pod mode.
-  mounterMode: "daemonset"
 
 # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
 # The default mounter DaemonSet, s3-csi-mounter, which runs every Mountpoint process on the nodes the
-# default CSI node (node above) runs on. Only used when experimental.mounterMode is "daemonset".
+# default CSI node (node above) runs on.
 mounter:
   # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
   # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
@@ -267,7 +261,6 @@ mounter:
 # pairs may run on the same node, so narrow the default pair's placement to keep it off the
 # entries' nodes. Set node.nodeSelector, as in the example below, or add an expression such as
 # { key: karpenter.sh/nodepool, operator: In, values: [general] } to each node.affinity term.
-# Only used when experimental.mounterMode is "daemonset".
 #
 # WARNING: The driver does not support more than one CSI node and mounter on a node. Make sure no node
 # matches more than one pair, including the default pair; otherwise new mounts on that node can fail.

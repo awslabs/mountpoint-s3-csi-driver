@@ -131,16 +131,14 @@ delete_eks_cluster() {
 
 deploy_helm_chart() {
     local ecr_repository_url=$(get_ecr_repository_url)
-    local mounterMode="${MOUNTPOINT_CSI_DRIVER_MODE:-pod}" # or daemonset
 
-    echo "deploying Helm chart (mounterMode=${mounterMode})..."
+    echo "deploying Helm chart..."
     helm upgrade --install aws-mountpoint-s3-csi-driver \
         --namespace kube-system \
         --set unsupportedDevInstall=true \
         --set image.repository="${ecr_repository_url}" \
         --set image.pullPolicy=Always \
         --set image.tag=latest \
-        --set experimental.mounterMode="${mounterMode}" \
         --set experimental.dynamicVolumeProvisioningFromExistingBucket=true \
         ./charts/aws-mountpoint-s3-csi-driver
 
@@ -186,7 +184,6 @@ deploy_containers() {
       make login_registry all-push
 
     # Restart the node, controller and mounter daemonset pod
-    # Note pod mode has controller and no mounter daemonset, vice versa in daemonset mode
     kubectl -n kube-system delete po -lapp=s3-csi-controller --ignore-not-found
     kubectl -n kube-system delete po -lapp=s3-csi-node
     kubectl -n kube-system delete po -lapp=s3-csi-mounter --ignore-not-found

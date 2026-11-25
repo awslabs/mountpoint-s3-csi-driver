@@ -167,13 +167,6 @@ func TestMounterLogLevel(t *testing.T) {
 	}
 }
 
-func TestPodModeIgnoresAdditionalDaemonSets(t *testing.T) {
-	manifests, err := renderChart(t, `additionalDaemonSets: {b: {node: {nodeSelector: {x: "1"}}}}`, map[string]any{"experimental": map[string]any{"mounterMode": "pod"}})
-	assert.NoError(t, err)
-	assert.Equals(t, 1, strings.Count(manifests["aws-mountpoint-s3-csi-driver/templates/node.yaml"], "kind: DaemonSet"))
-	assert.Equals(t, "", strings.TrimSpace(manifests["aws-mountpoint-s3-csi-driver/templates/mounter-daemonset.yaml"]))
-}
-
 func TestAdditionalDaemonSetsDefaultInstall(t *testing.T) {
 	daemonSets, err := renderDaemonSets(t, `{}`)
 	assert.NoError(t, err)
@@ -206,7 +199,7 @@ func TestAdditionalDaemonSetsQuoteNodeSelectorValues(t *testing.T) {
 		assert.Equals(t, map[string]string{"kubernetes.io/os": "linux", "gpu": "true", "zone": "1", "memory": "10000000", "on": "x", "empty": ""}, daemonSets[name].Spec.Template.Spec.NodeSelector)
 	}
 	// The parse above turns an unquoted true into "true" too, so also check the rendered text.
-	manifests, err := renderChart(t, values, map[string]any{"experimental": map[string]any{"mounterMode": "daemonset"}})
+	manifests, err := renderChart(t, values)
 	assert.NoError(t, err)
 	for _, file := range []string{"node.yaml", "mounter-daemonset.yaml"} {
 		manifest := manifests["aws-mountpoint-s3-csi-driver/templates/"+file]
@@ -280,10 +273,10 @@ func envValue(ds appsv1.DaemonSet, container, name string) string {
 	return ""
 }
 
-// renderDaemonSets renders the chart in daemonset mode with values, a values file's YAML, and returns its DaemonSets by name.
+// renderDaemonSets renders the chart with values, a values file's YAML, and returns its DaemonSets by name.
 func renderDaemonSets(t *testing.T, values string) (map[string]appsv1.DaemonSet, error) {
 	t.Helper()
-	manifests, err := renderChart(t, values, daemonsetMode)
+	manifests, err := renderChart(t, values)
 	if err != nil {
 		return nil, err
 	}
