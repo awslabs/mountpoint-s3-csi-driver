@@ -25,7 +25,7 @@ env:
   CLUSTER_NAME: "s3-csi-${{ inputs.environment }}"
 jobs:
   build:
-    runs-on: ubuntu-22.04 # FIXME - https://github.com/actions/runner-images/issues/11471
+    runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
