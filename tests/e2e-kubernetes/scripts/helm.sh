@@ -45,7 +45,7 @@ function helm_uninstall_driver() {
     echo "Deleting leftover mount-s3 namespace..."
     # Mountpoint pods ignore SIGTERM and have a 10-minute termination grace period - bypass it.
     $KUBECTL_BIN delete pods --all --namespace mount-s3 --grace-period=0 --force --ignore-not-found --kubeconfig $KUBECONFIG || true
-    $KUBECTL_BIN delete namespace mount-s3 --kubeconfig $KUBECONFIG --ignore-not-found
+    $KUBECTL_BIN delete namespace mount-s3 --kubeconfig $KUBECONFIG --ignore-not-found --wait=false
     if ! $KUBECTL_BIN wait --for=delete namespace/mount-s3 --timeout=120s --kubeconfig $KUBECONFIG; then
       echo "WARNING: mount-s3 namespace did not finish terminating within 120s"
       $KUBECTL_BIN get namespace mount-s3 -o yaml --kubeconfig $KUBECONFIG || true
