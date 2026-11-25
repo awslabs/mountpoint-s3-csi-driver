@@ -294,9 +294,6 @@ func (t *s3CSIVolumeLimitsTestSuite) DefineTests(driver storageframework.TestDri
 	// doesn't check volume limits. So the mounter's own --max-volumes-per-node cap is the only guard left for such a pod;
 	// it also covers slots the scheduler can't see, such as a cache directory still being removed.
 	f.It("should refuse a mount beyond the mounter's volume cap when the scheduler is bypassed", f.WithSerial(), func(ctx context.Context) {
-		if !isDaemonsetMounterMode(ctx, f) {
-			ginkgo.Skip("the mounter's volume cap only exists in daemonset mounter mode")
-		}
 		driverInfo := driver.GetDriverInfo()
 
 		ginkgo.By("Picking a node")

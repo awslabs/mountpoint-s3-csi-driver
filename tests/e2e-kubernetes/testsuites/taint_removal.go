@@ -111,17 +111,13 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			node := getCSIDriverNode(ctx, f)
 			framework.Logf("Selected node %s for taint removal test", node.Name)
 
-			// v3 only removes the taint once the mounter is running, so start with no mounter on the node
-			v3 := isDaemonsetMounterMode(ctx, f)
-			var restoreMounter func(context.Context) error
-			if v3 {
-				waitForNoS3VolumesOnNode(ctx, f, node.Name, driver.GetDriverInfo().Name)
-				restoreMounter = removeMounterFromNode(ctx, f, node.Name)
-				// Restart the node pod so no taint watcher from its previous start is running
-				killCSIDriverPods(ctx, f)
-				// Without a mounter, the node pod still registers, so it serves the volumes already on the node
-				expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
-			}
+			// The driver only removes the taint once the mounter is running, so start with no mounter on the node
+			waitForNoS3VolumesOnNode(ctx, f, node.Name, driver.GetDriverInfo().Name)
+			restoreMounter := removeMounterFromNode(ctx, f, node.Name)
+			// Restart the node pod so no taint watcher from its previous start is running
+			killCSIDriverPods(ctx, f)
+			// Without a mounter, the node pod still registers, so it serves the volumes already on the node
+			expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
 
 			// 2. Apply the taint to the node
 			err := applyAgentNotReadyTaint(ctx, f.ClientSet, node.Name)
@@ -138,13 +134,11 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 			framework.Logf("Restarting CSI driver pods to trigger taint watcher")
 			killCSIDriverPods(ctx, f)
 
-			if v3 {
-				// Without a mounter the node pod never removes the taint
-				gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
-				// but registers, tainted or not, so it still serves the volumes already on the node
-				expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
-				framework.ExpectNoError(restoreMounter(ctx))
-			}
+			// Without a mounter the node pod never removes the taint
+			gomega.Consistently(ctx, hasAgentNotReadyTaint(f.ClientSet, node.Name)).WithTimeout(90 * time.Second).WithPolling(10 * time.Second).Should(gomega.BeTrue())
+			// but registers, tainted or not, so it still serves the volumes already on the node
+			expectServingWithoutMounter(ctx, f, node.Name, driver.GetDriverInfo().Name)
+			framework.ExpectNoError(restoreMounter(ctx))
 
 			// Wait for CSI driver pods to be ready again
 			waitForCSIDriverReady(ctx, f)
@@ -164,9 +158,6 @@ func (t *s3CSITaintRemovalTestSuite) DefineTests(driver storageframework.TestDri
 		})
 
 		It("should evict a workload on a NoExecute taint but keep the driver pods serving it", func(ctx context.Context) {
-			if !isDaemonsetMounterMode(ctx, f) {
-				Skip("the shared mounter only exists in daemonset mode")
-			}
 			node := getCSIDriverNode(ctx, f)
 			mounter, err := podOnNode(ctx, f, mounterPodLabel, node.Name)
 			framework.ExpectNoError(err)

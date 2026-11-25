@@ -159,9 +159,6 @@ func (t *s3CSISchedulingTestSuite) DefineTests(driver storageframework.TestDrive
 	})
 
 	f.It("should size each node for its own mounter entry, and scale out workloads by that entry's volume limit", f.WithSerial(), func(ctx context.Context) {
-		if !isDaemonsetMounterMode(ctx, f) {
-			e2eskipper.Skipf("mounter entries are DaemonSets, which only exist in daemonset mode")
-		}
 		small, big := sizeSelectors(ctx, f)
 		release := setUpDriverRelease(ctx, f)
 		waitForEmptyNodePool(ctx, f)

@@ -29,7 +29,7 @@ import (
 //   - upgrade_and_rollback.go: initHelmClient, helmChartSource, helmChartName, helmReleaseNamespace
 //   - taint_removal.go: mounterDaemonSetName
 //   - util.go: createVolumeResourceWithMountOptions, bucketNameFromVolumeResource, createPod, createPodWithoutWaiting,
-//     checkWriteToPathSucceed, checkReadFromPathSucceed, isDaemonsetMounterMode, awsConfig,
+//     checkWriteToPathSucceed, checkReadFromPathSucceed, awsConfig,
 //     execInMounterPod, podOnNode
 
 const (
