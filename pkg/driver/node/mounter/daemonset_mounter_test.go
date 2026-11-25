@@ -1092,6 +1092,12 @@ func TestDaemonsetMounter_PodSharing(t *testing.T) {
 		testCtx := setupDM(t)
 		target1 := testCtx.targetPath("pod-a-uid")
 		target2 := testCtx.targetPath("pod-b-uid")
+		// Pod-level mounts read the pod's service account for its IAM role.
+		for _, name := range []string{"sa-a", "sa-b"} {
+			_, err := testCtx.client.CoreV1().ServiceAccounts("default").Create(testCtx.ctx,
+				&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}}, metav1.CreateOptions{})
+			assert.NoError(t, err)
+		}
 
 		// Expect Provide to be called exactly once (for the first pod only).
 		// The second pod should be rejected BEFORE provideCredentials is reached.

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
@@ -145,12 +146,9 @@ var errMissingServiceAccountAnnotationForIRSA = errors.New("Missing role annotat
 
 // findPodServiceAccountRole tries to provide associated AWS IAM role for service account specified in the volume context.
 func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx ProvideContext) (string, error) {
-	podNamespace := provideCtx.PodNamespace
-	podServiceAccount := provideCtx.ServiceAccountName
-
-	// In PodMounter we get IAM Role ARN from MountpointS3PodAttachment custom resource
-	// TODO(vlaad): In DaemonsetMounter we should get IAM Role ARN from in-memory cache (or from volume's .meta)
-	if provideCtx.IsPodMountpoint() {
+	// PodMounter takes the IAM role ARN from the MountpointS3PodAttachment custom resource, and DaemonsetMounter
+	// from the role the volume was first mounted with, so an empty one means EKS Pod Identity.
+	if provideCtx.IsPodMountpoint() || provideCtx.MountKind == MountKindDaemonset {
 		if provideCtx.ServiceAccountEKSRoleARN != "" {
 			return provideCtx.ServiceAccountEKSRoleARN, nil
 		} else {
@@ -158,23 +156,32 @@ func (c *Provider) findPodServiceAccountRole(ctx context.Context, provideCtx Pro
 		}
 	}
 
-	if podNamespace == "" || podServiceAccount == "" {
-		klog.Error("credentialprovider: `authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
-		return "", status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
-	}
-
-	response, err := c.client.ServiceAccounts(podNamespace).Get(ctx, podServiceAccount, metav1.GetOptions{})
+	roleArn, err := ServiceAccountRoleARN(ctx, c.client, provideCtx.PodNamespace, provideCtx.ServiceAccountName)
 	if err != nil {
-		return "", status.Errorf(codes.InvalidArgument, "Failed to get pod's service account %s/%s: %v", podNamespace, podServiceAccount, err)
+		return "", err
 	}
-
-	roleArn := response.Annotations[serviceAccountRoleAnnotation]
 	if roleArn == "" {
 		klog.Error("credentialprovider: `authenticationSource` configured to `pod` but pod's service account is not annotated with a role, see " + podLevelCredentialsDocsPage)
 		return "", errMissingServiceAccountAnnotationForIRSA
 	}
 
 	return roleArn, nil
+}
+
+// ServiceAccountRoleARN returns the IAM role ARN in the `eks.amazonaws.com/role-arn` annotation of the
+// pod's service account, or "" if it has none (so pod-level credentials come from EKS Pod Identity).
+func ServiceAccountRoleARN(ctx context.Context, client k8sv1.ServiceAccountsGetter, podNamespace, podServiceAccount string) (string, error) {
+	if podNamespace == "" || podServiceAccount == "" {
+		klog.Error("credentialprovider: `authenticationSource` configured to `pod` but no pod info found. Please make sure to enable `podInfoOnMountCompat`, see " + podLevelCredentialsDocsPage)
+		return "", status.Error(codes.InvalidArgument, "Missing Pod info. Please make sure to enable `podInfoOnMountCompat`, see "+podLevelCredentialsDocsPage)
+	}
+
+	response, err := client.ServiceAccounts(podNamespace).Get(ctx, podServiceAccount, metav1.GetOptions{})
+	if err != nil {
+		return "", status.Errorf(codes.InvalidArgument, "Failed to get pod's service account %s/%s: %v", podNamespace, podServiceAccount, err)
+	}
+
+	return response.Annotations[serviceAccountRoleAnnotation], nil
 }
 
 // podLevelSTSWebIdentityServiceAccountTokenName returns service account token name for Pod-level identity.
