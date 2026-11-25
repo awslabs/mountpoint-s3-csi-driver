@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"helm.sh/helm/v3/pkg/action"
@@ -511,11 +512,17 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 		return chartVersion
 	}
 
-	// Chart version not published, find latest version less than current
-	var olderVersions []string
+	// Chart version not published, find latest version less than current.
+	// Compare as semver: as strings, "2.9.2" > "2.10.0".
+	current, err := semver.StrictNewVersion(chartVersion)
+	framework.ExpectNoError(err, "parsing chart version %q", chartVersion)
+
+	var olderVersions []*semver.Version
 	for _, v := range allVersions {
-		if v < chartVersion {
-			olderVersions = append(olderVersions, v)
+		parsed, err := semver.StrictNewVersion(v)
+		framework.ExpectNoError(err, "parsing published version %q", v)
+		if parsed.LessThan(current) {
+			olderVersions = append(olderVersions, parsed)
 		}
 	}
 
@@ -523,9 +530,9 @@ func getLatestReleasedVersion(settings *cli.EnvSettings, cfg *action.Configurati
 		Fail(fmt.Sprintf("No published releases found older than %s", chartVersion))
 	}
 
-	slices.SortFunc(olderVersions, func(a, b string) int { return strings.Compare(b, a) })
-	framework.Logf("Using latest published release older than %s: v%s", chartVersion, olderVersions[0])
-	return olderVersions[0]
+	latest := slices.MaxFunc(olderVersions, func(a, b *semver.Version) int { return a.Compare(b) })
+	framework.Logf("Using latest published release older than %s: v%s", chartVersion, latest)
+	return latest.String()
 }
 
 // getAllPublishedVersions fetches and parses all published versions from the Helm repository.
