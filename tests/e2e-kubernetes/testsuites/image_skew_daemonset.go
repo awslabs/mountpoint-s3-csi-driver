@@ -64,9 +64,6 @@ func (t *s3CSIImageSkewDaemonsetTestSuite) DefineTests(driver storageframework.T
 		var config *storageframework.PerTestConfig
 
 		ginkgo.BeforeEach(func(ctx context.Context) {
-			if !isDaemonsetMounterMode(ctx, f) {
-				ginkgo.Skip("the image check only exists in daemonset mounter mode")
-			}
 			if _, ok := csiNodeImageEnvValue(csiDriverDaemonSet(ctx, f)); !ok {
 				ginkgo.Skip(fmt.Sprintf("the installed chart does not set %s on s3-plugin", csiNodeImageEnv))
 			}
