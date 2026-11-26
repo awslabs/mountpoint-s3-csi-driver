@@ -138,6 +138,7 @@ jobs:
         run: |
           tests/e2e-kubernetes/scripts/run.sh
       - name: Install the driver
+        timeout-minutes: 10
         env:
           ACTION: "install_driver"
         run: |
@@ -161,6 +162,7 @@ jobs:
       - name: Uninstall the driver
         # Skip uninstall if cluster creation did not succeed - no cluster to communicate with
         if: ${{ always() && steps.create_cluster.conclusion == 'success' }}
+        timeout-minutes: 10
         env:
           ACTION: "uninstall_driver"
         run: |
