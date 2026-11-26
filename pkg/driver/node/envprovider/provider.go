@@ -77,6 +77,11 @@ func Default() Environment {
 	return environment
 }
 
+// UserEnvKey returns the volume attribute key that sets the environment variable `name` of Mountpoint.
+func UserEnvKey(name Key) string {
+	return mountpointEnvPrefix + name
+}
+
 // IsUserEnvKey reports whether a volume attribute key sets an environment variable of Mountpoint (mountpointEnv.*).
 func IsUserEnvKey(key string) bool {
 	return strings.HasPrefix(key, mountpointEnvPrefix)

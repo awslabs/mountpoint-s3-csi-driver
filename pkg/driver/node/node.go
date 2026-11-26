@@ -419,11 +419,18 @@ func podIDFromTargetPath(target string) (string, bool) {
 	return targetPath.PodID, true
 }
 
+// redactedValue replaces a value that must not be logged.
+const redactedValue = "REDACTED"
+
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
-// with sensitive fields removed.
+// with sensitive fields removed or redacted.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
 	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
+	// The HTTPS_PROXY URL can hold a proxy password. Replace its whole value.
+	if key := envprovider.UserEnvKey(envprovider.EnvHTTPSProxy); safeVolumeContext[key] != "" {
+		safeVolumeContext[key] = redactedValue
+	}
 
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,

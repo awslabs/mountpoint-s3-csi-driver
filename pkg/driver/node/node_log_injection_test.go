@@ -13,6 +13,7 @@ import (
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/credentialprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/driver/node/envprovider"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
+	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/testutil"
 )
 
 // A bucket name, mount option or other value passed on to Mountpoint with a line break, such as the CR/LF of a log
@@ -143,5 +144,48 @@ func TestNodePublishVolumeRejectsUnicodeLineBreaks(t *testing.T) {
 		if status.Code(err) != codes.InvalidArgument {
 			t.Errorf("%q: want InvalidArgument, got %v", lineBreak, err)
 		}
+	}
+}
+
+// The HTTPS_PROXY URL can hold a proxy password, so NodePublishVolume's request log at -v=4 (the chart default) shows
+// the key but never its value, whatever its form: a URL, a scheme-less user:password@host, or a value no URL parser
+// accepts. Other mountpointEnv.* values, such as NO_PROXY, stay in the log for debugging.
+func TestNodePublishVolumeDoesNotLogHTTPSProxyValue(t *testing.T) {
+	for name, proxy := range map[string]string{
+		"URL":         "http://user:s3cr3tpw@proxy.example.com:3128",
+		"scheme-less": "user:s3cr3tpw@proxy.example.com:3128",
+		"malformed":   "http://user:s3cr3tpw%zz@proxy:3128",
+	} {
+		t.Run(name, func(t *testing.T) {
+			logs := testutil.CaptureKlogAtVerbosity(t, 4)
+			env := initNodeServerTestEnv(t)
+			env.mockMounter.EXPECT().Mount(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+			env.server.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+				VolumeId: "test-volume-id",
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
+					AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER},
+				},
+				TargetPath: "/var/lib/kubelet/target/path",
+				VolumeContext: map[string]string{
+					"bucketName":                "test-bucket-name",
+					"mountpointEnv.HTTPS_PROXY": proxy,
+					"mountpointEnv.NO_PROXY":    ".internal.example.com,10.0.0.0/8",
+				},
+			})
+			got := logs()
+			if !strings.Contains(got, "NodePublishVolume: new request") {
+				t.Fatalf("the request log line is missing, so this test checks nothing: %q", got)
+			}
+			if strings.Contains(got, "s3cr3tpw") {
+				t.Errorf("the HTTPS_PROXY value was logged: %q", got)
+			}
+			if !strings.Contains(got, `key:"mountpointEnv.HTTPS_PROXY" value:"REDACTED"`) {
+				t.Errorf("the log should still show mountpointEnv.HTTPS_PROXY, with its value REDACTED: %q", got)
+			}
+			if !strings.Contains(got, `key:"mountpointEnv.NO_PROXY" value:".internal.example.com,10.0.0.0/8"`) {
+				t.Errorf("the log should show the NO_PROXY value: %q", got)
+			}
+		})
 	}
 }
