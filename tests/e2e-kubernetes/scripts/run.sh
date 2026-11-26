@@ -21,11 +21,11 @@ source "${BASE_DIR}"/helm.sh
 
 TEST_DIR=${BASE_DIR}/../csi-test-artifacts
 BIN_DIR=${TEST_DIR}/bin
-KUBECTL_INSTALL_PATH=/usr/local/bin
 
-HELM_BIN=${BIN_DIR}/helm
+# helm and kubectl come from PATH: GitHub's Ubuntu runners ship both.
+HELM_BIN=helm
 EKSCTL_BIN=${BIN_DIR}/eksctl
-KUBECTL_BIN=${KUBECTL_INSTALL_PATH}/kubectl
+KUBECTL_BIN=kubectl
 
 CLUSTER_TYPE=${CLUSTER_TYPE:-eksctl}
 IMDS_AVAILABLE=${IMDS_AVAILABLE:-true}
@@ -35,7 +35,7 @@ SELINUX_MODE=${SELINUX_MODE:-}
 
 # eksctl: mustn't include patch version (e.g. 1.19)
 # 'K8S_VERSION' variable must be a full version (e.g. 1.19.1)
-K8S_VERSION=${K8S_VERSION:-1.31.0}
+K8S_VERSION=${K8S_VERSION:-1.32.1}
 K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION%.*}}
 
 # We need to ensure that we're using all testing matrix variables in the cluster name
@@ -78,13 +78,6 @@ mkdir -p ${TEST_DIR}
 mkdir -p ${BIN_DIR}
 export PATH="$PATH:${BIN_DIR}"
 
-function kubectl_install() {
-  curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -O "https://dl.k8s.io/release/v$K8S_VERSION/bin/linux/amd64/kubectl"
-  curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -O "https://dl.k8s.io/release/v$K8S_VERSION/bin/linux/amd64/kubectl.sha256"
-  echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
-  sudo install -o root -g root -m 0755 kubectl ${KUBECTL_INSTALL_PATH}/kubectl
-}
-
 function print_cluster_info() {
   $KUBECTL_BIN logs -l app=s3-csi-node -n kube-system --kubeconfig ${KUBECONFIG}
   $KUBECTL_BIN version --kubeconfig ${KUBECONFIG}
@@ -92,10 +85,6 @@ function print_cluster_info() {
 }
 
 function install_tools() {
-  kubectl_install
-
-  helm_install "$BIN_DIR"
-
   eksctl_install "${BIN_DIR}"
 
   (cd "${BASE_DIR}/.." && "${BASE_DIR}/../../../hack/retry.sh" go install github.com/onsi/ginkgo/v2/ginkgo)

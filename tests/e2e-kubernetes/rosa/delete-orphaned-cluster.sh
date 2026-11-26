@@ -5,9 +5,10 @@
 # A cancelled `terraform apply` can leave the cluster in OCM but not in state. `terraform destroy`
 # then cannot delete it, nor the subnets and OIDC config the cluster still uses: it fails with
 # "DependencyViolation" on the subnets and "there are clusters using OIDC config". The ROSA e2e
-# workflow's next `terraform apply` fails too, with "Duplicate cluster name". When that happens, an
-# operator runs the "Manual ROSA cluster cleanup" workflow (delete-rosa-cluster.yaml), which runs
-# this script before `terraform destroy`.
+# workflow's next `terraform apply` fails too, with "Duplicate cluster name". The ROSA e2e workflow
+# (e2e-rosa-tests.yaml) runs this script before `terraform apply` when state has no cluster, and
+# the "Manual ROSA cluster cleanup" workflow (delete-rosa-cluster.yaml) runs it before
+# `terraform destroy`.
 #
 # Run it from tests/e2e-kubernetes/rosa/ after `terraform init`, with AWS credentials for the
 # cluster's account. It needs `terraform`, `rosa` and `jq` on PATH and these variables:
