@@ -132,6 +132,7 @@ jobs:
           if [ -z "$CLUSTER_CREATED" ] || [ "$CLUSTER_CREATED" = "null" ]; then
             echo "No existing cluster found (no creation timestamp in state)"
             echo "destroy_cluster=false" >> $GITHUB_OUTPUT
+            echo "cluster_found=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           echo "Cluster created at: $CLUSTER_CREATED"
@@ -158,6 +159,13 @@ jobs:
           TF_VAR_rhcs_token: "${{ env.ROSATOKEN }}"
           TF_VAR_billing_account_id: ${{ secrets.ROSA_BILLING_ACCOUNT_ID }}
         run: terraform destroy --auto-approve
+      - name: Delete orphaned cluster
+        # Orphaned: in OCM but missing from Terraform state, e.g. after a cancelled apply.
+        if: steps.check_cluster_age.outputs.cluster_found == 'false'
+        working-directory: tests/e2e-kubernetes/rosa/
+        run: |
+          ./install-rosa-cli.sh
+          ./delete-orphaned-cluster.sh
       - name: Create/Update ROSA cluster
         working-directory: tests/e2e-kubernetes/rosa/
         env:
