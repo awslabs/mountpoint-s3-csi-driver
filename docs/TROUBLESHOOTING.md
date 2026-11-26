@@ -4,6 +4,147 @@ If the CSI Driver is not working as expected, there are some common errors to lo
 
 Regardless of the issue, a good first step would be checking logs from the CSI Driver and Mountpoint by following the [logging guide](./LOGGING.md). Also, [troubleshooting guide of Mountpoint](https://github.com/awslabs/mountpoint-s3/blob/main/doc/TROUBLESHOOTING.md) might be useful as well.
 
+## I'm getting AWS credential or `AccessDenied` errors
+
+First identify which identity the volume is configured to use. The
+`authenticationSource` volume attribute is either `driver` (the default when
+the attribute is absent) or `pod`:
+
+```bash
+NAMESPACE=default
+POD=my-pod
+PVC=my-s3-pvc
+
+PV=$(kubectl get pvc -n "${NAMESPACE}" "${PVC}" -o jsonpath='{.spec.volumeName}')
+kubectl get pv "${PV}" -o jsonpath='{.spec.csi.volumeAttributes.authenticationSource}{"\n"}'
+```
+
+Use the following table to determine which Kubernetes service account and AWS
+credential mechanisms to inspect:
+
+| `authenticationSource` | Identity to inspect | Supported credential mechanisms |
+| --- | --- | --- |
+| absent or `driver` | CSI node DaemonSet service account | Kubernetes Secret, IRSA, EKS Pod Identity, or the node instance profile through IMDS |
+| `pod` | Workload Pod service account | IRSA or EKS Pod Identity only |
+
+For more details about each mechanism and their load order, see
+[AWS Credentials](./CONFIGURATION.md#aws-credentials).
+
+### Check which credential provider was selected
+
+Credential selection happens in the CSI node component. Its default log level
+includes the relevant `credentialprovider` messages:
+
+```bash
+kubectl logs -n kube-system -c s3-plugin -l app=s3-csi-node \
+    | grep -E 'credentialprovider|Providing credentials'
+```
+
+If the failure occurs after Mountpoint starts, inspect the corresponding
+Mountpoint Pod as described in the [logging guide](./LOGGING.md#the-mounter-component--mountpoint-pod-aws-s3-csi-mounter):
+
+```bash
+kubectl logs -n mount-s3 mp-...
+```
+
+To include AWS Common Runtime credential-provider diagnostics in Mountpoint
+logs, add `debug-crt` to the PersistentVolume's `mountOptions` and recreate the
+workload Pod so that the volume is mounted again:
+
+```yaml
+spec:
+  mountOptions:
+    - debug-crt
+```
+
+You can then narrow the Mountpoint logs to common credential messages:
+
+```bash
+kubectl logs -n mount-s3 mp-... \
+    | grep -E 'AuthCredentialsProvider|AWSProfile'
+```
+
+`debug-crt` is verbose. Remove it after troubleshooting, and review logs before
+sharing them outside your organization.
+
+### Validate driver-level credentials
+
+Find the service account used by the CSI node DaemonSet rather than assuming
+the default name:
+
+```bash
+DRIVER_NAMESPACE=kube-system
+DRIVER_SERVICE_ACCOUNT=$(kubectl get daemonset -n "${DRIVER_NAMESPACE}" s3-csi-node \
+    -o jsonpath='{.spec.template.spec.serviceAccountName}')
+kubectl get serviceaccount -n "${DRIVER_NAMESPACE}" "${DRIVER_SERVICE_ACCOUNT}" -o yaml
+```
+
+Then validate the configured mechanism:
+
+- **IRSA:** Confirm that the service account has the
+  `eks.amazonaws.com/role-arn` annotation. The role trust policy must use the
+  cluster's OIDC provider, allow `sts:AssumeRoleWithWebIdentity`, and match the
+  service account subject
+  `system:serviceaccount:<namespace>:<service-account>` and audience
+  `sts.amazonaws.com`.
+- **EKS Pod Identity:** Confirm that the EKS Pod Identity Agent is running and
+  that the association matches the cluster, namespace, and service account.
+- **Kubernetes Secret:** Confirm that the configured secret exists and contains
+  the configured key names without printing their values. The defaults are
+  secret `aws-secret` with keys `key_id` and `access_key`:
+
+  ```bash
+  kubectl get secret -n "${DRIVER_NAMESPACE}" aws-secret \
+      -o go-template='{{range $key, $value := .data}}{{printf "%s\n" $key}}{{end}}'
+  ```
+
+  Secret credentials are read only when the CSI Driver starts. Restart the node
+  DaemonSet after rotating or replacing the secret.
+- **Node instance profile:** Confirm that the node role has the required S3
+  permissions and that IMDS is accessible from the CSI Driver Pod. If IMDSv2 is
+  required, the instance metadata response hop limit must be at least 2.
+
+If multiple mechanisms are configured, remember that the CSI Driver uses the
+documented load order instead of combining permissions from multiple roles.
+
+### Validate pod-level credentials
+
+Confirm that the workload uses the intended service account:
+
+```bash
+SERVICE_ACCOUNT=$(kubectl get pod -n "${NAMESPACE}" "${POD}" \
+    -o jsonpath='{.spec.serviceAccountName}')
+[ -n "${SERVICE_ACCOUNT}" ] || SERVICE_ACCOUNT=default
+kubectl get serviceaccount -n "${NAMESPACE}" "${SERVICE_ACCOUNT}" -o yaml
+```
+
+For IRSA, apply the same OIDC trust-policy checks described above to the
+workload's service account. For EKS Pod Identity, verify the association for
+the workload namespace and service account. Driver-level Secrets and node
+instance profiles are intentionally ignored when `authenticationSource: pod`
+is configured.
+
+Pod-level IRSA also needs an AWS STS region. If node logs contain
+`credentialprovider: pod-level: unknown region`, either make IMDS region
+detection available or set the `stsRegion` volume attribute explicitly. See
+[Configuring the STS region](./CONFIGURATION.md#configuring-the-sts-region).
+
+### Separate credential lookup failures from authorization failures
+
+- Errors such as `NoCredentials`, `CredentialsError`, missing service account
+  tokens, or `InvalidIdentityToken` indicate that no usable identity was
+  obtained. Check the selected credential mechanism, service account, OIDC or
+  Pod Identity association, token injection, and IMDS access.
+- `AccessDenied` means an identity was obtained but is not authorized for the
+  request. Check the IAM role policy, S3 bucket or access point policy, bucket
+  region, and whether the policy covers both the bucket and object ARNs needed
+  by the configured operation.
+
+When opening an issue, include the CSI Driver version, the redacted
+PersistentVolume and service account manifests, the selected
+`authenticationSource`, and the relevant CSI node and Mountpoint logs. Never
+include Secret data, web identity tokens, access keys, or session tokens.
+
 ## I'm trying to use multiple S3 volumes in the same Pod but my Pod is stuck at `ContainerCreating` status
 
 Make sure to use unique `volumeHandle` in your `PersistentVolume`s. For example, if you use the following:
