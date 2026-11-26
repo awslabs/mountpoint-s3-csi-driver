@@ -28,6 +28,7 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
@@ -54,6 +55,7 @@ import (
 	mpmounter "github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mounter"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/podmounter/mppod/watcher"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/util"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 const (
@@ -286,15 +288,8 @@ func (d *Driver) Run() error {
 		}
 	}
 
-	logErr := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		resp, err := handler(ctx, req)
-		if err != nil {
-			klog.Errorf("GRPC error: %v", err)
-		}
-		return resp, err
-	}
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(logErr),
+		grpc.UnaryInterceptor(logErrorsInterceptor),
 		grpc.MaxRecvMsgSize(grpcServerMaxReceiveMessageSize),
 	}
 	d.Srv = grpc.NewServer(opts...)
@@ -324,6 +319,35 @@ func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
 		}
 	}
 	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
+}
+
+// logErrorsInterceptor logs the error of every failed gRPC call and returns it with the control characters in its
+// message escaped. Kubelet logs this message and puts it in a FailedMount event, and it can carry untrusted text,
+// such as a PV's volume handle or Mountpoint's stderr, whose CR/LF would otherwise split kubelet's log record.
+func logErrorsInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	resp, err := handler(ctx, req)
+	if err != nil {
+		err = escapeErrorMessage(err)
+		klog.Errorf("GRPC error: %v", err)
+	}
+	return resp, err
+}
+
+// escapeErrorMessage returns err as a gRPC status error, with its code and details, whose message has its control
+// characters escaped. It returns err as is when the message needs no escaping.
+func escapeErrorMessage(err error) error {
+	st, ok := status.FromError(err)
+	if !ok {
+		// As the gRPC server converts it: a context error keeps its code, any other error gets Unknown.
+		st = status.FromContextError(err)
+	}
+	msg := utillog.EscapeControlChars(st.Message())
+	if msg == st.Message() {
+		return err
+	}
+	p := st.Proto()
+	p.Message = msg
+	return status.FromProto(p).Err()
 }
 
 func (d *Driver) Stop() {

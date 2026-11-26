@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint"
 	"github.com/awslabs/mountpoint-s3-csi-driver/pkg/mountpoint/mountoptions"
+	utillog "github.com/awslabs/mountpoint-s3-csi-driver/pkg/util/log"
 )
 
 const errorFilePerm = fs.FileMode(0600)
@@ -504,13 +505,9 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 		if len(line) == 0 && i == len(lines)-1 {
 			break
 		}
-		if _, err := pw.w.Write([]byte(pw.prefix)); err != nil {
-			return 0, err
-		}
-		if _, err := pw.w.Write(line); err != nil {
-			return 0, err
-		}
-		if _, err := pw.w.Write([]byte("\n")); err != nil {
+		// Write the tag, the line with its control characters escaped, and the newline at once, so a line from
+		// another mount writing to the same stderr cannot land inside this one.
+		if _, err := pw.w.Write([]byte(pw.prefix + utillog.EscapeControlChars(string(line)) + "\n")); err != nil {
 			return 0, err
 		}
 	}

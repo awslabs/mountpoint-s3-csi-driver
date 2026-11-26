@@ -20,6 +20,7 @@ import (
 	"context"
 	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -102,6 +103,17 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "Bucket name not provided")
 	}
+	// Mountpoint can write a value we pass it (an argument, or an environment variable such as AWS_REGION) as is to
+	// its stderr, which the mounter DaemonSet relays one record per line, so reject a line break in it here. Mount
+	// options are checked below. The mounter DaemonSet escapes other control characters, such as a tab, in each line.
+	if key, value, found := volumeAttributeWithLineBreak(volumeCtx); found {
+		if envprovider.IsUserEnvKey(key) {
+			// An environment variable can hold a secret, such as a proxy password, and this error reaches the Pod's
+			// events: name it, but don't echo it.
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s: it must not contain a line break", key)
+		}
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid volume attribute %s %q: it must not contain a line break", key, value)
+	}
 
 	targetHost := req.GetTargetPath()
 	if len(targetHost) == 0 {
@@ -132,6 +144,11 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 
 	if capMount := volCap.GetMount(); capMount != nil {
 		mountFlags := capMount.GetMountFlags()
+		for _, option := range mountFlags {
+			if hasLineBreak(option) {
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid mount option %q: it must not contain a line break", option)
+			}
+		}
 		mountpointArgs = append(mountpointArgs, mountFlags...)
 	}
 
@@ -402,11 +419,18 @@ func podIDFromTargetPath(target string) (string, bool) {
 	return targetPath.PodID, true
 }
 
+// redactedValue replaces a value that must not be logged.
+const redactedValue = "REDACTED"
+
 // logSafeNodePublishVolumeRequest returns a copy of given `csi.NodePublishVolumeRequest`
-// with sensitive fields removed.
+// with sensitive fields removed or redacted.
 func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.NodePublishVolumeRequest {
 	safeVolumeContext := maps.Clone(req.VolumeContext)
 	delete(safeVolumeContext, volumecontext.CSIServiceAccountTokens)
+	// The HTTPS_PROXY URL can hold a proxy password. Replace its whole value.
+	if key := envprovider.UserEnvKey(envprovider.EnvHTTPSProxy); safeVolumeContext[key] != "" {
+		safeVolumeContext[key] = redactedValue
+	}
 
 	return &csi.NodePublishVolumeRequest{
 		VolumeId:          req.VolumeId,
@@ -424,4 +448,22 @@ func logSafeNodePublishVolumeRequest(req *csi.NodePublishVolumeRequest) *csi.Nod
 func isPositiveInteger(value string) bool {
 	n, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
 	return err == nil && n > 0
+}
+
+// hasLineBreak reports whether s has a CR, LF, NEL, U+2028 or U+2029, which would end a log record (in some log
+// viewers, for the last three) if Mountpoint printed s as is.
+func hasLineBreak(s string) bool {
+	return strings.ContainsAny(s, "\r\n\u0085\u2028\u2029")
+}
+
+// volumeAttributeWithLineBreak returns the first volume attribute, in key order, that is passed on to Mountpoint and
+// has a line break: bucketName, stsRegion (Mountpoint's AWS_REGION) or a mountpointEnv.* variable.
+func volumeAttributeWithLineBreak(volumeCtx map[string]string) (key, value string, found bool) {
+	for _, key := range slices.Sorted(maps.Keys(volumeCtx)) {
+		passedOn := key == volumecontext.BucketName || key == volumecontext.STSRegion || envprovider.IsUserEnvKey(key)
+		if passedOn && hasLineBreak(volumeCtx[key]) {
+			return key, volumeCtx[key], true
+		}
+	}
+	return "", "", false
 }

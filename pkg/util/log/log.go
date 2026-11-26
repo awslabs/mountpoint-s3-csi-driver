@@ -2,31 +2,42 @@
 package log
 
 import (
-	"bytes"
 	"flag"
 	"os"
 
 	"k8s.io/klog/v2"
 )
 
-var (
-	newline       = []byte("\n")
-	newlineEscape = []byte("")
-)
+// noStderrThreshold is a klog -stderrthreshold above FATAL, the highest severity. klog writes an entry at or above
+// the threshold to os.Stderr as is, in addition to the output InitKlog sets, so no entry may reach it. (klog.Fatal
+// still writes the current goroutine's stack to os.Stderr as is, and the full stack dump, escaped, once per
+// severity; use klog.Exit for an error that needs no stacks.)
+const noStderrThreshold = "4"
 
-// newlineEscapingStderrWriter writes log entries to stderr after escaping newlines.
-type newlineEscapingStderrWriter struct{}
+// escapingStderrWriter writes each klog entry to stderr as one line, with its control characters escaped.
+type escapingStderrWriter struct{}
 
-func (*newlineEscapingStderrWriter) Write(b []byte) (int, error) {
+func (*escapingStderrWriter) Write(b []byte) (int, error) {
 	n := len(b)
-	_, err := os.Stderr.Write(append(bytes.ReplaceAll(b, newline, newlineEscape), newline...))
+	entry := string(b)
+	if len(entry) > 0 && entry[len(entry)-1] == '\n' {
+		entry = entry[:len(entry)-1]
+	}
+	_, err := os.Stderr.WriteString(EscapeControlChars(entry) + "\n")
 	return n, err
 }
 
-// InitKlog initializes klog to write to stderr with newlines escaped.
+// InitKlog initializes klog to write each entry to stderr once, as one line: control characters in it, such as
+// the CR/LF of untrusted text it logs, are escaped (see EscapeControlChars).
 func InitKlog() {
 	klog.InitFlags(nil)
 	flag.Set("logtostderr", "false")
 	flag.Set("alsologtostderr", "false")
-	klog.SetOutput(&newlineEscapingStderrWriter{})
+	if err := flag.Set("stderrthreshold", noStderrThreshold); err != nil {
+		flag.Set("stderrthreshold", "FATAL")
+	}
+	// Write an entry only to the output of its own severity. All severities share the output set below, which
+	// would otherwise get an error entry three times: as ERROR, WARNING and INFO.
+	flag.Set("one_output", "true")
+	klog.SetOutput(&escapingStderrWriter{})
 }
