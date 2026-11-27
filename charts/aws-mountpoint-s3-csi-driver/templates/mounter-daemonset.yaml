@@ -168,9 +168,9 @@ spec:
         {{- with $node.tolerations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with $mounter.imagePullSecrets }}
+      {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
-      {{- range . }}
+      {{- range .Values.imagePullSecrets }}
         - name: {{ . }}
       {{- end }}
       {{- end }}

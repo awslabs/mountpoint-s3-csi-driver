@@ -139,6 +139,7 @@ customLabels: {}
 # Annotations for every driver pod. A pod's own podAnnotations (node, mounter, controller) win on the same key.
 podAnnotations: {}
 
+# Image pull secrets for every driver Pod: the CSI node, mounter and controller Pods.
 imagePullSecrets: []
 
 awsAccessSecret:
@@ -254,7 +255,6 @@ mounter:
   podAnnotations: {}
   # The mounter runs on the same nodes as the CSI node: it uses node.nodeSelector, node.affinity and the
   # node tolerations (node.tolerateAllTaints, node.defaultTolerations, node.tolerations).
-  imagePullSecrets: []
 
 
 # Mixed fleet: node and mounter above render the default pair of CSI node and mounter DaemonSets,
