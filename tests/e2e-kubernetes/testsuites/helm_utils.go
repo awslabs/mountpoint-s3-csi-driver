@@ -24,7 +24,6 @@ import (
 // move into util.go, or here for the Helm ones, in a future refactor.
 //   - pod_sharing_daemonset.go: assertPodFailsToMount, isPodReady
 //   - process_isolation_daemonset.go: statPath, commDirHostPath, mountpointProcessRunningAs
-//   - cache.go: createEBSCacheSC, ebsCSIDriverDaemonSet, deleteObjectFromS3
 //   - credentials.go: contextWithVolumeAttributes
 //   - upgrade_and_rollback.go: initHelmClient, helmChartSource, helmChartName, helmReleaseNamespace
 //   - taint_removal.go: mounterDaemonSetName

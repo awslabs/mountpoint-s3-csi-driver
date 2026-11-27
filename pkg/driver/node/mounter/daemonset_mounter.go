@@ -96,6 +96,11 @@ const (
 
 var mounterNamespace = os.Getenv("MOUNTER_NAMESPACE")
 
+var mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
+
+// targetDirPerm is the permission to use while creating target directory if its not exists.
+const targetDirPerm = fs.FileMode(0755)
+
 const (
 	// csiNodeImageEnv carries this CSI node's own image reference. The chart renders it with the same
 	// helper as the s3-plugin and mounter container images, so it equals the CSI node's `image:`.
@@ -1755,4 +1760,12 @@ func (dm *DaemonsetMounter) waitForMount(parentCtx context.Context, target, volu
 	}()
 
 	return <-mountResultCh
+}
+
+func hostPluginDirWithDefault() string {
+	hostPluginDir := os.Getenv("HOST_PLUGIN_DIR")
+	if hostPluginDir == "" {
+		hostPluginDir = "/var/lib/kubelet/plugins/s3.csi.aws.com/"
+	}
+	return hostPluginDir
 }

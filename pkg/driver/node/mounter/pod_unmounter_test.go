@@ -22,6 +22,9 @@ import (
 	"k8s.io/mount-utils"
 )
 
+const mountpointPodNamespace = "mount-s3"
+const dummyIMDSRegion = "us-west-2"
+
 const (
 	nodeName     = "test-node"
 	testVolumeId = "vol-1"

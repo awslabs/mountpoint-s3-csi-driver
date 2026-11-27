@@ -26,8 +26,6 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -171,50 +169,6 @@ func (ns *S3NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePubl
 		args.SetIfAbsent(mountpoint.ArgAllowRoot, mountpoint.ArgNoValue)
 	}
 
-	// Pod Mode: If cacheEmptyDirSizeLimit is set with cache=emptyDir, validate that an explicit --max-cache-size (in MiB) doesn't exceed it.
-	// Daemonset mode configures the cache in DaemonsetMounter.Mount. // TODO remove once we remove pod mode code.
-	_, isDaemonsetMounter := ns.Mounter.(*mounter.DaemonsetMounter)
-	if emptyDirSizeLimit := volumeCtx[volumecontext.CacheEmptyDirSizeLimit]; emptyDirSizeLimit != "" && volumeCtx[volumecontext.Cache] == volumecontext.CacheTypeEmptyDir && !isDaemonsetMounter {
-		quantity, err := resource.ParseQuantity(emptyDirSizeLimit)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, err)
-		}
-		emptyDirSizeLimitMiB := quantity.Value() / (1024 * 1024)
-
-		// Safety factor to account for Mountpoint overshooting its cache target by around 1-2%.
-		const safetyFactor = 0.95
-		safeMaxCacheSizeMiB := int64(float64(quantity.Value()) * safetyFactor / (1024 * 1024))
-
-		if maxCacheSize, ok := args.Value(mountpoint.ArgMaxCacheSize); ok {
-			maxCacheSizeMiB, err := strconv.ParseInt(maxCacheSize, 10, 64)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s %q: %v", mountpoint.ArgMaxCacheSize, maxCacheSize, err)
-			}
-			if maxCacheSizeMiB > emptyDirSizeLimitMiB {
-				return nil, status.Errorf(codes.InvalidArgument,
-					"%s (%d MiB) exceeds %s (%s = %d MiB). Reduce %s or increase %s.",
-					mountpoint.ArgMaxCacheSize, maxCacheSizeMiB,
-					volumecontext.CacheEmptyDirSizeLimit, emptyDirSizeLimit, emptyDirSizeLimitMiB,
-					mountpoint.ArgMaxCacheSize, volumecontext.CacheEmptyDirSizeLimit)
-			}
-			// For disk-backed (default) medium, remove user's explicit --max-cache-size if it exceeds
-			// the safe threshold, allowing the safe default to be injected below via SetIfAbsent.
-			if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) && maxCacheSizeMiB > safeMaxCacheSizeMiB {
-				args.Remove(mountpoint.ArgMaxCacheSize)
-			}
-		}
-
-		// For disk-backed (default) medium, statvfs on the cache directory reports the node's root filesystem
-		// stats rather than the emptyDir's sizeLimit, so Mountpoint cannot self-limit correctly.
-		// Inject --max-cache-size at 95% of the limit to ensure Mountpoint evicts before Kubernetes does.
-		// The 5% margin accounts for Mountpoint overshooting its target by around 1-2%.
-		// Memory medium has an isolated filesystems with accurate size reporting, so Mountpoint
-		// can self-limit without this injection.
-		if volumeCtx[volumecontext.CacheEmptyDirMedium] == string(corev1.StorageMediumDefault) {
-			args.SetIfAbsent(mountpoint.ArgMaxCacheSize, strconv.FormatInt(safeMaxCacheSizeMiB, 10))
-		}
-	}
-
 	klog.V(4).Infof("NodePublishVolume: mounting %s at %s with options %v", bucket, targetContainer, args.SortedList())
 
 	credentialCtx := credentialProvideContextFromPublishRequest(req, args)
@@ -266,12 +220,7 @@ func (ns *S3NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUn
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", targetContainer, err)
 	}
 	if !mounted {
-		// For daemonset mounter, always call Unmount for bookkeeping (MountMap refcount).
-		// For other mounters, skip if not mounted (original behavior).
-		if _, isDaemonset := ns.Mounter.(*mounter.DaemonsetMounter); !isDaemonset {
-			klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, skipping unmount", targetContainer)
-			return &csi.NodeUnpublishVolumeResponse{}, nil
-		}
+		// Call Unmount anyway, for the mounter's bookkeeping (MountMap refcount).
 		klog.V(4).Infof("NodeUnpublishVolume: target path %s not mounted, calling Unmount for bookkeeping", targetContainer)
 	}
 

@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
@@ -32,6 +33,11 @@ const (
 	drainAssertionTimeout = 8 * time.Minute
 	drainAssertionPolling = 15 * time.Second
 )
+
+// mountpointNamespace is where V2 Mountpoint Pods run; the drain-only cleaner only touches pods there.
+const mountpointNamespace = "mount-s3"
+
+var s3paGVR = schema.GroupVersionResource{Group: "s3.csi.aws.com", Version: "v2", Resource: "mountpoints3podattachments"}
 
 type s3CSIDrainOnlyDaemonsetTestSuite struct {
 	tsInfo storageframework.TestSuiteInfo

@@ -77,8 +77,6 @@ const (
 
 var (
 	mountpointPodNamespace = os.Getenv("MOUNTPOINT_NAMESPACE")
-	mounterMode            = os.Getenv("MOUNTER_MODE")
-	mounterModeDaemonset   = "daemonset"
 	podWatcherResyncPeriod = time.Minute
 	scheme                 = runtime.NewScheme()
 )
@@ -98,8 +96,7 @@ type Driver struct {
 
 	Clientset kubernetes.Interface
 
-	// mounterFound, if set, is closed once this node can mount S3 volumes, which the agent-not-ready
-	// taint removal waits for. Unset when the node can mount as soon as the driver serves.
+	// mounterFound is closed once this node can mount S3 volumes, which the agent-not-ready taint removal waits for.
 	mounterFound <-chan struct{}
 
 	// nodeLock is held for the process's lifetime, so no other CSI node works on this node meanwhile. Kept here so it
@@ -163,97 +160,66 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 		klog.Fatalf("%v; exiting so only one CSI node works on this node", err)
 	})
 
-	var nodeServer *node.S3NodeServer
-	var mounterFound <-chan struct{}
+	klog.Info("Note: the mounter DaemonSets use OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
 
-	if mounterMode == mounterModeDaemonset {
-		klog.Info("Using daemonset mounter mode")
-		klog.Info("Note: the mounter DaemonSets use OnDelete update strategy - helm upgrade will not restart/upgrade mounter pods automatically")
-
-		var fallbackVolumeLimit int64
-		if v := os.Getenv(fallbackMaxVolumesPerNodeEnv); v != "" {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || n < 0 {
-				return nil, fmt.Errorf("%s must be a whole number >= 0, got %q", fallbackMaxVolumesPerNodeEnv, v)
-			}
-			fallbackVolumeLimit = n
+	var fallbackVolumeLimit int64
+	if v := os.Getenv(fallbackMaxVolumesPerNodeEnv); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%s must be a whole number >= 0, got %q", fallbackMaxVolumesPerNodeEnv, v)
 		}
+		fallbackVolumeLimit = n
+	}
 
-		dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil, kubernetesVersion, variant)
-		dm.SetFallbackVolumeLimit(fallbackVolumeLimit)
+	dm := mounter.NewDaemonsetMounter(clientset, nodeID, mpmounter.New(), credProvider, nil, nil, nil, kubernetesVersion, variant)
+	dm.SetFallbackVolumeLimit(fallbackVolumeLimit)
 
-		// Rebuild mount map from persisted .meta.json files + kernel mount table.
-		// Fatal on failure: operating with an empty map while FUSE mounts exist
-		// would cause duplicate mounts or incorrect unmounts.
-		if err := dm.RebuildMountMap(); err != nil {
-			klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
-		}
+	// Rebuild mount map from persisted .meta.json files + kernel mount table.
+	// Fatal on failure: operating with an empty map while FUSE mounts exist
+	// would cause duplicate mounts or incorrect unmounts.
+	if err := dm.RebuildMountMap(); err != nil {
+		klog.Fatalf("Failed to rebuild mount map from disk: %v", err)
+	}
 
-		// V2 legacy support: start PodUnmounter to handle source teardown for V2 Mountpoint Pods
-		// when the controller annotates them with needs-unmount. Also set up the S3PA informer
-		// cache used to resolve the committed IAM role ARN during V2 credential refresh.
-		//
-		// It starts before, and whether or not, this node's mounter is found: the V2 volumes on this node
-		// still need unmounting and credential refresh when no mounter runs here, for example because the
-		// node can't fit it.
-		if util.SupportLegacyPodMounts() {
-			klog.Info("V2 legacy pod mount support enabled — starting PodUnmounter and S3PA cache")
-			podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
-			if err := podWatcher.Start(stopCh); err != nil {
-				klog.Fatalf("Failed to start Pod watcher for V2 legacy support: %v", err)
-			}
-			unmounter := mounter.NewPodUnmounter(nodeID, mpmounter.New(), podWatcher, credProvider)
-			podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
-			go unmounter.StartPeriodicCleanup(stopCh)
-
-			// Set up S3PA informer cache for V2 credential refresh (resolves mp pod name + IAM role ARN).
-			s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
-			dm.SetS3PACache(s3paCache)
-		}
-
-		// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
-		ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
-		if err := dm.DiscoverMounter(ctx); err != nil {
-			klog.Warningf("No mounter this node can use yet (%v). Serving the volumes already on this node "+
-				"and failing new S3 mounts until there is one. V3 requires the %s startup taint on nodes, which keeps workloads off "+
-				"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
-		}
-		cancel()
-		go dm.StartCommDirWatch(stopCh)
-		go dm.StartPeriodicCleanup(stopCh)
-
-		nodeServer = node.NewS3NodeServer(nodeID, dm)
-		mounterFound = dm.MounterFound()
-	} else {
-		mpMounter := mpmounter.New()
+	// V2 legacy support: start PodUnmounter to handle source teardown for V2 Mountpoint Pods
+	// when the controller annotates them with needs-unmount. Also set up the S3PA informer
+	// cache used to resolve the committed IAM role ARN during V2 credential refresh.
+	//
+	// It starts before, and whether or not, this node's mounter is found: the V2 volumes on this node
+	// still need unmounting and credential refresh when no mounter runs here, for example because the
+	// node can't fit it.
+	if util.SupportLegacyPodMounts() {
+		klog.Info("V2 legacy pod mount support enabled — starting PodUnmounter and S3PA cache")
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
-		err = podWatcher.Start(stopCh)
-		if err != nil {
-			klog.Fatalf("Failed to start Pod watcher: %v\n", err)
+		if err := podWatcher.Start(stopCh); err != nil {
+			klog.Fatalf("Failed to start Pod watcher for V2 legacy support: %v", err)
 		}
-
-		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
-
-		unmounter := mounter.NewPodUnmounter(nodeID, mpMounter, podWatcher, credProvider)
-
+		unmounter := mounter.NewPodUnmounter(nodeID, mpmounter.New(), podWatcher, credProvider)
 		podWatcher.AddEventHandler(cache.ResourceEventHandlerFuncs{UpdateFunc: unmounter.HandleMountpointPodUpdate})
-
 		go unmounter.StartPeriodicCleanup(stopCh)
 
-		podMounter, err := mounter.NewPodMounter(podWatcher, s3paCache, credProvider, mpMounter, nil, nil,
-			kubernetesVersion, nodeID, variant)
-		if err != nil {
-			klog.Fatalln(err)
-		}
-		nodeServer = node.NewS3NodeServer(nodeID, podMounter)
+		// Set up S3PA informer cache for V2 credential refresh (resolves mp pod name + IAM role ARN).
+		s3paCache := setupS3PodAttachmentCache(config, stopCh, nodeID, kubernetesVersion)
+		dm.SetS3PACache(s3paCache)
 	}
+
+	// Without a mounter this node pod still serves the volumes already on its node, so it keeps looking in the background.
+	ctx, cancel := context.WithTimeout(context.Background(), mounterWaitBeforeServing)
+	if err := dm.DiscoverMounter(ctx); err != nil {
+		klog.Warningf("No mounter this node can use yet (%v). Serving the volumes already on this node "+
+			"and failing new S3 mounts until there is one. V3 requires the %s startup taint on nodes, which keeps workloads off "+
+			"a new node until its mounter runs", err, node.AgentNotReadyNodeTaintKey)
+	}
+	cancel()
+	go dm.StartCommDirWatch(stopCh)
+	go dm.StartPeriodicCleanup(stopCh)
 
 	return &Driver{
 		Endpoint:     endpoint,
 		NodeID:       nodeID,
-		NodeServer:   nodeServer,
+		NodeServer:   node.NewS3NodeServer(nodeID, dm),
 		Clientset:    clientset,
-		mounterFound: mounterFound,
+		mounterFound: dm.MounterFound(),
 		nodeLock:     lock,
 		stopCh:       stopCh,
 	}, nil
@@ -312,16 +278,13 @@ func (d *Driver) Run() error {
 	return d.Srv.Serve(listener)
 }
 
-// startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node
-// can mount S3 volumes: right away, or in daemonset mode once its mounter is first found, so a node that
-// the taint keeps workloads off stays that way while its mounter isn't running.
+// startTaintWatcherOnceMounting starts the watcher that removes the agent-not-ready taint once this node's mounter
+// is first found, so a node that the taint keeps workloads off stays that way while its mounter isn't running.
 func (d *Driver) startTaintWatcherOnceMounting(stopCh <-chan struct{}) {
-	if d.mounterFound != nil {
-		select {
-		case <-d.mounterFound:
-		case <-stopCh:
-			return
-		}
+	select {
+	case <-d.mounterFound:
+	case <-stopCh:
+		return
 	}
 	node.StartNotReadyTaintWatcher(d.Clientset, d.NodeID, node.TaintWatcherDuration)
 }

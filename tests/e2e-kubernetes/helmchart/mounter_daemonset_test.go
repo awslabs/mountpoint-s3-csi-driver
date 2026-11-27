@@ -156,13 +156,13 @@ func TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache(t *testing.T) {
 // renderMounterDaemonSet renders the chart with values, a values file's YAML, and returns the mounter DaemonSet's manifest.
 func renderMounterDaemonSet(t *testing.T, values string) (string, error) {
 	t.Helper()
-	manifests, err := renderChart(t, values, daemonsetMode)
+	manifests, err := renderChart(t, values)
 	return manifests[templatePath("mounter-daemonset.yaml")], err
 }
 
 // The capabilities the mounter adds back are checked by TestMounterDaemonSetGrantsCacheCapabilitiesOnlyWithACache.
 func TestMounterIsUnprivilegedAndCannotEscalate(t *testing.T) {
-	for name, values := range daemonsetModeValues {
+	for name, values := range cacheValues {
 		t.Run(name, func(t *testing.T) {
 			mounter := findWorkload(t, renderWorkloads(t, values), "DaemonSet", mounterDaemonSet)
 

@@ -1,4 +1,3 @@
-{{- if eq .Values.experimental.mounterMode "daemonset" }}
 {{- range $pair := (include "aws-mountpoint-s3-csi-driver.daemonsetPairs" . | fromJson).pairs }}
 {{- $mounter := $pair.mounter }}
 {{- $node := $pair.node }}
@@ -274,6 +273,5 @@ spec:
                   storage: {{ $cacheEphemeral.resourceRequests }}
         {{- end }}
       {{- end }}
-{{- end }}
 {{- end }}
 {{- end }}

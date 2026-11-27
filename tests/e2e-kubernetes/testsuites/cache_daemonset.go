@@ -13,13 +13,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
 	admissionapi "k8s.io/pod-security-admission/api"
+	"k8s.io/utils/ptr"
 
 	"github.com/awslabs/mountpoint-s3-csi-driver/tests/e2e-kubernetes/s3client"
 )
@@ -551,6 +555,56 @@ func waitAndAssertCacheDirReclaimed(ctx context.Context, f *framework.Framework,
 	GinkgoHelper()
 	Eventually(ctx, func(ctx context.Context) (bool, error) { return cacheDirExists(ctx, f, m) }).
 		WithTimeout(time.Minute).WithPolling(2*time.Second).Should(BeFalse(), "%s outlived its Mountpoint", m.cacheDir)
+}
+
+// deleteObjectFromS3 deletes an object from given bucket by using S3 SDK.
+// This is useful to create some side-effects by bypassing Mountpoint.
+func deleteObjectFromS3(ctx context.Context, bucket string, key string) {
+	client := s3.NewFromConfig(awsConfig(ctx))
+	_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	framework.ExpectNoError(err)
+}
+
+// createEBSCacheSC creates a StorageClass to provision an EBS volume as local-cache.
+// It automatically cleans up SC after the test-case.
+func createEBSCacheSC(ctx context.Context, f *framework.Framework, scName string) string {
+	sc := &storagev1.StorageClass{
+		Name:              scName,
+		Provisioner:       "ebs.csi.aws.com",
+		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
+		ReclaimPolicy:     ptr.To(v1.PersistentVolumeReclaimDelete),
+		Parameters: map[string]string{
+			"encrypted": "true",
+		},
+	}
+
+	framework.Logf("Creating StorageClass %s with EBS CSI Driver provisioner", scName)
+	// A fixed name can meet one leaked by an interrupted run.
+	_, err := f.ClientSet.StorageV1().StorageClasses().Create(ctx, sc, metav1.CreateOptions{})
+	if !apierrors.IsAlreadyExists(err) {
+		framework.ExpectNoError(err, "Failed to create StorageClass for cache")
+	}
+
+	DeferCleanup(func(ctx context.Context) {
+		framework.Logf("Deleting StorageClass %s", scName)
+		err := f.ClientSet.StorageV1().StorageClasses().Delete(ctx, scName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "Failed to delete StorageClass for cache")
+	})
+
+	return scName
+}
+
+// ebsCSIDriverDaemonSet returns the DaemonSet of EBS CSI Driver if its installed in the cluster.
+func ebsCSIDriverDaemonSet(ctx context.Context, f *framework.Framework) *appsv1.DaemonSet {
+	client := f.ClientSet.AppsV1().DaemonSets(csiDriverDaemonSetNamespace)
+	ds, err := client.Get(ctx, "ebs-csi-node", metav1.GetOptions{})
+	if err != nil {
+		return nil
+	}
+	return ds
 }
 
 // Could add later:

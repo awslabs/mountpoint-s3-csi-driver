@@ -28,25 +28,18 @@ type renderedWorkload struct {
 }
 
 // renderChart renders the whole chart with values, a values file's YAML, and returns its manifests by template
-// path. overrides are set on top of values. The chart refuses to render from a source checkout without
-// unsupportedDevInstall, so that is always set.
-func renderChart(t *testing.T, values string, overrides map[string]any) (map[string]string, error) {
+// path. The chart refuses to render from a source checkout without unsupportedDevInstall, so that is always set.
+func renderChart(t *testing.T, values string) (map[string]string, error) {
 	t.Helper()
 	ch, err := loader.Load("../../../charts/aws-mountpoint-s3-csi-driver")
 	assert.NoError(t, err)
 	userValues, err := chartutil.ReadValues([]byte(values))
 	assert.NoError(t, err)
-	for key, value := range overrides {
-		userValues[key] = value
-	}
 	userValues["unsupportedDevInstall"] = true
 	renderValues, err := chartutil.ToRenderValues(ch, userValues, chartutil.ReleaseOptions{Name: "s3-csi", Namespace: "kube-system"}, chartutil.DefaultCapabilities)
 	assert.NoError(t, err)
 	return engine.Render(ch, renderValues)
 }
-
-// daemonsetMode renders the daemonset architecture; it is the only mode the mounter renders in.
-var daemonsetMode = map[string]any{"experimental": map[string]any{"mounterMode": "daemonset"}}
 
 // templatePath is the key renderChart returns a template's manifest under.
 func templatePath(file string) string {
@@ -57,7 +50,7 @@ func templatePath(file string) string {
 // Deployment in it.
 func renderWorkloads(t *testing.T, values string) []renderedWorkload {
 	t.Helper()
-	manifests, err := renderChart(t, values, nil)
+	manifests, err := renderChart(t, values)
 	assert.NoError(t, err)
 
 	var workloads []renderedWorkload
@@ -106,19 +99,17 @@ func findWorkload(t *testing.T, workloads []renderedWorkload, kind, name string)
 	return renderedWorkload{}
 }
 
-// Values rendering the daemonset architecture, without and with a cache volume.
-var daemonsetModeValues = map[string]string{
-	"in daemonset mode without a cache": `
-experimental: {mounterMode: daemonset}
+// Values rendering the mounter without and with a cache volume.
+var cacheValues = map[string]string{
+	"without a cache": `
 mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none}`,
-	"in daemonset mode with a cache": `
-experimental: {mounterMode: daemonset}
+	"with a cache": `
 mounter: {maxVolumesPerNode: 4, memoryLimitStrategy: none, cache: {emptyDir: {sizeLimit: 2Gi}, limitStrategy: equalSplit}}`,
 }
 
 func TestOnlyTheNodePluginIsPrivileged(t *testing.T) {
 	cases := map[string]string{"with the default values": ``}
-	for name, values := range daemonsetModeValues {
+	for name, values := range cacheValues {
 		cases[name] = values
 	}
 	for name, values := range cases {
@@ -142,12 +133,12 @@ func TestImagesComeFromTheConfiguredRegistry(t *testing.T) {
 	}{
 		{
 			name:       "public ECR by default",
-			values:     daemonsetModeValues["in daemonset mode with a cache"],
+			values:     cacheValues["with a cache"],
 			wantPrefix: "public.ecr.aws/",
 		},
 		{
 			name: "the regional EKS registry for the EKS add-on",
-			values: daemonsetModeValues["in daemonset mode with a cache"] + `
+			values: cacheValues["with a cache"] + `
 isEKSAddon: true
 image: {containerRegistry: 602401143452.dkr.ecr.us-west-2.amazonaws.com}
 sidecars:
