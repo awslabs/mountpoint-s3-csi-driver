@@ -31,7 +31,22 @@ jobs:
       # Failing fast causes some resources created during the test to leak,
       # so we disable it to ensure all resources created during test are properly cleaned up.
       fail-fast: false
-      matrix: ${{ fromJson(needs.build_matrix.outputs.delete_matrix) }}
+      # One-off: delete only the x86 UbuntuPro2604 1.36 and x86 AL2023 1.34 clusters
+      # (s3-csi-cluster-eksctl-ubuntupro2604-x86-1-36, s3-csi-cluster-eksctl-amazonlinux2023-x86-1-34).
+      matrix:
+        include:
+          - cluster-type: "eksctl"
+            cluster-profile: ""
+            arch: "x86"
+            family: "UbuntuPro2604"
+            kubernetes-version: "1.36.1"
+            selinux-mode: ""
+          - cluster-type: "eksctl"
+            cluster-profile: ""
+            arch: "x86"
+            family: "AmazonLinux2023"
+            kubernetes-version: "1.34.1"
+            selinux-mode: "enforcing"
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
