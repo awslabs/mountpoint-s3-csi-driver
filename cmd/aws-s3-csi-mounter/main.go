@@ -78,6 +78,7 @@ func recvMountOptions() (mountoptions.Options, error) {
 		return mountoptions.Options{}, err
 	}
 	klog.Infof("Mount options has been received from %s", mountSockPath)
+	klog.Infof("Mount options: %#v", options)
 	return options, nil
 }
 

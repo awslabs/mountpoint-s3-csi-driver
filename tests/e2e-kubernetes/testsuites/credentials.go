@@ -145,6 +145,7 @@ func (t *s3CSICredentialsTestSuite) DefineTests(driver storageframework.TestDriv
 	// are not tested on OpenShift because they are not supported.
 
 	f := framework.NewFrameworkWithCustomTimeouts(NamespacePrefix+"credentials", storageframework.GetDriverTimeouts(driver))
+	dumpMountpointAndDriverInfoOnFailure(f)
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
 	type local struct {
