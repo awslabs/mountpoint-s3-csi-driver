@@ -171,7 +171,6 @@ experimental:
   headroomPodImage: public.ecr.aws/eks-distro/kubernetes/pause:3.10
   headroomPodLabels: {}
 
-# WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
 # The default mounter DaemonSet, s3-csi-mounter, which runs every Mountpoint process on the nodes the
 # default CSI node (node above) runs on.
 mounter:

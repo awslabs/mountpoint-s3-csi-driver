@@ -494,7 +494,7 @@ func TestNodePublishVolume(t *testing.T) {
 	}
 }
 
-func TestNodePublishVolumeForPodMounter(t *testing.T) {
+func TestNodePublishVolumeFsGroup(t *testing.T) {
 	var (
 		volumeId   = "test-volume-id"
 		bucketName = "test-bucket-name"
@@ -954,7 +954,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilitiesForPodMounter(t *testing.T) {
+func TestNodeGetCapabilities(t *testing.T) {
 	nodeTestEnv := initNodeServerTestEnv(t)
 	ctx := context.Background()
 	req := &csi.NodeGetCapabilitiesRequest{}
