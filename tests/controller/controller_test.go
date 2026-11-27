@@ -795,6 +795,69 @@ var _ = Describe("Mountpoint Controller", func() {
 						Expect(mpPod1.Name).NotTo(Equal(mpPod3.Name))
 					})
 				})
+
+				Context("Failed Mountpoint Pods", func() {
+					It("should move pending workloads to a new Mountpoint Pod and delete the failed one", func() {
+						vol := createVolume()
+						vol.bind()
+
+						pod1 := createPod(withPVC(vol.pvc))
+						pod2 := createPod(withPVC(vol.pvc))
+						pod1.schedule(testNode)
+						pod2.schedule(testNode)
+
+						expectedFields := defaultExpectedFields(testNode, vol.pv)
+						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+						mpPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol, mountpointPriorityClassName)
+						mpPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol, mountpointPriorityClassName)
+						Expect(mpPod1.Name).To(Equal(mpPod2.Name))
+
+						// Kubelet evicts the Mountpoint Pod while both workloads are still waiting for their volume
+						mpPod1.fail()
+
+						// Both workloads end up on the same new Mountpoint Pod
+						s3pa = waitForS3PodAttachmentWithFields(expectedFields, s3pa.ResourceVersion, func(g Gomega, s3pa *crdv2.MountpointS3PodAttachment) {
+							g.Expect(s3pa.Spec.MountpointS3PodAttachments).NotTo(HaveKey(mpPod1.Name))
+							g.Expect(findMountpointPodNameForWorkload(s3pa, string(pod1.UID))).ToNot(BeEmpty())
+							g.Expect(findMountpointPodNameForWorkload(s3pa, string(pod2.UID))).ToNot(BeEmpty())
+						})
+						Expect(len(s3pa.Spec.MountpointS3PodAttachments)).To(Equal(1))
+						newMPPod1 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod1, vol, mountpointPriorityClassName)
+						newMPPod2 := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod2, vol, mountpointPriorityClassName)
+						Expect(newMPPod1.Name).To(Equal(newMPPod2.Name))
+						Expect(newMPPod1.Name).NotTo(Equal(mpPod1.Name))
+
+						// Failed Pod is cleaned up once nothing references it
+						waitForObjectToDisappear(mpPod1.Pod)
+					})
+
+					It("should not replace the Mountpoint Pod of a running workload and delete the failed one once the workload terminates", func() {
+						vol := createVolume()
+						vol.bind()
+
+						pod := createPod(withPVC(vol.pvc))
+						pod.runOn(testNode)
+
+						expectedFields := defaultExpectedFields(testNode, vol.pv)
+						s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+						mpPod := waitAndVerifyMountpointPodFromPodAttachment(s3pa, pod, vol, mountpointPriorityClassName)
+
+						mpPod.fail()
+
+						// The workload stays attached to the failed Pod, no new Mountpoint Pod is spawned
+						Consistently(func(g Gomega) {
+							s3pa := waitForS3PodAttachmentWithFields(expectedFields, "")
+							g.Expect(s3pa.Spec.MountpointS3PodAttachments).To(HaveLen(1))
+							g.Expect(s3pa.Spec.MountpointS3PodAttachments).To(HaveKey(mpPod.Name))
+						}, "2s").Should(Succeed())
+						waitForObject(mpPod.Pod)
+
+						// Once the workload is done, nothing needs the failed Pod anymore
+						pod.succeed()
+
+						waitForObjectToDisappear(mpPod.Pod)
+					})
+				})
 			})
 
 			Context("Different Node", func() {

@@ -159,6 +159,15 @@ This error occurs when workload pods are terminated before the Mountpoint pod th
 
 **Recommendation:** Keep workload pod termination grace periods sufficiently low to ensure graceful shutdown completes within the Mountpoint pod's 10-minute window and the grace period specified in the `drain` operation (e.g. via Karpenter NodePool [settings](https://karpenter.sh/docs/concepts/nodepools/#spectemplatespecterminationgraceperiod)).
 
+## My Mountpoint pod was evicted (`Failed` status) and my workload pod cannot access its S3 volume
+
+A Mountpoint pod can end up in `Failed` status, for example when kubelet evicts it because the node is under `DiskPressure` or `MemoryPressure`. A failed pod never comes back, so the controller handles it as follows:
+
+- **Workload pods still in `ContainerCreating`:** the controller attaches them to another Mountpoint pod, or spawns a new one, and deletes the failed pod. kubelet's next retry of the mount then succeeds. Pods may stay in `ContainerCreating` until that retry happens, as kubelet backs off between retries.
+- **Workload pods that are already `Running`:** their mount is broken (accessing it fails with "Transport endpoint is not connected") and kubelet does not mount the volume again for a running pod, so **restart those workload pods**. The failed Mountpoint pod is deleted after they terminate.
+
+If a node keeps failing Mountpoint pods, the controller waits longer before each new replacement for the same workload (10 seconds, doubling up to 5 minutes), so fix the cause on the node (for example, free up disk space). To reduce evictions caused by the cache, see [`cacheEmptyDirSizeLimit`](./CACHING.md).
+
 ## My node drain fails with "cannot delete Pods that declare no controller"
 
 `kubectl drain` refuses to evict the Mountpoint pods, failing with:
