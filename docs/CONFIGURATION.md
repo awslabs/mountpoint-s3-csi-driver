@@ -515,8 +515,8 @@ The driver is configured at install time through Helm values. The chart's [value
 
 ### Driver node Pods (`node`)
 
-- `node.nodeSelector`: the labels a node needs to run the driver and its mounter.
-- `node.affinity`: node affinity for the driver and its mounter. The default skips Fargate, hybrid nodes and EKS Auto Mode's built-in `system` NodePool.
+- `node.nodeSelector`: the labels a node needs to run the default pair, `s3-csi-node` and `s3-csi-mounter`. [Mixed fleet](#mixed-fleet) entries set their own.
+- `node.affinity`: node affinity for the default pair. The default skips Fargate, hybrid nodes and EKS Auto Mode's built-in `system` NodePool. [Mixed fleet](#mixed-fleet) entries set their own.
 - `node.tolerations`, `node.tolerateAllTaints` and `node.defaultTolerations`: the taints the node pod and its mounter pod tolerate. See [Configure driver toleration settings](#configure-driver-toleration-settings).
 - `node.podLabels`: extra labels on the `s3-csi-node` Pods.
 - `node.podAnnotations`: extra annotations on the `s3-csi-node` Pods.
@@ -546,13 +546,18 @@ The field relies on the `VolumeLimitScaling` feature gate, which is enabled by d
 
 If you use Cluster Autoscaler, only enable this when Cluster Autoscaler runs with `--enable-csi-node-aware-scheduling=true`, the default from Cluster Autoscaler 1.37. Node groups that scale from zero also need the `k8s.io/cluster-autoscaler/node-template/csi-driver` tag on the Auto Scaling group or EKS managed node group, with `s3.csi.aws.com` in its comma-separated value. Without the tag, Cluster Autoscaler doesn't scale those node groups up for Pods that use S3 volumes. See the [Cluster Autoscaler AWS documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md) for details. Karpenter doesn't use the field, so it needs no extra configuration.
 
-### Mounter Pods (`daemonsetMounters`)
-<!-- TODO update name from daemonsetMounters, ref PR 1060. -->
+### Mounter Pods (`mounter`)
 
-- Memory for the mounter: see [MEMORY.md](MEMORY.md).
-- An optional local cache: see [CACHING.md](CACHING.md).
+- `mounter.maxVolumesPerNode`: how many distinct S3 volumes one node can mount. See [Limit S3 volumes per node](#limit-s3-volumes-per-node-maxvolumespernode).
+- `mounter.memoryLimitStrategy` and `mounter.resources`: memory for the mounter. See [MEMORY.md](MEMORY.md).
+- `mounter.cache`: an optional local cache. See [CACHING.md](CACHING.md).
+  <!-- TODO: CACHING.md covers mounter.cache once #1041 merges. -->
+- `mounter.podLabels` and `mounter.podAnnotations`: extra labels and annotations on the `s3-csi-mounter` Pods.
+- `mounter.imagePullSecrets`: pull secrets for the mounter image. The top-level `imagePullSecrets` doesn't apply to the mounter.
 
-<!-- TODO: MOUNTER_CONFIG.md (or similar) replaces MEMORY.md, with maxVolumesPerNode, memory and CPU, and "Updating configurations" (mounter changes need cordon, drain, delete, uncordon). -->
+The mounter uses the `OnDelete` update strategy, so a changed mounter setting reaches a node only when its mounter Pod is replaced. See [Updating the configuration](MIXED_FLEET_CONFIG.md#updating-the-configuration).
+
+<!-- TODO: MOUNTER_CONFIG.md (or similar) replaces MEMORY.md, with maxVolumesPerNode, memory and CPU. -->
 
 #### Limit S3 volumes per node (`maxVolumesPerNode`)
 
@@ -567,12 +572,14 @@ If you are using autoscalers or are creating new nodes, use the [node startup ta
 
 ### Other values
 
+- `podAnnotations`: annotations on every driver Pod. A Pod's own `podAnnotations` (`node`, `mounter`, `controller`) win on the same key.
+- `imagePullSecrets`: pull secrets for the `s3-csi-node` and controller Pods.
+
 For the controller (`controller`) and the other values, see the comments in [values.yaml](../charts/aws-mountpoint-s3-csi-driver/values.yaml).
 
 ### Mixed fleet
 
-To give different nodes different settings, see [MIXED_FLEET_CONFIG.md](MIXED_FLEET_CONFIG.md).
-<!-- TODO: write MIXED_FLEET_CONFIG.md (or ADDITIONAL_DAEMONSET.md); this link 404s until then. Today the example at the end of values.yaml shows extra `daemonsetMounters` entries. -->
+To give different nodes different mounter settings, add `additionalDaemonSets` entries. See [MIXED_FLEET_CONFIG.md](MIXED_FLEET_CONFIG.md).
 
 ## Configuring PVs
 

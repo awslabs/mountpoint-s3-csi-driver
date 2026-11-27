@@ -192,7 +192,7 @@ I1216 20:28:55.343278       1 cluster.go:169] Node ip-10-112-14-230.ec2.internal
 
 ## V3 (daemonset mounter mode)
 
-A pair is one CSI node and one mounter DaemonSet, which run on the same nodes: `s3-csi-node` and `s3-csi-mounter` from the top-level `node` and `mounter` values, and `s3-csi-node-<name>` and `s3-csi-mounter-<name>` for each `additionalDaemonSets` entry.
+A pair is one CSI node and one mounter DaemonSet, which run on the same nodes: `s3-csi-node` and `s3-csi-mounter` from the top-level `node` and `mounter` values, and `s3-csi-node-<name>` and `s3-csi-mounter-<name>` for each `additionalDaemonSets` entry. See [MIXED_FLEET_CONFIG.md](MIXED_FLEET_CONFIG.md).
 
 ### My node runs more than one `s3-csi-node` Pod
 
@@ -200,19 +200,20 @@ The node matches more than one pair: two or more `additionalDaemonSets` entries,
 
 To recover:
 
-1. Find the mounter that serves each affected node's mounts, which the working `s3-csi-node` Pod names, and the pair it belongs to:
+1. Find the mounter that serves each affected node's mounts, and the pair it belongs to. The working `s3-csi-node` Pod is the one that logs `multiple running mounter pods found`; the others log `node.lock`. It names the mounter after `keep using` (or `Using`):
    ```bash
    $ kubectl get pods -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
    $ kubectl logs -n kube-system <s3-csi-node-pod-name> -c s3-plugin | grep "multiple running mounter pods found" | tail -1
    $ kubectl get pod -n kube-system <mounter-pod-name> -o jsonpath='{.metadata.ownerReferences[0].name}'
    ```
-   The last command prints `s3-csi-mounter` for the default pair, or `s3-csi-mounter-<name>` for the `additionalDaemonSets` entry `<name>`. Keep that pair. It may not be the pair of the working `s3-csi-node` Pod; removing that Pod's pair from the node is safe, since the mounts are held by the mounter and the kept pair's `s3-csi-node` Pod takes over when it exits. If no mounter serves the node's mounts, keep any one pair.
+   The last command prints `s3-csi-mounter` for the default pair, or `s3-csi-mounter-<name>` for the `additionalDaemonSets` entry `<name>`. Keep that pair. It may not be the pair of the working `s3-csi-node` Pod; removing that Pod's pair from the node is safe, since the mounts are held by the mounter and the kept pair's `s3-csi-node` Pod takes over when it exits. If no mounter serves the node's mounts, keep any one pair. To keep a different pair, cordon and drain the node first; its mounter then serves no mounts, so you can keep any pair.
 
    Change the other pairs' placement (`node.nodeSelector` or `node.affinity`, top-level or `additionalDaemonSets.<name>.node`) so only the kept pair matches these nodes. Their mounters have no mounts there, so you don't need to drain these nodes. A placement change also deletes a pair's mounter on every other node it stops matching, as removing an entry does on all of its nodes, so cordon and drain those nodes first.
-2. Run `helm upgrade`, then uncordon any nodes you drained, and check the driver is registered again:
+2. Apply the change (`helm upgrade`, or update the EKS add-on's configuration values), then uncordon any nodes you drained, and check the driver is registered again:
    ```bash
    $ kubectl get csinode <node-name> -o jsonpath='{.spec.drivers[*].name}'
    ```
+   <!-- TODO: the EKS add-on path is true once the add-on's configuration schema accepts additionalDaemonSets, which is being added in parallel. -->
 
 ### My Pod is stuck at `ContainerCreating` with error "no usable mounter on node"
 
@@ -233,6 +234,20 @@ Until a mounter runs, the node's volume limit is its pair's `mounter.maxVolumesP
 ```bash
 $ kubectl delete pod -n kube-system -l app=s3-csi-node --field-selector spec.nodeName=<node-name>
 ```
+
+### My Pod fails to mount with "has no cache volume"
+
+The PV requests a local cache (`cache: enabled` in its `volumeAttributes`), but the node's mounter Pod (`s3-csi-mounter`, or `s3-csi-mounter-<name>` for an `additionalDaemonSets` entry) has no cache volume. If the Pod should run on nodes whose pair has a cache, give it a `nodeSelector` or node affinity for them instead. To give this node's mounter a cache:
+
+1. Add `mounter.cache`, or `additionalDaemonSets.<name>.mounter.cache` for the entry whose nodes need it, to the driver's values, and apply the change (`helm upgrade`, or update the EKS add-on's configuration values). See [CACHING.md](CACHING.md).
+   <!-- TODO: CACHING.md covers mounter.cache once #1041 merges; the EKS add-on path is true once its schema accepts additionalDaemonSets. -->
+2. The mounter uses the `OnDelete` update strategy, so replace the mounter Pod on each node that needs the cache. Replacing it breaks every S3 mount on the node, so drain the node first:
+   ```bash
+   $ kubectl cordon <node-name>
+   $ kubectl drain <node-name> --ignore-daemonsets
+   $ kubectl delete pod -n kube-system -l app=s3-csi-mounter --field-selector spec.nodeName=<node-name>
+   $ kubectl uncordon <node-name>
+   ```
 
 ### My `s3-csi-node` Pod logs "another CSI node on this node holds ... node.lock"
 
