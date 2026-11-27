@@ -51,13 +51,14 @@ func TestAdditionalDaemonSetsRejectInvalidValues(t *testing.T) {
 }
 
 func TestAdditionalDaemonSetsPlacementAndOverrides(t *testing.T) {
-	daemonSets, err := renderDaemonSets(t, `node: {nodeSelector: {team: data}, logLevel: 5, podAnnotations: {a: node}}
+	daemonSets, err := renderDaemonSets(t, `imagePullSecrets: [regcred]
+node: {nodeSelector: {team: data}, logLevel: 5, podAnnotations: {a: node}}
 mounter: {maxVolumesPerNode: 6, resources: {requests: {memory: 6Gi}}, podAnnotations: {a: mounter}, logLevel: 6}
 additionalDaemonSets:
   bigmem:
     node: {nodeSelector: {pool: bigmem}, podLabels: {cost: ml}, podAnnotations: {b: bigmem}, logLevel: 7, tolerateAllTaints: false, tolerations: [{key: gpu, operator: Exists}],
       kubeletPath: /var/lib/k0s/kubelet, resources: {requests: {cpu: "1"}}}
-    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}, podLabels: {x: bigmem}, imagePullSecrets: [bigmem], logLevel: 2}
+    mounter: {maxVolumesPerNode: 32, resources: {requests: {memory: 32Gi}}, podAnnotations: {a: bigmem}, podLabels: {x: bigmem}, logLevel: 2}
   cached:
     node: {affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [{matchExpressions: [{key: mem, operator: Gt, values: ["65535"]}]}]}}}}`)
 	assert.NoError(t, err)
@@ -88,7 +89,10 @@ additionalDaemonSets:
 	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-mounter-cached"].Spec.Template.Spec.Containers[0].Args, "--v=6"))
 	assert.Equals(t, true, slices.Contains(daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.Containers[0].Args, "--v=2"))
 	assert.Equals(t, "bigmem", daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Labels["x"])
-	assert.Equals(t, []corev1.LocalObjectReference{{Name: "bigmem"}}, daemonSets["s3-csi-mounter-bigmem"].Spec.Template.Spec.ImagePullSecrets)
+	// The top-level imagePullSecrets goes on every pod, entries included.
+	for _, ds := range daemonSets {
+		assert.Equals(t, []corev1.LocalObjectReference{{Name: "regcred"}}, ds.Spec.Template.Spec.ImagePullSecrets)
+	}
 	// Both bigmem pods get its gpu toleration, and not the tolerate-all one, since it sets tolerateAllTaints: false.
 	for _, name := range []string{"s3-csi-node-bigmem", "s3-csi-mounter-bigmem"} {
 		tolerations := daemonSets[name].Spec.Template.Spec.Tolerations
