@@ -13,6 +13,7 @@
   * Fix a deadlock that could make the file system hang when the kernel forgets a file or directory while another file in the same directory is renamed, or while the directory is opened for listing with files still being written in it. ([#1995](https://github.com/awslabs/mountpoint-s3/pull/1995))
   * Make `incremental-upload` consistently check for concurrent writes when appending (i.e. without `O_TRUNC`), even at offset 0. Previously, appending to an existing empty object could silently overwrite another writer's changes instead of failing with `EIO`. ([#1970](https://github.com/awslabs/mountpoint-s3/pull/1970))
 * Ignore `aws-max-attempts` mount option values that are not positive integers, and log a warning. Mountpoint fails to start with them since v1.25.0; with the value ignored, it uses its default number of attempts, as before. ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
+* Add a tag-based IAM policy for EKS Pod Identity that limits the driver to S3 buckets tagged for its own EKS cluster, recommended as the default. Policies that name specific buckets, for example buckets shared between clusters, can be added alongside it. See [Cluster tag isolation](docs/CLUSTER_TAG_ISOLATION.md).
 
 # v2.9.2
 
