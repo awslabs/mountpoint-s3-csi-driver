@@ -35,6 +35,7 @@ var mountpointHeadroomPriorityClassName = flag.String("mountpoint-headroom-prior
 var mountpointImage = flag.String("mountpoint-image", os.Getenv("MOUNTPOINT_IMAGE"), "Image of Mountpoint to use in spawned Mountpoint Pods.")
 var headroomImage = flag.String("headroom-image", os.Getenv("MOUNTPOINT_HEADROOM_IMAGE"), "Image of a pause container to use in spawned Headroom Pods.")
 var mountpointImagePullPolicy = flag.String("mountpoint-image-pull-policy", os.Getenv("MOUNTPOINT_IMAGE_PULL_POLICY"), "Pull policy of Mountpoint images.")
+var mountpointImagePullSecrets = flag.String("mountpoint-image-pull-secrets", os.Getenv("MOUNTPOINT_IMAGE_PULL_SECRETS"), "Image pull Secret names for spawned Mountpoint and Headroom Pods (JSON format).")
 var mountpointContainerCommand = flag.String("mountpoint-container-command", "/bin/aws-s3-csi-mounter", "Entrypoint command of the Mountpoint Pods.")
 var mountpointPodLabels = flag.String("mountpoint-pod-labels", os.Getenv("MOUNTPOINT_POD_LABELS"), "Pod labels to apply to Mountpoint Pods (JSON format).")
 var mountpointHeadroomPodLabels = flag.String("mountpoint-headroom-pod-labels", os.Getenv("MOUNTPOINT_HEADROOM_POD_LABELS"), "Pod labels to apply to Headroom Pods (JSON format).")
@@ -72,6 +73,7 @@ func main() {
 
 	podLabels := util.ParseLabels(*mountpointPodLabels, log)
 	headroomPodLabels := util.ParseLabels(*mountpointHeadroomPodLabels, log)
+	imagePullSecrets := util.ParseImagePullSecrets(*mountpointImagePullSecrets, log)
 
 	reconciler := csicontroller.NewReconciler(mgr.GetClient(), mppod.Config{
 		Namespace:                   *mountpointNamespace,
@@ -89,6 +91,7 @@ func main() {
 		ClusterVariant:    cluster.DetectVariant(conf, log),
 		PodLabels:         podLabels,
 		HeadroomPodLabels: headroomPodLabels,
+		ImagePullSecrets:  imagePullSecrets,
 	}, log)
 
 	if err := reconciler.SetupWithManager(mgr); err != nil {

@@ -48,6 +48,7 @@ func (c *Creator) HeadroomPod(workloadPod *corev1.Pod, pv *corev1.PersistentVolu
 		Namespace: c.config.Namespace,
 		Labels:    labels,
 		Spec: corev1.PodSpec{
+			ImagePullSecrets: slices.Clone(c.config.ImagePullSecrets),
 			NodeSelector: map[string]string{
 				corev1.LabelOSStable: "linux",
 			},
