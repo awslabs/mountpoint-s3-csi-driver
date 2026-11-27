@@ -469,6 +469,8 @@ There are potential race conditions on node startup (especially when a node is f
 
 This feature is activated by default, and cluster administrators should use the taint `s3.csi.aws.com/agent-not-ready:NoExecute` (any effect will work, but `NoExecute` is recommended). For example, EKS Managed Node Groups [support automatically tainting nodes](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html).
 
+A ValidatingAdmissionPolicy, `s3-csi-driver-node`, limits the CSI driver's service account to removing the `s3.csi.aws.com/agent-not-ready` taint from the Node its pod runs on. Set `node.validatingAdmissionPolicy.enabled=false` to not install it.
+
 ## Prevent scheduling on nodes without the driver
 On Kubernetes 1.37 and later, the Kubernetes scheduler can keep Pods that use S3 volumes off nodes where the Mountpoint CSI Driver isn't registered, such as nodes that `node.affinity` or `node.nodeSelector` exclude. Otherwise, these Pods can be scheduled on such nodes and get stuck in `ContainerCreating`. To enable it, set `node.preventPodSchedulingIfMissing` to `true`.
 
