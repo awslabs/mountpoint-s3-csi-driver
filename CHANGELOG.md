@@ -1,10 +1,12 @@
-# Unreleased
+# v2.10.0
+
+[Documentation](https://github.com/awslabs/mountpoint-s3-csi-driver/blob/v2.10.0/README.md)
 
 ### Notable changes
-* Add support for Kubernetes 1.37.
-* Add support for Ubuntu 26.04 on Kubernetes 1.35+.
-* Drop support for Kubernetes 1.31.
-* Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver doesn't run. It doesn't replace the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details.
+* Add support for Kubernetes 1.37. ([#981](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/981))
+* Add support for Ubuntu 26.04 on Kubernetes 1.35+. ([#980](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/980))
+* Drop support for Kubernetes 1.31. ([#1097](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1097), [#1098](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1098))
+* Add opt-in `node.preventPodSchedulingIfMissing` Helm value. On Kubernetes 1.37 and later, it keeps Pods that use S3 volumes off nodes where the CSI Driver doesn't run. It doesn't replace the node startup taint. If you use Cluster Autoscaler, check its requirements first. See the [configuration guide](./docs/CONFIGURATION.md#prevent-scheduling-on-nodes-without-the-driver) for more details. ([#1000](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1000))
 * Support Mountpoint [version 1.25.0](https://github.com/awslabs/mountpoint-s3/releases/tag/mountpoint-s3-1.25.0) ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
   * **Breaking**: Mountpoint now fails to start when `AWS_MAX_ATTEMPTS`, set with the `aws-max-attempts` mount option, is not a positive integer. Previously `0` selected 4 attempts and other invalid values were silently ignored. `aws-max-attempts 1` no longer retries failed S3 requests, and values above 64 no longer prevent Mountpoint from starting. ([#1996](https://github.com/awslabs/mountpoint-s3/pull/1996), [#2010](https://github.com/awslabs/mountpoint-s3/pull/2010))
   * Mountpoint now detects the EC2 instance type from the instance's DMI tables before querying IMDS. Where IMDS is not reachable from the Mountpoint Pods (for example, with an IMDS hop limit of 1), the default target throughput now matches the instance's network bandwidth instead of falling back to 10 Gbps. This can increase memory and network usage; use the `maximum-throughput-gbps 10` mount option to keep the previous target. ([#2006](https://github.com/awslabs/mountpoint-s3/pull/2006))
@@ -12,7 +14,13 @@
   * Fix existing directories appearing as missing, and directory listings ending early, when S3 returns an empty page of listing results. ([#1954](https://github.com/awslabs/mountpoint-s3/pull/1954), [#2023](https://github.com/awslabs/mountpoint-s3/pull/2023))
   * Fix a deadlock that could make the file system hang when the kernel forgets a file or directory while another file in the same directory is renamed, or while the directory is opened for listing with files still being written in it. ([#1995](https://github.com/awslabs/mountpoint-s3/pull/1995))
   * Make `incremental-upload` consistently check for concurrent writes when appending (i.e. without `O_TRUNC`), even at offset 0. Previously, appending to an existing empty object could silently overwrite another writer's changes instead of failing with `EIO`. ([#1970](https://github.com/awslabs/mountpoint-s3/pull/1970))
+  * Add the AWS European Sovereign Cloud (`aws-eusc`) partition to the STS credential provider, resolving IRSA authentication issues in that partition. ([awslabs/aws-c-auth#309](https://github.com/awslabs/aws-c-auth/pull/309))
 * Ignore `aws-max-attempts` mount option values that are not positive integers, and log a warning. Mountpoint fails to start with them since v1.25.0; with the value ignored, it uses its default number of attempts, as before. ([#1064](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1064))
+* Fix workload Pods staying scheduling-gated when they also use a non-S3 PVC with `WaitForFirstConsumer` volume binding. This only affects clusters with `experimental.reserveHeadroomForMountpointPods` enabled, where the controller's RBAC now also grants read access to StorageClasses. ([#856](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/856) by @Kathir163)
+* Fix a race between dangling mount cleanup and other operations on the same Mountpoint Pod ([#818](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/818) by @guessi)
+* Use the node driver registrar's `/healthz` endpoint for its liveness probe ([#1049](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1049))
+* Update Go to 1.27.4 ([#1052](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1052))
+* Update sidecar images to csi-node-driver-registrar:v2.18.0-eksbuild.6 and livenessprobe:v2.20.0-eksbuild.6 ([#1075](https://github.com/awslabs/mountpoint-s3-csi-driver/pull/1075))
 
 # v2.9.2
 
